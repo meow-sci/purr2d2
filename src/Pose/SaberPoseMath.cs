@@ -16,6 +16,9 @@ internal static class SaberPoseMath
         * double4x4.CreateRotationZ(-Math.PI / 2)
         * double4x4.CreateTranslation(-double3.Unpack(centerOfMass));
 
+    internal static double3 ModelDirectionToBody(float3 direction) => double3.NormalizeOrZero(
+        double3.TransformNormal(double3.Unpack(in direction), ModelToBody(1, float3.Zero)));
+
     internal static bool TryBladeSegment(double4x4 emitterToBody, double lengthMeters,
         out double3 baseBody, out double3 tipBody)
     {

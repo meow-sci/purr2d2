@@ -2,6 +2,7 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
+using Purr2D2.Autopilot;
 using Purr2D2.Audio;
 using Purr2D2.Core;
 using Purr2D2.Cutting;
@@ -12,7 +13,7 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime : IDisposable
 {
-    private enum Command { Equip, Ignite, Swing }
+    private enum Command { Equip, Ignite, Swing, CaptureRing, AlignRing, StartCutOrbit, AbortAutopilot }
     private readonly Queue<(KittenEva Owner, Command Value)> _commands = new();
     private readonly BladeState _blade = new();
     private readonly SaberPoseController _pose = new();
@@ -20,6 +21,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private readonly SaberAudio _audio = new();
     private readonly SaberCutter _cutter = new();
     private readonly ArbitrarySlicer _slicer = new();
+    private readonly EvaCuttingAutopilot _autopilot = new();
     private readonly string _settingsPath;
     private SaberSettings _settings;
     private KittenEva? _owner;
@@ -34,6 +36,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private float _swingSpeed;
     private ulong _consumedPoseGeneration;
     private bool _freshPoseThisTick;
+    private bool _autopilotBladeWasEquipped, _autopilotBladeWasOn, _autopilotOwnsBlade;
     private string? _fault;
     private float3 Color => new(_settings.ColorR, _settings.ColorG, _settings.ColorB);
     private float Length => _blade.Deployment * _settings.BladeLength;
@@ -78,6 +81,7 @@ internal sealed partial class SaberRuntime : IDisposable
                 switch (item.Value)
                 {
                     case Command.Equip:
+                        if (_autopilot.Active) StopAutopilot("Autopilot released for manual saber control.");
                         _blade.Equip(!_blade.Equipped);
                         if (_blade.Equipped) _pose.Bind(_owner);
                         else { _pose.Unbind(); _audio.Stop(); _cutter.Reset(); }
@@ -89,6 +93,27 @@ internal sealed partial class SaberRuntime : IDisposable
                         if (_blade.Equipped && Universe.GetSimulationSpeed() > 0 && Universe.GetSimulationSpeed() <= 1)
                             _pose.Swing();
                         break;
+                    case Command.CaptureRing:
+                        _autopilot.Capture(_owner, _settings);
+                        break;
+                    case Command.AlignRing:
+                    {
+                        bool wasEquipped = _blade.Equipped, wasOn = _blade.TargetOn;
+                        if (_autopilot.BeginAlign(_owner, _settings))
+                        {
+                            _autopilotBladeWasEquipped = wasEquipped;
+                            _autopilotBladeWasOn = wasOn;
+                            _autopilotOwnsBlade = true;
+                            EnsureAutopilotBlade();
+                        }
+                        break;
+                    }
+                    case Command.StartCutOrbit:
+                        if (_autopilot.BeginCut(StructuralCutCount)) EnsureAutopilotBlade();
+                        break;
+                    case Command.AbortAutopilot:
+                        StopAutopilot("Autopilot aborted; manual MMU control restored.");
+                        break;
                 }
             }
             SimStep applied = Universe.GetLastSimStep();
@@ -98,6 +123,26 @@ internal sealed partial class SaberRuntime : IDisposable
             bool normalSpeed = Universe.GetSimulationSpeed() > 0 && Universe.GetSimulationSpeed() <= 1;
             double simulationDt = newStep && normalSpeed && double.IsFinite(applied.DeltaTime) && applied.DeltaTime <= .15
                 ? Math.Clamp(applied.DeltaTime, 0, .1) : 0;
+            if (_autopilot.Active)
+            {
+                if (!normalSpeed)
+                {
+                    _autopilot.Suspend();
+                }
+                else
+                {
+                    double3 bladeDirectionBody = SaberPoseMath.ModelDirectionToBody(
+                        new float3(_settings.AimX, _settings.AimY, _settings.AimZ));
+                    if (_pose.TryGetBladeSegment(1, out double3 bladeBase, out double3 bladeTip))
+                        bladeDirectionBody = double3.NormalizeOrZero(bladeTip - bladeBase);
+                    AutopilotResult result = _autopilot.Update(_settings, simulationDt,
+                        _blade.Deployment, StructuralCutCount, _pose.HasFreshBodyFrame, bladeDirectionBody);
+                    if (_autopilot.WantsEquipped) EnsureAutopilotBlade();
+                    _blade.SetIgnited(_autopilot.WantsIgnited || (_autopilotBladeWasOn && _autopilot.Active));
+                    if (result is AutopilotResult.Completed or AutopilotResult.Aborted)
+                        RestoreAutopilotBlade();
+                }
+            }
             _pose.GripOffsetFromChestCm = new float3(_settings.GripX, _settings.GripY, _settings.GripZ);
             _pose.BladeDirectionModel = new float3(_settings.AimX, _settings.AimY, _settings.AimZ);
             _pose.FingerCurlRadians = _settings.FingerCurl;
@@ -120,6 +165,7 @@ internal sealed partial class SaberRuntime : IDisposable
                     _pose.TryGetBladeSegment(Length, out var start, out var end))
                 {
                     ConfigureCutter();
+                    if (_autopilot.Active && !_autopilot.AllowsCutting) _cutter.Enabled = false;
                     _cutter.Update(_owner, start, end, simulationDt, _playerTime);
                 }
                 else _cutter.Suspend();
@@ -194,8 +240,42 @@ internal sealed partial class SaberRuntime : IDisposable
             _commands.Enqueue((kitten, command));
     }
 
+    private int StructuralCutCount => _cutter.SeveredConnections + _cutter.FragmentedParts + _cutter.SlicedParts;
+
+    private void EnsureAutopilotBlade()
+    {
+        if (_owner == null) return;
+        if (!_blade.Equipped)
+        {
+            _blade.Equip(true);
+            _pose.Bind(_owner);
+        }
+    }
+
+    private void StopAutopilot(string reason)
+    {
+        _autopilot.Abort(reason);
+        RestoreAutopilotBlade();
+    }
+
+    private void RestoreAutopilotBlade()
+    {
+        if (!_autopilotOwnsBlade) return;
+        _blade.SetIgnited(_autopilotBladeWasOn);
+        if (!_autopilotBladeWasEquipped)
+        {
+            _blade.Equip(false);
+            _pose.Unbind();
+            _audio.Stop();
+            _cutter.Reset();
+        }
+        _autopilotOwnsBlade = false;
+    }
+
     internal void ResetWorld()
     {
+        _autopilot.Reset();
+        _autopilotOwnsBlade = false;
         _commands.Clear();
         _blade.Reset();
         _pose.Unbind();

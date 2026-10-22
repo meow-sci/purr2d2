@@ -528,6 +528,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     required = [
         source / "src/Core/BladeState.cs",
         source / "src/Core/SaberSettings.cs",
+        source / "src/Autopilot/CylinderOrbitGuidance.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Cutting/PlaneSlicer.cs",
         source / "src/Pose/SaberPoseMath.cs",
@@ -538,6 +539,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "tests/CoreChecks.cs",
         source / "tests/PoseChecks.cs",
         source / "tests/SlicingPhysicsChecks.cs",
+        source / "tests/AutopilotChecks.cs",
     ]
     numerics = (source.parent / "ksa-game-assemblies/current/dll/Brutal.Numerics.dll").resolve()
     missing = [path.relative_to(source).as_posix() for path in required if not path.is_file()]
@@ -576,7 +578,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         """)
     (check_dir / "Program.cs").write_text(
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); } }\n",
+        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); } }\n",
         encoding="utf-8",
     )
     project_path.write_text(project, encoding="utf-8")

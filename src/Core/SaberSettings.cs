@@ -21,6 +21,12 @@ public sealed class SaberSettings
     public float AimZ { get; set; } = .6f;
     public float FingerCurl { get; set; } = .12f;
     public bool HideMmu { get; set; } = true;
+    public float AutopilotClearance { get; set; } = .55f;
+    public float AutopilotOrbitSpeed { get; set; } = .15f;
+    public int AutopilotAxis { get; set; }
+    public bool AutopilotAxisReversed { get; set; }
+    public bool AutopilotClockwise { get; set; }
+    public int AutopilotRollQuarterTurns { get; set; }
 
     public void Validate()
     {
@@ -34,6 +40,10 @@ public sealed class SaberSettings
         AimX = Clamp(AimX, -1, 1, .05f); AimY = Clamp(AimY, -1, 1, .8f); AimZ = Clamp(AimZ, -1, 1, .6f);
         if (AimX * AimX + AimY * AimY + AimZ * AimZ < .0001f) { AimX = .05f; AimY = .8f; AimZ = .6f; }
         FingerCurl = Clamp(FingerCurl, 0, .5f, .12f);
+        AutopilotClearance = Clamp(AutopilotClearance, .3f, 1.5f, .55f);
+        AutopilotOrbitSpeed = Clamp(AutopilotOrbitSpeed, .04f, .4f, .15f);
+        AutopilotAxis = Math.Clamp(AutopilotAxis, 0, 2);
+        AutopilotRollQuarterTurns = ((AutopilotRollQuarterTurns % 4) + 4) % 4;
     }
 
     private static float Clamp(float value, float min, float max, float fallback) =>

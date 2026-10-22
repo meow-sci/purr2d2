@@ -3,7 +3,7 @@
     <OutputType>Library</OutputType>
     <AssemblyName>Purr2D2</AssemblyName>
     <RootNamespace>Purr2D2</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Description>Kitten-held lightsabers, spatial audio and native vessel cutting for KSA.</Description>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>

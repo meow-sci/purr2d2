@@ -1,6 +1,6 @@
 name = "purr2d2"
 description = "Kitten-held lightsabers with spatial sound, world lighting and vessel cutting."
-version = "0.1.0"
+version = "0.2.0"
 author = "meow sci"
 assets = ["Assets/purr2d2.xml", "Assets/Sounds.xml", "Assets/PracticeTargets.xml"]
 

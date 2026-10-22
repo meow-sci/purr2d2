@@ -16,6 +16,7 @@ Use `--file` explicitly: without it, `dotnet run tools/inspect_host.cs` selects 
 - Exact parameter/return types, visibility, static/instance flags and non-generic status for all patched methods: `Program.PrepareFrame`, `OnFrameEditor`, `OnGameLoaded`, `Dispose`, `UpdateRenderingResources`, `Universe.DeserializeSave`, `SuperMeshRenderSystem.ClearBuckets` and `RenderMainPass`.
 - Render-hook parameter names that Harmony binds by name.
 - The private instance field `KittenRenderable._characterAvatar : KSA.CharacterAvatar`.
+- The private instance field `Vehicle._manualControlInputs : KSA.ManualControlInputs` used to publish native EVA MMU pulse commands.
 - The internal static native fragmentation method `PartFailure.IsolateAndDestroy(Vehicle, Part, List<Vehicle>) : void`.
 - The exact private PartModel submission overload used for generated cap cooling, and the complete plain-public-field layout of `DeviceMeshInterleaved` used to initialize objects inside the startup-reserved fragment arena without growing native counters at runtime.
 - The actual decoded `Program.PrepareFrame` IL contains exactly one call to each apply/input/dispatch method in the production hook's required order. The inspector reads operands correctly, including two-byte opcodes and variable-size switch tables, and resolves call tokens through metadata. Negative controls ensure the same validator rejects missing, duplicate and reordered calls.
@@ -26,7 +27,7 @@ The tool exits `0` when the checks pass, `1` when inputs cannot be read or compa
 
 ## Verified result
 
-The local host reports `KSA 2026.10.19.5638`, PE machine `Amd64`. The built mod reports `Purr2D2 0.1.0.0`; references include `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0`, and the matching KSA version. All checks passed. The decoded frame call positions were:
+The local host reports `KSA 2026.10.19.5638`, PE machine `Amd64`. The built mod reports `Purr2D2 0.2.0.0`; references include `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0`, and the matching KSA version. All checks passed. The decoded frame call positions were:
 
 | IL offset | Method |
 | --- | --- |

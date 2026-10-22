@@ -18,6 +18,7 @@ Target the supplied KSA **2026.10.19.5638** assemblies, StarMap.API **0.3.6**, a
 8. **Implement arbitrary slicing as a primary feature.** The user's follow-up elevates real geometry slicing above authored-boundary separation. Build and validate triangle/plane clipping with interpolated normals and UVs, preserved material groups, closed caps with holes, connected-component extraction, signed volume, center of mass and full inertia. Generate native fragment GLBs and immutable part templates, bind them within a pre-reserved native GPU arena, and construct independent colliders. Prepare every asset before isolating the source; remove the source only after all replacement fragments exist. Preserve total mass and linear/angular momentum. Reload generated template references before native saves. Use glowing molten caps that cool to durable dark faces. Keep ordinary boundary separation and native subpart failure available as separate modes; rejected arbitrary slices must not silently destroy the source through a fallback.
 9. **Add controls and diagnostics.** Provide an ImGui panel for equip, ignition, swing, blade color/length, sound volume, cutting toggle, and cut exposure. Show current target/support status and failures in usable terms. Persist user preferences separately from transient channels, GPU handles, and contact heat. Native KSA saves own resulting vessel topology; short-lived heat/glow effects expire rather than serialize pointers.
 10. **Validate and package.** Build the complete mod against the real snapshot; compile shaders and validate GLB/texture/WAV/XML inputs; exercise state reversal, pause/warp gates, sweep/heat logic, lifecycle signature discovery, and the actual Harmony seam where feasible without the game. Stage and inspect the final ZIP for correct identity/version and absence of host DLLs. Document the exact native in-game acceptance pass, keeping build success distinct from a successful game session.
+11. **Add human-assisted cylinder cutting guidance.** Reuse the stock vessel target, capture a local target-body cylinder axis and cut station, raycast the outer hull radius, then drive the EVA MMU with native pulse translation and a custom flight-computer attitude. Split the workflow into capture, align/inspect, roll adjustment and one-lap cut. Track target translation and spin, require fresh saber geometry before advancing the lap, enforce close-proximity limits, clear translation during pause/warp, and restore every changed flight/saber state on completion, abort, target change, scene change or failure.
 
 ## Ownership and component boundaries
 
@@ -27,6 +28,7 @@ Target the supplied KSA **2026.10.19.5638** assemblies, StarMap.API **0.3.6**, a
 | Pose | `src/Pose/` | Scoped skeletal overlay, hand/emitter transform, swing pose |
 | Rendering | `src/Rendering/`, `Assets/Shaders/`, asset XML | Native hilt, blade/glow, world light, cooling cut ribbons |
 | Cutting | `src/Cutting/` | Swept contact, exposure, native separation, fragment-local marks |
+| EVA guidance | `src/Autopilot/` | Target-relative ring capture, close-proximity MMU pulse guidance and attitude/state ownership |
 | Audio | `src/Audio/`, `Assets/Audio/`, audio generator | Original sounds, FMOD spatial channels and disposal |
 | Art | `Assets/Models/`, `Assets/Textures/`, `art/`, Blender script | Editable source and runtime model/texture assets |
 | Delivery | root project/manifest, `tools/`, `docs/` | Build, test, reproducible packaging, compatibility and acceptance records |
@@ -53,6 +55,7 @@ Research and engine-facing implementation use gpt-6.1-sol / xhigh agents. Simple
 | Contact | No damage while off, paused, in unsupported warp, during teleport discontinuity, or to the wielder/crew |
 | Separation | Contact can produce independent native fragments without duplicate geometry, mass bookkeeping corruption or worker races |
 | Arbitrary slicing | A blade-defined plane cuts supported closed geometry across existing triangles; output has sealed manifold caps, conserved solid volume, native fragment ownership and durable template IDs |
+| Cylinder autopilot | Stock-target capture and staged human inspection produce one bounded MMU lap; abort, target loss and unsafe proximity restore prior controls without stale thrust |
 | Cut appearance | Hot local marks cool and follow the affected fragments; effects remain bounded |
 | Packaging | One installable `purr2d2/` directory, entry DLL + required owned assets, no game/loader/Harmony/test binaries |
 | Evidence | Record managed tests and package checks separately from unperformed native KSA acceptance |

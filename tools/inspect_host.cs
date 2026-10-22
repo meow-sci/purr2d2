@@ -60,6 +60,7 @@ static class HostInspection
             CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "ClearBuckets", "viewport");
             CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "RenderMainPass", "viewport", "commandBuffer");
             CheckAvatarField(host);
+            CheckManualInputField(host);
             CheckDeviceMeshFields(host);
             if (!prepare.IsNil) CheckFrameSeam(host, prepare);
             CheckEntry(mod);
@@ -126,6 +127,23 @@ static class HostInspection
         }
         Check(valid, "Private instance KittenRenderable._characterAvatar : KSA.CharacterAvatar",
             "The pose reflection seam changed. Update SaberPoseController before enabling its pose overlay.");
+    }
+
+    private static void CheckManualInputField(Image image)
+    {
+        var type = image.FindType("KSA.Vehicle");
+        var fields = type.IsNil ? [] : image.Reader.GetTypeDefinition(type).GetFields()
+            .Where(h => image.Reader.GetString(image.Reader.GetFieldDefinition(h).Name) == "_manualControlInputs").ToArray();
+        var valid = fields.Length == 1;
+        if (valid)
+        {
+            var field = image.Reader.GetFieldDefinition(fields[0]);
+            valid = field.DecodeSignature(image.Types, (object?)null) == "KSA.ManualControlInputs"
+                    && (field.Attributes & FieldAttributes.FieldAccessMask) == FieldAttributes.Private
+                    && (field.Attributes & FieldAttributes.Static) == 0;
+        }
+        Check(valid, "Private instance Vehicle._manualControlInputs : KSA.ManualControlInputs",
+            "The EVA MMU pulse-input seam changed. Update EvaCuttingAutopilot before enabling close-proximity guidance.");
     }
 
     private static void CheckDeviceMeshFields(Image image)

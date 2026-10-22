@@ -74,10 +74,16 @@ internal static class CoreChecks
             CuttingEnabled = false,
             FragmentStruckPart = true,
             ArbitrarySlicing = true,
+            AutopilotClearance = 99,
+            AutopilotOrbitSpeed = float.NaN,
+            AutopilotAxis = 8,
+            AutopilotRollQuarterTurns = -1,
         };
         settings.Validate();
         Check(settings.BladeLength == 1.5f && settings.ColorR == 0 && settings.ColorG == .75f
-            && settings.ColorB == 1 && settings.Volume == 0 && settings.ContactSeconds == .1f,
+            && settings.ColorB == 1 && settings.Volume == 0 && settings.ContactSeconds == .1f
+            && settings.AutopilotClearance == 1.5f && settings.AutopilotOrbitSpeed == .15f
+            && settings.AutopilotAxis == 2 && settings.AutopilotRollQuarterTurns == 3,
             "settings clamp high, low, and non-finite values to supported boundaries");
 
         string directory = Path.Combine(Path.GetTempPath(), "purr2d2-checks-" + Guid.NewGuid().ToString("N"));
@@ -88,7 +94,9 @@ internal static class CoreChecks
             var loaded = SaberSettings.Load(path);
             Check(loaded.BladeLength == 1.5f && loaded.ColorR == 0 && loaded.ColorG == .75f
                 && loaded.ColorB == 1 && loaded.Volume == 0 && loaded.ContactSeconds == .1f
-                && !loaded.CuttingEnabled && loaded.FragmentStruckPart && loaded.ArbitrarySlicing,
+                && !loaded.CuttingEnabled && loaded.FragmentStruckPart && loaded.ArbitrarySlicing
+                && loaded.AutopilotClearance == 1.5f && loaded.AutopilotAxis == 2
+                && loaded.AutopilotRollQuarterTurns == 3,
                 "settings save and load round-trip preserves validated preferences");
 
             File.WriteAllText(path, "{\"BladeLength\":-3,\"ColorR\":2,\"ColorG\":0.5,\"ColorB\":0.5,\"Volume\":2,\"ContactSeconds\":9}");

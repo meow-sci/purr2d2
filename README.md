@@ -20,6 +20,17 @@ Hotkeys are ignored while ImGui captures keyboard input. The simulation and effe
 
 The panel controls color, blade length, volume, contact time and cutting mode. **Save preferences** writes `settings.json` beside the installed mod; updates should preserve that file. Equipping is intentionally scoped to the currently controlled EVA kitten and is cleared on switching, boarding, loading a save or entering the editor.
 
+## Cylinder cutting autopilot
+
+The panel includes a human-assisted MMU autopilot for making one circular cut around a vessel approximated as a cylinder. Use KSA's normal targeting system to select the vessel, move the EVA kitten beside the desired cross-section, enable MMU, then:
+
+1. Choose the target vessel's local X, Y or Z cylinder axis; use **Reverse** if needed.
+2. **Capture target ring** to raycast the hull at the kitten's present axial station.
+3. **Align / approach** to fly to the configured hull clearance and point the blade inward. Inspect the pose and use the ±90° roll buttons until the kitten is oriented appropriately.
+4. **Cut one orbit** to ignite automatically and circumnavigate the captured ring once. **Abort / release** immediately clears commanded translation and restores the prior flight-computer, MMU-control and saber states.
+
+The guidance follows target translation and body rotation, uses low-speed MMU pulse commands, and pauses orbital progress until a fresh rendered blade pose is available. It requires the kitten and target to share a parent body, the target to be in the physics bubble, and normal simulation speed. This first version assumes a locally closed cylindrical surface and does not plan around appendages, solar arrays or other obstacles. Start with a simple uncrewed practice craft and remain ready to abort. See [autopilot research and safety design](docs/research-autopilot.md).
+
 ## Cutting behavior
 
 The blade tests a bounded sweep against the actual CPU mesh triangles. Sustained contact heats a surface and produces a glowing track that cools into a temporary dark scar. Geometry and exposure budgets keep large scenes bounded. Off, paused, stale, distant and discontinuous sweeps cannot accumulate damage.
@@ -59,5 +70,6 @@ This repository contains exactly one runtime `.csproj`; validation generates tem
 - `Assets/Audio/`: user-supplied ignition/idle recordings prepared for mono spatial playback, plus generated supplementary retraction/contact audio. See [audio provenance and preparation](docs/research-audio.md).
 - `src/Pose/`: scoped right-arm IK overlay; preserves stock root/leg animation and derives the emitter from the live paw skeleton.
 - `src/Runtime/`: one StarMap entry/controller; a checked `PrepareFrame` insertion after applied input and before new workers ensures structural mutations happen safely. It leaves `GetJobSimStep` available to other mods' wrappers.
+- `src/Autopilot/`: target-relative cylinder guidance, native EVA MMU pulse commands, custom flight-computer attitude control and full state restoration.
 
 Start with the [implementation plan](docs/IMPLEMENTATION_PLAN.md), then [compatibility map](docs/COMPATIBILITY.md) and [acceptance record](docs/ACCEPTANCE.md). Source code is MIT; supplied audio provenance is recorded separately.

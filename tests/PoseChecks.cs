@@ -36,6 +36,9 @@ internal static class PoseChecks
         Near(emitter.Translation, new double3(.1, -.25, -.7), "model-to-body chain includes the centre-of-mass offset");
         Near(double3.Transform(new double3(0, 0, 1), emitter), new double3(1.1, -.25, -.7),
             "metre-authored blade stays one metre and points along the correct body axis");
+        Near(SaberPoseMath.ModelDirectionToBody(new float3(.05f, .8f, .6f)),
+            double3.NormalizeOrZero(new double3(.6, -.05, -.8)),
+            "model-authored blade aim converts to the flight-computer body frame");
         double4x4 largeKitten = double4x4.CreateScale(100)
             * double4x4.CreateTranslation(5, 40, 20)
             * SaberPoseMath.ModelToBody(.02f, new float3(.1f, .2f, .3f));
