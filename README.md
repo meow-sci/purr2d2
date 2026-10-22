@@ -24,11 +24,11 @@ The panel controls color, blade length, volume, contact time and cutting mode. *
 
 Open **Cylinder cutting autopilot** in the F7 panel:
 
-1. Choose a vessel from **Vessel target**. This sets the kitten's actual flight-computer target.
-2. Use **Find ring preview**, or arm **Select hull point** and click the vessel where you want the slice. Auto axis searches X/Y/Z; you can also choose an axis explicitly. **Ring −/+0.25 m** moves the selected station when another valid ring fits there.
-3. Inspect the **cyan cut ring**, **amber flight circle**, and **MMU entry** marker in the scene. The far side of the ring is dashed; this is a targeting overlay, not a depth-tested cut. Adjust clearance before flying.
-4. Enable MMU, then **Fly to ring**. The autopilot approaches the marked entry and holds. **Match target velocity** is available separately to cancel relative drift. Inspect the held blade pose and adjust roll with the ±90° buttons.
-5. Press **Cut one orbit** once holding. This ignites the saber and performs one lap. **Abort / release** or **Esc** clears commanded translation and restores the previous flight-computer and saber settings. Esc also cancels point selection.
+1. Enable MMU and choose a vessel from **Vessel target**. This sets the kitten's actual flight-computer target.
+2. Press **Approach ring**. It finds a valid ring if none is selected, equips and aligns the saber, flies to the marked entry and holds. The scene shows a **cyan cut ring**, **amber flight circle**, and **MMU entry** marker.
+3. Once holding, **Cut ring** becomes available. Inspect the position, then press it to ignite and cut one lap. Speed automatically reduces to suit the available MMU thrust. **Abort / release** or **Esc** returns manual control and restores the previous flight-computer and saber settings.
+
+To choose the station yourself, use **Select hull point** before approaching. **Ring setup (optional)** contains axis/clearance controls, preview-only search, **Ring −/+0.25 m**, the maximum cut-speed setting and standalone **Match target velocity**. **Saber orientation (optional)** offers ±90° roll adjustments. The far side of the preview ring is dashed; the overlay is not a depth-tested cut. **Copy autopilot diagnostics** reports thrust, target spin and planned cut speed if guidance refuses or stalls.
 
 Finding a ring no longer requires the kitten to be beside the correct cross-section. The search reads rendered hull geometry, including transformed subparts, samples the circumference, and checks the direct approach and whole flight circle for clearance. A clicked point fixes the slice station; an invalid selection explains why it failed. A failed nudge retains the previous preview. The preview does not guarantee that the selected cutting mode can structurally cut that part.
 

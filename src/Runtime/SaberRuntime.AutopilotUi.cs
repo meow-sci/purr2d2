@@ -20,7 +20,7 @@ internal sealed partial class SaberRuntime
     private void DrawAutopilotUi(bool hasKitten)
     {
         if (!ImGui.CollapsingHeader("Cylinder cutting autopilot")) return;
-        ImGui.TextWrapped("Choose a vessel, preview its cut ring, then fly to the marked entry. You can also click a hull point to choose the cutting station.");
+        ImGui.TextWrapped("Choose a vessel and Approach ring. The autopilot finds a clear ring, flies to it, aligns the saber and holds. You can optionally select a hull point first.");
         var owner = Program.ControlledVehicle as KittenEva;
         bool controlsAvailable = _ready && hasKitten && _fault == null;
         bool geometryChanged = false;
@@ -46,49 +46,14 @@ internal sealed partial class SaberRuntime
                 finally { ImGui.EndCombo(); }
             }
 
-            bool automatic = _settings.AutopilotAutoAxis;
-            int axis = _settings.AutopilotAxis;
-            if (ImGui.RadioButton("Auto axis", automatic)) { automatic = true; geometryChanged = true; }
-            ImGui.SameLine();
-            if (ImGui.RadioButton("X##CutAxis", !automatic && axis == 0)) { automatic = false; axis = 0; geometryChanged = true; }
-            ImGui.SameLine();
-            if (ImGui.RadioButton("Y##CutAxis", !automatic && axis == 1)) { automatic = false; axis = 1; geometryChanged = true; }
-            ImGui.SameLine();
-            if (ImGui.RadioButton("Z##CutAxis", !automatic && axis == 2)) { automatic = false; axis = 2; geometryChanged = true; }
-            bool reverse = _settings.AutopilotAxisReversed;
-            geometryChanged |= ImGui.Checkbox("Reverse cylinder axis", ref reverse);
-            float clearance = _settings.AutopilotClearance;
-            geometryChanged |= ImGui.SliderFloat("Hull clearance", ref clearance, .3f, 1.5f, "%.2f m");
-            if (geometryChanged)
-            {
-                _settings.AutopilotAutoAxis = automatic;
-                _settings.AutopilotAxis = axis;
-                _settings.AutopilotAxisReversed = reverse;
-                _settings.AutopilotClearance = clearance;
-                _settings.Validate();
-                _autopilot.InvalidateCapture();
-                _ringSelectionStatus = "Geometry changed; find a new preview or select a hull point.";
-            }
-
-            bool clockwise = _settings.AutopilotClockwise;
-            float speed = _settings.AutopilotOrbitSpeed;
-            bool motionChanged = ImGui.Checkbox("Clockwise orbit", ref clockwise);
-            motionChanged |= ImGui.SliderFloat("Orbit speed", ref speed, .04f, .4f, "%.2f m/s");
-            if (motionChanged)
-            {
-                _settings.AutopilotClockwise = clockwise;
-                _settings.AutopilotOrbitSpeed = speed;
-                _settings.Validate();
-            }
-
-            ImGui.BeginDisabled(owner?.Target is not Vehicle);
+            ImGui.BeginDisabled(owner?.Target is not Vehicle { IsDisposed: false });
             try
             {
-                if (ImGui.Button("Find ring preview"))
+                if (ImGui.Button("Approach ring"))
                 {
                     _ringSelectionArmed = false;
                     _ringSelectionStatus = "";
-                    Queue(Command.CaptureRing);
+                    Queue(Command.AlignRing);
                 }
                 ImGui.SameLine();
                 if (ImGui.Button(_ringSelectionArmed ? "Cancel point selection" : "Select hull point"))
@@ -98,62 +63,122 @@ internal sealed partial class SaberRuntime
                     _ringSelectionOwner = owner;
                     _ringSelectionTarget = owner?.Target as Vehicle;
                     _ringSelectionStatus = _ringSelectionArmed
-                        ? "Click a visible surface of the selected vessel. Esc cancels selection."
+                        ? "Click a visible surface of the selected vessel, then Approach ring. Esc cancels selection."
                         : "Point selection cancelled.";
                 }
             }
             finally { ImGui.EndDisabled(); }
 
-            ImGui.BeginDisabled(!_autopilot.Captured);
-            try
+            if (ImGui.CollapsingHeader("Ring setup (optional)"))
             {
-                if (ImGui.Button("Ring -0.25 m")) { _ringSelectionStatus = ""; Queue(Command.NudgeRingBack); }
+                bool automatic = _settings.AutopilotAutoAxis;
+                int axis = _settings.AutopilotAxis;
+                if (ImGui.RadioButton("Auto axis", automatic)) { automatic = true; geometryChanged = true; }
                 ImGui.SameLine();
-                if (ImGui.Button("Ring +0.25 m")) { _ringSelectionStatus = ""; Queue(Command.NudgeRingForward); }
-                if (ImGui.Button("Fly to ring")) { _ringSelectionArmed = false; _ringSelectionStatus = ""; Queue(Command.AlignRing); }
-            }
-            finally { ImGui.EndDisabled(); }
-            ImGui.BeginDisabled(owner?.Target is not Vehicle { IsDisposed: false });
-            try
-            {
-                if (ImGui.Button("Match target velocity"))
+                if (ImGui.RadioButton("X##CutAxis", !automatic && axis == 0)) { automatic = false; axis = 0; geometryChanged = true; }
+                ImGui.SameLine();
+                if (ImGui.RadioButton("Y##CutAxis", !automatic && axis == 1)) { automatic = false; axis = 1; geometryChanged = true; }
+                ImGui.SameLine();
+                if (ImGui.RadioButton("Z##CutAxis", !automatic && axis == 2)) { automatic = false; axis = 2; geometryChanged = true; }
+                bool reverse = _settings.AutopilotAxisReversed;
+                geometryChanged |= ImGui.Checkbox("Reverse cylinder axis", ref reverse);
+                float clearance = _settings.AutopilotClearance;
+                geometryChanged |= ImGui.SliderFloat("Hull clearance", ref clearance, .3f, 1.5f, "%.2f m");
+                if (geometryChanged)
                 {
-                    _ringSelectionArmed = false;
-                    _ringSelectionStatus = "";
-                    Queue(Command.MatchVelocity);
+                    _settings.AutopilotAutoAxis = automatic;
+                    _settings.AutopilotAxis = axis;
+                    _settings.AutopilotAxisReversed = reverse;
+                    _settings.AutopilotClearance = clearance;
+                    _settings.Validate();
+                    _autopilot.InvalidateCapture();
+                    _ringSelectionStatus = "Geometry changed; find a new preview or select a hull point.";
                 }
+
+                bool clockwise = _settings.AutopilotClockwise;
+                float speed = _settings.AutopilotOrbitSpeed;
+                bool motionChanged = ImGui.Checkbox("Clockwise orbit", ref clockwise);
+                motionChanged |= ImGui.SliderFloat("Maximum cut speed", ref speed, .04f, .4f, "%.2f m/s");
+                ImGui.TextWrapped("Cutting speed automatically reduces to match the available MMU thrust.");
+                if (motionChanged)
+                {
+                    _settings.AutopilotClockwise = clockwise;
+                    _settings.AutopilotOrbitSpeed = speed;
+                    _settings.Validate();
+                }
+
+                ImGui.BeginDisabled(owner?.Target is not Vehicle);
+                try
+                {
+                    if (ImGui.Button("Find ring preview"))
+                    {
+                        _selectedRingPointTarget = null;
+                        _ringSelectionArmed = false;
+                        _ringSelectionStatus = "";
+                        Queue(Command.CaptureRing);
+                    }
+                }
+                finally { ImGui.EndDisabled(); }
+
+                ImGui.BeginDisabled(!_autopilot.Captured);
+                try
+                {
+                    if (ImGui.Button("Ring -0.25 m")) { _ringSelectionStatus = ""; Queue(Command.NudgeRingBack); }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Ring +0.25 m")) { _ringSelectionStatus = ""; Queue(Command.NudgeRingForward); }
+                }
+                finally { ImGui.EndDisabled(); }
+                ImGui.BeginDisabled(owner?.Target is not Vehicle { IsDisposed: false });
+                try
+                {
+                    if (ImGui.Button("Match target velocity"))
+                    {
+                        _ringSelectionArmed = false;
+                        _ringSelectionStatus = "";
+                        Queue(Command.MatchVelocity);
+                    }
+                }
+                finally { ImGui.EndDisabled(); }
             }
-            finally { ImGui.EndDisabled(); }
         }
         finally { ImGui.EndDisabled(); }
 
         ImGui.BeginDisabled(!controlsAvailable);
         try
         {
-            ImGui.Text($"Kitten roll: {_settings.AutopilotRollQuarterTurns * 90} degrees");
-            if (ImGui.Button("Rotate -90°")) { _settings.AutopilotRollQuarterTurns--; _settings.Validate(); }
-            ImGui.SameLine();
-            if (ImGui.Button("Rotate +90°")) { _settings.AutopilotRollQuarterTurns++; _settings.Validate(); }
             ImGui.BeginDisabled(!_autopilot.Active);
             try
             {
                 ImGui.BeginDisabled(!_autopilot.ReadyToCut);
                 try
                 {
-                    if (ImGui.Button("Cut one orbit")) Queue(Command.StartCutOrbit);
+                    if (ImGui.Button("Cut ring")) Queue(Command.StartCutOrbit);
                 }
                 finally { ImGui.EndDisabled(); }
                 ImGui.SameLine();
                 if (ImGui.Button("Abort / release")) { _ringSelectionArmed = false; Queue(Command.AbortAutopilot); }
             }
             finally { ImGui.EndDisabled(); }
+            if (ImGui.CollapsingHeader("Saber orientation (optional)"))
+            {
+                ImGui.Text($"Kitten roll: {_settings.AutopilotRollQuarterTurns * 90} degrees");
+                if (ImGui.Button("Rotate -90°")) { _settings.AutopilotRollQuarterTurns--; _settings.Validate(); }
+                ImGui.SameLine();
+                if (ImGui.Button("Rotate +90°")) { _settings.AutopilotRollQuarterTurns++; _settings.Validate(); }
+            }
         }
         finally { ImGui.EndDisabled(); }
-        if (_autopilot.Active || _autopilot.Progress > 0)
+        if (_autopilot.WantsIgnited || _autopilot.Progress > 0)
             ImGui.ProgressBar(_autopilot.Progress, new float2(-1, 0));
         if (_ringSelectionStatus.Length > 0) ImGui.TextWrapped(_ringSelectionStatus);
         ImGui.TextWrapped(_autopilot.Status);
         ImGui.TextDisabled("Cyan: cut preview  |  Amber: MMU path and entry");
+        if (ImGui.CollapsingHeader("Autopilot diagnostics"))
+        {
+            string diagnostics = _autopilot.GetDiagnostics(owner, _settings);
+            if (ImGui.Button("Copy autopilot diagnostics")) ImGui.SetClipboardText(diagnostics);
+            ImGui.TextWrapped(diagnostics);
+        }
 
         void SelectTarget(Vehicle? target)
         {

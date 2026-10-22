@@ -20,6 +20,8 @@ internal static class ContactChecks
         RenderFallbackAfterEmptyContactMesh();
         DeferredMeshLoad();
         DuplicateMeshMiss();
+        StockSizedContactScan();
+        BudgetWarningPreservesCutRefusal();
         Console.WriteLine("PASS: production SaberCutter contact integration checks");
     }
 
@@ -199,6 +201,51 @@ internal static class ContactChecks
     }
 
     private static MeshReference NewMesh() => new() { PositionsCompare = [Triangle.ToArray()] };
+
+    private static void StockSizedContactScan()
+    {
+        var f = new Fixture(addMesh: false);
+        // Match the reported Gemini7 candidate count. Give each distant surface
+        // its own mesh reference to exceed both the old part and mesh-cache caps.
+        for (int i = 0; i < 623; i++)
+        {
+            var miss = new Part { Tree = f.Target.Parts };
+            miss.Modules.Add(new MeshViewModule(new()
+            {
+                PositionsCompare = [Triangle.Select(p => p + new double3(10, 0, 0)).ToArray()]
+            }));
+            f.Target.Parts.Parts.Add(miss);
+        }
+        var hit = new Part { Tree = f.Target.Parts, PositionParentAsmb = new(1, 0, 0) };
+        hit.Modules.Add(new MeshViewModule(new()
+        {
+            PositionsCompare = [Triangle.Select(p => p - new double3(1, 0, 0)).ToArray()]
+        }));
+        f.Target.Parts.Parts.Add(hit);
+        // Duplicate enumeration must not spend budget or advance heat twice.
+        f.Target.Parts.Parts.Add(hit);
+        for (int i = 0; i < 3; i++) f.Step(new(0, -.2, 0), new(0, .2, 0));
+        Check(f.Cutter.CandidateParts == 624 && f.Cutter.TestedParts == 624 && f.Cutter.MeshesTested == 624,
+            "stock-sized contact scan covers all 624 unique candidates and meshes");
+        Check(!f.Cutter.BudgetLimited && f.Cutter.Contacts == 1 && f.Scars.All(s => ReferenceEquals(s.Surface, hit)),
+            "contact beyond both former budgets is detected without a scan-limit warning");
+        Check(Math.Abs(f.Cutter.HottestContactSeconds - .06) < 1e-9, "duplicate enumeration cannot double heat accumulation");
+    }
+
+    private static void BudgetWarningPreservesCutRefusal()
+    {
+        var f = new Fixture();
+        f.Target.Crew = [new() { AssignedKittenHash = new(7) }];
+        f.Configure(CutMode.Boundary);
+        var oversized = new Part { Tree = f.Target.Parts };
+        oversized.Modules.Add(new MeshViewModule(new() { PositionsCompare = [new double3[500_001 * 3]] }));
+        f.Target.Parts.Parts.Add(oversized);
+        for (int i = 0; i < 5; i++) f.Step(new(0, -.2, 0), new(0, .2, 0));
+        Check(f.Cutter.BudgetLimited && f.Cutter.Contacts == 1 && f.Cutter.Status.Contains("Crew aboard")
+            && f.Cutter.Status.Contains("Contact scan limited"), "scan warnings preserve the actual structural-cut refusal");
+        Check(f.Target.SplitCalls == 0 && f.Target.FragmentCalls == 0 && f.SliceCalls == 0,
+            "increased scan budgets do not bypass crew protection");
+    }
     private static PartModelModule RenderModel(MeshReference mesh) => new()
     {
         PartModel = new() { Template = new() { Mesh = mesh } },

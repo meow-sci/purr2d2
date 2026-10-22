@@ -14,11 +14,11 @@ namespace Purr2D2.Cutting;
 public sealed class SaberCutter
 {
     private const double Radius = .025;
-    private const int MaxTrianglesPerMesh = 150_000;
-    private const int MaxTriangleTestsPerStep = 25_000;
-    private const int MaxCandidateSubparts = 256;
-    private const int MaxCachedMeshes = 128;
-    private const int MaxCachedTriangles = 500_000;
+    private const int MaxTrianglesPerMesh = 500_000;
+    private const int MaxTriangleTestsPerStep = 100_000;
+    private const int MaxCandidateSubparts = 32_768;
+    private const int MaxCachedMeshes = 8_192;
+    private const int MaxCachedTriangles = 4_000_000;
     private const double MaximumSweepTravel = .75;
     private readonly Dictionary<MeshReference, CutMesh?> _meshes = new();
     private readonly Dictionary<Part, History> _history = new();
@@ -26,6 +26,7 @@ public sealed class SaberCutter
     private readonly HashSet<Part> _touched = new();
     private readonly List<Part> _remove = new();
     private readonly List<Candidate> _candidates = new();
+    private readonly HashSet<Part> _candidateParts = new();
     private readonly List<int> _triangleCandidates = new();
     private readonly HashSet<MeshReference> _testedMeshes = new();
     private readonly List<Vehicle> _fragments = new();
@@ -104,7 +105,7 @@ public sealed class SaberCutter
     /// <summary>Drop interrupted contact/sweep state while keeping mesh caches and lifetime statistics.</summary>
     public void Suspend()
     {
-        _history.Clear(); _heat.Clear(); _candidates.Clear(); _touched.Clear(); _testedMeshes.Clear();
+        _history.Clear(); _heat.Clear(); _candidates.Clear(); _candidateParts.Clear(); _touched.Clear(); _testedMeshes.Clear();
         Contacts = TriangleTests = 0; HottestContactSeconds = 0; BudgetLimited = false;
         ResetDiagnostics();
         Status = "Inactive";
@@ -147,7 +148,7 @@ public sealed class SaberCutter
             * double4x4.CreateTranslation(camera.GetPositionEgo(wielder));
         if (!double4x4.Invert(bodyToEgo, out var egoToBody)) { Suspend(); return; }
         var aEgo = baseBody.Transform(bodyToEgo); var bEgo = tipBody.Transform(bodyToEgo);
-        _touched.Clear(); _candidates.Clear();
+        _touched.Clear(); _candidates.Clear(); _candidateParts.Clear();
 
         // Resolve a fresh membership snapshot, including debris, then sort deterministically.
         // Do not enumerate the live system during Split/CreateVehicle.
@@ -168,7 +169,8 @@ public sealed class SaberCutter
             }
             void Offer(Part part)
             {
-                if (part.Modules.HasAny<MeshViewModule>() || part.Modules.HasAny<PartModelModule>())
+                if ((part.Modules.HasAny<MeshViewModule>() || part.Modules.HasAny<PartModelModule>())
+                    && _candidateParts.Add(part))
                 {
                     var vehicleMatrix = vehicle.GetMatrixAsmb2Ego(camera);
                     double distance = (part.PositionEgo(in vehicleMatrix) - aEgo).LengthSquared();
@@ -210,9 +212,10 @@ public sealed class SaberCutter
         // Histories must not retain vessels after leaving range, loading, or native destruction.
         _remove.Clear();
         foreach (var pair in _history)
-            if (pair.Key.Tree?.OwningVehicle is not { IsDisposed: false } || !_candidates.Exists(x => x.Part == pair.Key)) _remove.Add(pair.Key);
+            if (pair.Key.Tree?.OwningVehicle is not { IsDisposed: false } || !_candidateParts.Contains(pair.Key)) _remove.Add(pair.Key);
         foreach (var part in _remove) _history.Remove(part);
-        if (BudgetLimited) Status = "Contact budget reached; skipped work does not heat parts";
+        if (BudgetLimited) Status = (Status == "Blade clear" ? "" : Status + ". ")
+            + "Contact scan limited; untested parts do not heat";
         else if (Contacts == 0 && Status == "Blade clear")
         {
             if (VehiclesInRange == 0) Status = "Blade clear: no nearby vessels";

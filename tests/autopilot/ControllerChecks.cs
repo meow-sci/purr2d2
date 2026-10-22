@@ -17,16 +17,19 @@ internal static class ControllerChecks
         foreach (string reason in new[] { "target", "topology", "center of mass", "spin", "MMU", "propellant", "step", "range" })
             InvalidFlightReleases(reason);
         CutStateMachine();
+        ApproachWithAutomaticCutSpeed();
         NativePulseApproach(10, new(6, 6, 6));
         NativePulseApproach(100, new(6, 6, 6));
         NativePulseApproach(10, new(4, 8, 12));
+        NativePulseApproach(2.2, new(40, 60, 80), mass: 150, pulseTime: .001);
+        NativePulseCutOrbit();
         Console.WriteLine("PASS: production EVA autopilot controller integration checks");
     }
 
     private static void CaptureAndEngagement()
     {
         var f = new Fixture();
-        Check(!f.Pilot.BeginCut(0), "cut cannot start before the controller holds at a ring");
+        Check(!f.Pilot.BeginCut(f.Settings, 0), "cut cannot start before the controller holds at a ring");
         f.Owner.LocomotionState.Mode = LocomotionMode.Other;
         Check(!f.Pilot.BeginAlign(f.Owner, f.Settings) && !f.Pilot.Active,
             "non-MMU locomotion refuses engagement");
@@ -113,6 +116,8 @@ internal static class ControllerChecks
     private static void SelectionRevalidation()
     {
         var f = new Fixture();
+        Check(!f.Pilot.BeginAlign(f.Owner, f.Settings, new double3(20, 0, 0)) && !f.Pilot.Active,
+            "one-click approach does not replace an invalid explicit hull station with an automatic ring");
         Check(f.Pilot.Capture(f.Owner, f.Settings) && f.Pilot.TryGetPreview(out _, out _),
             "selection fixture starts with an inspectable ring");
         f.Pilot.TryGetPreview(out _, out CutRing previous);
@@ -142,7 +147,7 @@ internal static class ControllerChecks
         Check(f.Step() == AutopilotResult.Running && f.Pilot.Active && !f.Pilot.WantsIgnited
             && !f.Pilot.AllowsCutting && f.Pilot.Status.StartsWith("Approach corridor lost", StringComparison.Ordinal),
             "a blocked Hold route switches to braking with ignition and cutting inhibited");
-        Check(!f.Pilot.BeginCut(0), "a lost Hold corridor cannot start a cut");
+        Check(!f.Pilot.BeginCut(f.Settings, 0), "a lost Hold corridor cannot start a cut");
         f.Pilot.Abort("hold corridor fixture cleanup");
         f.AssertRestored("hold corridor release");
     }
@@ -186,7 +191,7 @@ internal static class ControllerChecks
         f.Owner.Position = ring.Center + ring.Radial * (ring.Radius + f.Settings.AutopilotClearance);
         f.Owner.Velocity = double3.Zero;
         f.Step();
-        Check(f.Pilot.BeginCut(0) && f.Pilot.WantsIgnited && !f.Pilot.AllowsCutting,
+        Check(f.Pilot.BeginCut(f.Settings, 0) && f.Pilot.WantsIgnited && !f.Pilot.AllowsCutting,
             "a held ring enters ignition with cutting inhibited");
         f.Step(blade: .7f);
         Check(!f.Pilot.AllowsCutting && f.Pilot.Progress == 0,
@@ -203,9 +208,39 @@ internal static class ControllerChecks
         f.AssertRestored("structural cut completion");
     }
 
-    private static void NativePulseApproach(double distance, double3 axisForces)
+    private static void ApproachWithAutomaticCutSpeed()
     {
-        var f = new Fixture(axisForces);
+        var f = new Fixture(new(40, 60, 80), mass: 150, pulseTime: .001);
+        f.Settings.AutopilotOrbitSpeed = .4f;
+        f.Owner.Position = new(0, 2.2, 0);
+        Check(f.Pilot.BeginAlign(f.Owner, f.Settings), "one approach action finds and engages a ring with stock-duration MMU pulses");
+        Check(f.Pilot.TryGetPreview(out _, out var ring), "automatic approach exposes the chosen ring without a separate capture step");
+        f.Owner.Position = ring.Center + ring.Radial * (ring.Radius + f.Settings.AutopilotClearance);
+        f.Step();
+        Check(f.Pilot.ReadyToCut && !f.Pilot.WantsIgnited && !f.Pilot.AllowsCutting,
+            "arrival enables Cut ring without automatically igniting or cutting");
+        Check(f.Pilot.BeginCut(f.Settings, 0) && f.Pilot.EffectiveOrbitSpeed > .001
+            && f.Pilot.EffectiveOrbitSpeed < .04 && f.Settings.AutopilotOrbitSpeed == .4f,
+            "Cut ring selects a feasible speed while preserving the requested ceiling");
+        f.Step(blade: 1);
+        f.Step(blade: 1);
+        double speed = f.Pilot.EffectiveOrbitSpeed;
+        double expected = speed * .02 / (ring.Radius + f.Settings.AutopilotClearance) / CylinderOrbitGuidance.FullTurn;
+        Check(f.Pilot.AllowsCutting && Math.Abs(f.Pilot.Progress - expected) < 1e-7,
+            "orbit progress uses the feasible speed, not the requested ceiling");
+        foreach (var thruster in f.Owner.Parts.States.ModulesAndStates) thruster.State.IntendedForce *= .25;
+        f.Step(blade: 1);
+        Check(f.Pilot.Active && f.Pilot.EffectiveOrbitSpeed < speed,
+            "cutting speed adapts when available thrust decreases");
+        Check(f.Pilot.GetDiagnostics(f.Owner, f.Settings).Contains("MMU pulse acceleration"),
+            "copyable autopilot diagnostics expose authority and planned cut speed");
+        f.Pilot.Abort("automatic-speed cleanup");
+        f.AssertRestored("automatic-speed release");
+    }
+
+    private static void NativePulseApproach(double distance, double3 axisForces, double mass = 10, double pulseTime = .03)
+    {
+        var f = new Fixture(axisForces, mass, pulseTime);
         f.Owner.Position = new(0, distance, 0);
         f.Engage();
         Check(f.Pilot.TryGetPreview(out _, out CutRing ring), "pulse approach has a selected entry");
@@ -246,12 +281,54 @@ internal static class ControllerChecks
                 maxHoldSpeed = Math.Max(maxHoldSpeed, f.Owner.Velocity.Length());
             }
         }
-        string label = $"{distance:F0} m production approach with axis forces {axisForces}";
+        string label = $"{distance:F1} m production approach with axis forces {axisForces}, {pulseTime * 1000:F0} ms pulses";
         Check(arrival < 180 && maxOvershoot < .25, label + " arrives without gross overshoot");
         Check(maxHoldError < .15 && maxHoldSpeed < .1,
             $"{label} holds after full native pulses ({maxHoldError:F3} m, {maxHoldSpeed:F3} m/s)");
+        Check(f.Pilot.ReadyToCut, label + " automatically enables Cut ring after arrival");
         f.Pilot.Abort("pulse fixture cleanup");
         f.AssertRestored("pulse approach release");
+    }
+
+    private static void NativePulseCutOrbit()
+    {
+        var f = new Fixture(new(40, 60, 80), mass: 150, pulseTime: .001);
+        f.Owner.Position = new(0, 1.55, 0);
+        f.Settings.AutopilotOrbitSpeed = .4f;
+        f.Engage();
+        f.Step();
+        Check(f.Pilot.ReadyToCut && f.Pilot.BeginCut(f.Settings, 0), "stock-pulse orbit starts from the automatic hold state");
+        f.Pilot.TryGetPreview(out _, out var ring);
+        const double dt = .01;
+        double nextPulse = .073, maximumError = 0, minimumClearance = double.PositiveInfinity;
+        bool completed = false;
+        for (int step = 0; step < 90_000; step++)
+        {
+            AutopilotResult result = f.Step(dt, blade: 1);
+            if (result == AutopilotResult.Completed)
+            {
+                completed = f.Pilot.Status.StartsWith("Cut orbit complete", StringComparison.Ordinal);
+                break;
+            }
+            if (result != AutopilotResult.Running || f.Pilot.Status.StartsWith("Approach corridor lost", StringComparison.Ordinal))
+                throw new InvalidOperationException("Stock-pulse cut orbit lost guidance: " + f.Pilot.Status);
+            if (step * dt + 1e-9 >= nextPulse)
+            {
+                ThrusterMapFlags flags = f.Owner.ManualInputs.ThrusterCommandFlags;
+                foreach (var thruster in f.Owner.Parts.States.ModulesAndStates)
+                    if ((thruster.State.ControlMap & flags) != 0 && thruster.State.IsPropellantAvailable)
+                        f.Owner.Velocity += thruster.State.IntendedForce * thruster.Module.MinimumPulseTime / f.Owner.TotalMass;
+                nextPulse += .15;
+            }
+            f.Owner.Position += f.Owner.Velocity * dt;
+            double3 expected = ring.Center + CylinderOrbitGuidance.Point(ring.Axis, 0, ring.Radial,
+                ring.Radius + f.Settings.AutopilotClearance, f.Pilot.Progress * CylinderOrbitGuidance.FullTurn);
+            maximumError = Math.Max(maximumError, (f.Owner.Position - expected).Length());
+            minimumClearance = Math.Min(minimumClearance, (f.Owner.Position - ring.Center).Length() - ring.Radius);
+        }
+        Check(completed && maximumError < .25 && minimumClearance > .25,
+            $"stock-duration pulses complete a full cut lap ({maximumError:F3} m max tracking error, {minimumClearance:F3} m hull clearance)");
+        f.AssertRestored("full cut orbit completion");
     }
 
     private sealed class Fixture
@@ -260,10 +337,11 @@ internal static class ControllerChecks
         public readonly Vehicle Target = new();
         public readonly SaberSettings Settings = new() { AutopilotAutoAxis = false, AutopilotAxis = 0 };
         public readonly EvaCuttingAutopilot Pilot = new();
-        public Fixture(double3? axisForces = null)
+        public Fixture(double3? axisForces = null, double mass = 10, double pulseTime = .03)
         {
             Program.ControlledVehicle = Owner;
             Owner.Target = Target;
+            Owner.TotalMass = mass;
             Target.Parent = Owner.Parent;
             Owner.Position = new(0, 10, 0);
             var hull = new Part();
@@ -279,7 +357,8 @@ internal static class ControllerChecks
                 (double3.UnitZ, ThrusterMapFlags.TranslateDown, forces.Z),
                 (-double3.UnitZ, ThrusterMapFlags.TranslateUp, forces.Z),
             })
-                Owner.Parts.States.ModulesAndStates.Add(new(new(), new() { IntendedForce = direction * force, ControlMap = flag }));
+                Owner.Parts.States.ModulesAndStates.Add(new(new() { MinimumPulseTime = pulseTime },
+                    new() { IntendedForce = direction * force, ControlMap = flag }));
         }
         public void Engage() => Check(Pilot.BeginAlign(Owner, Settings), "fixture engages: " + Pilot.Status);
         public AutopilotResult Step(double dt = .02, float blade = 0, int cuts = 0, bool pose = true) =>

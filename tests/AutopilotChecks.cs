@@ -7,6 +7,7 @@ internal static class AutopilotChecks
     {
         AxisAndRingGeometry();
         GuidanceAndProgress();
+        TrackingSpeedEnvelope();
         AttitudeAlignment();
     }
 
@@ -62,6 +63,31 @@ internal static class AutopilotChecks
         Near(double3.Dot(mapped90, inward), 0, "quarter-turn adjustment preserves blade alignment");
         Near(double3.Dot(mapped0, mapped90), 0, "quarter-turn adjustment rotates the kitten by ninety degrees");
         Pass("blade-inward attitude and human-assisted quarter-turn orientation");
+    }
+
+    private static void TrackingSpeedEnvelope()
+    {
+        Check(CylinderOrbitGuidance.TryTrackingSpeed(0, 0, 1.55, .0009, 0, out var speed, out _)
+            && speed == 0, "weak native pulse authority permits holding a stationary ring");
+        Check(CylinderOrbitGuidance.TryTrackingSpeed(0, 0, 1.55, .0009, .15, out speed, out _)
+            && speed > 0 && speed < .04, "cut speed can automatically fall below the former slider minimum");
+        Check(!CylinderOrbitGuidance.TryTrackingSpeed(.1, 2, 1.55, .0009, 0, out _, out var reason)
+            && reason.Contains("m/s²"), "insufficient holding thrust reports required and available acceleration");
+        Check(!CylinderOrbitGuidance.TryTrackingSpeed(.2, 0, 1, 1, 0, out _, out _), "fast target spin remains unsupported");
+        foreach (double spin in new[] { 0, .001, .01, .03 })
+        foreach (double offset in new[] { 0.0, 1, 10 })
+        foreach (double radius in new[] { .3, 1.5, 4 })
+        foreach (double authority in new[] { .001, .01, .1 })
+        {
+            if (!CylinderOrbitGuidance.TryTrackingSpeed(spin, offset, radius, authority, .4, out speed, out _)) continue;
+            double demand = spin * spin * (offset + radius) + 2 * spin * speed + speed * speed / radius;
+            if (!double.IsFinite(speed) || speed <= 0 || speed > .4 || demand > authority * .4 + 1e-12)
+                throw new InvalidOperationException("Tracking speed exceeds the full rotation/orbit acceleration envelope");
+        }
+        Pass("adaptive cut speed respects target rotation, offset, radius and MMU authority");
+        foreach (double invalid in new[] { double.NaN, double.PositiveInfinity, -1.0 })
+            Check(!CylinderOrbitGuidance.TryTrackingSpeed(0, 0, 1, .1, invalid, out _, out _),
+                "invalid requested speed cannot start an orbit");
     }
 
     private static void Near(double actual, double expected, string message)

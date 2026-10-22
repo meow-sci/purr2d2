@@ -2,6 +2,18 @@
 
 This file separates automated checks from native gameplay observation. An unperformed native check remains unperformed even when the DLL builds successfully.
 
+## Approach authority, workflow and contact scan repair — 2026-10-22
+
+Native user feedback reports matched speeds beside Gemini7 but refusal with "target spin or orbit speed exceeds MMU tracking authority". Source inspection found that approach/hold incorrectly included the requested cutting-orbit acceleration. Stock backpack pulses are 1 ms after the native template clamp, while the previous controller fixture used 30 ms. The new phase-specific check allows a feasible approach independently of cut speed; cutting automatically reduces speed within the existing thrust reserve. Target-spin and propellant checks remain enforced. The exact user's target spin/thrust was not recorded in the supplied contact diagnostics; a new copyable autopilot diagnostic reports both.
+
+The primary workflow is now **Vessel target → Approach ring → Cut ring**. Approach finds a ring when necessary and handles flight/alignment/hold; explicit hull selection remains optional and is preserved. Preview, nudges, axis/clearance, separate velocity matching and manual roll are optional controls. No automatic ignition occurs on arrival.
+
+The supplied contact diagnostics show 624 candidates, only 256 tested, one actual contact and sustained heat. Contact scan/cache limits now accommodate stock vessels. Budget warnings no longer conceal an existing structural refusal (for example, crew protection). A 624-candidate fixture tests every candidate and detects contact beyond the former part/cache budgets; a deliberately oversized mesh verifies that a crew refusal remains visible alongside a budget warning.
+
+Managed regression coverage includes a one-action approach using 1 ms pulses and 150 kg mass, actual simulated arrival/hold enabling Cut ring, automatically limited orbit progression, reduced-thrust adaptation, invalid selected-station refusal and the existing abort/restoration checks. Native reproduction on Gemini7 and live UI/attitude behavior remain pending. After updating and restarting KSA, enable MMU, choose Gemini7 and press Approach ring; verify arrival enables Cut ring. If it refuses, copy **Autopilot diagnostics** as well as contact diagnostics.
+
+Validation passed: Release build with zero warnings/errors, full managed/source/stage validation, and the final controller checks after selected-point integration. A full lap using 1 ms pulses completed with 0.070 m maximum tracking error and 0.546 m minimum geometric hull clearance, then restored manual settings. The fixture integrates translation impulses around a stationary cylinder; it does not execute native attitude/physics, renderer, input or structural cutting. Logs: ignored `artifacts/approach-repair-validation.log` and `artifacts/approach-controller-validation.log`.
+
 ## Built-in vessel target limits repair — 2026-10-22
 
 The user reported "The target exceeds the autopilot part budget" on a built-in vessel. The 256-node guard counted full parts plus subparts, including internal/decorative components. The supplied default-vehicle XML lists 1,032 nodes for Rocket (161 full parts) and 664 for Gemini7 (35 full parts). A read-only count using the available older native GLB atlas headers resolves at least 365,224 render triangles for Rocket and 247,688 for Gemini7; these are indicative asset counts, not a live 5638 runtime measurement. Both also exceed the former 150,000-triangle snapshot guard, and Rocket exceeds the former 64-bound ring-search guard.

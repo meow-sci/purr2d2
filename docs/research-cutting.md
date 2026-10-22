@@ -79,9 +79,12 @@ triangles are transformed to the wielder's body frame so nonuniform display scal
 does not silently change the physical blade radius. Geometry remains double precision.
 World-space floats, a cursor ray and collider-only picking are not used for damage.
 
-Current explicit limits: 150,000 triangles per cached mesh, 500,000 cached triangles
-in total, 128 cached meshes,
-256 candidate subparts per step and 25,000 candidate triangle tests per step.
+Current explicit limits: 500,000 triangles per cached mesh, 4,000,000 cached triangles
+in total, 8,192 cached meshes,
+32,768 candidate parts/subparts per step and 100,000 candidate triangle tests per step.
+Part references are deduplicated before scanning; history membership uses a set so
+larger scans do not incur a quadratic cleanup pass. Budget warnings append to the
+contact/structural-cut status rather than hiding the reason a hot part cannot be cut.
 Candidates sort by distance and then stable runtime instance identity. A mesh or
 step exceeding a budget is skipped/reported; skipped geometry never receives inferred
 damage. A relative endpoint jump over 0.75 m skips contact for that subpart for the

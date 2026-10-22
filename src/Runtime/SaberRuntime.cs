@@ -117,7 +117,9 @@ internal sealed partial class SaberRuntime : IDisposable
                     case Command.AlignRing:
                     {
                         bool wasEquipped = _blade.Equipped, wasOn = _blade.TargetOn;
-                        if (_autopilot.BeginAlign(_owner, _settings))
+                        double3? selectedPoint = ReferenceEquals(_selectedRingPointTarget, _owner.Target)
+                            ? _selectedRingPointBody : null;
+                        if (_autopilot.BeginAlign(_owner, _settings, selectedPoint))
                         {
                             _autopilotBladeWasEquipped = wasEquipped;
                             _autopilotBladeWasOn = wasOn;
@@ -127,7 +129,7 @@ internal sealed partial class SaberRuntime : IDisposable
                         break;
                     }
                     case Command.StartCutOrbit:
-                        if (_autopilot.BeginCut(StructuralCutCount)) EnsureAutopilotBlade();
+                        if (_autopilot.BeginCut(_settings, StructuralCutCount)) EnsureAutopilotBlade();
                         break;
                     case Command.AbortAutopilot:
                         StopAutopilot("Autopilot aborted; manual MMU control restored.");

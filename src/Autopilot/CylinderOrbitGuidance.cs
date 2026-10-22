@@ -59,6 +59,41 @@ internal static class CylinderOrbitGuidance
     internal static double Progress(double angle) =>
         double.IsFinite(angle) ? Math.Clamp(Math.Abs(angle) / FullTurn, 0, 1) : 0;
 
+    // Approach/hold needs only the target's rotation acceleration. Cutting adds
+    // Coriolis and orbit acceleration; solve that envelope for speed instead of
+    // rejecting an approach because the player's requested cutting speed is high.
+    internal static bool TryTrackingSpeed(double spin, double centerOffset, double radius,
+        double authority, double requestedSpeed, out double speed, out string reason)
+    {
+        speed = 0;
+        reason = "Invalid MMU tracking state; select the ring again.";
+        if (!double.IsFinite(spin) || spin < 0 || !double.IsFinite(centerOffset) || centerOffset < 0
+            || !double.IsFinite(radius) || radius <= 1e-6 || !double.IsFinite(authority) || authority <= 0
+            || !double.IsFinite(requestedSpeed) || requestedSpeed < 0) return false;
+        if (spin >= .15)
+        {
+            reason = $"The target is rotating too quickly ({spin * 180 / Math.PI:F2} degrees/s). Stabilize it before approaching.";
+            return false;
+        }
+        double budget = authority * .4;
+        double holding = spin * spin * (centerOffset + radius);
+        double remaining = budget - holding;
+        if (!(remaining > 0))
+        {
+            reason = $"Following the target's rotation needs {holding:G3} m/s²; the MMU tracking allowance is {budget:G3} m/s². Stabilize the target.";
+            return false;
+        }
+        reason = "";
+        if (requestedSpeed == 0) return true;
+        // Stable positive root of v²/r + 2*spin*v = remaining, with headroom.
+        double maximum = .95 * remaining / (Math.Sqrt(spin * spin + remaining / radius) + spin);
+        speed = Math.Min(requestedSpeed, maximum);
+        if (speed >= .001) return true;
+        reason = "The MMU can hold this ring, but has too little thrust left to circle it. Stabilize the target before cutting.";
+        speed = 0;
+        return false;
+    }
+
     internal static doubleQuat DesiredBody2Cci(double3 bladeDirectionBody, double3 inwardCci,
         double3 cylinderAxisCci, int rollQuarterTurns)
     {
