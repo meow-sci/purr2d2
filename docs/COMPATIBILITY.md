@@ -27,7 +27,7 @@ The authority for this build is the supplied `ksa-game-assemblies/current` snaps
 | Avatar access | `KittenEva.Renderable`, private `KittenRenderable._characterAvatar` | Cached reflection; missing field/rig disables equip with status |
 | Pose | `CharacterModel.AnimProcessors`, `IAnimProcessor` local/skeleton callbacks | Updates arm only; removes only its own processor |
 | Hilt | Native GltfFile/PbrMaterial/StaticMeshRenderable | Shared mod assets remain engine-owned |
-| Blade | SuperMeshRenderSystem.ClearBuckets/RenderMainPass; ShaderReference; HDR target | Per-view submissions and sample/format-specific pipelines; no custom device initialization |
+| Blade | SuperMeshRenderSystem.ClearBuckets/RenderTranslucencyPass; ShaderReference; HDR target | Draws after atmosphere using existing color/depth attachments; per-view submissions and sample/format-specific pipelines |
 | Light | Program.UpdateRenderingResources prefix; LightSystem.CreateLightInstance | Runs after ClearLights and before forward/deferred light uploads |
 | Audio | GameAudio, SoundBehavior, IChannel, SpatialAudio | Own channels only; SFX/master mixing respected; stops before mixer release |
 | Contact | MeshViewModule.MeshView.PositionsCompare, part/body/Ego matrices | Double precision transforms; bounded triangle query; missing geometry does not damage |

@@ -47,7 +47,8 @@ static class HostInspection
                 new("KSA.Program", "Dispose", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Program", "UpdateRenderingResources", "System.Void", false, MethodAttributes.Public, "System.Int32"),
                 new("KSA.SuperMeshRenderSystem", "ClearBuckets", "System.Void", false, MethodAttributes.Public, "KSA.IViewport"),
-                new("KSA.SuperMeshRenderSystem", "RenderMainPass", "System.Void", false, MethodAttributes.Public, "KSA.IViewport", "Brutal.VulkanApi.CommandBuffer"),
+                new("KSA.SuperMeshRenderSystem", "RenderTranslucencyPass", "System.Void", false, MethodAttributes.Public,
+                    "KSA.IViewport", "Brutal.VulkanApi.CommandBuffer", "System.Boolean"),
                 new("KSA.PartFailure", "IsolateAndDestroy", "System.Void", true, MethodAttributes.Assembly,
                     "KSA.Vehicle", "KSA.Part", "System.Collections.Generic.List`1<KSA.Vehicle>"),
                 new("KSA.PartModel", "AddInstance", "System.Void", false, MethodAttributes.Private,
@@ -61,11 +62,12 @@ static class HostInspection
             }
             // Harmony matches these render postfix arguments by name as well as by type.
             CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "ClearBuckets", "viewport");
-            CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "RenderMainPass", "viewport", "commandBuffer");
+            CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "RenderTranslucencyPass", "viewport", "commandBuffer", "useCustomRenderPass");
             CheckAvatarField(host);
             CheckManualInputField(host);
             CheckDeviceMeshFields(host);
             if (!prepare.IsNil) CheckFrameSeam(host, prepare);
+            CheckRenderSeams(host);
             CheckEntry(mod);
             CheckReferences(host, mod);
             Console.WriteLine(_failures == 0
@@ -210,11 +212,37 @@ static class HostInspection
         foreach (var key in expected)
         {
             var indices = Enumerable.Range(0, calls.Count).Where(i => calls[i].Key == key).ToArray();
-            if (indices.Length != 1) return $"Expected one call to {key}, found {indices.Length}. Re-check the settled update hook.";
-            if (indices[0] <= previous) return $"{key} moved before its required predecessor. Re-check the settled update hook.";
+            if (indices.Length != 1) return $"Expected one call to {key}, found {indices.Length}. Re-check the affected hook.";
+            if (indices[0] <= previous) return $"{key} moved before its required predecessor. Re-check the affected hook.";
             previous = indices[0];
         }
         return null;
+    }
+
+    private static void CheckRenderSeams(Image image)
+    {
+        // Depthless glow must follow atmosphere composition, but precede bloom/final composition.
+        // Inspect actual host IL: compiling against the API alone cannot detect an order change.
+        (string Method, string[] Stages)[] paths =
+        [
+            ("RenderGame", ["KSA.SuperMeshRenderSystem.RenderMainPass", "KSA.PlanetTransparenciesRenderer.Render",
+                "KSA.Rendering.Atmosphere.Rendering.TransparenciesMsaaResolve.ApplyTransparenciesMsaaIfEnabled",
+                "KSA.SuperMeshRenderSystem.RenderTranslucencyPass", "KSA.OverallBloomRenderer.Render"]),
+            ("RenderViewport", ["KSA.SuperMeshRenderSystem.RenderMainPass", "KSA.PlanetTransparenciesRenderer.RenderAtmosphereOnly",
+                "KSA.SuperMeshRenderSystem.RenderTranslucencyPass", "KSA.Rendering.RenderTarget.ResolveAttachments"]),
+            ("RenderEditor", ["KSA.SuperMeshRenderSystem.RenderMainPass", "KSA.SuperMeshRenderSystem.RenderTranslucencyPass",
+                "KSA.Rendering.RenderTarget.ResolveAttachments", "KSA.OverallBloomRenderer.Render"]),
+        ];
+        foreach (var (method, stages) in paths)
+        {
+            var methods = image.Methods("KSA.Program", method).ToArray();
+            Check(methods.Length == 1, $"One Program.{method} rendering entry", "Inspect the host's changed rendering path.");
+            if (methods.Length != 1) continue;
+            var calls = image.Calls(methods[0]).Select(c => new Call(c.Offset, c.Key.Split('(')[0])).ToArray();
+            var problem = OrderedUnique(calls, stages);
+            Check(problem == null, $"Program.{method} orders saber translucency after the scene and before post-processing",
+                problem ?? "Review SaberRenderer's translucency hook against the current host.");
+        }
     }
 
     private static void CheckEntry(Image image)

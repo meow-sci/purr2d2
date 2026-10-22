@@ -59,8 +59,8 @@ public sealed unsafe class SaberRenderer : IDisposable
         _instance = this;
         harmony.Patch(AccessTools.Method(typeof(SuperMeshRenderSystem), nameof(SuperMeshRenderSystem.ClearBuckets)),
             postfix: new HarmonyMethod(typeof(SaberRenderer), nameof(AfterClearBuckets)));
-        harmony.Patch(AccessTools.Method(typeof(SuperMeshRenderSystem), nameof(SuperMeshRenderSystem.RenderMainPass)),
-            postfix: new HarmonyMethod(typeof(SaberRenderer), nameof(AfterMainPass)));
+        harmony.Patch(AccessTools.Method(typeof(SuperMeshRenderSystem), nameof(SuperMeshRenderSystem.RenderTranslucencyPass)),
+            postfix: new HarmonyMethod(typeof(SaberRenderer), nameof(AfterTranslucencyPass)));
         harmony.Patch(AccessTools.Method(typeof(Program), nameof(Program.UpdateRenderingResources)),
             prefix: new HarmonyMethod(typeof(SaberRenderer), nameof(BeforeRenderResources)));
         // StarMapUnload occurs after the Vulkan device has gone away. Free before KSA tears it down.
@@ -199,9 +199,64 @@ public sealed unsafe class SaberRenderer : IDisposable
         }
     }
 
-    private void DrawPass(IViewport viewport, CommandBuffer commands)
+    private void DrawPass(IViewport viewport, CommandBuffer commands, bool useCustomRenderPass)
     {
-        if (_disposed || _gpuFailed || !_pipelines.TryGetValue(Key(viewport.OffscreenTarget), out var pair)) return;
+        if (_disposed || _gpuFailed || !viewport.Visible
+            || !_pipelines.TryGetValue(Key(viewport.OffscreenTarget), out var pair)) return;
+        if (_scars.Count == 0 && (!_blades.TryGetValue(viewport.ShaderSlot, out var blades) || blades.Count == 0)) return;
+
+        // The blade has no depth writes. Drawing before atmosphere/cloud composition makes
+        // those passes attenuate its light using the distant planet's depth instead of the blade's.
+        // KSA normally closes its custom translucency scope before this postfix runs; callers
+        // with useCustomRenderPass=false still own an open scope, which we must not nest or end.
+        if (!useCustomRenderPass)
+        {
+            DrawEffects(viewport, commands, pair);
+            return;
+        }
+
+        var target = viewport.OffscreenTarget;
+        if (target.ColorAttachment is not { } color || target.DepthAttachment is not { } depth) return;
+        Span<VkImageMemoryBarrier2> images = stackalloc VkImageMemoryBarrier2[2];
+        var barriers = new BarrierBatch(images);
+        barriers.Add(color, ImageBarrierInfo.Presets.ColorAttachmentReadWrite, inForceBarrier: true);
+        barriers.Add(depth, ImageBarrierInfo.Presets.DepthStencilAttachmentReadWrite, inForceBarrier: true);
+        barriers.SubmitAndFlush(commands);
+
+        // Load the actual attachments (MSAA when enabled), not their resolved images. Leave
+        // resolving to KSA after translucent particles so the blade is included in bloom/AA.
+        var colorAttachment = new VkRenderingAttachmentInfo
+        {
+            ImageLayout = VkImageLayout.ColorAttachmentOptimal,
+            ImageView = color.ImageView,
+            ResolveMode = VkResolveModeFlags.None,
+            LoadOp = VkAttachmentLoadOp.Load,
+            StoreOp = VkAttachmentStoreOp.Store,
+        };
+        var depthAttachment = new VkRenderingAttachmentInfo
+        {
+            ImageLayout = VkImageLayout.DepthStencilAttachmentOptimal,
+            ImageView = depth.ImageView,
+            ResolveMode = VkResolveModeFlags.None,
+            LoadOp = VkAttachmentLoadOp.Load,
+            StoreOp = VkAttachmentStoreOp.Store,
+        };
+        var rendering = new VkRenderingInfo
+        {
+            RenderArea = new VkRect2D(target.Extent),
+            LayerCount = 1,
+            ColorAttachmentCount = 1,
+            ColorAttachments = &colorAttachment,
+            DepthAttachment = &depthAttachment,
+            StencilAttachment = depth.HasStencil ? &depthAttachment : null,
+        };
+        commands.BeginRendering(in rendering);
+        try { DrawEffects(viewport, commands, pair); }
+        finally { commands.EndRendering(); }
+    }
+
+    private void DrawEffects(IViewport viewport, CommandBuffer commands, PipelinePair pair)
+    {
         var camera = viewport.GetCamera();
         var projection = camera.MVP.viewProjection;
         Program.SetViewport(commands);
@@ -349,10 +404,10 @@ public sealed unsafe class SaberRenderer : IDisposable
         if (_instance?._blades.TryGetValue(viewport.ShaderSlot, out var list) == true) list.Clear();
     }
 
-    private static void AfterMainPass(IViewport viewport, CommandBuffer commandBuffer)
+    private static void AfterTranslucencyPass(IViewport viewport, CommandBuffer commandBuffer, bool useCustomRenderPass)
     {
         if (_instance is not { } self) return;
-        try { self.DrawPass(viewport, commandBuffer); }
+        try { self.DrawPass(viewport, commandBuffer, useCustomRenderPass); }
         catch (Exception ex) { self._gpuFailed = true; self.Report("glow rendering", ex); }
     }
 

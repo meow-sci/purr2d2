@@ -13,8 +13,9 @@ Use `--file` explicitly: without it, `dotnet run tools/inspect_host.cs` selects 
 
 ## Checks performed
 
-- Exact parameter/return types, visibility, static/instance flags and non-generic status for all patched methods: `Program.PrepareFrame`, `OnFrameEditor`, `OnGameLoaded`, `Dispose`, `UpdateRenderingResources`, `Universe.DeserializeSave`, `SuperMeshRenderSystem.ClearBuckets` and `RenderMainPass`.
+- Exact parameter/return types, visibility, static/instance flags and non-generic status for all patched methods: `Program.PrepareFrame`, `OnFrameEditor`, `OnFrameViewports`, `OnMouseButton`, `OnGameLoaded`, `Dispose`, `UpdateRenderingResources`, `Universe.DeserializeSave`, `SuperMeshRenderSystem.ClearBuckets` and `RenderTranslucencyPass`.
 - Render-hook parameter names that Harmony binds by name.
+- Actual host IL order for `RenderGame`, `RenderViewport` and `RenderEditor`: translucency follows the opaque scene and applicable atmosphere/MSAA composition, and precedes bloom or attachment resolve. This guards the late saber pass against host render-order changes; it does not execute GPU commands.
 - The private instance field `KittenRenderable._characterAvatar : KSA.CharacterAvatar`.
 - The private instance field `Vehicle._manualControlInputs : KSA.ManualControlInputs` used to publish native EVA MMU pulse commands.
 - The internal static native fragmentation method `PartFailure.IsolateAndDestroy(Vehicle, Part, List<Vehicle>) : void`.

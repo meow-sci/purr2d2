@@ -2,6 +2,14 @@
 
 This file separates automated checks from native gameplay observation. An unperformed native check remains unperformed even when the DLL builds successfully.
 
+## Saber against Earth repair — 2026-10-22
+
+The user reports the saber disappears when Earth is behind it. Source inspection found that the depthless glow was added during the opaque pass, before the atmosphere/cloud passes that use background depth. The glow and scar ribbons now draw after native translucency, with reverse-Z depth tests retained. The custom scope loads/stores the actual viewport color/depth attachments, including MSAA, and leaves resolve/bloom to the game. The hilt remains native PBR geometry.
+
+Validation passed: Release build with zero warnings/errors; current-host metadata checks for the translucency hook and IL ordering checks for game, secondary viewport and editor paths; source/stage validation; all 21 ZIP files matched the stage, current Release DLL and SHA-256 sidecar. Host check log: ignored `artifacts/saber-atmosphere-host-validation.log`.
+
+Native acceptance remains pending: orbit the camera so the lit blade crosses deep space, Earth's limb, the day/night surface, clouds and ocean; verify continuous visibility with atmosphere enabled and disabled. Place a vessel between camera and blade to confirm occlusion, inspect hot/cold scars, and repeat with MSAA off/on, a resized window and a secondary viewport. No pixel-level Vulkan result is claimed by the host checks.
+
 ## Approach authority, workflow and contact scan repair — 2026-10-22
 
 Native user feedback reports matched speeds beside Gemini7 but refusal with "target spin or orbit speed exceeds MMU tracking authority". Source inspection found that approach/hold incorrectly included the requested cutting-orbit acceleration. Stock backpack pulses are 1 ms after the native template clamp, while the previous controller fixture used 30 ms. The new phase-specific check allows a feasible approach independently of cut speed; cutting automatically reduces speed within the existing thrust reserve. Target-spin and propellant checks remain enforced. The exact user's target spin/thrust was not recorded in the supplied contact diagnostics; a new copyable autopilot diagnostic reports both.
