@@ -189,7 +189,20 @@ internal sealed partial class SaberRuntime
                 }
                 ImGui.Separator();
                 ImGui.TextWrapped(_cutter.Status);
+                ImGui.Text($"Touching parts: {_cutter.Contacts}  |  Contact heat: {_cutter.HottestContactSeconds:F2} s");
                 ImGui.Text($"Severed: {_cutter.SeveredConnections}  Fragmented: {_cutter.FragmentedParts}  Sliced: {_cutter.SlicedParts}");
+                if (ImGui.CollapsingHeader("Contact diagnostics"))
+                {
+                    string diagnostics = $"Purr2D2 {typeof(SaberRuntime).Assembly.GetName().Version}; KSA {typeof(Vehicle).Assembly.GetName().Version}\n"
+                        + $"Equipped: {_blade.Equipped}; cutting enabled: {_settings.CuttingEnabled}; fresh pose: {_freshPoseThisTick}; pose age: {_pose.FreshnessFrames}\n"
+                        + _cutter.GetDiagnostics();
+                    ImGui.TextWrapped(diagnostics);
+                    if (ImGui.Button("Copy contact diagnostics"))
+                    {
+                        ImGui.SetClipboardText(diagnostics);
+                        Console.WriteLine("[purr2d2] Contact diagnostics\n" + diagnostics);
+                    }
+                }
                 if (_renderer.LastError != null) ImGui.TextWrapped(_renderer.LastError);
                 if (_audio.LastError != null) ImGui.TextWrapped(_audio.LastError);
                 if (_cutter.BudgetLimited) ImGui.TextWrapped("Contact geometry budget reached; only checked surfaces can be cut.");

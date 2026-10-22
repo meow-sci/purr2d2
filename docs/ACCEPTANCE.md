@@ -2,6 +2,14 @@
 
 This file separates automated checks from native gameplay observation. An unperformed native check remains unperformed even when the DLL builds successfully.
 
+## Contact detection repair (2026-10-22)
+
+The user reports that the saber, character animation and sound work in KSA, but vessel contact stays at "Blade clear". Source inspection found two definite faults: the contact scan discarded every vessel with assigned crew, and the status reset to clear on each step but only changed to heating when a new scar was emitted (at most once every 40 ms).
+
+The repair allows geometric contact independently of crew, physics-bubble and parent-body restrictions; those restrictions remain on structural changes. It also scans native PartModel surfaces without MeshView modules, retries unavailable CPU mesh data, and reports contact on every touching step. Contact counters and a copyable diagnostics snapshot are available in the saber panel. The production detector is exercised in an isolated managed harness using game stand-ins; this does not execute the native KSA renderer or physics.
+
+Retest a crewed vessel and an uncrewed practice target after updating and restarting KSA. A touch should register a nonzero touching-part count, accumulate heat and produce contact effects. A crewed vessel should report its structural-cut refusal without losing contact. On an uncrewed supported target, verify each cutting mode separately. If a visible touch still misses, hold the blade against it and copy **Contact diagnostics**. Live acceptance of this repair remains pending user feedback.
+
 ## Automated checks
 
 Completed on 2026-10-22 with .NET SDK 10.0.402 on macOS ARM64, against the supplied KSA 2026.10.19.5638 assemblies. The validation tools exercise production state/geometry code; the Release build compiles the complete runtime mod.
@@ -9,12 +17,12 @@ Completed on 2026-10-22 with .NET SDK 10.0.402 on macOS ARM64, against the suppl
 | Check | Result |
 | --- | --- |
 | `dotnet build Purr2D2.slnx -c Release --no-restore` | Passed: 0 warnings, 0 errors. |
-| `python3 tools/validate.py --run-tests` | Passed: CoreChecks, CuttingChecks, PlaneSliceChecks, PoseChecks, SlicingPhysicsChecks and AutopilotChecks, plus source assets and metadata. |
+| `python3 tools/validate.py --run-tests` | Passed: CoreChecks, CuttingChecks, PlaneSliceChecks, PoseChecks, SlicingPhysicsChecks and AutopilotChecks, plus production SaberCutter contact integration checks, source assets and metadata. |
 | `glslc Assets/Shaders/SaberGlow.vert` and `.frag`, each with an explicit output path | Both shaders compiled successfully. |
 | `tools/inspect_host.cs`, run against KSA.dll and the complete Release Purr2D2.dll | Passed metadata/IL checks for patched method signatures, the ordered simulation handoff, private native integration members, mesh layout and lifecycle hooks, including negative controls. |
 | `dotnet msbuild Purr2D2.csproj -t:StageMod -p:Configuration=Release` | Passed; staged the installable mod in `artifacts/stage/purr2d2`. |
 | `python3 tools/validate.py --stage artifacts/stage/purr2d2` | Passed source and staged-payload allowlist checks. |
-| `python3 tools/package.py` and ZIP inspection | Passed: 22 entries, 1,232,546 bytes, valid CRCs and a single `purr2d2/` root. The only packaged DLL is Purr2D2.dll; game, loader and Harmony assemblies are excluded. |
+| `python3 tools/package.py` and ZIP inspection | Passed: 22 entries, 1,234,739 bytes, valid CRCs and a single `purr2d2/` root. The only packaged DLL is Purr2D2.dll; game, loader and Harmony assemblies are excluded. |
 
 The geometry checks cover oblique and repeated cuts, concave contours, holes and cavities, overlapping authored solids, material/UV preservation, sealed topology, volume/centroid/full inertia, float export and conservative refusal cases. Physics checks cover principal frames and linear/angular momentum calculations. These are managed numerical checks, not execution of the native game renderer or physics engine.
 
@@ -22,7 +30,7 @@ Additional read-only trials on supplied native meshes are recorded in [research-
 
 Package: `artifacts/dist/purr2d2-0.2.0.zip`.
 
-SHA-256: `5b0e34e524d52d6886020c77d1757b33cabe4b5713fb97d256d9125bf8bf242c`.
+SHA-256: `6b5df68750904fb320e2e8a1f9cb7abff56077b384dbfca942af8a7f14e00ac5`.
 
 The host inspector reads PE metadata and IL without loading the Windows game assemblies. Harmony installation, Vulkan/FMOD execution, native fragment spawning and save/reload still require the native checks below. No live KSA acceptance result is claimed.
 
@@ -35,7 +43,7 @@ Use a disposable test save containing an EVA kitten, a simple uncrewed vessel wi
 3. **Deployment:** ignite/retract rapidly including halfway through each transition. The blade must grow from the emitter and reverse without a full-length flash. Change color/length and test an end-on camera angle.
 4. **Rendering/light:** put the blade behind a vessel and verify depth occlusion. Check night/day, near metal surfaces, camera zoom and multiple game viewports. Check editor/portrait/thumbnail views for unwanted saber submissions. Change MSAA or resize/rebuild the renderer.
 5. **Audio:** verify the supplied activation and idle clips, loop seam and relative gain. Move camera/source near/far and left/right; change SFX/master volume. Toggle while paused, resume, enter/exit warp and hide HUD. Verify swing/contact modulation uses local hand speed, not orbital speed.
-6. **Contact safety:** off/retracted/pause/warp must not damage. Teleport or change target while the blade is lit; no long sweep should cut between old and new locations. Test thin triangles, scaled/rotated parts and large meshes. Crew/EVA exclusions and debris budgets must hold.
+6. **Contact safety:** off/retracted/pause/warp must not damage. Teleport or change target while the blade is lit; no long sweep should cut between old and new locations. Test thin triangles, scaled/rotated parts and large meshes. Crewed vessels must register contact and surface effects while retaining the structural-cut refusal; EVA exclusions and debris budgets must hold.
 7. **Connection cuts:** dwell on a nonroot part until it separates. Verify no duplicate geometry, valid free-moving craft/debris, sensible inherited motion, and working remaining systems. Contact a root/brace/multi-connection graph; unsupported separation should report scorch-only rather than corrupt topology.
 8. **Subpart fragmentation:** explicitly enable Fragment struck part on an uncrewed test vessel. Confirm native isolation destroys the source, produces at most two authored subpart fragments, adds no explosion and does not leave the original mesh. Check cut marks follow any matching retained fragment. Switch back to default afterward.
 9. **Arbitrary slicing:** enable the experimental mode on a closed inert structural part. Try oblique cuts across triangles, then cut a resulting fragment again. Inspect both cap surfaces, surface UVs/materials, cooling emission and absence of the source mesh. Check closed convex and concave/holed test meshes, documenting enclosing-hull collision behavior. Unsupported meshes/modules must show a reason and remain intact. Check mass totals and linear/angular momentum on translating and spinning targets. Exercise isolation of a nonroot part with children and a one-part craft; source removal occurs only after all replacement fragments exist.

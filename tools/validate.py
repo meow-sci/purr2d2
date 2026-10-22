@@ -523,9 +523,7 @@ def validate_stage(stage: Path, expected_version: str | None = None) -> list[str
 
 def run_managed_checks(source: Path) -> tuple[int, str]:
     source = source.resolve()
-    dotnet = "dotnet"
-    checks = source / "tests/CuttingChecks.cs"
-    required = [
+    core_sources = [
         source / "src/Core/BladeState.cs",
         source / "src/Core/SaberSettings.cs",
         source / "src/Autopilot/CylinderOrbitGuidance.cs",
@@ -534,22 +532,51 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "src/Pose/SaberPoseMath.cs",
         source / "src/Rendering/FragmentGlbWriter.cs",
         source / "src/Slicing/SlicePrincipalFrame.cs",
-        checks,
+        source / "tests/CuttingChecks.cs",
         source / "tests/PlaneSliceChecks.cs",
         source / "tests/CoreChecks.cs",
         source / "tests/PoseChecks.cs",
         source / "tests/SlicingPhysicsChecks.cs",
         source / "tests/AutopilotChecks.cs",
     ]
+    contact_sources = [
+        source / "src/Cutting/SaberCutter.cs",
+        source / "src/Cutting/CutGeometry.cs",
+        source / "src/Cutting/PlaneSlicer.cs",
+        source / "tests/contact/GameStubs.cs",
+        source / "tests/contact/ContactChecks.cs",
+    ]
+    core_program = (
+        "using System;\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); } }\n"
+    )
+    outputs = []
+    result = 0
+    for name, required, program in (
+        ("CoreChecks", core_sources, core_program),
+        ("ContactChecks", contact_sources, None),
+    ):
+        code, output = _run_managed_project(source, name, required, program)
+        outputs.append(output)
+        result = result or code
+    return result, "\n".join(outputs)
+
+
+def _run_managed_project(source: Path, name: str, required: list[Path], program: str | None) -> tuple[int, str]:
+    """Generate isolated projects so game stubs cannot leak into the core checks or mod."""
     numerics = (source.parent / "ksa-game-assemblies/current/dll/Brutal.Numerics.dll").resolve()
     missing = [path.relative_to(source).as_posix() for path in required if not path.is_file()]
     if not numerics.is_file():
         missing.append("../ksa-game-assemblies/current/dll/Brutal.Numerics.dll")
     if missing:
         return 1, "managed checks cannot be generated; missing: " + ", ".join(missing)
-    check_dir = source / "artifacts/checks"
+    check_dir = source / "artifacts/checks" / name
     check_dir.mkdir(parents=True, exist_ok=True)
-    project_path = check_dir / "CoreChecks.csproj"
+    project_path = check_dir / f"{name}.csproj"
+    if program is not None:
+        program_path = check_dir / "Program.cs"
+        program_path.write_text(program, encoding="utf-8")
+        required = [*required, program_path]
     includes = "\n".join(
         f'    <Compile Include="{Path(os.path.relpath(path, check_dir)).as_posix()}" />'
         for path in required
@@ -566,7 +593,6 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
           </PropertyGroup>
           <ItemGroup>
         {includes}
-            <Compile Include="Program.cs" />
           </ItemGroup>
           <ItemGroup>
             <Reference Include="Brutal.Numerics">
@@ -576,15 +602,10 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
           </ItemGroup>
         </Project>
         """)
-    (check_dir / "Program.cs").write_text(
-        "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); } }\n",
-        encoding="utf-8",
-    )
     project_path.write_text(project, encoding="utf-8")
     try:
         completed = subprocess.run(
-            [dotnet, "run", "--project", str(project_path), "--configuration", "Release", "--no-launch-profile"],
+            ["dotnet", "run", "--project", str(project_path), "--configuration", "Release", "--no-launch-profile"],
             cwd=source,
             text=True,
             stdout=subprocess.PIPE,

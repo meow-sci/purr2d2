@@ -27,6 +27,7 @@ public sealed class SaberCutter
     private readonly List<Part> _remove = new();
     private readonly List<Candidate> _candidates = new();
     private readonly List<int> _triangleCandidates = new();
+    private readonly HashSet<MeshReference> _testedMeshes = new();
     private readonly List<Vehicle> _fragments = new();
     private readonly List<Part> _nativeSubparts = new();
     private readonly HashSet<Vehicle> _beforeFragmentation = new();
@@ -48,6 +49,16 @@ public sealed class SaberCutter
     public int SlicedParts { get; private set; }
     public bool BudgetLimited { get; private set; }
     public double HottestContactSeconds { get; private set; }
+    public int VehiclesInRange { get; private set; }
+    public int CandidateParts => _candidates.Count;
+    public int TestedParts { get; private set; }
+    public int MeshesTested { get; private set; }
+    public int MissingMeshes { get; private set; }
+    public int DiscontinuousParts { get; private set; }
+    public string ContactSurface { get; private set; } = "none";
+    private double3 _baseBody, _tipBody;
+    private string _nearestVehicle = "none";
+    private double _nearestDistance = double.PositiveInfinity;
     /// <summary>Endpoints and normal belong to the exact struck subpart's local assembly frame.</summary>
     public Action<Part, double3, double3, double3, double>? Scar { get; set; }
 
@@ -66,6 +77,7 @@ public sealed class SaberCutter
         public SlicePlane Plane;
         public bool HasPlane, HasSweptPlane;
         public Vehicle? PlaneOwner;
+        public string? LastCutStatus;
     }
 
     // This is the stock blast-free primitive. PartFailureEvent.Apply adds explosions around it;
@@ -92,15 +104,36 @@ public sealed class SaberCutter
     /// <summary>Drop interrupted contact/sweep state while keeping mesh caches and lifetime statistics.</summary>
     public void Suspend()
     {
-        _history.Clear(); _heat.Clear(); _candidates.Clear(); _touched.Clear();
+        _history.Clear(); _heat.Clear(); _candidates.Clear(); _touched.Clear(); _testedMeshes.Clear();
         Contacts = TriangleTests = 0; HottestContactSeconds = 0; BudgetLimited = false;
+        ResetDiagnostics();
         Status = "Inactive";
     }
+
+    private void ResetDiagnostics()
+    {
+        VehiclesInRange = TestedParts = MeshesTested = MissingMeshes = DiscontinuousParts = 0;
+        ContactSurface = _nearestVehicle = "none";
+        _nearestDistance = double.PositiveInfinity;
+        _baseBody = _tipBody = double3.Zero;
+    }
+
+    public string GetDiagnostics() => FormattableString.Invariant($"""
+        Status: {Status}
+        Nearby vessels: {VehiclesInRange}; candidate parts/subparts: {CandidateParts}; tested: {TestedParts}
+        Meshes tested: {MeshesTested}; unavailable: {MissingMeshes}; triangles tested: {TriangleTests}
+        Contacts: {Contacts}; hottest: {HottestContactSeconds:F3} s; surface: {ContactSurface}
+        Skipped motion jumps: {DiscontinuousParts}; budget limited: {BudgetLimited}
+        Nearest vessel: {_nearestVehicle}; centre to blade midpoint: {_nearestDistance:F3} m
+        Blade body metres: ({_baseBody.X:F3}, {_baseBody.Y:F3}, {_baseBody.Z:F3}) -> ({_tipBody.X:F3}, {_tipBody.Y:F3}, {_tipBody.Z:F3})
+        Mesh cache: {_meshes.Count} entries / {_cachedTriangles} triangles
+        """);
 
     public void Update(KittenEva wielder, double3 baseBody, double3 tipBody, double appliedDeltaTime, double nowPlayerSeconds)
     {
         Contacts = TriangleTests = 0; BudgetLimited = false; HottestContactSeconds = 0;
         if (_wielder != wielder) { Reset(); _wielder = wielder; }
+        ResetDiagnostics();
         if (!Enabled || wielder.IsDisposed || Program.EditorFlag || Universe.CurrentSystem == null
             || Program.GetMainCamera() is not { } camera || !(appliedDeltaTime > 0) || appliedDeltaTime > .15
             || !double.IsFinite(appliedDeltaTime) || !double.IsFinite(nowPlayerSeconds))
@@ -109,6 +142,7 @@ public sealed class SaberCutter
         if (!a.Finite || !b.Finite || (b - a).Length < .025 || (b - a).Length > 3)
         { Suspend(); return; }
         Status = "Blade clear";
+        _baseBody = baseBody; _tipBody = tipBody;
         var bodyToEgo = double4x4.CreateFromQuaternion(wielder.Body2Ego)
             * double4x4.CreateTranslation(camera.GetPositionEgo(wielder));
         if (!double4x4.Invert(bodyToEgo, out var egoToBody)) { Suspend(); return; }
@@ -121,10 +155,12 @@ public sealed class SaberCutter
         for (int i = 0; i < all.Length; i++)
         {
             if (all[i] is not Vehicle vehicle || vehicle == wielder || vehicle is KittenEva
-                || vehicle.IsDisposed || vehicle.IsEditedVehicle || !vehicle.HasPhysicsBubble
-                || !ReferenceEquals(vehicle.Parent, wielder.Parent) || HasAssignedCrew(vehicle)) continue;
+                || vehicle.IsDisposed || vehicle.IsEditedVehicle) continue;
             double centreDistance = (camera.GetPositionEgo(vehicle) - (aEgo + bEgo) * .5).Length();
+            if (centreDistance < _nearestDistance) { _nearestDistance = centreDistance; _nearestVehicle = vehicle.Id; }
             if (centreDistance > vehicle.BoundingSphereRadiusBody + 4) continue;
+            VehiclesInRange++;
+            // Contact is geometric. Crew and physics eligibility only restrict structural changes.
             foreach (var full in vehicle.Parts.Parts)
             {
                 Offer(full);
@@ -132,10 +168,12 @@ public sealed class SaberCutter
             }
             void Offer(Part part)
             {
-                if (!part.Modules.HasAny<MeshViewModule>()) return;
-                var vehicleMatrix = vehicle.GetMatrixAsmb2Ego(camera);
-                double distance = (part.PositionEgo(in vehicleMatrix) - aEgo).LengthSquared();
-                _candidates.Add(new(part, vehicle, distance));
+                if (part.Modules.HasAny<MeshViewModule>() || part.Modules.HasAny<PartModelModule>())
+                {
+                    var vehicleMatrix = vehicle.GetMatrixAsmb2Ego(camera);
+                    double distance = (part.PositionEgo(in vehicleMatrix) - aEgo).LengthSquared();
+                    _candidates.Add(new(part, vehicle, distance));
+                }
             }
         }
         _candidates.Sort((x, y) => { int c = x.Distance.CompareTo(y.Distance); return c != 0 ? c : x.Part.InstanceId.CompareTo(y.Part.InstanceId); });
@@ -158,11 +196,13 @@ public sealed class SaberCutter
             state.Cooldown = Math.Max(0, state.Cooldown - appliedDeltaTime);
             bool hot = state.Heat.Advance(contact, appliedDeltaTime, ContactSeconds);
             HottestContactSeconds = Math.Max(HottestContactSeconds, state.Heat.Seconds);
+            if (contact && state.LastCutStatus != null) Status = state.LastCutStatus;
             if (contact && hot && state.Cooldown <= 0 && !attemptedStructuralChange)
             {
                 attemptedStructuralChange = true;
                 state.Cooldown = 1;
                 if (TrySever(full, state, nowPlayerSeconds)) _remove.Add(full);
+                else state.LastCutStatus = Status;
             }
             else if (!contact && state.Heat.Seconds <= 0) _remove.Add(full);
         }
@@ -173,9 +213,16 @@ public sealed class SaberCutter
             if (pair.Key.Tree?.OwningVehicle is not { IsDisposed: false } || !_candidates.Exists(x => x.Part == pair.Key)) _remove.Add(pair.Key);
         foreach (var part in _remove) _history.Remove(part);
         if (BudgetLimited) Status = "Contact budget reached; skipped work does not heat parts";
+        else if (Contacts == 0 && Status == "Blade clear")
+        {
+            if (VehiclesInRange == 0) Status = "Blade clear: no nearby vessels";
+            else if (CandidateParts == 0) Status = "Nearby parts have no contact mesh geometry";
+            else if (MeshesTested == 0) Status = "Contact mesh geometry unavailable";
+        }
 
         void Test(Candidate candidate)
         {
+            TestedParts++;
             var part = candidate.Part;
             var matrix = candidate.Vehicle.GetMatrixAsmb2Ego(camera);
             var partToEgo = part.MatrixAsmb2Ego(in matrix);
@@ -188,20 +235,29 @@ public sealed class SaberCutter
             var partToBody = partToEgo * egoToBody;
             var previousA = Transform(old.A, partToBody); var previousB = Transform(old.B, partToBody);
             if (!CutGeometry.MotionWithinLimit(previousA, previousB, a, b, MaximumSweepTravel))
-            { Status = "Motion discontinuity: contact skipped"; return; }
+            { DiscontinuousParts++; Status = "Motion discontinuity: contact skipped"; return; }
             // Frobenius norm bounds scale/shear of the inverse; broadphase is conservative.
             double inverseNorm = Math.Sqrt(egoToPart.M11 * egoToPart.M11 + egoToPart.M12 * egoToPart.M12 + egoToPart.M13 * egoToPart.M13
                 + egoToPart.M21 * egoToPart.M21 + egoToPart.M22 * egoToPart.M22 + egoToPart.M23 * egoToPart.M23
                 + egoToPart.M31 * egoToPart.M31 + egoToPart.M32 * egoToPart.M32 + egoToPart.M33 * egoToPart.M33);
             var query = CutBounds.Sweep(old.A, old.B, localA, localB, Radius * inverseNorm * 2);
+            _testedMeshes.Clear();
             foreach (var view in part.Modules.Get<MeshViewModule>())
+                if (TestMesh(view.MeshView)) return;
+            // Some authored surfaces have a render model but no separate picking MeshView.
+            foreach (var model in part.Modules.Get<PartModelModule>())
+                if (model.PartModel.Template.Mesh?.Get() is { } reference && TestMesh(reference)) return;
+
+            bool TestMesh(MeshReference reference)
             {
-                var mesh = GetMesh(view.MeshView);
-                if (mesh == null) continue;
+                if (!_testedMeshes.Add(reference)) return false;
+                var mesh = GetMesh(reference);
+                if (mesh == null) { MissingMeshes++; return false; }
+                MeshesTested++;
                 mesh.Query(query, _triangleCandidates);
                 foreach (int index in _triangleCandidates)
                 {
-                    if (++TriangleTests > MaxTriangleTestsPerStep) { BudgetLimited = true; return; }
+                    if (++TriangleTests > MaxTriangleTestsPerStep) { BudgetLimited = true; return true; }
                     var local = mesh.Triangles[index];
                     var triangle = new CutTriangle(Transform(local.A, partToBody), Transform(local.B, partToBody), Transform(local.C, partToBody));
                     if (!CutGeometry.SweepContact(previousA, previousB, a, b, triangle, Radius, out var hit)) continue;
@@ -226,35 +282,36 @@ public sealed class SaberCutter
                     planeNormal = planeNormal.Normalized;
                     var plane = new SlicePlane(planeNormal, CutPoint.Dot(planeNormal, (currentA + currentB) * .5));
                     RegisterContact(part, hitEgo.Transform(egoToPart), ToGame(local.Normal), nowPlayerSeconds, plane, swept);
-                    return;
+                    return true;
                 }
+                return false;
             }
         }
     }
 
     private CutMesh? GetMesh(MeshReference reference)
     {
-        if (_meshes.TryGetValue(reference, out var mesh)) return mesh;
+        if (_meshes.TryGetValue(reference, out var mesh))
+        { if (mesh == null) BudgetLimited = true; return mesh; }
         if (_meshes.Count >= MaxCachedMeshes) { BudgetLimited = true; return null; }
+        // A temporarily unavailable CPU mesh must be retried when loading finishes.
+        if (reference.PositionsCompare is not { Length: > 0 } primitives) return null;
         var triangles = new List<CutTriangle>();
-        if (reference.PositionsCompare is { } primitives)
+        foreach (var primitive in primitives)
         {
-            foreach (var primitive in primitives)
+            if (primitive == null || primitive.Length % 3 != 0) continue;
+            if (triangles.Count + primitive.Length / 3 > MaxTrianglesPerMesh
+                || _cachedTriangles + triangles.Count + primitive.Length / 3 > MaxCachedTriangles)
+            { _meshes[reference] = null; BudgetLimited = true; return null; }
+            for (int i = 0; i < primitive.Length; i += 3)
             {
-                if (primitive == null || primitive.Length % 3 != 0) continue;
-                if (triangles.Count + primitive.Length / 3 > MaxTrianglesPerMesh
-                    || _cachedTriangles + triangles.Count + primitive.Length / 3 > MaxCachedTriangles)
-                { _meshes[reference] = null; Status = "Mesh exceeds contact geometry budget"; return null; }
-                for (int i = 0; i < primitive.Length; i += 3)
-                {
-                    var t = new CutTriangle(ToPoint(primitive[i]), ToPoint(primitive[i + 1]), ToPoint(primitive[i + 2]));
-                    if (t.A.Finite && t.B.Finite && t.C.Finite && CutPoint.Cross(t.B - t.A, t.C - t.A).LengthSquared > 1e-20) triangles.Add(t);
-                }
+                var t = new CutTriangle(ToPoint(primitive[i]), ToPoint(primitive[i + 1]), ToPoint(primitive[i + 2]));
+                if (t.A.Finite && t.B.Finite && t.C.Finite && CutPoint.Cross(t.B - t.A, t.C - t.A).LengthSquared > 1e-20) triangles.Add(t);
             }
         }
         mesh = triangles.Count > 0 ? new CutMesh(triangles.ToArray()) : null;
         _cachedTriangles += triangles.Count;
-        _meshes[reference] = mesh;
+        if (mesh != null) _meshes[reference] = mesh;
         return mesh;
     }
 
@@ -263,10 +320,14 @@ public sealed class SaberCutter
         var full = surface.FullPart;
         if (!_touched.Add(full)) return;
         Contacts++;
+        ContactSurface = $"{surface.Tree?.OwningVehicle?.Id} / {full.DisplayName} / {surface.Id}";
+        // Reporting contact must not depend on the slower scar-emission interval.
+        Status = $"Heating {full.DisplayName}";
         if (!_heat.TryGetValue(full, out var state)) _heat.Add(full, state = new());
         if (!ReferenceEquals(state.PlaneOwner, full.Tree?.OwningVehicle))
         {
             state.HasPlane = state.HasSweptPlane = false;
+            state.LastCutStatus = null;
             state.PlaneOwner = full.Tree?.OwningVehicle;
         }
         // Keep a deliberate swing plane when the blade comes to rest during heating.
@@ -283,13 +344,15 @@ public sealed class SaberCutter
         double3 end = (start - localHit).LengthSquared() < 1e-8 ? localHit + tangent * .007 : localHit;
         Scar?.Invoke(surface, start, end, localNormal, now);
         state.PreviousScar = localHit; state.HasPreviousScar = true; state.LastScarTime = now;
-        Status = $"Heating {full.DisplayName}";
     }
 
     private bool TrySever(Part full, HeatState contact, double now)
     {
         var owner = full.Tree?.OwningVehicle;
-        if (owner == null || owner.IsDisposed || owner is KittenEva || !owner.HasPhysicsBubble) return false;
+        if (owner == null || owner.IsDisposed || owner is KittenEva) return false;
+        if (!owner.HasPhysicsBubble) { Status = "Contact detected; cutting requires a physics bubble"; return false; }
+        if (!ReferenceEquals(owner.Parent, _wielder?.Parent))
+        { Status = "Contact detected; cutting requires the same parent body"; return false; }
         if (HasAssignedCrew(owner)) { Status = "Crew aboard: cutting refused"; return false; }
         if (owner.BubbleVehicleCount >= PartFailure.MaximumVehiclesPerBubble)
         { Status = "Debris budget reached"; return false; }
