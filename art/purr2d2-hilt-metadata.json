@@ -1,0 +1,26 @@
+{
+  "triangles": 9728,
+  "vertices": 7558,
+  "mesh": "Purr2D2_Hilt",
+  "bounds": {
+    "bufferView": 0,
+    "componentType": 5126,
+    "count": 7558,
+    "type": "VEC3",
+    "min": [
+      -0.0213,
+      -0.02275,
+      -0.22
+    ],
+    "max": [
+      0.0213,
+      0.0213,
+      0
+    ]
+  },
+  "material": "Purr2D2_Hilt_Material",
+  "textures": "1024 x 1024 PNG",
+  "units": "meters",
+  "authoring": "original portable procedural generator",
+  "blend_saved": false
+}

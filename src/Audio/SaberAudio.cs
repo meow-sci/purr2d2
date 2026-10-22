@@ -1,0 +1,250 @@
+using System;
+using Brutal.FmodApi;
+using Brutal.Numerics;
+using KSA;
+
+namespace Purr2D2.Audio;
+
+/// <summary>
+/// Owns one saber's moving SFX channels. Call on the main thread, after the camera and
+/// hand pose have updated, once per frame even when the HUD is hidden.
+/// </summary>
+public sealed class SaberAudio : IDisposable
+{
+    private const int MaxLoopStartsPerTransition = 4;
+    private const float AudibleDeployment = 0.001f;
+    private SoundBehavior? _igniteSound;
+    private SoundBehavior? _retractSound;
+    private SoundBehavior? _humSound;
+    private SoundBehavior? _contactSound;
+    private IChannel? _transition;
+    private IChannel? _hum;
+    private IChannel? _contact;
+    private KittenEva? _owner;
+    private bool _initializationAttempted;
+    private bool _lastTargetOn;
+    private bool _transitionPending;
+    private bool _shutdown;
+    private bool _disposed;
+    private bool _warnedPlayback;
+    private int _humStarts;
+    private int _contactStarts;
+    private long _nextHumStart;
+    private long _nextContactStart;
+
+    public bool Ready => _humSound is not null && !_shutdown && !_disposed;
+    public string? LastError { get; private set; }
+
+    /// <summary>Resolve XML assets after StarMapAllModsLoaded; safe to call repeatedly.</summary>
+    public void Initialize()
+    {
+        if (_initializationAttempted || _shutdown || _disposed || GameAudio.System.IsNull()) return;
+        _initializationAttempted = true;
+        _igniteSound = Resolve("Purr2D2SaberIgnite");
+        _retractSound = Resolve("Purr2D2SaberRetract");
+        _humSound = Resolve("Purr2D2SaberHum");
+        _contactSound = Resolve("Purr2D2SaberContact");
+    }
+
+    /// <param name="emitterBody">Hilt/emitter position relative to the kitten's body origin, in body coordinates.</param>
+    /// <param name="paused">Pass true for pause and unsupported time warp. No new channels are started.</param>
+    /// <param name="swingSpeed">Tip speed relative to the kitten, in m/s; never orbital speed.</param>
+    /// <param name="contact">Contact intensity from 0 to 1; zero stops the optional sizzle loop.</param>
+    public void Update(KittenEva owner, double3 emitterBody, float deployment, bool targetOn,
+        bool paused, float volume, float swingSpeed = 0, float contact = 0)
+    {
+        if (_shutdown || _disposed) return;
+        if (owner.IsDisposed || !Finite(emitterBody)) { Stop(); return; }
+        if (!ReferenceEquals(_owner, owner)) { Reset(); _owner = owner; }
+        Initialize();
+        deployment = Clamp(deployment, 0, 1);
+        volume = Clamp(volume, 0, 1);
+        contact = Clamp(contact, 0, 1);
+        swingSpeed = Clamp(swingSpeed, 0, 30);
+
+        if (targetOn != _lastTargetOn)
+        {
+            _lastTargetOn = targetOn;
+            _transitionPending = true;
+            _humStarts = _contactStarts = 0;
+            _nextHumStart = _nextContactStart = 0;
+        }
+
+        if (!Ready) return;
+        try
+        {
+            Camera camera = GameAudio.GetAudioCamera();
+            double3 position = camera.GetPositionEgo(owner) + emitterBody.Transform(owner.Body2Cce);
+            double3 velocity = camera.GetVelocityEgo(owner);
+            // Fictional suit/saber audio remains audible in vacuum. Coordinates still spatialize normally.
+            var spatial = new SpatialAudio(position, velocity, 1.0);
+
+            if (_transitionPending && !paused)
+            {
+                Cut(ref _transition);
+                if (volume > 0)
+                    _transition = Play(targetOn ? _igniteSound : _retractSound, spatial, volume * 0.7f);
+                _transitionPending = false;
+            }
+
+            float swing = Math.Clamp(swingSpeed / 6f, 0, 1);
+            float humGain = volume * deployment * 0.42f * (1 + swing * 0.18f);
+            if (deployment <= AudibleDeployment || volume <= 0)
+            {
+                Cut(ref _hum);
+                Cut(ref _contact);
+                _humStarts = _contactStarts = 0;
+                _nextHumStart = _nextContactStart = 0;
+            }
+            else if (!paused)
+            {
+                EnsureLoop(ref _hum, _humSound, spatial, humGain, ref _humStarts, ref _nextHumStart);
+                if (contact > 0.01f)
+                    EnsureLoop(ref _contact, _contactSound, spatial, volume * deployment * contact * 0.35f,
+                        ref _contactStarts, ref _nextContactStart);
+                else
+                {
+                    Cut(ref _contact);
+                    _contactStarts = 0;
+                    _nextContactStart = 0;
+                }
+            }
+
+            Follow(ref _transition, spatial, volume * 0.7f, 1, paused);
+            Follow(ref _hum, spatial, humGain, 1 + swing * 0.15f, paused);
+            Follow(ref _contact, spatial, volume * deployment * contact * 0.35f, 1, paused);
+        }
+        catch (Exception ex)
+        {
+            WarnPlayback(ex.Message);
+            // A stale camera, channel or scene must never interrupt the game's frame.
+            Cut(ref _transition);
+            Cut(ref _hum);
+            Cut(ref _contact);
+        }
+    }
+
+    private SoundBehavior? Resolve(string id)
+    {
+        try
+        {
+            if (ModLibrary.TryGet<SoundBehavior>(id, out var sound) && sound is not null) return sound;
+            LastError = $"Audio asset '{id}' is missing; check mod.toml and Assets/Sounds.xml.";
+        }
+        catch (Exception ex) { LastError = $"Audio asset '{id}' could not resolve: {ex.Message}"; }
+        Console.WriteLine($"purr2d2: {LastError}");
+        return null;
+    }
+
+    private IChannel? Play(SoundBehavior? sound, SpatialAudio spatial, float volume)
+    {
+        if (sound is null) return null;
+        // Configure while paused so no sound spends one frame at the listener origin.
+        GameAudio.PlaySound(sound, spatial, out IChannel? channel, volume, startPaused: true);
+        if (channel is ChannelWrapper wrapper)
+        {
+            wrapper.Channel.TrySet3dDopplerLevel(0);
+            wrapper.Channel.TrySet3dSpread(0);
+        }
+        channel?.SetPaused(false);
+        return channel;
+    }
+
+    private void EnsureLoop(ref IChannel? channel, SoundBehavior? sound, SpatialAudio spatial,
+        float volume, ref int starts, ref long nextStart)
+    {
+        if (Alive(channel)) return;
+        Cut(ref channel);
+        long now = Environment.TickCount64;
+        if (starts >= MaxLoopStartsPerTransition || now < nextStart || sound is null) return;
+        starts++;
+        nextStart = now + 250L * starts;
+        channel = Play(sound, spatial, volume);
+        if (channel is null && starts == MaxLoopStartsPerTransition)
+            WarnPlayback("Saber audio could not acquire a loop channel; toggle the blade to retry.");
+    }
+
+    private static void Follow(ref IChannel? channel, SpatialAudio spatial, float volume, float pitch, bool paused)
+    {
+        if (!Alive(channel)) { Cut(ref channel); return; }
+        channel!.SetSpatialAudio(spatial);
+        channel.VolumeMultiplier = volume;
+        channel.PitchMultiplier = pitch;
+        channel.UpdateVolume();
+        channel.UpdatePitch();
+        channel.SetPaused(paused);
+    }
+
+    private static bool Alive(IChannel? channel) => channel is not null && (channel.IsPlaying() || channel.IsVirtual());
+
+    private static void Cut(ref IChannel? channel)
+    {
+        IChannel? old = channel;
+        channel = null;
+        try { old?.Stop(stopImmediate: true); }
+        catch { /* Invalid/stolen handles and a closing mixer are already stopped. */ }
+    }
+
+    /// <summary>
+    /// Pause a temporarily hidden/stale emitter without forgetting its ignition state.
+    /// A subsequent Update resumes and relocates its channels without replaying activation.
+    /// </summary>
+    public void Suspend()
+    {
+        if (_shutdown || _disposed) return;
+        PauseOwned(ref _transition);
+        PauseOwned(ref _hum);
+        PauseOwned(ref _contact);
+    }
+
+    private static void PauseOwned(ref IChannel? channel)
+    {
+        try { channel?.SetPaused(true); }
+        catch { channel = null; /* A stolen/invalid handle can be reacquired by Update. */ }
+    }
+
+    /// <summary>Immediately end all channels without playing a retraction sound.</summary>
+    public void Stop()
+    {
+        if (!_shutdown)
+        {
+            Cut(ref _transition);
+            Cut(ref _hum);
+            Cut(ref _contact);
+        }
+        else _transition = _hum = _contact = null;
+        _owner = null;
+        _lastTargetOn = _transitionPending = false;
+        _humStarts = _contactStarts = 0;
+        _nextHumStart = _nextContactStart = 0;
+    }
+
+    /// <summary>Forget the previous EVA/world on save load, boarding, scene exit or equip change.</summary>
+    public void Reset() => Stop();
+
+    /// <summary>Call before GameAudio.Release (for example from a Program.Dispose prefix).</summary>
+    public void Shutdown()
+    {
+        if (_shutdown) return;
+        Stop();
+        _shutdown = true;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        Stop();
+        _disposed = true;
+    }
+
+    private void WarnPlayback(string message)
+    {
+        LastError = message;
+        if (_warnedPlayback) return;
+        _warnedPlayback = true;
+        Console.WriteLine($"purr2d2: saber audio: {message}");
+    }
+
+    private static float Clamp(float value, float min, float max) => float.IsFinite(value) ? Math.Clamp(value, min, max) : min;
+    private static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
+}

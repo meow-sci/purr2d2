@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>Purr2D2</AssemblyName>
+    <RootNamespace>Purr2D2</RootNamespace>
+    <Version>0.1.0</Version>
+    <Description>Kitten-held lightsabers, spatial audio and native vessel cutting for KSA.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateDependencyFile>true</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" />
+    <PackageReference Include="StarMap.API" Version="0.3.6" PrivateAssets="all" IncludeAssets="compile;build;analyzers" />
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" PrivateAssets="all" IncludeAssets="compile;build;analyzers" />
+  </ItemGroup>
+  <ItemGroup>
+    <HostAssembly Include="KSA;BepuPhysics;BepuUtilities;Brutal.Core;Brutal.Numerics;Brutal.Collections;Brutal.Memory;Brutal.Strings;Brutal.Maths;Brutal.ImGui;Brutal.ImGui.Abstractions;Brutal.Glfw;Brutal.Fmod;Brutal.Render.Common;Brutal.Render.Mesh;Brutal.Vulkan;Brutal.Vulkan.Abstractions;Brutal.Vulkan.Vma;Brutal.ShaderC;Brutal.Gltf;Brutal.Texture;Brutal.Texture.Abstractions;Planet.Core;Planet.Render.Core" />
+    <Reference Include="@(HostAssembly)">
+      <HintPath>$(KSAFolder)/%(Identity).dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="ValidateHostReferences" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(KSAFolder)/%(HostAssembly.Identity).dll')" Text="Missing KSA reference %(HostAssembly.Identity).dll. Set KSA_DLL_DIR or KSAFolder to the complete 2026.10.19.5638 snapshot DLL directory." />
+  </Target>
+  <Target Name="StageMod" DependsOnTargets="Build">
+    <PropertyGroup>
+      <_OwnedStageDir>$(MSBuildProjectDirectory)/artifacts/stage/purr2d2</_OwnedStageDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_StageFile Include="$(TargetPath);$(TargetDir)$(AssemblyName).deps.json;$(MSBuildProjectDirectory)/mod.toml;$(MSBuildProjectDirectory)/LICENSE;$(MSBuildProjectDirectory)/README.md" />
+      <_StageAsset Include="$(MSBuildProjectDirectory)/Assets/**/*.xml;$(MSBuildProjectDirectory)/Assets/**/*.glb;$(MSBuildProjectDirectory)/Assets/**/*.png;$(MSBuildProjectDirectory)/Assets/**/*.wav;$(MSBuildProjectDirectory)/Assets/**/*.vert;$(MSBuildProjectDirectory)/Assets/**/*.frag" />
+    </ItemGroup>
+    <Error Condition="!Exists('%(_StageFile.Identity)')" Text="Required stage file missing: %(_StageFile.Identity)" />
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets/purr2d2.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/Sounds.xml')" Text="Required model or audio asset manifest missing." />
+    <RemoveDir Directories="$(_OwnedStageDir)" />
+    <MakeDir Directories="$(_OwnedStageDir)" />
+    <Copy SourceFiles="@(_StageFile)" DestinationFolder="$(_OwnedStageDir)" />
+    <Copy SourceFiles="@(_StageAsset)" DestinationFiles="@(_StageAsset->'$(_OwnedStageDir)/Assets/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Message Importance="high" Text="Staged purr2d2 at $(_OwnedStageDir)" />
+  </Target>
+</Project>

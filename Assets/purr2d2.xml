@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Assets>
+  <GltfFile Id="Purr2D2_Hilt_Glb">
+    <Source Path="Assets/Models/Purr2D2_Hilt.glb" />
+  </GltfFile>
+  <PbrMaterial Id="Purr2D2_Hilt_Material">
+    <Diffuse Path="Assets/Textures/Purr2D2_Hilt_Diffuse.png" Category="Default" />
+    <Normal Path="Assets/Textures/Purr2D2_Hilt_Normal.png" Category="Default" />
+    <AoRoughMetal Path="Assets/Textures/Purr2D2_Hilt_ORM.png" Category="Default" />
+  </PbrMaterial>
+  <PbrMaterial Id="Purr2D2_CutSurface">
+    <Diffuse Path="Assets/Textures/Purr2D2_CutSurface_Diffuse.png" Category="Default" />
+    <Normal Id="EmptyNormal" />
+    <AoRoughMetal Path="Assets/Textures/Purr2D2_CutSurface_ORM.png" Category="Default" />
+    <Emissive Id="EmptyWhite" />
+  </PbrMaterial>
+  <Shader Id="Purr2D2_Glow_Vert" Path="Assets/Shaders/SaberGlow.vert" />
+  <Shader Id="Purr2D2_Glow_Frag" Path="Assets/Shaders/SaberGlow.frag" />
+</Assets>

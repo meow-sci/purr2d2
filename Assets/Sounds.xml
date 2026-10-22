@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Assets>
+  <!-- Ignite/hum: supplied recordings prepared as mono; retract/contact: original synthesis.
+       See docs/research-audio.md and tools/generate_audio.py for provenance and loop preparation. -->
+  <SpatialSoundData Id="Purr2D2SaberSpatial" DistanceFilter="false">
+    <VolumeRange Min="1" Max="35" />
+  </SpatialSoundData>
+  <Sound Id="Purr2D2SaberIgnite" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
+    <SoundFile Path="Assets/Audio/saber-ignite.wav" />
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+  <Sound Id="Purr2D2SaberRetract" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
+    <SoundFile Path="Assets/Audio/saber-retract.wav" />
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+  <Sound Id="Purr2D2SaberHum" ChannelId="Sfx" SimSpeed="Ignore" Priority="112">
+    <SoundFile Path="Assets/Audio/saber-hum.wav">
+      <Loop>
+        <Start Value="0" Unit="Pcm" />
+        <End Value="93546" Unit="Pcm" />
+      </Loop>
+    </SoundFile>
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+  <Sound Id="Purr2D2SaberContact" ChannelId="Sfx" SimSpeed="Ignore" Priority="120">
+    <SoundFile Path="Assets/Audio/saber-contact.wav">
+      <Loop>
+        <Start Value="0" Unit="Pcm" />
+        <End Value="95999" Unit="Pcm" />
+      </Loop>
+    </SoundFile>
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+</Assets>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Assets>
+  <!-- Original generated geometry. Hilt material is owned by this mod. -->
+  <MeshAtlas Path="Assets/Models/Purr2D2_Practice.glb" />
+  <SubPart Id="Purr2D2_PracticeBillet_Surface">
+    <PartModel Id="Purr2D2_PracticeBillet_Model">
+      <Mesh Id="Purr2D2_PracticeBillet_Mesh" />
+      <Material Id="Purr2D2_Hilt_Material" />
+    </PartModel>
+    <MeshView><Mesh Id="Purr2D2_PracticeBillet_Mesh" /></MeshView>
+  </SubPart>
+  <SubPart Id="Purr2D2_PracticeTube_Surface">
+    <PartModel Id="Purr2D2_PracticeTube_Model">
+      <Mesh Id="Purr2D2_PracticeTube_Mesh" />
+      <Material Id="Purr2D2_Hilt_Material" />
+    </PartModel>
+    <MeshView><Mesh Id="Purr2D2_PracticeTube_Mesh" /></MeshView>
+  </SubPart>
+  <Part Id="Purr2D2_PracticeBillet" DisplayName="Purr2D2 Practice Billet">
+    <EditorTag Value="Structural" />
+    <SubPart Id="Purr2D2_PracticeBillet_Placed" InstanceOf="Purr2D2_PracticeBillet_Surface" />
+    <SolidCuboidMass>
+      <Mass Kg="25" />
+      <LengthX M="1.2" /><LengthY M="0.36" /><LengthZ M="0.36" />
+    </SolidCuboidMass>
+    <Collider Id="Purr2D2_PracticeBillet_Collider">
+      <Box Id="Purr2D2_PracticeBillet_Box">
+        <LengthX M="1.2" /><LengthY M="0.36" /><LengthZ M="0.36" />
+      </Box>
+    </Collider>
+    <Connector Id="Purr2D2_PracticeBillet_Left"><Transform><Position X="-0.6" /><Rotation Z="3.141592653589793" /></Transform></Connector>
+    <Connector Id="Purr2D2_PracticeBillet_Right"><Transform><Position X="0.6" /></Transform></Connector>
+  </Part>
+  <Part Id="Purr2D2_PracticeTube" DisplayName="Purr2D2 Practice Hollow Tube">
+    <EditorTag Value="Structural" />
+    <SubPart Id="Purr2D2_PracticeTube_Placed" InstanceOf="Purr2D2_PracticeTube_Surface" />
+    <CustomMass>
+      <Mass Kg="8" />
+      <MassSpecificInertia Ixx="0.03545" Iyy="0.137725" Izz="0.137725" />
+    </CustomMass>
+    <!-- Conservative cylinder collision envelope; visual/cut geometry preserves the open bore. -->
+    <Collider Id="Purr2D2_PracticeTube_Collider">
+      <Cylinder Id="Purr2D2_PracticeTube_Envelope">
+        <Collider2Asmb Z="-1.5707963267948966" />
+        <LengthY M="1.2" /><Radius M="0.22" />
+      </Cylinder>
+    </Collider>
+    <Connector Id="Purr2D2_PracticeTube_Left"><Transform><Position X="-0.6" /><Rotation Z="3.141592653589793" /></Transform></Connector>
+    <Connector Id="Purr2D2_PracticeTube_Right"><Transform><Position X="0.6" /></Transform></Connector>
+  </Part>
+</Assets>
