@@ -41,9 +41,19 @@ def _verify_archive(path: Path, stage: Path) -> None:
     with zipfile.ZipFile(path, "r") as archive:
         names = archive.namelist()
         if names != expected:
-            raise ValueError("generated ZIP does not contain exactly one purr2d/ root and all staged files")
+            missing = sorted(set(expected) - set(names))
+            unexpected = sorted(set(names) - set(expected))
+            if missing or unexpected:
+                details = []
+                if missing:
+                    details.append("missing " + ", ".join(repr(name) for name in missing))
+                if unexpected:
+                    details.append("unexpected " + ", ".join(repr(name) for name in unexpected))
+                raise ValueError("generated ZIP does not contain exactly one purr2d2/ root and all staged files: "
+                                 + "; ".join(details))
+            raise ValueError("generated ZIP contains the correct files in a non-deterministic order")
         if any(not name.startswith("purr2d2/") for name in names):
-            raise ValueError("generated ZIP has a file outside the purr2d/ root")
+            raise ValueError("generated ZIP has a file outside the purr2d2/ root")
         corrupt = archive.testzip()
         if corrupt is not None:
             raise ValueError(f"generated ZIP has a corrupt member: {corrupt}")
@@ -61,7 +71,12 @@ def create_package(source: Path, stage: Path, output_dir: Path) -> tuple[Path, s
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_path = output_dir / f"purr2d2-{version}.zip"
     temporary_path = archive_path.with_suffix(archive_path.suffix + ".tmp")
-    members = sorted(path for path in stage.rglob("*") if path.is_file())
+    # Sort by the actual POSIX archive name. Native Path ordering may be
+    # case-insensitive on Windows while ZIP name verification is case-sensitive.
+    members = sorted(
+        (path for path in stage.rglob("*") if path.is_file()),
+        key=lambda path: path.relative_to(stage).as_posix(),
+    )
     try:
         with zipfile.ZipFile(temporary_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             archive.writestr(_zip_info("purr2d2/", is_directory=True), b"")
