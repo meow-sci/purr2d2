@@ -11,6 +11,7 @@ internal static class TargetSurfaceSnapshotChecks
         ReusedMeshOnDifferentParts();
         RenderOnlyPrimitives();
         RenderGeometrySupersedesPicking();
+        LargeVesselRetainsEveryMesh();
         InvalidGeometryIsAtomic();
         WorkBudgetsAreAtomic();
         Console.WriteLine("PASS: target surface snapshots, transforms, completeness and budgets");
@@ -138,14 +139,14 @@ internal static class TargetSurfaceSnapshotChecks
     private static void WorkBudgetsAreAtomic()
     {
         var target = Target();
-        for (int i = 0; i < 256; i++) target.Parts.Parts.Add(new Part());
+        for (int i = 0; i < AutopilotGeometryLimits.Parts; i++) target.Parts.Parts.Add(new Part());
         Rejected(target, "part budget");
 
         target = Target();
-        for (int i = 0; i < 1024; i++) target.Parts.Parts[0].Modules.Add(new MeshViewModule(Mesh()));
+        for (int i = 0; i < AutopilotGeometryLimits.Meshes; i++) target.Parts.Parts[0].Modules.Add(new MeshViewModule(Mesh()));
         Rejected(target, "mesh budget");
 
-        var primitives = new double3[8193][];
+        var primitives = new double3[AutopilotGeometryLimits.Primitives + 1][];
         for (int i = 0; i < primitives.Length; i++) primitives[i] = [];
         primitives[0] = Mesh().PositionsCompare![0];
         target = Target();
@@ -153,11 +154,44 @@ internal static class TargetSurfaceSnapshotChecks
         Rejected(target, "primitive budget including empty primitives");
 
         target = Target();
+        // Share a degenerate primitive to exercise cumulative accounting without
+        // allocating hundreds of MB merely to trigger the input-size guard.
+        var repeated = Enumerable.Repeat(new double3[3_000], AutopilotGeometryLimits.Triangles / 1_000 + 1).ToArray();
         target.Parts.Parts[0].Modules.Add(RenderModel(new()
         {
-            PositionsCompare = [new double3[150_001 * 3]]
+            PositionsCompare = repeated
         }));
         Rejected(target, "triangle budget including degenerate triangles");
+
+        target = Target();
+        var cycle = new Part();
+        cycle.PartParent = cycle;
+        target.Parts.Parts.Add(cycle);
+        Rejected(target, "cyclic parent hierarchy remains bounded independently of vessel size");
+    }
+
+    private static void LargeVesselRetainsEveryMesh()
+    {
+        // Exceeds every former size limit: 2,176 nodes, 2,048 mesh instances,
+        // 32,768 primitives, 524,288 triangles and 128 candidate full parts.
+        var target = new Vehicle();
+        var primitive = Enumerable.Range(0, 16).SelectMany(_ => Mesh().PositionsCompare![0]).ToArray();
+        var mesh = new MeshReference { PositionsCompare = Enumerable.Repeat(primitive, 16).ToArray() };
+        for (int i = 0; i < 128; i++)
+        {
+            var full = new Part { PositionParentAsmb = new(i * 100, 0, 0) };
+            target.Parts.Parts.Add(full);
+            for (int j = 0; j < 16; j++)
+            {
+                var sub = new Part { PartParent = full, PositionParentAsmb = new(j, 0, 0) };
+                sub.Modules.Add(RenderModel(mesh));
+                full.SubParts.Add(sub);
+            }
+        }
+        Check(TargetSurfaceSnapshot.TryCapture(target, out var triangles, out var bounds, out var reason), reason);
+        Check(triangles.Length == 524_288 && bounds.Length == 128, "large-vessel capture retains the complete geometry");
+        Near(triangles[^1].A, new(12_715, 0, 0), "geometry beyond the old budgets is transformed and retained");
+        Near(bounds[^1].Max, new(12_716, 1, 0), "last full-part candidate includes all its mesh instances");
     }
 
     private static Vehicle Target()

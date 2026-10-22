@@ -12,16 +12,18 @@ internal static class CuttingRingGeometry
     internal const double KittenRadius = .25;
     private const int AzimuthSamples = 48;
     private const int OrbitSegments = 96;
-    private const int MaxTriangles = 200_000;
-    private const int MaxBounds = 64;
-    private const int MaxCandidates = 1_536;
-    private const int MaxTriangleTests = 4_000_000;
-
     internal static bool TryFind(CutTriangle[] triangles, IReadOnlyList<CutBounds> candidateBounds,
         double3 kittenBody, int axisIndex, bool reversed, double clearance,
         out CutRing ring, out string reason, double3? preferredPoint = null)
+        => TryFind(triangles, candidateBounds, kittenBody, axisIndex, reversed, clearance,
+            out ring, out reason, out _, preferredPoint);
+
+    internal static bool TryFind(CutTriangle[] triangles, IReadOnlyList<CutBounds> candidateBounds,
+        double3 kittenBody, int axisIndex, bool reversed, double clearance,
+        out CutRing ring, out string reason, out CutMesh? surface, double3? preferredPoint = null)
     {
         ring = default;
+        surface = null;
         if (!Finite(kittenBody) || (preferredPoint.HasValue && !Finite(preferredPoint.Value)) || axisIndex is < -1 or > 2
             || !double.IsFinite(clearance) || clearance < KittenRadius + .025)
         {
@@ -34,9 +36,9 @@ internal static class CuttingRingGeometry
             reason = "The target has no available part bounds for a ring search.";
             return false;
         }
-        if (candidateBounds.Count > MaxBounds)
+        if (candidateBounds.Count > AutopilotGeometryLimits.Parts)
         {
-            reason = "Ring search part limit exceeded; use a simpler target.";
+            reason = $"Ring search part limit: {candidateBounds.Count:N0} exceeds {AutopilotGeometryLimits.Parts:N0}.";
             return false;
         }
         foreach (var bounds in candidateBounds)
@@ -50,7 +52,10 @@ internal static class CuttingRingGeometry
         bool found = false, sawRoundSection = false, sawBlockedPath = false;
         double bestDistance = double.PositiveInfinity;
         int candidates = 0;
-        foreach (var bounds in candidateBounds)
+        // Rank bounds, not collision geometry. Every candidate still checks against
+        // the entire target, including parts beyond the candidate/work budget.
+        CutPoint focus = Point(preferredPoint ?? kittenBody);
+        foreach (var bounds in candidateBounds.Distinct().OrderBy(bounds => BoundsDistanceSquared(bounds, focus)))
         {
             double3 boundsCenter = Vector((bounds.Min + bounds.Max) * .5);
             for (int axisNumber = 0; axisNumber < 3; axisNumber++)
@@ -74,11 +79,7 @@ internal static class CuttingRingGeometry
                 foreach (double station in stations)
                 {
                     if (!visited.Add(station)) continue;
-                    if (++candidates > MaxCandidates)
-                    {
-                        reason = "Ring search candidate limit exceeded; use a simpler target.";
-                        return false;
-                    }
+                    if (++candidates > AutopilotGeometryLimits.RingCandidates) goto SearchComplete;
                     double3 center = WithComponent(boundsCenter, axisNumber, station);
                     double3 radial = kittenBody - center;
                     radial -= axis * double3.Dot(radial, axis);
@@ -87,7 +88,7 @@ internal static class CuttingRingGeometry
                     double band = Math.Min(.08, Math.Min(station - minimum, maximum - station) * .4);
                     if (!search.TryRadius(center, axis, radial, band, out double surfaceRadius))
                     {
-                        if (search.Exhausted) return BudgetFailure(out reason);
+                        if (search.Exhausted) goto SearchComplete;
                         continue;
                     }
                     sawRoundSection = true;
@@ -100,7 +101,7 @@ internal static class CuttingRingGeometry
                     if (!search.PathClear(kittenBody, start, KittenRadius)
                         || !search.OrbitClear(candidate, clearance))
                     {
-                        if (search.Exhausted) return BudgetFailure(out reason);
+                        if (search.Exhausted) goto SearchComplete;
                         sawBlockedPath = true;
                         continue;
                     }
@@ -110,19 +111,26 @@ internal static class CuttingRingGeometry
                 }
             }
         }
+    SearchComplete:
+        // A later budget exhaustion cannot invalidate a ring whose complete approach
+        // and orbit have already passed. Never accept the partially checked candidate.
+        bool limited = search.Exhausted || candidates > AutopilotGeometryLimits.RingCandidates;
+        if (found) surface = mesh;
         reason = found ? "Found a sampled circular hull section with a clear direct approach and orbit."
+            : limited ? "Ring search reached its work limit. Select a hull point near the desired cut or choose a cylinder axis, then try again."
             : sawBlockedPath ? "A circular section was found, but its approach or orbit is obstructed. Move to a clearer side and try again."
             : sawRoundSection ? "No reachable cutting ring was found. Move to a clearer side and try again."
             : preferredPoint.HasValue
                 ? "No clear circular ring exists at that selected station. Choose a point farther from the ends or another cylinder axis."
                 : "No sufficiently circular hull section was found. Try Auto axis or a simpler cylindrical target.";
+        if (found && limited) reason += " Search stopped at its work limit; closer alternatives may exist.";
         return found;
     }
 
     internal static bool TryPick(CutTriangle[] triangles, double3 origin, double3 direction, out double3 hit)
     {
         hit = default;
-        if (triangles.Length == 0 || triangles.Length > MaxTriangles || !Finite(origin) || !Finite(direction)
+        if (triangles.Length == 0 || triangles.Length > AutopilotGeometryLimits.Triangles || !Finite(origin) || !Finite(direction)
             || direction.LengthSquared() < 1e-20) return false;
         direction /= direction.Length();
         double nearest = double.PositiveInfinity;
@@ -167,9 +175,9 @@ internal static class CuttingRingGeometry
             reason = "Target surface geometry is unavailable; capture again after loading finishes.";
             return false;
         }
-        if (triangles.Length > MaxTriangles)
+        if (triangles.Length > AutopilotGeometryLimits.Triangles)
         {
-            reason = "Ring search triangle limit exceeded; use a simpler target.";
+            reason = $"Ring search triangle limit: {triangles.Length:N0} exceeds {AutopilotGeometryLimits.Triangles:N0}.";
             return false;
         }
         foreach (var triangle in triangles)
@@ -281,7 +289,7 @@ internal static class CuttingRingGeometry
 
         private bool Count()
         {
-            Exhausted = ++_tests > MaxTriangleTests;
+            Exhausted = ++_tests > AutopilotGeometryLimits.TriangleTests;
             return !Exhausted;
         }
     }
@@ -308,6 +316,12 @@ internal static class CuttingRingGeometry
     {
         reason = "Ring search work limit exceeded; use a simpler target.";
         return false;
+    }
+
+    private static double BoundsDistanceSquared(CutBounds bounds, CutPoint point)
+    {
+        CutPoint nearest = CutPoint.Max(bounds.Min, CutPoint.Min(bounds.Max, point));
+        return (nearest - point).LengthSquared;
     }
 
     private static bool Valid(CutBounds bounds) => bounds.Min.Finite && bounds.Max.Finite

@@ -62,9 +62,9 @@ internal sealed class EvaCuttingAutopilot
         double3 position = (owner.GetPositionCci() - target.GetPositionCci()).Transform(target.GetBody2Cci().Inverse());
         if (!CuttingRingGeometry.TryFind(triangles, bounds, position,
             settings.AutopilotAutoAxis ? -1 : settings.AutopilotAxis, settings.AutopilotAxisReversed,
-            settings.AutopilotClearance, out var ring, out reason, preferredPoint)) return FailCapture(reason);
+            settings.AutopilotClearance, out var ring, out reason, out var surface, preferredPoint)) return FailCapture(reason);
         _owner = owner; _target = target; _ring = ring; _hasRing = true;
-        _surface = new CutMesh(triangles); _topology = Topology(target);
+        _surface = surface; _topology = Topology(target);
         _clearance = settings.AutopilotClearance;
         _angle = 0; _cutWhenReady = _cutStarted = _cuttingMotionReady = false;
         _phase = Phase.Captured;
@@ -252,7 +252,7 @@ internal sealed class EvaCuttingAutopilot
         if (_surface == null) return false;
         var a = new CutPoint(start.X, start.Y, start.Z); var b = new CutPoint(end.X, end.Y, end.Z);
         _surface.Query(CutBounds.Sweep(a, b, a, b, CuttingRingGeometry.KittenRadius), _nearTriangles);
-        if (_nearTriangles.Count > 25_000) return false;
+        if (_nearTriangles.Count > AutopilotGeometryLimits.RouteTriangles) return false;
         foreach (int index in _nearTriangles)
             if (CutGeometry.SegmentTriangleDistanceSquared(a, b, _surface.Triangles[index], out _)
                 < CuttingRingGeometry.KittenRadius * CuttingRingGeometry.KittenRadius) return false;

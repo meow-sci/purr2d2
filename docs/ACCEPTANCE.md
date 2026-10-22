@@ -2,6 +2,14 @@
 
 This file separates automated checks from native gameplay observation. An unperformed native check remains unperformed even when the DLL builds successfully.
 
+## Built-in vessel target limits repair — 2026-10-22
+
+The user reported "The target exceeds the autopilot part budget" on a built-in vessel. The 256-node guard counted full parts plus subparts, including internal/decorative components. The supplied default-vehicle XML lists 1,032 nodes for Rocket (161 full parts) and 664 for Gemini7 (35 full parts). A read-only count using the available older native GLB atlas headers resolves at least 365,224 render triangles for Rocket and 247,688 for Gemini7; these are indicative asset counts, not a live 5638 runtime measurement. Both also exceed the former 150,000-triangle snapshot guard, and Rocket exceeds the former 64-bound ring-search guard.
+
+Shared limits now permit 32,768 nodes/mesh instances, 131,072 primitives and 4 million triangles through capture, picking and ring search. Search ranks nearby/clicked parts first, keeps complete obstacle geometry and retains an independently validated ring if later discovery work reaches its limit. Flight reuses the validated search BVH. The search/route work limits were also increased; parent-cycle protection stays independent of vessel size. See [research-autopilot.md](research-autopilot.md) for exact limits and limitations.
+
+Release build passed with zero warnings/errors. The full managed validation passed, including a 524,288-triangle/2,176-node snapshot, picking/search above 400,000 triangles, 1,701 candidate parts, blocked paths, retained remote obstacles, atomic size/hierarchy refusals and the existing flight-controller checks. Output is in ignored `artifacts/large-target-validation.log`. These fixtures exercise production code with game stand-ins; native built-in-vessel capture and flight must still be retested after replacing the mod and restarting KSA.
+
 ## EVA rendezvous and ring targeting update — 2026-10-22
 
 Implemented the vessel-target dropdown, render-geometry ring search, exact clicked-station selection, ring/flight-path/entry overlay, station nudges, local approach and match-velocity controls. Fixed the former capture path's subpart coordinate mistake and dependence on MeshView-only raycasts. Coupled roll now holds the complete blade orientation.

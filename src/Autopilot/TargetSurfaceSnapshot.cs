@@ -7,11 +7,6 @@ namespace Purr2D2.Autopilot;
 /// <summary>A bounded CPU geometry copy, relative to the target's center of mass.</summary>
 internal static class TargetSurfaceSnapshot
 {
-    private const int MaximumParts = 256;
-    private const int MaximumMeshes = 1024;
-    private const int MaximumPrimitives = 8192;
-    private const int MaximumTriangles = 150_000;
-
     internal static bool TryCapture(Vehicle target, out CutTriangle[] triangles,
         out CutBounds[] candidateBounds, out string reason)
     {
@@ -68,19 +63,20 @@ internal static class TargetSurfaceSnapshot
                 {
                     // Reusing a mesh on another part still needs that part's transform.
                     if (!seenMeshes.Add(mesh)) return;
-                    Require(++meshCount <= MaximumMeshes, "The target exceeds the autopilot mesh budget.");
+                    Require(++meshCount <= AutopilotGeometryLimits.Meshes,
+                        $"Autopilot mesh limit: {meshCount:N0} exceeds {AutopilotGeometryLimits.Meshes:N0}.");
                     Require(mesh.PositionsCompare is { Length: > 0 },
                         "Target CPU geometry is unavailable; wait for loading to finish.");
                     int start = captured.Count;
                     foreach (double3[]? primitive in mesh.PositionsCompare!)
                     {
-                        Require(++primitiveCount <= MaximumPrimitives,
-                            "The target exceeds the autopilot geometry budget.");
+                        Require(++primitiveCount <= AutopilotGeometryLimits.Primitives,
+                            $"Autopilot geometry limit: {primitiveCount:N0} primitives exceeds {AutopilotGeometryLimits.Primitives:N0}.");
                         Require(primitive != null && primitive.Length % 3 == 0,
                             "A target mesh has incomplete triangle geometry.");
                         int count = primitive!.Length / 3;
-                        Require(count <= MaximumTriangles - triangleCount,
-                            "The target exceeds the autopilot triangle budget.");
+                        Require(count <= AutopilotGeometryLimits.Triangles - triangleCount,
+                            $"Autopilot triangle limit: {(long)triangleCount + count:N0} exceeds {AutopilotGeometryLimits.Triangles:N0}.");
                         // Count even degenerate triangles so invalid art cannot evade the work bound.
                         triangleCount += count;
                         for (int i = 0; i < primitive.Length; i += 3)
@@ -126,7 +122,8 @@ internal static class TargetSurfaceSnapshot
             void AddPart(Part part)
             {
                 if (!seenParts.Add(part)) return;
-                Require(parts.Count < MaximumParts, "The target exceeds the autopilot part budget.");
+                Require(parts.Count < AutopilotGeometryLimits.Parts,
+                    $"Autopilot part limit: {parts.Count + 1:N0} parts/subparts exceeds {AutopilotGeometryLimits.Parts:N0}.");
                 parts.Add(part);
             }
         }
@@ -155,7 +152,7 @@ internal static class TargetSurfaceSnapshot
         int depth = 0;
         for (Part? current = part; current != null; current = current.PartParent)
         {
-            Require(++depth <= MaximumParts, "A target part has an invalid geometry hierarchy.");
+            Require(++depth <= AutopilotGeometryLimits.HierarchyDepth, "A target part has an invalid geometry hierarchy.");
             transform *= double4x4.CreateScale(current.Scale)
                 * double4x4.CreateFromQuaternion(current.Asmb2ParentAsmb)
                 * double4x4.CreateTranslation(current.PositionParentAsmb);

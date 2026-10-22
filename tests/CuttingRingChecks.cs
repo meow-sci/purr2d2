@@ -11,6 +11,8 @@ internal static class CuttingRingChecks
         SelectedStationAndPicking();
         RefusesMissingAndIrregularSections();
         RefusesBlockedApproachAndOrbit();
+        LargeVesselSearchAndPicking();
+        BoundedSearchRetainsOnlyValidatedRings();
         InvalidAndBoundedInput();
     }
 
@@ -111,9 +113,53 @@ internal static class CuttingRingChecks
         var invalid = new CutTriangle[] { new(default, default, default) };
         Check(!CuttingRingGeometry.TryFind(invalid, [new(default, new(1, 1, 1))], new(0, 5, 0), -1,
             false, .55, out _, out _), "degenerate geometry refuses capture");
-        Check(!CuttingRingGeometry.TryFind(cylinder, Enumerable.Repeat(Bounds(cylinder), 65).ToArray(),
+        Check(!CuttingRingGeometry.TryFind(cylinder, Enumerable.Repeat(Bounds(cylinder), AutopilotGeometryLimits.Parts + 1).ToArray(),
             new(0, 5, 0), -1, false, .55, out _, out string reason), "part search count is bounded");
         Check(reason.Contains("limit"), "bounded search failure is actionable");
+        Check(!CuttingRingGeometry.TryFind(cylinder, [Bounds(cylinder), new(default, new(double.NaN, 0, 0))],
+            new(0, 5, 0), -1, false, .55, out _, out _), "invalid remote bounds cannot bypass validation through ranking");
+    }
+
+    private static void LargeVesselSearchAndPicking()
+    {
+        var cylinder = Cylinder(default, 0);
+        // More geometry than both former snapshot/search limits, spatially spread
+        // so this also exercises the real BVH rather than one duplicated triangle.
+        var remote = Enumerable.Range(0, 400_000).Select(i => new CutTriangle(
+            new(100 + i, 100, 100), new(100.5 + i, 100, 100), new(100 + i, 101, 100))).ToArray();
+        var triangles = remote.Concat(cylinder).ToArray();
+        var bounds = Enumerable.Range(0, 128).Select(i => new CutBounds(new(100 + i, 100, 100), new(101 + i, 101, 100)))
+            .Append(Bounds(cylinder)).ToArray();
+        Check(CuttingRingGeometry.TryPick(triangles, new(.6, 5, 0), new(0, -1, 0), out var hit),
+            "picking supports a target with more than 400,000 triangles");
+        Near(hit.X, .6, "large-target picking preserves the requested station");
+        Check(CuttingRingGeometry.TryFind(triangles, bounds, new(0, 5, 0), 0, false, .55,
+            out var ring, out _, out var surface, hit), "ring search accepts more than 64 part bounds and 400,000 triangles");
+        Near(ring.Center.X, .6, "large-target search retains the exact clicked station");
+        Check(surface != null && ReferenceEquals(surface.Triangles, triangles), "accepted search reuses its complete collision mesh for flight");
+        Check(!CuttingRingGeometry.IsPathClear(surface!, new(400_099.1, 100.1, 99), new(400_099.1, 100.1, 101), .25, out _),
+            "remote geometry outside the candidate bounds remains a flight obstacle");
+    }
+
+    private static void BoundedSearchRetainsOnlyValidatedRings()
+    {
+        var cylinder = Cylinder(default, 0);
+        var farBoxes = Enumerable.Range(1, 1_700).Select(i => Box(new(i * 10 - 2, -1, -1), new(i * 10 + 2, 1, 1))).ToArray();
+        var bounds = farBoxes.Select(Bounds).Append(Bounds(cylinder)).ToArray();
+        var triangles = farBoxes.SelectMany(t => t).Concat(cylinder).ToArray();
+        Check(CuttingRingGeometry.TryFind(triangles, bounds, new(0, 5, 0), 0, false, .55,
+            out var ring, out var reason), "nearby ring wins even when listed after 1,700 other parts");
+        Near(ring.Center.X, 0, "nearest bounds are searched before distant parts");
+        Check(reason.Contains("work limit"), "later search exhaustion retains a fully checked ring");
+
+        var box = Box(new(-2, -1, -1), new(2, 1, 1));
+        Check(!CuttingRingGeometry.TryFind(farBoxes.SelectMany(t => t).Concat(box).ToArray(), bounds,
+            new(0, 5, 0), 0, false, .55, out _, out reason), "exhaustion without a validated ring refuses capture");
+        Check(reason.Contains("Select a hull point"), "bounded search provides a targeted retry rather than rejecting vessel size");
+
+        var wall = Box(new(-4, 2.5, -4), new(4, 2.7, 4));
+        Check(!CuttingRingGeometry.TryFind(triangles.Concat(wall).ToArray(), bounds,
+            new(0, 5, 0), 0, false, .55, out _, out _), "large-target candidate ranking never drops obstructing geometry");
     }
 
     private static CutTriangle[] Cylinder(double3 center, int axis, bool missingSector = false)
