@@ -20,16 +20,19 @@ Hotkeys are ignored while ImGui captures keyboard input. The simulation and effe
 
 The panel controls color, blade length, volume, contact time and cutting mode. **Save preferences** writes `settings.json` beside the installed mod; updates should preserve that file. Equipping is intentionally scoped to the currently controlled EVA kitten and is cleared on switching, boarding, loading a save or entering the editor.
 
-## Cylinder cutting autopilot
+## EVA rendezvous and ring targeting
 
-The panel includes a human-assisted MMU autopilot for making one circular cut around a vessel approximated as a cylinder. Use KSA's normal targeting system to select the vessel, move the EVA kitten beside the desired cross-section, enable MMU, then:
+Open **Cylinder cutting autopilot** in the F7 panel:
 
-1. Choose the target vessel's local X, Y or Z cylinder axis; use **Reverse** if needed.
-2. **Capture target ring** to raycast the hull at the kitten's present axial station.
-3. **Align / approach** to fly to the configured hull clearance and point the blade inward. Inspect the pose and use the ±90° roll buttons until the kitten is oriented appropriately.
-4. **Cut one orbit** to ignite automatically and circumnavigate the captured ring once. **Abort / release** immediately clears commanded translation and restores the prior flight-computer, MMU-control and saber states.
+1. Choose a vessel from **Vessel target**. This sets the kitten's actual flight-computer target.
+2. Use **Find ring preview**, or arm **Select hull point** and click the vessel where you want the slice. Auto axis searches X/Y/Z; you can also choose an axis explicitly. **Ring −/+0.25 m** moves the selected station when another valid ring fits there.
+3. Inspect the **cyan cut ring**, **amber flight circle**, and **MMU entry** marker in the scene. The far side of the ring is dashed; this is a targeting overlay, not a depth-tested cut. Adjust clearance before flying.
+4. Enable MMU, then **Fly to ring**. The autopilot approaches the marked entry and holds. **Match target velocity** is available separately to cancel relative drift. Inspect the held blade pose and adjust roll with the ±90° buttons.
+5. Press **Cut one orbit** once holding. This ignites the saber and performs one lap. **Abort / release** or **Esc** clears commanded translation and restores the previous flight-computer and saber settings. Esc also cancels point selection.
 
-The guidance follows target translation and body rotation, uses low-speed MMU pulse commands, and pauses orbital progress until a fresh rendered blade pose is available. It requires the kitten and target to share a parent body, the target to be in the physics bubble, and normal simulation speed. This first version assumes a locally closed cylindrical surface and does not plan around appendages, solar arrays or other obstacles. Start with a simple uncrewed practice craft and remain ready to abort. See [autopilot research and safety design](docs/research-autopilot.md).
+Finding a ring no longer requires the kitten to be beside the correct cross-section. The search reads rendered hull geometry, including transformed subparts, samples the circumference, and checks the direct approach and whole flight circle for clearance. A clicked point fixes the slice station; an invalid selection explains why it failed. A failed nudge retains the previous preview. The preview does not guarantee that the selected cutting mode can structurally cut that part.
+
+This is local EVA guidance: the target must share the kitten's parent body, be loaded in the physics bubble, and be within 500 m of its bounds with less than 20 m/s relative speed. Approach speed is limited and reduced using available MMU pulse thrust. Fast target spin, depleted thrusters, changed geometry, blocked paths and unsupported simulation speed stop or suspend guidance. It does not plan orbital transfers or routes around obstacles. Sampled rings assume a locally cylindrical hull and a 0.25 m kitten clearance volume; other vessels are not included in path checks. Native in-game calibration remains required. See [autopilot research and limits](docs/research-autopilot.md).
 
 ## Cutting behavior
 
@@ -55,13 +58,17 @@ The default discovers `../ksa-game-assemblies/current/dll/`. Alternatively set `
 
 ```sh
 dotnet build Purr2D2.slnx -c Release
-python3 tools/validate.py --run-tests
-dotnet msbuild Purr2D2.csproj -t:StageMod -p:Configuration=Release
-python3 tools/validate.py --stage artifacts/stage/purr2d2
-python3 tools/package.py
 ```
 
-`StageMod` rebuilds one allowlisted directory, `artifacts/stage/purr2d2/`. It never installs the mod or changes game saves. The ZIP under `artifacts/dist/` contains one `purr2d2/` folder. Extract that folder into your configured KSA/StarMap mod directory and enable the `purr2d2` mod ID. A game restart is needed. Preserve existing `settings.json` and `Generated/Slices/` when updating.
+The Release build produces the installable folder `artifacts/stage/purr2d2/`, `artifacts/dist/purr2d2-0.2.0.zip`, and its `.zip.sha256` checksum using built-in MSBuild tasks. No packaging scripts or Python installation are required. The archive name follows the project version; `mod.toml` must match that version or the build fails. Add `-p:CreateModZip=false` for just the folder. Debug builds compile without changing the Release distribution; `dotnet clean Purr2D2.slnx -c Release` removes its generated folder, ZIP and checksum.
+
+Every Release build recreates the folder from the project's explicit file set, so stale files and host DLLs cannot survive a rebuild. The ZIP contains one `purr2d2/` folder. Extract that folder into your configured KSA/StarMap mod directory and enable the `purr2d2` mod ID. A game restart is needed. Preserve existing `settings.json` and `Generated/Slices/` when updating.
+
+Optional development checks are separate from building the distribution:
+
+```sh
+python3 tools/validate.py --run-tests --stage artifacts/stage/purr2d2
+```
 
 This repository contains exactly one runtime `.csproj`; validation generates temporary game-free harness projects under ignored `artifacts/`. The solution and all mod code target `net10.0`.
 

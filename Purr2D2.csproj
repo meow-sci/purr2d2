@@ -10,6 +10,9 @@
     <GenerateDependencyFile>true</GenerateDependencyFile>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <CreateModZip Condition="'$(CreateModZip)' == ''">true</CreateModZip>
+    <ModStageDir>$(MSBuildProjectDirectory)/artifacts/stage/purr2d2</ModStageDir>
+    <ModArchive>$(MSBuildProjectDirectory)/artifacts/dist/purr2d2-$(Version).zip</ModArchive>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src/**/*.cs" />
@@ -26,20 +29,47 @@
   <Target Name="ValidateHostReferences" BeforeTargets="ResolveAssemblyReferences">
     <Error Condition="!Exists('$(KSAFolder)/%(HostAssembly.Identity).dll')" Text="Missing KSA reference %(HostAssembly.Identity).dll. Set KSA_DLL_DIR or KSAFolder to the complete 2026.10.19.5638 snapshot DLL directory." />
   </Target>
-  <Target Name="StageMod" DependsOnTargets="Build">
-    <PropertyGroup>
-      <_OwnedStageDir>$(MSBuildProjectDirectory)/artifacts/stage/purr2d2</_OwnedStageDir>
-    </PropertyGroup>
+  <!-- Release builds always recreate the installable payload, including incremental builds. -->
+  <Target Name="BuildModDistribution" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true'">
     <ItemGroup>
       <_StageFile Include="$(TargetPath);$(TargetDir)$(AssemblyName).deps.json;$(MSBuildProjectDirectory)/mod.toml;$(MSBuildProjectDirectory)/LICENSE;$(MSBuildProjectDirectory)/README.md" />
       <_StageAsset Include="$(MSBuildProjectDirectory)/Assets/**/*.xml;$(MSBuildProjectDirectory)/Assets/**/*.glb;$(MSBuildProjectDirectory)/Assets/**/*.png;$(MSBuildProjectDirectory)/Assets/**/*.wav;$(MSBuildProjectDirectory)/Assets/**/*.vert;$(MSBuildProjectDirectory)/Assets/**/*.frag" />
     </ItemGroup>
     <Error Condition="!Exists('%(_StageFile.Identity)')" Text="Required stage file missing: %(_StageFile.Identity)" />
-    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets/purr2d2.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/Sounds.xml')" Text="Required model or audio asset manifest missing." />
-    <RemoveDir Directories="$(_OwnedStageDir)" />
-    <MakeDir Directories="$(_OwnedStageDir)" />
-    <Copy SourceFiles="@(_StageFile)" DestinationFolder="$(_OwnedStageDir)" />
-    <Copy SourceFiles="@(_StageAsset)" DestinationFiles="@(_StageAsset->'$(_OwnedStageDir)/Assets/%(RecursiveDir)%(Filename)%(Extension)')" />
-    <Message Importance="high" Text="Staged purr2d2 at $(_OwnedStageDir)" />
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets/purr2d2.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/Sounds.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/PracticeTargets.xml')" Text="Required model, audio or practice-target asset manifest missing." />
+    <PropertyGroup>
+      <_ManifestVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/mod.toml')), '(?m)^version\s*=\s*&quot;([^&quot;]+)&quot;\s*$').Groups[1].Value)</_ManifestVersion>
+    </PropertyGroup>
+    <Error Condition="'$(_ManifestVersion)' != '$(Version)'" Text="mod.toml version '$(_ManifestVersion)' must match project Version '$(Version)' before building the distribution." />
+    <RemoveDir Directories="$(ModStageDir)" />
+    <MakeDir Directories="$(ModStageDir)" />
+    <Copy SourceFiles="@(_StageFile)" DestinationFolder="$(ModStageDir)" />
+    <Copy SourceFiles="@(_StageAsset)" DestinationFiles="@(_StageAsset->'$(ModStageDir)/Assets/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <!-- A folder-only build must not leave a ZIP of an older payload beside it. -->
+    <Delete Files="$(ModArchive);$(ModArchive).sha256" />
+    <Message Importance="high" Text="Built installable mod: $(ModStageDir)" />
+  </Target>
+  <Target Name="ZipModDistribution" AfterTargets="BuildModDistribution"
+          Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true' and '$(CreateModZip)' == 'true'">
+    <PropertyGroup>
+      <_ModArchiveRoot>$(IntermediateOutputPath)mod-package</_ModArchiveRoot>
+    </PropertyGroup>
+    <!-- ZipDirectory archives a directory's contents. Use a private wrapper so the
+         archive has one purr2d2/ root and cannot pick up sibling staging folders. -->
+    <RemoveDir Directories="$(_ModArchiveRoot)" />
+    <MakeDir Directories="$(_ModArchiveRoot)/purr2d2;$(MSBuildProjectDirectory)/artifacts/dist" />
+    <Copy SourceFiles="@(_StageFile)" DestinationFolder="$(_ModArchiveRoot)/purr2d2" />
+    <Copy SourceFiles="@(_StageAsset)" DestinationFiles="@(_StageAsset->'$(_ModArchiveRoot)/purr2d2/Assets/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <ZipDirectory SourceDirectory="$(_ModArchiveRoot)" DestinationFile="$(ModArchive)" Overwrite="true" />
+    <GetFileHash Files="$(ModArchive)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_ModArchiveHash" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(ModArchive).sha256" Lines="@(_ModArchiveHash->'%(FileHash)  %(Filename)%(Extension)')" Overwrite="true" Encoding="ASCII" />
+    <Message Importance="high" Text="Built mod archive: $(ModArchive)" />
+  </Target>
+  <Target Name="CleanModDistribution" AfterTargets="Clean" Condition="'$(Configuration)' == 'Release'">
+    <RemoveDir Directories="$(ModStageDir);$(IntermediateOutputPath)mod-package" />
+    <Delete Files="$(ModArchive);$(ModArchive).sha256" />
   </Target>
 </Project>

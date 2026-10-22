@@ -23,6 +23,7 @@ public sealed class SaberSettings
     public bool HideMmu { get; set; } = true;
     public float AutopilotClearance { get; set; } = .55f;
     public float AutopilotOrbitSpeed { get; set; } = .15f;
+    public bool AutopilotAutoAxis { get; set; } = true;
     public int AutopilotAxis { get; set; }
     public bool AutopilotAxisReversed { get; set; }
     public bool AutopilotClockwise { get; set; }

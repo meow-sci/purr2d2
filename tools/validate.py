@@ -527,6 +527,8 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "src/Core/BladeState.cs",
         source / "src/Core/SaberSettings.cs",
         source / "src/Autopilot/CylinderOrbitGuidance.cs",
+        source / "src/Autopilot/CuttingRingGeometry.cs",
+        source / "src/Autopilot/EvaApproachGuidance.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Cutting/PlaneSlicer.cs",
         source / "src/Pose/SaberPoseMath.cs",
@@ -538,6 +540,8 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "tests/PoseChecks.cs",
         source / "tests/SlicingPhysicsChecks.cs",
         source / "tests/AutopilotChecks.cs",
+        source / "tests/CuttingRingChecks.cs",
+        source / "tests/EvaApproachChecks.cs",
     ]
     contact_sources = [
         source / "src/Cutting/SaberCutter.cs",
@@ -548,13 +552,20 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); CuttingRingChecks.Run(); EvaApproachChecks.Run(); } }\n"
     )
     outputs = []
     result = 0
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),
         ("ContactChecks", contact_sources, None),
+        ("EvaControllerChecks", [source / "src/Autopilot/EvaCuttingAutopilot.cs", source / "src/Autopilot/CylinderOrbitGuidance.cs",
+            source / "src/Autopilot/EvaApproachGuidance.cs", source / "src/Autopilot/CuttingRingGeometry.cs",
+            source / "src/Autopilot/TargetSurfaceSnapshot.cs", source / "src/Cutting/CutGeometry.cs", source / "src/Core/SaberSettings.cs",
+            source / "tests/autopilot/GameStubs.cs", source / "tests/autopilot/ControllerChecks.cs"], None),
+        ("TargetSurfaceChecks", [source / "src/Autopilot/TargetSurfaceSnapshot.cs", source / "src/Cutting/CutGeometry.cs",
+            source / "src/Cutting/PlaneSlicer.cs", source / "tests/contact/GameStubs.cs", source / "tests/TargetSurfaceSnapshotChecks.cs"],
+            "internal static class Program { private static void Main() => TargetSurfaceSnapshotChecks.Run(); }"),
     ):
         code, output = _run_managed_project(source, name, required, program)
         outputs.append(output)

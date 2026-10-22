@@ -13,8 +13,9 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime : IDisposable
 {
-    private enum Command { Equip, Ignite, Swing, CaptureRing, AlignRing, StartCutOrbit, AbortAutopilot }
-    private readonly Queue<(KittenEva Owner, Command Value)> _commands = new();
+    private enum Command { Equip, Ignite, Swing, CaptureRing, AlignRing, StartCutOrbit, AbortAutopilot, MatchVelocity, NudgeRingBack, NudgeRingForward, SetTarget, PickRing }
+    private readonly record struct Request(KittenEva Owner, Command Value, Vehicle? Target = null, double3? Point = null);
+    private readonly Queue<Request> _commands = new();
     private readonly BladeState _blade = new();
     private readonly SaberPoseController _pose = new();
     private readonly SaberRenderer _renderer = new();
@@ -77,7 +78,7 @@ internal sealed partial class SaberRuntime : IDisposable
             }
             while (_commands.TryDequeue(out var item))
             {
-                if (_fault != null || !ReferenceEquals(item.Owner, _owner) || _owner == null) continue;
+                if ((_fault != null && item.Value != Command.AbortAutopilot) || !ReferenceEquals(item.Owner, _owner) || _owner == null) continue;
                 switch (item.Value)
                 {
                     case Command.Equip:
@@ -93,8 +94,25 @@ internal sealed partial class SaberRuntime : IDisposable
                         if (_blade.Equipped && Universe.GetSimulationSpeed() > 0 && Universe.GetSimulationSpeed() <= 1)
                             _pose.Swing();
                         break;
+                    case Command.SetTarget:
+                        if (item.Target is { IsDisposed: true } || item.Target is KittenEva || item.Target?.IsEditedVehicle == true) break;
+                        StopAutopilot("Target changed; manual MMU control restored.");
+                        _autopilot.InvalidateCapture();
+                        _owner.SetTarget(item.Target);
+                        break;
+                    case Command.PickRing:
+                        if (item.Point.HasValue && ReferenceEquals(_owner.Target, item.Target))
+                            _autopilot.Capture(_owner, _settings, item.Point.Value);
+                        break;
                     case Command.CaptureRing:
                         _autopilot.Capture(_owner, _settings);
+                        break;
+                    case Command.NudgeRingBack:
+                    case Command.NudgeRingForward:
+                        _autopilot.Nudge(_owner, _settings, item.Value == Command.NudgeRingBack ? -.25 : .25);
+                        break;
+                    case Command.MatchVelocity:
+                        _autopilot.BeginMatchVelocity(_owner);
                         break;
                     case Command.AlignRing:
                     {
@@ -138,7 +156,7 @@ internal sealed partial class SaberRuntime : IDisposable
                     AutopilotResult result = _autopilot.Update(_settings, simulationDt,
                         _blade.Deployment, StructuralCutCount, _pose.HasFreshBodyFrame, bladeDirectionBody);
                     if (_autopilot.WantsEquipped) EnsureAutopilotBlade();
-                    _blade.SetIgnited(_autopilot.WantsIgnited || (_autopilotBladeWasOn && _autopilot.Active));
+                    if (_autopilotOwnsBlade) _blade.SetIgnited(_autopilot.WantsIgnited);
                     if (result is AutopilotResult.Completed or AutopilotResult.Aborted)
                         RestoreAutopilotBlade();
                 }
@@ -180,6 +198,7 @@ internal sealed partial class SaberRuntime : IDisposable
         }
         catch (Exception ex)
         {
+            Cleanup(() => StopAutopilot("Autopilot released after a simulation error."), "Autopilot release");
             _fault = "Saber suspended: " + ex.Message;
             Report("Simulation handoff failed", ex);
             _blade.Reset();
@@ -206,6 +225,8 @@ internal sealed partial class SaberRuntime : IDisposable
                 else if (io.KeyAlt) Queue(Command.Swing);
                 else _windowVisible = !_windowVisible;
             }
+            if (_autopilot.Active && !io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Escape, false))
+                Queue(Command.AbortAutopilot);
             // Pauses/warp and culled kittens must not leave the last audible channel running forever.
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
@@ -214,7 +235,12 @@ internal sealed partial class SaberRuntime : IDisposable
             else if (_owner != null && _blade.Equipped) _audio.Suspend();
             else _audio.Stop();
         }
-        catch (Exception ex) { _fault = ex.Message; Report("Frame update failed", ex); }
+        catch (Exception ex)
+        {
+            Queue(Command.AbortAutopilot);
+            _fault = ex.Message;
+            Report("Frame update failed", ex);
+        }
     }
 
     private void DrawSaber(KittenEva owner, IViewport viewport, float4x4 emitterToEgo)
@@ -237,7 +263,19 @@ internal sealed partial class SaberRuntime : IDisposable
     private void Queue(Command command)
     {
         if (_commands.Count < 16 && Program.ControlledVehicle is KittenEva kitten)
-            _commands.Enqueue((kitten, command));
+            _commands.Enqueue(new(kitten, command));
+    }
+
+    private void QueueTarget(Vehicle? target)
+    {
+        if (_commands.Count < 16 && Program.ControlledVehicle is KittenEva kitten)
+            _commands.Enqueue(new(kitten, Command.SetTarget, target));
+    }
+
+    private void QueueRingPoint(Vehicle target, double3 point)
+    {
+        if (_commands.Count < 16 && Program.ControlledVehicle is KittenEva kitten)
+            _commands.Enqueue(new(kitten, Command.PickRing, target, point));
     }
 
     private int StructuralCutCount => _cutter.SeveredConnections + _cutter.FragmentedParts + _cutter.SlicedParts;
@@ -277,6 +315,9 @@ internal sealed partial class SaberRuntime : IDisposable
         _autopilot.Reset();
         _autopilotOwnsBlade = false;
         _commands.Clear();
+        _ringSelectionArmed = false;
+        _selectedRingPointTarget = null;
+        _ringSelectionStatus = "";
         _blade.Reset();
         _pose.Unbind();
         _audio.Reset();

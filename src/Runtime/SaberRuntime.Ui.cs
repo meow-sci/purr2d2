@@ -94,76 +94,7 @@ internal sealed partial class SaberRuntime
                     _settings.ArbitrarySlicing = slicing;
                     _settings.Validate();
                 }
-                if (ImGui.CollapsingHeader("Cylinder cutting autopilot"))
-                {
-                    ImGui.TextWrapped("Uses the controlled kitten's stock vessel target and MMU backpack. Capture from beside the desired cross-section, align, inspect the pose, then run one circular cut. Abort immediately restores manual MMU control.");
-                    string targetName = (Program.ControlledVehicle as KittenEva)?.Target is Vehicle target && !target.IsDisposed
-                        ? target.Id : "none";
-                    ImGui.Text($"Stock target: {targetName}");
-
-                    int axis = _settings.AutopilotAxis;
-                    bool axisChanged = false;
-                    ImGui.BeginDisabled(_autopilot.Active);
-                    bool xClicked = ImGui.RadioButton("Cylinder X", axis == 0);
-                    if (xClicked) { axis = 0; axisChanged = true; }
-                    ImGui.SameLine();
-                    bool yClicked = ImGui.RadioButton("Y", axis == 1);
-                    if (yClicked) { axis = 1; axisChanged = true; }
-                    ImGui.SameLine();
-                    bool zClicked = ImGui.RadioButton("Z", axis == 2);
-                    if (zClicked) { axis = 2; axisChanged = true; }
-                    bool reverseAxis = _settings.AutopilotAxisReversed;
-                    axisChanged |= ImGui.Checkbox("Reverse cylinder axis", ref reverseAxis);
-                    ImGui.EndDisabled();
-
-                    bool clockwise = _settings.AutopilotClockwise;
-                    bool autoChanged = ImGui.Checkbox("Clockwise orbit", ref clockwise);
-                    float clearance = _settings.AutopilotClearance;
-                    float orbitSpeed = _settings.AutopilotOrbitSpeed;
-                    autoChanged |= ImGui.SliderFloat("Hull clearance", ref clearance, .3f, 1.5f, "%.2f m");
-                    autoChanged |= ImGui.SliderFloat("Orbit speed", ref orbitSpeed, .04f, .4f, "%.2f m/s");
-
-                    ImGui.Text($"Kitten roll: {_settings.AutopilotRollQuarterTurns * 90} degrees");
-                    if (ImGui.Button("Rotate -90°"))
-                    {
-                        _settings.AutopilotRollQuarterTurns--;
-                        autoChanged = true;
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.Button("Rotate +90°"))
-                    {
-                        _settings.AutopilotRollQuarterTurns++;
-                        autoChanged = true;
-                    }
-
-                    if (axisChanged || autoChanged)
-                    {
-                        _settings.AutopilotAxis = axis;
-                        _settings.AutopilotAxisReversed = reverseAxis;
-                        _settings.AutopilotClockwise = clockwise;
-                        _settings.AutopilotClearance = clearance;
-                        _settings.AutopilotOrbitSpeed = orbitSpeed;
-                        _settings.Validate();
-                        if (axisChanged) _autopilot.InvalidateCapture();
-                    }
-
-                    ImGui.BeginDisabled(!hasKitten || _autopilot.Active);
-                    if (ImGui.Button("1. Capture target ring")) Queue(Command.CaptureRing);
-                    ImGui.SameLine();
-                    ImGui.BeginDisabled(!_autopilot.Captured);
-                    if (ImGui.Button("2. Align / approach")) Queue(Command.AlignRing);
-                    ImGui.EndDisabled();
-                    ImGui.EndDisabled();
-
-                    ImGui.BeginDisabled(!_autopilot.Active);
-                    if (ImGui.Button("3. Cut one orbit")) Queue(Command.StartCutOrbit);
-                    ImGui.SameLine();
-                    if (ImGui.Button("Abort / release")) Queue(Command.AbortAutopilot);
-                    ImGui.EndDisabled();
-                    if (_autopilot.Active || _autopilot.Progress > 0)
-                        ImGui.ProgressBar(_autopilot.Progress, new float2(-1, 0));
-                    ImGui.TextWrapped(_autopilot.Status);
-                }
+                DrawAutopilotUi(hasKitten);
                 if (ImGui.CollapsingHeader("Paw alignment"))
                 {
                     var grip = new float3(_settings.GripX, _settings.GripY, _settings.GripZ);
