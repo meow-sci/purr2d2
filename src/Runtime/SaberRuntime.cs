@@ -13,7 +13,7 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime : IDisposable
 {
-    private enum Command { Equip, Ignite, Swing, CaptureRing, AlignRing, StartCutOrbit, AbortAutopilot, MatchVelocity, NudgeRingBack, NudgeRingForward, SetTarget, PickRing }
+    private enum Command { Equip, Ignite, Swing, CaptureRing, AlignRing, StartCutOrbit, AbortAutopilot, MatchVelocity, NudgeRingBack, NudgeRingForward, SetTarget, PickRing, Speed1, Speed2, Speed5 }
     private readonly record struct Request(KittenEva Owner, Command Value, Vehicle? Target = null, double3? Point = null);
     private readonly Queue<Request> _commands = new();
     private readonly BladeState _blade = new();
@@ -50,6 +50,8 @@ internal sealed partial class SaberRuntime : IDisposable
         _pose.Draw += DrawSaber;
         _cutter.Scar += _renderer.AddScar;
         _cutter.SliceHandler = (part, plane) => _slicer.Slice(part, plane, _playerTime);
+        _cutter.SliceCheckHandler = _slicer.Check;
+        _slicer.CutSparks = _renderer.AddCutSparks;
     }
 
     internal void Initialize(Harmony harmony)
@@ -91,8 +93,14 @@ internal sealed partial class SaberRuntime : IDisposable
                         _blade.SetIgnited(!_blade.TargetOn);
                         break;
                     case Command.Swing:
-                        if (_blade.Equipped && Universe.GetSimulationSpeed() > 0 && Universe.GetSimulationSpeed() <= 1)
+                        if (_blade.Equipped && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()))
                             _pose.Swing();
+                        break;
+                    case Command.Speed1:
+                    case Command.Speed2:
+                    case Command.Speed5:
+                        Universe.AutoWarpStop(resetSimulationSpeed: false);
+                        Universe.SetSimulationSpeed(item.Value == Command.Speed5 ? 5 : item.Value == Command.Speed2 ? 2 : 1);
                         break;
                     case Command.SetTarget:
                         if (item.Target is { IsDisposed: true } || item.Target is KittenEva || item.Target?.IsEditedVehicle == true) break;
@@ -129,7 +137,13 @@ internal sealed partial class SaberRuntime : IDisposable
                         break;
                     }
                     case Command.StartCutOrbit:
-                        if (_autopilot.BeginCut(_settings, StructuralCutCount)) EnsureAutopilotBlade();
+                        if (_autopilot.TryGetPreview(out Vehicle ringTarget, out CutRing ring)
+                            && _autopilot.BeginCut(_settings, StructuralCutCount))
+                        {
+                            ConfigureCutter();
+                            _cutter.BeginRingCut(_owner, ringTarget, ring.Center, ring.Axis, ring.Radial, ring.Radius);
+                            EnsureAutopilotBlade();
+                        }
                         break;
                     case Command.AbortAutopilot:
                         StopAutopilot("Autopilot aborted; manual MMU control restored.");
@@ -140,12 +154,23 @@ internal sealed partial class SaberRuntime : IDisposable
             bool newStep = !_hasConsumedTime || applied.NextTime != _consumedTime;
             _hasConsumedTime = true;
             _consumedTime = applied.NextTime;
-            bool normalSpeed = Universe.GetSimulationSpeed() > 0 && Universe.GetSimulationSpeed() <= 1;
-            double simulationDt = newStep && normalSpeed && double.IsFinite(applied.DeltaTime) && applied.DeltaTime <= .15
-                ? Math.Clamp(applied.DeltaTime, 0, .1) : 0;
+            double speed = Universe.GetSimulationSpeed();
+            bool supportedSpeed = SaberLimits.SupportsSpeed(speed);
+            double simulationDt = SaberLimits.AppliedDelta(newStep, speed, applied.DeltaTime);
+            bool autopilotFinished = false;
             if (_autopilot.Active)
             {
-                if (!normalSpeed)
+                if (_autopilot.WantsIgnited && !_settings.CuttingEnabled)
+                    StopAutopilot("Cutting was disabled; the ring cut stopped.");
+                if (speed > SaberLimits.MaximumSimulationSpeed || !double.IsFinite(speed)
+                    || (newStep && supportedSpeed && (!double.IsFinite(applied.DeltaTime)
+                        || applied.DeltaTime < 0 || applied.DeltaTime > SaberLimits.MaximumSimulationStep)))
+                {
+                    StopAutopilot("Autopilot stopped: use up to 5x with simulation steps no longer than 0.25 s. Returned to 1x.");
+                    simulationDt = 0;
+                    autopilotFinished = true;
+                }
+                else if (!supportedSpeed)
                 {
                     _autopilot.Suspend();
                 }
@@ -153,21 +178,35 @@ internal sealed partial class SaberRuntime : IDisposable
                 {
                     double3 bladeDirectionBody = SaberPoseMath.ModelDirectionToBody(
                         new float3(_settings.AimX, _settings.AimY, _settings.AimZ));
+                    double3? bladeBaseBody = null;
                     if (_pose.TryGetBladeSegment(1, out double3 bladeBase, out double3 bladeTip))
+                    {
                         bladeDirectionBody = double3.NormalizeOrZero(bladeTip - bladeBase);
+                        bladeBaseBody = bladeBase;
+                    }
                     AutopilotResult result = _autopilot.Update(_settings, simulationDt,
-                        _blade.Deployment, StructuralCutCount, _pose.HasFreshBodyFrame, bladeDirectionBody);
+                        _blade.Deployment, StructuralCutCount, _pose.HasFreshBodyFrame, bladeDirectionBody, bladeBaseBody);
+                    if (result == AutopilotResult.OrbitFinished)
+                    {
+                        SliceAttempt cut = _cutter.FinishRingCut(_playerTime);
+                        _autopilot.Abort((cut.Success ? "Ring cut complete: " : "Ring cut stopped: ") + cut.Message);
+                    }
                     if (_autopilot.WantsEquipped) EnsureAutopilotBlade();
                     if (_autopilotOwnsBlade) _blade.SetIgnited(_autopilot.WantsIgnited);
-                    if (result is AutopilotResult.Completed or AutopilotResult.Aborted)
+                    if (result is AutopilotResult.Completed or AutopilotResult.OrbitFinished or AutopilotResult.Aborted)
+                    {
+                        autopilotFinished = true;
+                        ReturnToNormalSpeed();
+                        _cutter.EndRingCut();
                         RestoreAutopilotBlade();
+                    }
                 }
             }
             _pose.GripOffsetFromChestCm = new float3(_settings.GripX, _settings.GripY, _settings.GripZ);
             _pose.BladeDirectionModel = new float3(_settings.AimX, _settings.AimY, _settings.AimZ);
             _pose.FingerCurlRadians = _settings.FingerCurl;
             _pose.HideMmuWhenEquipped = _settings.HideMmu;
-            _pose.Update(normalSpeed ? Math.Clamp(dtPlayer, 0, .1) : 0, _blade.Equipped);
+            _pose.Update(supportedSpeed ? Math.Clamp(dtPlayer, 0, .1) : 0, _blade.Equipped);
             // KSA's FrameNumber does not advance when rendering exits early. A distinct main
             // pose publication, consumed once here, also handles minimized/rebuilding windows.
             _freshPoseThisTick = _pose.MainPoseGeneration != _consumedPoseGeneration && _pose.HasFreshBodyFrame;
@@ -180,13 +219,15 @@ internal sealed partial class SaberRuntime : IDisposable
             {
                 _renderer.SetEmitter(_owner, emitter, Length, Color);
                 // Geometry is a coherent snapshot from the previous render; never sweep a hidden/stale paw.
-                if (_fault == null && _settings.CuttingEnabled && simulationDt > 0 && Length > .02f &&
+                if (!autopilotFinished && _fault == null && _settings.CuttingEnabled && simulationDt > 0 && Length > .02f &&
                     _pose.HasFreshBodyFrame &&
                     _pose.TryGetBladeSegment(Length, out var start, out var end))
                 {
                     ConfigureCutter();
                     if (_autopilot.Active && !_autopilot.AllowsCutting) _cutter.Enabled = false;
                     _cutter.Update(_owner, start, end, simulationDt, _playerTime);
+                    if (_autopilot.WantsIgnited && _cutter.RingFailure is { } failure)
+                        StopAutopilot("Ring cut stopped: " + failure);
                 }
                 else _cutter.Suspend();
             }
@@ -232,7 +273,7 @@ internal sealed partial class SaberRuntime : IDisposable
             // Pauses/warp and culled kittens must not leave the last audible channel running forever.
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
-                    Universe.IsPaused() || Universe.GetSimulationSpeed() > 1 || !_pose.HasFreshBodyFrame,
+                    !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.HasFreshBodyFrame,
                     _settings.Volume, _swingSpeed, _cutter.Contacts > 0 ? 1 : 0);
             else if (_owner != null && _blade.Equipped) _audio.Suspend();
             else _audio.Stop();
@@ -257,7 +298,7 @@ internal sealed partial class SaberRuntime : IDisposable
             else _swingSpeed = 0;
             _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
             _audio.Update(owner, emitter, _blade.Deployment, _blade.TargetOn,
-                Universe.IsPaused() || Universe.GetSimulationSpeed() > 1 || !_pose.Eligible,
+                !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.Eligible,
                 _settings.Volume, _swingSpeed, _cutter.Contacts > 0 ? 1 : 0);
         }
     }
@@ -294,8 +335,20 @@ internal sealed partial class SaberRuntime : IDisposable
 
     private void StopAutopilot(string reason)
     {
+        if (_autopilot.Active) ReturnToNormalSpeed();
+        _cutter.EndRingCut();
         _autopilot.Abort(reason);
         RestoreAutopilotBlade();
+    }
+
+    private static void ReturnToNormalSpeed()
+    {
+        // Preserve a deliberate pause, but never leave the kitten drifting at accelerated time.
+        if (Universe.GetSimulationSpeed() > 1 || !double.IsFinite(Universe.GetSimulationSpeed()))
+        {
+            Universe.AutoWarpStop(resetSimulationSpeed: false);
+            Universe.SetSimulationSpeed(1);
+        }
     }
 
     private void RestoreAutopilotBlade()
@@ -314,6 +367,7 @@ internal sealed partial class SaberRuntime : IDisposable
 
     internal void ResetWorld()
     {
+        if (_autopilot.Active) ReturnToNormalSpeed();
         _autopilot.Reset();
         _autopilotOwnsBlade = false;
         _commands.Clear();

@@ -1,6 +1,7 @@
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Core;
 
 namespace Purr2D2.Runtime;
 
@@ -24,6 +25,7 @@ internal sealed partial class SaberRuntime
         _cutter.ContactSeconds = _settings.ContactSeconds;
         _cutter.FragmentStruckPart = _settings.FragmentStruckPart;
         _cutter.ArbitrarySlicing = _settings.ArbitrarySlicing;
+        _cutter.SwingCut = _pose.Swinging && !_autopilot.Active;
     }
 
     internal void DrawUi()
@@ -61,13 +63,13 @@ internal sealed partial class SaberRuntime
                 ImGui.Text($"{_blade.Phase}  |  {Length:F2} m");
                 if (_blade.Equipped) ImGui.TextWrapped(_pose.Status);
                 if (Universe.IsPaused()) ImGui.TextWrapped("Paused: blade, sound and cutting are suspended.");
-                else if (Universe.GetSimulationSpeed() > 1) ImGui.TextWrapped("Return to 1x speed to use the saber.");
+                else if (Universe.GetSimulationSpeed() > SaberLimits.MaximumSimulationSpeed) ImGui.TextWrapped("Saber suspended: use timewarp of 5x or less.");
                 ImGui.Separator();
 
                 bool changed = false;
                 float length = _settings.BladeLength, volume = _settings.Volume, contact = _settings.ContactSeconds;
                 float3 color = Color;
-                changed |= ImGui.SliderFloat("Blade length", ref length, .25f, 1.5f, "%.2f m");
+                changed |= ImGui.SliderFloat("Blade length", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m");
                 changed |= ImGui.ColorEdit3("Blade color", ref color);
                 changed |= ImGui.SliderFloat("Sound volume", ref volume, 0, 1, "%.2f");
                 bool cutting = _settings.CuttingEnabled;
@@ -80,7 +82,7 @@ internal sealed partial class SaberRuntime
                 changed |= ImGui.Checkbox("Fragment struck part", ref fragment);
                 ImGui.EndDisabled();
                 if (slicing)
-                    ImGui.TextWrapped("The blade and swing define a cutting plane. Closed inert parts become new solid fragments with sealed, cooling cut faces. Unsupported parts remain intact. Concave fragments use enclosing convex colliders. Keep the Generated/Slices folder with saves containing sliced parts.");
+                    ImGui.TextWrapped("Swing to slice tanks, empty capsules and other hulls into wreckage with glowing cut edges. Stored propellant in the cut part is emptied. A stationary blade uses the contact time above. Occupied vessels and damaged geometry that cannot be baked remain protected. Keep Generated/Slices with saves containing cut pieces.");
                 else if (fragment)
                     ImGui.TextWrapped("Uses native part failure without an explosion. The struck part is destroyed; up to two of its authored subparts become debris. Crewed vessels are excluded.");
                 else

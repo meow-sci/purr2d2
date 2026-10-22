@@ -23,7 +23,27 @@ internal static class ControllerChecks
         NativePulseApproach(10, new(4, 8, 12));
         NativePulseApproach(2.2, new(40, 60, 80), mass: 150, pulseTime: .001);
         NativePulseCutOrbit();
+        NativePulseCutOrbit(5.0 / 60);
+        NativePulseCutOrbit(.25);
+        BladePlaneAlignment();
         Console.WriteLine("PASS: production EVA autopilot controller integration checks");
+    }
+
+    private static void BladePlaneAlignment()
+    {
+        var f = new Fixture();
+        f.Owner.Position = new(0, 1.55, 0);
+        f.Engage();
+        f.Pilot.Update(f.Settings, .02, 0, 0, true, double3.UnitY, new double3(.3, 0, 0));
+        Check(!f.Pilot.ReadyToCut && f.Owner.ManualInputs.ThrusterCommandFlags.HasFlag(ThrusterMapFlags.TranslateBackward),
+            "approach corrects the held blade's axial offset instead of placing only the kitten COM on the cut plane");
+        f.Owner.Position -= new double3(.3, 0, 0);
+        f.Pilot.Update(f.Settings, .02, 0, 0, true, double3.UnitY, new double3(.3, 0, 0));
+        Check(f.Pilot.ReadyToCut, "the corrected blade plane reaches the ring hold state");
+        f.Settings.CuttingEnabled = false;
+        Check(!f.Pilot.BeginCut(f.Settings, 0) && !f.Pilot.WantsIgnited,
+            "disabled structural cutting cannot start a misleading cutting orbit");
+        f.Pilot.Abort("fixture cleanup");
     }
 
     private static void CaptureAndEngagement()
@@ -175,7 +195,7 @@ internal static class ControllerChecks
             case "spin": f.Target.BodyRates = new(0, 0, .2); break;
             case "MMU": f.Owner.LocomotionState.Mode = LocomotionMode.Other; break;
             case "propellant": foreach (var thruster in f.Owner.Parts.States.ModulesAndStates) thruster.State.IsPropellantAvailable = false; break;
-            case "step": dt = .2; break;
+            case "step": dt = .3; break;
             case "range": f.Owner.Position = new(0, 600, 0); break;
         }
         Check(f.Step(dt) == AutopilotResult.Aborted && !f.Pilot.Active,
@@ -290,7 +310,7 @@ internal static class ControllerChecks
         f.AssertRestored("pulse approach release");
     }
 
-    private static void NativePulseCutOrbit()
+    private static void NativePulseCutOrbit(double dt = .01)
     {
         var f = new Fixture(new(40, 60, 80), mass: 150, pulseTime: .001);
         f.Owner.Position = new(0, 1.55, 0);
@@ -299,35 +319,41 @@ internal static class ControllerChecks
         f.Step();
         Check(f.Pilot.ReadyToCut && f.Pilot.BeginCut(f.Settings, 0), "stock-pulse orbit starts from the automatic hold state");
         f.Pilot.TryGetPreview(out _, out var ring);
-        const double dt = .01;
         double nextPulse = .073, maximumError = 0, minimumClearance = double.PositiveInfinity;
         bool completed = false;
-        for (int step = 0; step < 90_000; step++)
+        for (int step = 0; step * dt < 900; step++)
         {
             AutopilotResult result = f.Step(dt, blade: 1);
-            if (result == AutopilotResult.Completed)
+            if (result == AutopilotResult.OrbitFinished)
             {
-                completed = f.Pilot.Status.StartsWith("Cut orbit complete", StringComparison.Ordinal);
+                completed = f.Pilot.Status.StartsWith("Lap finished; checking", StringComparison.Ordinal);
                 break;
             }
             if (result != AutopilotResult.Running || f.Pilot.Status.StartsWith("Approach corridor lost", StringComparison.Ordinal))
                 throw new InvalidOperationException("Stock-pulse cut orbit lost guidance: " + f.Pilot.Status);
-            if (step * dt + 1e-9 >= nextPulse)
+            // The native physics solver continues pulsing/substepping between
+            // rendered frames. At 5x several pulses may fall within one frame.
+            for (double sub = 0; sub < dt - 1e-9; sub += .001)
             {
-                ThrusterMapFlags flags = f.Owner.ManualInputs.ThrusterCommandFlags;
-                foreach (var thruster in f.Owner.Parts.States.ModulesAndStates)
-                    if ((thruster.State.ControlMap & flags) != 0 && thruster.State.IsPropellantAvailable)
-                        f.Owner.Velocity += thruster.State.IntendedForce * thruster.Module.MinimumPulseTime / f.Owner.TotalMass;
-                nextPulse += .15;
+                if (step * dt + sub + 1e-9 >= nextPulse)
+                {
+                    ThrusterMapFlags flags = f.Owner.ManualInputs.ThrusterCommandFlags;
+                    foreach (var thruster in f.Owner.Parts.States.ModulesAndStates)
+                        if ((thruster.State.ControlMap & flags) != 0 && thruster.State.IsPropellantAvailable)
+                            f.Owner.Velocity += thruster.State.IntendedForce * thruster.Module.MinimumPulseTime / f.Owner.TotalMass;
+                    nextPulse += .15;
+                }
+                f.Owner.Position += f.Owner.Velocity * Math.Min(.001, dt - sub);
             }
-            f.Owner.Position += f.Owner.Velocity * dt;
             double3 expected = ring.Center + CylinderOrbitGuidance.Point(ring.Axis, 0, ring.Radial,
-                ring.Radius + f.Settings.AutopilotClearance, f.Pilot.Progress * CylinderOrbitGuidance.FullTurn);
+                ring.Radius + f.Settings.AutopilotClearance, f.Pilot.OrbitAngle);
             maximumError = Math.Max(maximumError, (f.Owner.Position - expected).Length());
             minimumClearance = Math.Min(minimumClearance, (f.Owner.Position - ring.Center).Length() - ring.Radius);
         }
         Check(completed && maximumError < .25 && minimumClearance > .25,
-            $"stock-duration pulses complete a full cut lap ({maximumError:F3} m max tracking error, {minimumClearance:F3} m hull clearance)");
+            $"stock-duration pulses complete a full cut lap at {dt:F3} s/frame ({maximumError:F3} m max tracking error, {minimumClearance:F3} m hull clearance)");
+        Check(f.Pilot.OrbitAngle > CylinderOrbitGuidance.FullTurn && !f.Pilot.Status.Contains("cut complete", StringComparison.OrdinalIgnoreCase),
+            "a lap overlaps its start and requests a structural result instead of claiming cut success");
         f.AssertRestored("full cut orbit completion");
     }
 

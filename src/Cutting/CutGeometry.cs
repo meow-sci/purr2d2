@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using Purr2D2.Core;
 
 namespace Purr2D2.Cutting;
 
 // Engine-independent doubles: tests exercise the actual contact implementation.
 internal readonly record struct CutPoint(double X, double Y, double Z)
 {
+    public override string ToString() => FormattableString.Invariant($"({X:G6}, {Y:G6}, {Z:G6})");
     public static CutPoint operator +(CutPoint a, CutPoint b) => new(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
     public static CutPoint operator -(CutPoint a, CutPoint b) => new(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
     public static CutPoint operator *(CutPoint a, double b) => new(a.X * b, a.Y * b, a.Z * b);
@@ -42,6 +44,14 @@ internal readonly record struct CutBounds(CutPoint Min, CutPoint Max)
 
 internal static class CutGeometry
 {
+    // A long blade moves farther at its tip during the same paw rotation. Keep the
+    // translation guard at the hilt, and separately bound angular/extension travel.
+    public static bool BladeMotionWithinLimit(CutPoint previousA, CutPoint previousB, CutPoint a, CutPoint b, double translationLimit)
+    {
+        double reach = Math.Max((previousB - previousA).Length, (b - a).Length);
+        return MotionWithinLimit(previousA, previousA, a, a, translationLimit)
+            && MotionWithinLimit(previousB, previousB, b, b, translationLimit + reach * .4);
+    }
     public static bool MotionWithinLimit(CutPoint previousA, CutPoint previousB, CutPoint a, CutPoint b, double limit) =>
         previousA.Finite && previousB.Finite && a.Finite && b.Finite && double.IsFinite(limit) && limit >= 0
         && Math.Max((previousA - a).LengthSquared, (previousB - b).LengthSquared) <= limit * limit;
@@ -129,7 +139,7 @@ internal static class CutGeometry
         CutTriangle triangle, double radius, out CutPoint surface)
     {
         double travel = Math.Max((previousA - a).Length, (previousB - b).Length);
-        int steps = Math.Clamp((int)Math.Ceiling(travel / Math.Max(radius, .001)), 1, 32);
+        int steps = Math.Clamp((int)Math.Ceiling(travel / Math.Max(radius, .001)), 1, 128);
         double conservativeRadius = radius + travel / (steps * 2);
         double best = double.PositiveInfinity;
         surface = default;
@@ -203,7 +213,7 @@ internal sealed class CutHeat
     public double Seconds { get; private set; }
     public bool Advance(bool contact, double delta, double threshold)
     {
-        if (!double.IsFinite(delta) || delta <= 0 || delta > .15) return false;
+        if (!double.IsFinite(delta) || delta <= 0 || delta > SaberLimits.MaximumSimulationStep) return false;
         Seconds = Math.Max(0, Seconds + delta * (contact ? 1 : -.5));
         return Seconds >= Math.Max(.05, threshold);
     }

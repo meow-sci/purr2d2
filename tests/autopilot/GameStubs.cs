@@ -127,6 +127,8 @@ public sealed class MeshReference
 }
 public sealed class MeshViewModule(MeshReference mesh) { public MeshReference MeshView = mesh; }
 public sealed class PartModelModule { public required PartModel PartModel; }
+public sealed class PartModelDynamicModule { public required PartModel PartModelDynamic; }
+public sealed class PartModelGlassModule { public required PartModel PartModelGlass; }
 public sealed class PartModel { public required PartModelTemplate Template; }
 public sealed class PartModelTemplate { public MeshReference? Mesh; }
 

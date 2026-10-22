@@ -62,6 +62,10 @@ internal static class CoreChecks
 
     private static void SettingsValidationAndPersistence()
     {
+        Check(SaberLimits.AppliedDelta(true, 5, .2) == .2, "5x consumes all applied simulation time without clipping to 0.1 seconds");
+        Check(SaberLimits.AppliedDelta(false, 5, .2) == 0 && SaberLimits.AppliedDelta(true, 0, .2) == 0
+            && SaberLimits.AppliedDelta(true, 10, .1) == 0 && SaberLimits.AppliedDelta(true, 5, .3) == 0,
+            "duplicate steps, pause, excessive warp and stalled frames do not advance cutting");
         Check(!new SaberSettings().ArbitrarySlicing, "arbitrary mesh slicing is opt-in by default");
         var settings = new SaberSettings
         {
@@ -80,7 +84,7 @@ internal static class CoreChecks
             AutopilotRollQuarterTurns = -1,
         };
         settings.Validate();
-        Check(settings.BladeLength == 1.5f && settings.ColorR == 0 && settings.ColorG == .75f
+        Check(settings.BladeLength == 12f && settings.ColorR == 0 && settings.ColorG == .75f
             && settings.ColorB == 1 && settings.Volume == 0 && settings.ContactSeconds == .1f
             && settings.AutopilotClearance == 1.5f && settings.AutopilotOrbitSpeed == .15f
             && settings.AutopilotAxis == 2 && settings.AutopilotRollQuarterTurns == 3,
@@ -92,7 +96,7 @@ internal static class CoreChecks
         {
             settings.Save(path);
             var loaded = SaberSettings.Load(path);
-            Check(loaded.BladeLength == 1.5f && loaded.ColorR == 0 && loaded.ColorG == .75f
+            Check(loaded.BladeLength == 12f && loaded.ColorR == 0 && loaded.ColorG == .75f
                 && loaded.ColorB == 1 && loaded.Volume == 0 && loaded.ContactSeconds == .1f
                 && !loaded.CuttingEnabled && loaded.FragmentStruckPart && loaded.ArbitrarySlicing
                 && loaded.AutopilotClearance == 1.5f && loaded.AutopilotAxis == 2

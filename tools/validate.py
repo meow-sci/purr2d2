@@ -532,11 +532,14 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "src/Autopilot/EvaApproachGuidance.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Cutting/PlaneSlicer.cs",
+        source / "src/Cutting/SliceShellBuilder.cs",
+        source / "src/Slicing/SliceMeshPrecision.cs",
         source / "src/Pose/SaberPoseMath.cs",
         source / "src/Rendering/FragmentGlbWriter.cs",
         source / "src/Slicing/SlicePrincipalFrame.cs",
         source / "tests/CuttingChecks.cs",
         source / "tests/PlaneSliceChecks.cs",
+        source / "tests/ShellSliceChecks.cs",
         source / "tests/CoreChecks.cs",
         source / "tests/PoseChecks.cs",
         source / "tests/SlicingPhysicsChecks.cs",
@@ -546,6 +549,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     ]
     contact_sources = [
         source / "src/Cutting/SaberCutter.cs",
+        source / "src/Cutting/RingCutCoverage.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Cutting/PlaneSlicer.cs",
         source / "tests/contact/GameStubs.cs",
@@ -553,7 +557,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); CuttingRingChecks.Run(); EvaApproachChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); CuttingRingChecks.Run(); EvaApproachChecks.Run(); } }\n"
     )
     outputs = []
     result = 0
@@ -590,6 +594,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
         program_path = check_dir / "Program.cs"
         program_path.write_text(program, encoding="utf-8")
         required = [*required, program_path]
+    required = [*required, source / "src/Core/SaberLimits.cs"]
     includes = "\n".join(
         f'    <Compile Include="{Path(os.path.relpath(path, check_dir)).as_posix()}" />'
         for path in required

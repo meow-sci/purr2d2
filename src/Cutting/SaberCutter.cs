@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Core;
 
 namespace Purr2D2.Cutting;
 
@@ -40,7 +41,19 @@ public sealed class SaberCutter
     /// <summary>Opt-in: destroy the struck full part with native subpart-debris shedding.</summary>
     public bool FragmentStruckPart { get; set; }
     public bool ArbitrarySlicing { get; set; }
+    internal bool SwingCut { get; set; }
     internal Func<Part, SlicePlane, SliceAttempt>? SliceHandler { get; set; }
+    internal Func<Part, SlicePlane, SliceAttempt>? SliceCheckHandler { get; set; }
+    private Vehicle? _ringTarget;
+    private Part? _ringPart;
+    private RingCutCoverage? _ringCoverage;
+    private SlicePlane _ringPlane;
+    private bool _ringArbitrary, _ringTouched;
+    private double _ringNoContactSeconds;
+    private int _ringStructuralStart;
+    internal string? RingFailure { get; private set; }
+    internal string RingStatus { get; private set; } = "";
+    internal double RingProgress => _ringCoverage?.Progress ?? 0;
     public bool FragmentationAvailable => NativeFragment != null;
     public string Status { get; private set; } = "Ready";
     public int Contacts { get; private set; }
@@ -97,6 +110,7 @@ public sealed class SaberCutter
 
     public void Reset()
     {
+        EndRingCut(); RingStatus = ""; RingFailure = null; _ringCoverage = null;
         Suspend(); _meshes.Clear(); _cachedTriangles = 0; _wielder = null;
         Contacts = TriangleTests = SeveredConnections = FragmentedParts = SlicedParts = 0;
         HottestContactSeconds = 0; BudgetLimited = false; Status = "Ready";
@@ -105,10 +119,54 @@ public sealed class SaberCutter
     /// <summary>Drop interrupted contact/sweep state while keeping mesh caches and lifetime statistics.</summary>
     public void Suspend()
     {
+        _ringCoverage?.BreakStroke();
         _history.Clear(); _heat.Clear(); _candidates.Clear(); _candidateParts.Clear(); _touched.Clear(); _testedMeshes.Clear();
         Contacts = TriangleTests = 0; HottestContactSeconds = 0; BudgetLimited = false;
         ResetDiagnostics();
         Status = "Inactive";
+    }
+
+    internal void BeginRingCut(KittenEva wielder, Vehicle target, double3 centerBody, double3 axis,
+        double3 radial, double radius)
+    {
+        if (_wielder != wielder) { Reset(); _wielder = wielder; }
+        _ringTarget = target; _ringPart = null; _ringArbitrary = ArbitrarySlicing;
+        _ringCoverage = new(ToPoint(centerBody), ToPoint(axis), ToPoint(radial), radius);
+        // The slicer consumes assembly metres, whereas navigation uses target COM/body metres.
+        var normal = ToPoint(axis).Normalized;
+        _ringPlane = new(normal, CutPoint.Dot(normal, ToPoint(centerBody + target.CenterOfMassAsmb)));
+        _ringStructuralStart = SeveredConnections + FragmentedParts + SlicedParts;
+        _ringNoContactSeconds = 0; RingFailure = null;
+        RingStatus = "Waiting for blade contact with the selected ring.";
+    }
+
+    internal void EndRingCut() { _ringTarget = null; _ringPart = null; _ringCoverage?.BreakStroke(); }
+
+    internal SliceAttempt FinishRingCut(double now)
+    {
+        if (_ringTarget == null) return new(false, "No ring cut is active.");
+        SliceAttempt result;
+        if (RingFailure != null) result = new(false, RingFailure);
+        else if (SeveredConnections + FragmentedParts + SlicedParts > _ringStructuralStart)
+            result = new(true, "The target separated.");
+        else if (_ringTarget == null || _ringPart == null || _ringCoverage == null)
+            result = new(false, "Lap finished without cutting contact on the selected ring; geometry is unchanged.");
+        else if (!_ringArbitrary)
+            result = new(false, "Lap finished without structural separation. " + Status);
+        else if (!_ringCoverage.Complete)
+            result = new(false, $"Ring cut incomplete: {RingProgress:P1} of the circumference contacted; geometry is unchanged.");
+        else if (_ringPart.Tree?.OwningVehicle != _ringTarget)
+            result = new(false, "Ring target changed; start a new cut.");
+        else if (!CanCut(_ringPart, out string reason)) result = new(false, reason);
+        else
+        {
+            result = SliceHandler?.Invoke(_ringPart, _ringPlane) ?? new(false, "Arbitrary slicing is unavailable.");
+            if (result.Success) SlicedParts++;
+        }
+        RingStatus = result.Message;
+        if (!result.Success) RingFailure = result.Message;
+        EndRingCut();
+        return result;
     }
 
     private void ResetDiagnostics()
@@ -128,6 +186,7 @@ public sealed class SaberCutter
         Nearest vessel: {_nearestVehicle}; centre to blade midpoint: {_nearestDistance:F3} m
         Blade body metres: ({_baseBody.X:F3}, {_baseBody.Y:F3}, {_baseBody.Z:F3}) -> ({_tipBody.X:F3}, {_tipBody.Y:F3}, {_tipBody.Z:F3})
         Mesh cache: {_meshes.Count} entries / {_cachedTriangles} triangles
+        Ring contact coverage: {RingProgress:P1}; {RingStatus}
         """);
 
     public void Update(KittenEva wielder, double3 baseBody, double3 tipBody, double appliedDeltaTime, double nowPlayerSeconds)
@@ -136,11 +195,11 @@ public sealed class SaberCutter
         if (_wielder != wielder) { Reset(); _wielder = wielder; }
         ResetDiagnostics();
         if (!Enabled || wielder.IsDisposed || Program.EditorFlag || Universe.CurrentSystem == null
-            || Program.GetMainCamera() is not { } camera || !(appliedDeltaTime > 0) || appliedDeltaTime > .15
+            || Program.GetMainCamera() is not { } camera || !(appliedDeltaTime > 0) || appliedDeltaTime > SaberLimits.MaximumSimulationStep
             || !double.IsFinite(appliedDeltaTime) || !double.IsFinite(nowPlayerSeconds))
         { Suspend(); return; }
         var a = ToPoint(baseBody); var b = ToPoint(tipBody);
-        if (!a.Finite || !b.Finite || (b - a).Length < .025 || (b - a).Length > 3)
+        if (!a.Finite || !b.Finite || (b - a).Length < .025 || (b - a).Length > SaberLimits.MaximumBladeLength + .001)
         { Suspend(); return; }
         Status = "Blade clear";
         _baseBody = baseBody; _tipBody = tipBody;
@@ -149,6 +208,9 @@ public sealed class SaberCutter
         if (!double4x4.Invert(bodyToEgo, out var egoToBody)) { Suspend(); return; }
         var aEgo = baseBody.Transform(bodyToEgo); var bEgo = tipBody.Transform(bodyToEgo);
         _touched.Clear(); _candidates.Clear(); _candidateParts.Clear();
+        _ringTouched = false;
+        if (_ringTarget != null && ArbitrarySlicing != _ringArbitrary)
+            RingFailure = "Cutting mode changed during the ring cut; start a new cut.";
 
         // Resolve a fresh membership snapshot, including debris, then sort deterministically.
         // Do not enumerate the live system during Split/CreateVehicle.
@@ -159,7 +221,7 @@ public sealed class SaberCutter
                 || vehicle.IsDisposed || vehicle.IsEditedVehicle) continue;
             double centreDistance = (camera.GetPositionEgo(vehicle) - (aEgo + bEgo) * .5).Length();
             if (centreDistance < _nearestDistance) { _nearestDistance = centreDistance; _nearestVehicle = vehicle.Id; }
-            if (centreDistance > vehicle.BoundingSphereRadiusBody + 4) continue;
+            if (centreDistance > vehicle.BoundingSphereRadiusBody + (b - a).Length * .5 + Radius) continue;
             VehiclesInRange++;
             // Contact is geometric. Crew and physics eligibility only restrict structural changes.
             foreach (var full in vehicle.Parts.Parts)
@@ -169,7 +231,8 @@ public sealed class SaberCutter
             }
             void Offer(Part part)
             {
-                if ((part.Modules.HasAny<MeshViewModule>() || part.Modules.HasAny<PartModelModule>())
+                if ((part.Modules.HasAny<MeshViewModule>() || part.Modules.HasAny<PartModelModule>()
+                    || part.Modules.HasAny<PartModelDynamicModule>() || part.Modules.HasAny<PartModelGlassModule>())
                     && _candidateParts.Add(part))
                 {
                     var vehicleMatrix = vehicle.GetMatrixAsmb2Ego(camera);
@@ -185,6 +248,18 @@ public sealed class SaberCutter
             if (++considered > MaxCandidateSubparts || TriangleTests >= MaxTriangleTestsPerStep) { BudgetLimited = true; break; }
             Test(candidate);
         }
+        if (_ringTarget != null)
+        {
+            if (!_ringTouched)
+            {
+                _ringCoverage?.BreakStroke();
+                _ringNoContactSeconds += appliedDeltaTime;
+                if (_ringNoContactSeconds >= 10 && RingFailure == null)
+                    RingFailure = "Blade is not contacting the selected ring. Check blade reach and alignment; geometry is unchanged.";
+            }
+            else _ringNoContactSeconds = 0;
+            RingStatus = RingFailure ?? $"Ring contact: {RingProgress:P1}. Cut progress is retained when the blade cools.";
+        }
 
         // A full part heats once per step, even if several subparts/triangles touch the blade.
         // Iterate a snapshot: native splitting reassigns part.Tree and can dispose entire hosts.
@@ -196,10 +271,15 @@ public sealed class SaberCutter
             if (full.Tree?.OwningVehicle is not { IsDisposed: false }) { _remove.Add(full); continue; }
             bool contact = _touched.Contains(full);
             state.Cooldown = Math.Max(0, state.Cooldown - appliedDeltaTime);
-            bool hot = state.Heat.Advance(contact, appliedDeltaTime, ContactSeconds);
+            // An explicit swing needs only a brief moving contact; a stationary
+            // blade retains the configured dwell time. Ring cuts still require
+            // their complete retained circumference before structural mutation.
+            double dwell = ArbitrarySlicing && SwingCut && state.HasSweptPlane ? Math.Min(ContactSeconds, .05) : ContactSeconds;
+            bool hot = state.Heat.Advance(contact, appliedDeltaTime, dwell);
             HottestContactSeconds = Math.Max(HottestContactSeconds, state.Heat.Seconds);
             if (contact && state.LastCutStatus != null) Status = state.LastCutStatus;
-            if (contact && hot && state.Cooldown <= 0 && !attemptedStructuralChange)
+            if (contact && hot && state.Cooldown <= 0 && !attemptedStructuralChange
+                && (_ringTarget == null || (!_ringArbitrary && RingFailure == null)))
             {
                 attemptedStructuralChange = true;
                 state.Cooldown = 1;
@@ -237,7 +317,7 @@ public sealed class SaberCutter
             _history[part] = new(localA, localB, candidate.Vehicle);
             var partToBody = partToEgo * egoToBody;
             var previousA = Transform(old.A, partToBody); var previousB = Transform(old.B, partToBody);
-            if (!CutGeometry.MotionWithinLimit(previousA, previousB, a, b, MaximumSweepTravel))
+            if (!CutGeometry.BladeMotionWithinLimit(previousA, previousB, a, b, MaximumSweepTravel))
             { DiscontinuousParts++; Status = "Motion discontinuity: contact skipped"; return; }
             // Frobenius norm bounds scale/shear of the inverse; broadphase is conservative.
             double inverseNorm = Math.Sqrt(egoToPart.M11 * egoToPart.M11 + egoToPart.M12 * egoToPart.M12 + egoToPart.M13 * egoToPart.M13
@@ -250,6 +330,10 @@ public sealed class SaberCutter
             // Some authored surfaces have a render model but no separate picking MeshView.
             foreach (var model in part.Modules.Get<PartModelModule>())
                 if (model.PartModel.Template.Mesh?.Get() is { } reference && TestMesh(reference)) return;
+            foreach (var model in part.Modules.Get<PartModelDynamicModule>())
+                if (model.PartModelDynamic.Template.Mesh?.Get() is { } reference && TestMesh(reference)) return;
+            foreach (var model in part.Modules.Get<PartModelGlassModule>())
+                if (model.PartModelGlass.Template.Mesh?.Get() is { } reference && TestMesh(reference)) return;
 
             bool TestMesh(MeshReference reference)
             {
@@ -321,6 +405,28 @@ public sealed class SaberCutter
     private void RegisterContact(Part surface, double3 localHit, double3 localNormal, double now, SlicePlane plane, bool swept)
     {
         var full = surface.FullPart;
+        if (_ringTarget != null && _ringCoverage != null && RingFailure == null
+            && ReferenceEquals(surface.Tree?.OwningVehicle, _ringTarget))
+        {
+            var hitBody = localHit.Transform(surface.MatrixAsmb2VehicleAsmb) - _ringTarget.CenterOfMassAsmb;
+            if (_ringCoverage.Add(ToPoint(hitBody)))
+            {
+                _ringTouched = true;
+                if (_ringPart != null && !ReferenceEquals(_ringPart, full))
+                    RingFailure = "The ring crosses multiple full parts. Select a ring contained in one supported part.";
+                else if (_ringPart == null)
+                {
+                    _ringPart = full;
+                    if (!CanCut(full, out string reason)) RingFailure = reason;
+                    else if (_ringArbitrary)
+                    {
+                        SliceAttempt check = SliceCheckHandler?.Invoke(full, _ringPlane)
+                            ?? new(false, "Arbitrary slice validation is unavailable.");
+                        if (!check.Success) RingFailure = check.Message;
+                    }
+                }
+            }
+        }
         if (!_touched.Add(full)) return;
         Contacts++;
         ContactSurface = $"{surface.Tree?.OwningVehicle?.Id} / {full.DisplayName} / {surface.Id}";
@@ -351,15 +457,8 @@ public sealed class SaberCutter
 
     private bool TrySever(Part full, HeatState contact, double now)
     {
-        var owner = full.Tree?.OwningVehicle;
-        if (owner == null || owner.IsDisposed || owner is KittenEva) return false;
-        if (!owner.HasPhysicsBubble) { Status = "Contact detected; cutting requires a physics bubble"; return false; }
-        if (!ReferenceEquals(owner.Parent, _wielder?.Parent))
-        { Status = "Contact detected; cutting requires the same parent body"; return false; }
-        if (HasAssignedCrew(owner)) { Status = "Crew aboard: cutting refused"; return false; }
-        if (owner.BubbleVehicleCount >= PartFailure.MaximumVehiclesPerBubble)
-        { Status = "Debris budget reached"; return false; }
-        if (full.IsAttachedInternal) { Status = "Internal part: surface scorched"; return false; }
+        if (!CanCut(full, out string reason)) { Status = reason; return false; }
+        var owner = full.Tree!.OwningVehicle!;
         if (ArbitrarySlicing)
         {
             if (SliceHandler == null || !contact.HasPlane)
@@ -402,6 +501,20 @@ public sealed class SaberCutter
             foreach (var connection in node.Connections)
                 if (!subtree.Contains(connection.OtherPart(node).FullPart)) { crossings++; crossing = connection; }
         }
+    }
+
+    private bool CanCut(Part full, out string reason)
+    {
+        var owner = full.Tree?.OwningVehicle;
+        reason = "The source part is unavailable.";
+        if (owner == null || owner.IsDisposed || owner is KittenEva) return false;
+        if (!owner.HasPhysicsBubble) reason = "Contact detected; cutting requires a physics bubble";
+        else if (!ReferenceEquals(owner.Parent, _wielder?.Parent)) reason = "Contact detected; cutting requires the same parent body";
+        else if (HasAssignedCrew(owner)) reason = "Crew aboard: cutting refused";
+        else if (owner.BubbleVehicleCount >= PartFailure.MaximumVehiclesPerBubble) reason = "Debris budget reached";
+        else if (full.IsAttachedInternal) reason = "Internal part: surface scorched";
+        else { reason = ""; return true; }
+        return false;
     }
 
     private static Part? ChooseChildBoundary(Part root, HeatState contact)

@@ -194,6 +194,7 @@ public sealed class SaberPoseController : IDisposable
     private static bool Supported(LocomotionMode mode) => mode is LocomotionMode.Grounded
         or LocomotionMode.Airborne or LocomotionMode.Mmu;
 
+    internal bool Swinging => _swingTime < SwingDuration;
     private float SwingAngle => _swingTime >= SwingDuration ? 0f
         : MathF.Sin((_swingTime / SwingDuration) * MathF.PI * 2f) * 1.05f;
 

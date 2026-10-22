@@ -17,12 +17,198 @@ internal static class ContactChecks
         foreach (var mode in Enum.GetValues<CutMode>()) DestructionPositiveControl(mode);
         TransformedSubpart();
         RenderOnlyMesh();
+        DynamicAndGlassContact();
         RenderFallbackAfterEmptyContactMesh();
         DeferredMeshLoad();
         DuplicateMeshMiss();
         StockSizedContactScan();
         BudgetWarningPreservesCutRefusal();
+        RingCoverageKeepsGaps();
+        FiveMinuteRingCut();
+        FiveMinuteRingCut(5.0 / 60);
+        FiveMinuteRingCut(.25);
+        LongBladeContact();
+        DeliberateSwingCuts();
+        RingCutRefusals();
+        RingCommitFailureAndNativeModes();
         Console.WriteLine("PASS: production SaberCutter contact integration checks");
+    }
+
+    private static void RingCoverageKeepsGaps()
+    {
+        var ring = new RingCutCoverage(new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), 1);
+        for (int i = 0; i <= 720; i++)
+        {
+            double angle = i * Math.PI / 360;
+            if (angle > 1 && angle < 1.4) { ring.BreakStroke(); continue; }
+            ring.Add(new(0, Math.Cos(angle), Math.Sin(angle)));
+        }
+        Check(!ring.Complete && ring.Progress > .9 && ring.Progress < .97,
+            "a complete orbit with a missed hull sector does not count as a completed ring cut");
+        double before = ring.Progress;
+        Check(!ring.Add(new(.3, 1, 0)) && ring.Progress == before,
+            "contact on a different axial plane does not fill the selected cut");
+        ring.BreakStroke();
+        for (int i = 100; i <= 170; i++)
+        { double angle = i * Math.PI / 360; ring.Add(new(0, Math.Cos(angle), Math.Sin(angle))); }
+        Check(ring.Complete, "returning to the missed sector completes retained coverage across stroke breaks");
+        var jump = new RingCutCoverage(new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), 1);
+        jump.Add(new(0, 1, 0)); jump.Add(new(0, -1, 0));
+        Check(jump.Progress < .04, "a contact teleport cannot invent a half-ring cut");
+    }
+
+    private static void FiveMinuteRingCut(double dt = .02)
+    {
+        var f = new Fixture(addMesh: false);
+        f.Configure(CutMode.Slice);
+        f.Hull.Modules.Add(new MeshViewModule(CylinderMesh()));
+        f.Target.CenterOfMassAsmb = new(.2, .3, -.4);
+        double3 center = new double3(.4, 0, 0) - f.Target.CenterOfMassAsmb;
+        int checks = 0;
+        SlicePlane checkedPlane = default, committedPlane = default;
+        f.Cutter.SliceCheckHandler = (_, plane) => { checks++; checkedPlane = plane; return new(true, "supported"); };
+        f.Cutter.SliceHandler = (_, plane) => { f.SliceCalls++; committedPlane = plane; return new(true, "fixture slice"); };
+        f.Cutter.BeginRingCut(f.Wielder, f.Target, center, double3.UnitX, double3.UnitY, 1);
+        int steps = (int)Math.Ceiling(300 / dt);
+        for (int i = 0; i <= steps; i++)
+        {
+            double angle = i * 2 * Math.PI / steps;
+            double3 radial = new(0, Math.Cos(angle), Math.Sin(angle));
+            if (i == steps / 2) f.Cutter.Suspend();
+            f.Step(center + radial * 1.2, center + radial * .8, dt);
+        }
+        Check(f.Cutter.RingFailure == null && f.Cutter.RingProgress > .999999,
+            $"five-minute production contact lap at {dt:F3} s/frame retains its whole cut, including across suspension");
+        Check(checks == 1 && f.SliceCalls == 0,
+            "ring geometry validates once on initial contact and ordinary heat cannot slice early");
+        var result = f.Cutter.FinishRingCut(302);
+        Check(result.Success && f.SliceCalls == 1 && f.Cutter.SlicedParts == 1,
+            "closing a fully contacted ring invokes exactly one structural slice");
+        Check(checkedPlane == committedPlane && Math.Abs(committedPlane.Offset - .4) < 1e-9
+            && (committedPlane.Normal - new CutPoint(1, 0, 0)).Length < 1e-9,
+            "the selected ring plane is stable and converts target COM coordinates to assembly coordinates");
+        Check(!f.Cutter.FinishRingCut(303).Success && f.SliceCalls == 1,
+            "a consumed ring cut cannot invoke the slicer twice");
+    }
+
+    private static void LongBladeContact()
+    {
+        var f = new Fixture();
+        f.Target.BoundingSphereRadiusBody = 1.5;
+        // Both the old 3 m segment cap and the old 4 m midpoint broadphase
+        // would silently discard this real contact near the tip of a 12 m blade.
+        f.Step(new(0, -11.8, 0), new(0, .2, 0));
+        Check(f.Cutter.Contacts == 1, "12 m blade reaches a small hull near its tip");
+        f.Step(new(0, -11.8, 0), new(2, .03216, 0));
+        Check(f.Cutter.DiscontinuousParts == 0 && f.Cutter.Contacts == 1,
+            "long blade sweep accepts ordinary angular travel without increasing the hilt teleport allowance");
+        f.Target.BoundingSphereRadiusBody = 20;
+        f.Step(new(5, -11.8, 0), new(7, .03216, 0));
+        Check(f.Cutter.DiscontinuousParts > 0 && f.Cutter.Contacts == 0, "translating a long blade five metres is still a discontinuity");
+    }
+
+    private static void DynamicAndGlassContact()
+    {
+        foreach (bool glass in new[] { false, true })
+        {
+            var f = new Fixture(addMesh: false);
+            var model = new PartModel { Template = new() { Mesh = NewMesh() } };
+            if (glass) f.Hull.Modules.Add(new PartModelGlassModule { PartModelGlass = model });
+            else f.Hull.Modules.Add(new PartModelDynamicModule { PartModelDynamic = model });
+            f.Step(new(0, -.2, 0), new(0, .2, 0));
+            Check(f.Cutter.Contacts == 1, $"{(glass ? "glass" : "dynamic")} render geometry supports cutting without a picking mesh");
+        }
+    }
+
+    private static void DeliberateSwingCuts()
+    {
+        var f = new Fixture();
+        f.Cutter.ArbitrarySlicing = true; f.Cutter.SwingCut = true; f.Cutter.ContactSeconds = .65;
+        f.Step(new(0, -.2, 0), new(0, .2, 0));
+        Check(f.SliceCalls == 0, "swing command alone does not bypass the need for moving blade contact");
+        f.Step(new(.02, -.2, 0), new(.02, .2, 0));
+        f.Step(new(.04, -.2, 0), new(.04, .2, 0));
+        Check(f.SliceCalls == 1, "deliberate moving swing cuts without a stationary 0.65 second dwell");
+        var held = new Fixture();
+        held.Cutter.ArbitrarySlicing = true; held.Cutter.SwingCut = true; held.Cutter.ContactSeconds = .65;
+        for (int i = 0; i < 10; i++) held.Step(new(0, -.2, 0), new(0, .2, 0));
+        Check(held.SliceCalls == 0, "stationary contact still respects configured heating time");
+    }
+
+    private static void RingCutRefusals()
+    {
+        foreach (var failure in new[] { "crew", "unsupported", "missing contact", "partial", "mode changed" })
+        {
+            var f = new Fixture(addMesh: false);
+            f.Configure(CutMode.Slice);
+            f.Hull.Modules.Add(new MeshViewModule(CylinderMesh()));
+            if (failure == "crew") f.Target.Crew = [new() { AssignedKittenHash = new(7) }];
+            f.Cutter.SliceCheckHandler = (_, _) => failure == "unsupported"
+                ? new(false, "Unsupported active module FuelTank; geometry retained.") : new(true, "supported");
+            f.Cutter.BeginRingCut(f.Wielder, f.Target, double3.Zero, double3.UnitX, double3.UnitY, 1);
+            if (failure == "mode changed") f.Cutter.ArbitrarySlicing = false;
+            if (failure == "missing contact")
+                for (int i = 0; i < 510; i++) f.Step(new(0, 3, 0), new(0, 2.5, 0));
+            else
+                for (int i = 0; i < 50; i++) f.Step(new(0, 1.2, 0), new(0, .8, 0));
+            if (failure != "partial") Check(f.Cutter.RingFailure != null,
+                failure + ": refusal is available during the orbit, before completing a lap");
+            Check(!f.Cutter.FinishRingCut(20).Success, failure + ": completion reports failure rather than a successful cut");
+            f.AssertUnchanged("ring " + failure);
+        }
+    }
+
+    private static MeshReference CylinderMesh()
+    {
+        var vertices = new List<double3>();
+        for (int i = 0; i < 96; i++)
+        {
+            double a = i * Math.PI / 48, b = (i + 1) * Math.PI / 48;
+            double3 p = new(-2, Math.Cos(a), Math.Sin(a)), q = new(-2, Math.Cos(b), Math.Sin(b));
+            double3 r = new(2, Math.Cos(a), Math.Sin(a)), s = new(2, Math.Cos(b), Math.Sin(b));
+            vertices.AddRange([p, q, r, q, s, r]);
+        }
+        return new() { PositionsCompare = [vertices.ToArray()] };
+    }
+
+    private static void RingCommitFailureAndNativeModes()
+    {
+        var failed = new Fixture(addMesh: false);
+        failed.Configure(CutMode.Slice);
+        failed.Hull.Modules.Add(new MeshViewModule(CylinderMesh()));
+        failed.Cutter.SliceCheckHandler = (_, _) => new(true, "supported");
+        failed.Cutter.SliceHandler = (_, _) => { failed.SliceCalls++; return new(false, "Native replacement refused; source retained."); };
+        failed.Cutter.BeginRingCut(failed.Wielder, failed.Target, double3.Zero, double3.UnitX, double3.UnitY, 1);
+        for (int i = 0; i <= 720; i++)
+        {
+            double a = i * Math.PI / 360;
+            double3 radial = new(0, Math.Cos(a), Math.Sin(a));
+            failed.Step(radial * 1.2, radial * .8);
+        }
+        var result = failed.Cutter.FinishRingCut(20);
+        Check(failed.Cutter.RingProgress > .999999 && !result.Success && failed.SliceCalls == 1
+            && failed.Cutter.SlicedParts == 0 && result.Message.Contains("Native replacement refused"),
+            "100% contact coverage preserves a native slice refusal and never increments successful slices");
+        foreach (var mode in new[] { CutMode.Boundary, CutMode.Fragment })
+        {
+            var f = new Fixture(addMesh: false);
+            f.Configure(mode);
+            f.Hull.Modules.Add(new MeshViewModule(CylinderMesh()));
+            f.Cutter.BeginRingCut(f.Wielder, f.Target, double3.Zero, double3.UnitX, double3.UnitY, 1);
+            for (int i = 0; i < 3; i++) f.Step(new(0, 1.2, 0), new(0, .8, 0));
+            Check(f.Cutter.SeveredConnections + f.Cutter.FragmentedParts == 1,
+                mode + ": ring tracking preserves native contact-triggered cutting");
+        }
+        var multiple = new Fixture(addMesh: false);
+        multiple.Configure(CutMode.Slice);
+        multiple.Root.Modules.Add(new MeshViewModule(CylinderMesh()));
+        multiple.Hull.Modules.Add(new MeshViewModule(CylinderMesh()));
+        multiple.Cutter.SliceCheckHandler = (_, _) => new(true, "supported");
+        multiple.Cutter.BeginRingCut(multiple.Wielder, multiple.Target, double3.Zero, double3.UnitX, double3.UnitY, 1);
+        multiple.Step(new(0, 1.2, 0), new(0, .8, 0));
+        Check(multiple.Cutter.RingFailure?.Contains("multiple full parts") == true,
+            "a multi-part ring is refused before any partial structural replacement");
+        multiple.AssertUnchanged("multi-part ring");
     }
 
     private static void StationaryContact()
@@ -292,10 +478,10 @@ internal static class ContactChecks
             Cutter.ArbitrarySlicing = mode == CutMode.Slice;
         }
 
-        public void Step(double3 a, double3 b)
+        public void Step(double3 a, double3 b, double dt = .02)
         {
-            Cutter.Update(Wielder, a, b, .02, _now);
-            _now += .02;
+            Cutter.Update(Wielder, a, b, dt, _now);
+            _now += dt;
         }
 
         public void AssertUnchanged(string context)

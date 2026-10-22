@@ -53,6 +53,10 @@ static class HostInspection
                     "KSA.Vehicle", "KSA.Part", "System.Collections.Generic.List`1<KSA.Vehicle>"),
                 new("KSA.PartModel", "AddInstance", "System.Void", false, MethodAttributes.Private,
                     "KSA.PartModel+PerInstanceData", "KSA.Deformation.PerInstanceDent", "KSA.IViewport", "System.Int32"),
+                new("KSA.Vehicle", "DepleteConsumables", "System.Void", false, MethodAttributes.Public),
+                new("KSA.Vehicle", "UpdateVehicleConfiguration", "System.Void", false, MethodAttributes.Public),
+                new("KSA.Part", "get_StructuralPart", "KSA.Part", false, MethodAttributes.Public),
+                new("KSA.Universe", "SetSimulationSpeed", "System.Void", true, MethodAttributes.Public, "System.Double", "System.Boolean"),
             ];
             MethodDefinitionHandle prepare = default;
             foreach (var expected in patches)

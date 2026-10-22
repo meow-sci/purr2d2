@@ -146,6 +146,19 @@ internal sealed partial class SaberRuntime
         ImGui.BeginDisabled(!controlsAvailable);
         try
         {
+            ImGui.Text($"Cutting timewarp: {Universe.GetSimulationSpeed():0.##}x");
+            if (ImGui.Button("1x##SaberSpeed")) Queue(Command.Speed1);
+            ImGui.SameLine();
+            if (ImGui.Button("2x##SaberSpeed")) Queue(Command.Speed2);
+            ImGui.SameLine();
+            if (ImGui.Button("5x##SaberSpeed")) Queue(Command.Speed5);
+            ImGui.TextWrapped("Timewarp accelerates the whole simulation. Autopilot returns to 1x when it finishes or stops.");
+        }
+        finally { ImGui.EndDisabled(); }
+
+        ImGui.BeginDisabled(!controlsAvailable);
+        try
+        {
             ImGui.BeginDisabled(!_autopilot.Active);
             try
             {
@@ -169,13 +182,17 @@ internal sealed partial class SaberRuntime
         }
         finally { ImGui.EndDisabled(); }
         if (_autopilot.WantsIgnited || _autopilot.Progress > 0)
-            ImGui.ProgressBar(_autopilot.Progress, new float2(-1, 0));
+        {
+            ImGui.ProgressBar(_autopilot.Progress, new float2(-1, 0), $"Flight around ring: {_autopilot.Progress:P0}");
+            ImGui.ProgressBar((float)_cutter.RingProgress, new float2(-1, 0), $"Cut contact coverage: {_cutter.RingProgress:P1}");
+        }
+        if (_cutter.RingStatus.Length > 0) ImGui.TextWrapped(_cutter.RingStatus);
         if (_ringSelectionStatus.Length > 0) ImGui.TextWrapped(_ringSelectionStatus);
         ImGui.TextWrapped(_autopilot.Status);
         ImGui.TextDisabled("Cyan: cut preview  |  Amber: MMU path and entry");
         if (ImGui.CollapsingHeader("Autopilot diagnostics"))
         {
-            string diagnostics = _autopilot.GetDiagnostics(owner, _settings);
+            string diagnostics = _autopilot.GetDiagnostics(owner, _settings) + "\n" + _cutter.GetDiagnostics();
             if (ImGui.Button("Copy autopilot diagnostics")) ImGui.SetClipboardText(diagnostics);
             ImGui.TextWrapped(diagnostics);
         }
@@ -282,6 +299,7 @@ internal sealed partial class SaberRuntime
                 double3 tangent = double3.Cross(ring.Axis, radial).NormalizeOrZero();
                 double3 cameraBody = (-targetEgo).Transform(body2Ego.Inverse());
                 double flightRadius = ring.Radius + _settings.AutopilotClearance;
+                double3 flightCenter = _autopilot.FlightCenter;
                 const int segments = 96;
                 for (int i = 0; i < segments; i++)
                 {
@@ -294,10 +312,10 @@ internal sealed partial class SaberRuntime
                         BodyLine(ring.Center + first * ring.Radius, ring.Center + second * ring.Radius,
                             Cyan(far ? .38f : 1), far ? 1.2f : 2.2f);
                     if (i % 3 != 2)
-                        BodyLine(ring.Center + first * flightRadius, ring.Center + second * flightRadius,
+                        BodyLine(flightCenter + first * flightRadius, flightCenter + second * flightRadius,
                             Amber(far ? .3f : .7f), 1.1f);
                 }
-                double3 entry = ring.Center + radial * flightRadius;
+                double3 entry = flightCenter + radial * flightRadius;
                 double3 surface = ring.Center + radial * ring.Radius;
                 BodyLine(surface, entry, Amber(.7f), 1.4f);
                 double3 entryEgo = targetEgo + entry.Transform(body2Ego);

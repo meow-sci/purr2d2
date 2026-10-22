@@ -31,7 +31,7 @@ public sealed class SaberSettings
 
     public void Validate()
     {
-        BladeLength = Clamp(BladeLength, .25f, 1.5f, .85f);
+        BladeLength = Clamp(BladeLength, .25f, SaberLimits.MaximumBladeLength, .85f);
         ColorR = Clamp(ColorR, 0, 1, .12f);
         ColorG = Clamp(ColorG, 0, 1, .75f);
         ColorB = Clamp(ColorB, 0, 1, 1);

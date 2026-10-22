@@ -45,8 +45,14 @@ internal static class TargetSurfaceSnapshot
                 // Render geometry describes the visible hull. Picking meshes are optional and
                 // may be coarse, empty or unloaded even when that complete hull is available.
                 foreach (PartModelModule model in part.Modules.Get<PartModelModule>())
+                    CaptureModel(model.PartModel.Template.Mesh);
+                foreach (PartModelDynamicModule model in part.Modules.Get<PartModelDynamicModule>())
+                    CaptureModel(model.PartModelDynamic.Template.Mesh);
+                foreach (PartModelGlassModule model in part.Modules.Get<PartModelGlassModule>())
+                    CaptureModel(model.PartModelGlass.Template.Mesh);
+                void CaptureModel(MeshReference? meshId)
                 {
-                    if (model.PartModel.Template.Mesh is not { } meshId) continue;
+                    if (meshId == null) return;
                     hasRenderMesh = true;
                     MeshReference? mesh = meshId.Get();
                     Require(mesh != null, "A target render mesh is unavailable; wait for loading to finish.");

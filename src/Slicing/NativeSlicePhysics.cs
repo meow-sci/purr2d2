@@ -5,7 +5,7 @@ using Purr2D2.Rendering;
 
 namespace Purr2D2.Slicing;
 
-internal readonly record struct PreparedPhysicsFragment(PreparedFragment Asset, PrincipalFragment Frame);
+internal readonly record struct PreparedPhysicsFragment(PreparedFragment Asset, PrincipalFragment Frame, bool PositiveSide);
 
 /// <summary>
 /// Commits already durable/bound fragment assets at the joined simulation handoff.
@@ -20,28 +20,28 @@ internal static class NativeSlicePhysics
 
     internal static bool ValidateSource(Part struck, out string reason)
     {
-        var full = struck.FullPart;
+        var full = struck.StructuralPart;
         var owner = full.Tree?.OwningVehicle;
         reason = "The source part is unavailable or outside native physics.";
         if (owner is null || owner.IsDisposed || owner is KittenEva || !owner.HasPhysicsBubble || Program.EditorFlag) return false;
         if (SetBodyRates is null) { reason = "The native angular-rate synchronization seam is unavailable."; return false; }
         foreach (var seat in owner.Crew)
             if (seat.AssignedKittenHash != KeyHash.Zero) { reason = "Crewed vessels cannot be sliced."; return false; }
-        if (full.IsAttachedInternal) { reason = "Internally attached parts cannot be sliced."; return false; }
-        float mass = full.ComputeSubtreeInertMass();
+        var sources = SourceParts(full);
+        float mass = SourceMass(full);
         if (!float.IsFinite(mass) || mass <= .001f) { reason = "The part has no finite positive inert mass."; return false; }
-        if (!Inert(full, out reason)) return false;
-        foreach (var sub in full.SubParts) if (!Inert(sub, out reason)) return false;
-        if (owner.Parts.Count > 64) { reason = "Vehicle exceeds the bounded native-isolation budget (64 parts)."; return false; }
+        if (!CanBake(full, out reason)) return false;
+        foreach (var sub in full.SubParts) if (!CanBake(sub, out reason)) return false;
+        if (owner.Parts.Count > 4096) { reason = "Vehicle exceeds the native-isolation budget (4096 parts)."; return false; }
         if (!ValidateTree(owner, out reason)) return false;
-        int edges = full.TreeChildren.Count + (full.TreeParent is null ? 0 : 1);
+        int edges = sources.Sum(p => p.TreeChildren.Count(c => !c.IsAttachedInternal)) + (full.TreeParent is null ? 0 : 1);
         if (owner.BubbleVehicleCount + edges + MaximumPieces > PartFailure.MaximumVehiclesPerBubble)
         { reason = "Insufficient native physics slots for safe isolation and slice fragments."; return false; }
         reason = "";
         return true;
     }
 
-    private static bool Inert(Part part, out string reason)
+    private static bool CanBake(Part part, out string reason)
     {
         foreach (var module in part.Modules.GetUsing<ModuleBase>())
         {
@@ -51,10 +51,11 @@ internal static class NativeSlicePhysics
                 { reason = "Dented geometry cannot be sliced until the actual deformed surface can be baked."; return false; }
                 continue;
             }
-            if (module is Decoupler decoupler && !decoupler.IsActive) continue;
-            if (module is not InertMass and not ColliderModule and not MeshViewModule and not PartModelModule
-                and not FxWetness and not FxTemperature)
-            { reason = $"{part.DisplayName} has unsupported active module {module.GetType().Name}; only static inert geometry or inactive decouplers can be sliced."; return false; }
+            // Modules are intentionally destroyed with the original part. The
+            // replacement is wreckage, so tanks, controls, batteries, engines and
+            // empty seats do not need functional equivalents in the fragments.
+            if (module is Parachute chute && chute.State is ChuteState.LineStretch or ChuteState.Reefed or ChuteState.Disreefing or ChuteState.Full)
+            { reason = "Retract or cut away the deployed parachute before slicing its housing."; return false; }
         }
         reason = "";
         return true;
@@ -71,7 +72,7 @@ internal static class NativeSlicePhysics
         }
         // Every tree boundary must have an actual unique native connection, not just a parent pointer.
         foreach (var part in owner.Parts.Parts)
-            if (part.TreeParent is { } parent && !pairs.Contains(Pair(part, parent)))
+            if (!part.IsAttachedInternal && part.TreeParent is { } parent && !pairs.Contains(Pair(part, parent)))
             { reason = "A native tree boundary has no unique separable connection."; return false; }
         reason = "";
         return true;
@@ -96,13 +97,14 @@ internal static class NativeSlicePhysics
 
     private static (uint, uint) Pair(Part a, Part b) => a.InstanceId < b.InstanceId ? (a.InstanceId, b.InstanceId) : (b.InstanceId, a.InstanceId);
 
-    internal static bool TryReplace(Part struck, IReadOnlyList<PreparedPhysicsFragment> pieces,
+    internal static bool TryReplace(Part struck, IReadOnlyList<PreparedPhysicsFragment> pieces, double3 cutNormal,
         out IReadOnlyList<Vehicle> created, out string reason)
     {
         created = Array.Empty<Vehicle>();
         if (!ValidateSource(struck, out reason)) return false;
         if (pieces.Count is < 2 or > MaximumPieces) { reason = "A slice must produce two to eight bounded fragments."; return false; }
-        var full = struck.FullPart;
+        var full = struck.StructuralPart;
+        var sources = SourceParts(full);
         var owner = full.Tree?.OwningVehicle;
         if (owner is null) { reason = "The source tree changed before commit."; return false; }
         double massSum = 0;
@@ -116,7 +118,7 @@ internal static class NativeSlicePhysics
             { reason = "A prepared fragment is not registered for native save restoration."; return false; }
             massSum += p.Asset.MassKg;
         }
-        double sourceMass = full.ComputeSubtreeInertMass();
+        double sourceMass = SourceMass(full);
         if (Math.Abs(massSum - sourceMass) > Math.Max(.001, sourceMass * 2e-5))
         { reason = "Prepared slice masses do not conserve the source inert mass."; return false; }
         double4x4 originalPartToAssembly = full.MatrixAsmb2VehicleAsmb;
@@ -124,6 +126,7 @@ internal static class NativeSlicePhysics
         var spawned = new List<Vehicle>(pieces.Count);
         var previouslyPresent = new HashSet<Vehicle>();
         var generatedTemplates = pieces.Select(p => p.Asset.Template).ToHashSet();
+        double emptiedMass = 0;
         foreach (var item in sourceSystem.All.AsSpan()) if (item is Vehicle vehicle) previouslyPresent.Add(vehicle);
         try
         {
@@ -142,19 +145,36 @@ internal static class NativeSlicePhysics
             }
             // Assets and geometry are validated before the first native structural mutation.
             // If a later spawn fails, the isolated source remains intact rather than being deleted.
-            foreach (var child in full.TreeChildren.ToArray())
-                if (!SplitBoundary(full, child)) { reason = "A child connection refused native isolation; the source remains intact."; return false; }
+            foreach (var source in sources)
+                foreach (var child in source.TreeChildren.Where(c => !c.IsAttachedInternal).ToArray())
+                    if (!SplitBoundary(source, child)) { reason = "A child connection refused native isolation; the source remains intact."; return false; }
             if (full.TreeParent is { } parent && !SplitBoundary(full, parent))
             { reason = "The parent connection refused native isolation; the source remains intact."; return false; }
             owner = full.Tree?.OwningVehicle;
-            if (owner is null || owner.IsDisposed || owner.Parts.Count != 1)
-            { reason = "Native isolation did not yield one intact source part."; return false; }
+            if (owner is null || owner.IsDisposed || owner.Parts.Count != sources.Length || sources.Any(p => p.Tree?.OwningVehicle != owner))
+            { reason = "Native isolation did not yield the intact source shell and its interior."; return false; }
             if (!double4x4.Invert(originalPartToAssembly, out var oldAssemblyToPart))
             { reason = "Source transformation is singular."; return false; }
             double4x4 sourceToIsolated = oldAssemblyToPart * full.MatrixAsmb2VehicleAsmb;
             if (!double4x4.Decompose(sourceToIsolated, out var scale, out var sourceToIsolatedRotation, out _)
                 || (scale - double3.One).Length() > 1e-5)
             { reason = "Native isolation unexpectedly changed physical source scale."; return false; }
+            // Only the isolated cut part is drained. Neighboring tanks and their
+            // resource networks have already been separated by native Split.
+            // Preserve the assembly's world pose when removing off-centre fuel.
+            var oldCom = owner.CenterOfMassAsmb;
+            emptiedMass = owner.TotalMass;
+            owner.DepleteConsumables();
+            owner.UpdateVehicleConfiguration();
+            var drainedState = owner.GetPhysicsStatesMutable();
+            var newCom = drainedState.Props.CenterOfMassAsmb;
+            var shift = (new double3(newCom.X, newCom.Y, newCom.Z) - oldCom).Transform(drainedState.Kinematic.Body2Phys);
+            drainedState.Kinematic.PositionPhys += shift;
+            drainedState.Kinematic.VelocityPhys += double3.Cross(drainedState.Kinematic.AngularVelocityPhys, shift);
+            drainedState.Props.SetOnRails(false);
+            owner.SetFlightPlan(new FlightPlan(drainedState.ComputeOrbit(owner.OrbitColor), owner.Hash));
+            owner.UpdatePerFrameData();
+            emptiedMass -= owner.TotalMass;
             var beforeStates = owner.GetPhysicsStates();
             beforeStates.GetStatesCci(out var beforePosition, out var beforeVelocity, out var beforeBody2Cci);
             double3 beforeOmega = beforeStates.GetBodyRates().Transform(beforeBody2Cci);
@@ -210,12 +230,23 @@ internal static class NativeSlicePhysics
             double3 totalMomentum = beforeVelocity * owner.TotalMass;
             double3 spinMomentum = sourceAngularMomentum
                 - double3.Cross(groupCentre - beforePosition, totalMomentum);
+            // A gentle opening impulse makes the hot cut visible immediately.
+            // Remove its net linear and angular momentum before assigning spin.
+            var normalCci = cutNormal.Transform(sourceToIsolatedRotation).Transform(beforeBody2Cci).NormalizeOrZero();
+            double meanSign = pieces.Select((p, i) => (p.PositiveSide ? 1 : -1) * spawned[i].TotalMass).Sum() / actualMass;
+            var separation = pieces.Select(p => normalCci * ((p.PositiveSide ? 1 : -1) - meanSign) * .12).ToArray();
+            for (int i = 0; i < spawned.Count; i++)
+            {
+                spawned[i].GetPhysicsStates().GetStatesCci(out var position, out _, out _);
+                spinMomentum -= double3.Cross(position - groupCentre, separation[i] * spawned[i].TotalMass);
+            }
             if (!SlicePrincipalFrame.TryAngularVelocity(groupInertia, spinMomentum, out var omega)
                 || omega.Length() > 300000) throw new InvalidOperationException("Conserved fragment angular velocity is invalid.");
-            foreach (var fragment in spawned)
+            for (int i = 0; i < spawned.Count; i++)
             {
+                var fragment = spawned[i];
                 fragment.GetPhysicsStates().GetStatesCci(out var position, out _, out var body2Cci);
-                double3 velocityCci = totalMomentum / actualMass + double3.Cross(omega, position - groupCentre);
+                double3 velocityCci = totalMomentum / actualMass + double3.Cross(omega, position - groupCentre) + separation[i];
                 var state = fragment.GetPhysicsStatesMutable();
                 if (state.Origin.BubFrame == BubbleFrame.Ccf)
                 {
@@ -237,7 +268,8 @@ internal static class NativeSlicePhysics
             // This is the only deletion. Both complete fragments exist with native collision and durable IDs.
             Universe.DestroyVehicle(owner);
             created = spawned.ToArray();
-            reason = $"Sliced into {spawned.Count} independent inert fragments; convex hull collision proxies.";
+            reason = $"Sliced into {spawned.Count} separating fragments."
+                + (emptiedMass > .001 ? $" Released {emptiedMass:F1} kg of stored propellant." : "");
             return true;
         }
         catch (Exception error)
@@ -260,7 +292,7 @@ internal static class NativeSlicePhysics
             foreach (var fragment in spawned)
                 try { if (!fragment.IsDisposed) Universe.DestroyVehicle(fragment); }
                 catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Fragment rollback cleanup: {cleanup.Message}"); }
-            reason = $"Slice commit refused; original source retained: {error.Message}";
+            reason = $"Slice commit refused; original source retained{(emptiedMass > .001 ? " with tanks emptied" : "")}: {error.Message}";
             return false;
         }
     }
@@ -274,4 +306,19 @@ internal static class NativeSlicePhysics
         var endpoint = crossing.Connectors[0].ConnectionPart.FullPart == full ? crossing.Connectors[0] : crossing.Connectors[1];
         return owner.Split(crossing, endpoint, 0, out _) is not null;
     }
+    // A capsule and its attached IVA belong to one structural shell. Native
+    // internal attachments have no separable connector and must travel with it.
+    internal static Part[] SourceParts(Part struck)
+    {
+        var parts = new List<Part>();
+        void Add(Part part)
+        {
+            parts.Add(part);
+            foreach (var child in part.TreeChildren) if (child.IsAttachedInternal) Add(child);
+        }
+        Add(struck.StructuralPart);
+        return parts.ToArray();
+    }
+
+    internal static float SourceMass(Part struck) => SourceParts(struck).Sum(p => p.ComputeSubtreeInertMass());
 }

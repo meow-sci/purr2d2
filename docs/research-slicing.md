@@ -200,9 +200,9 @@ rollback, GPU arena exhaustion and save/restart/load acceptance in KSA.
 - Open, duplicated, reversed-winding, nonintersecting and near-level cases, with
   conservative refusal or verified closed output as appropriate.
 
-Current limits are 40,000 source faces; 240,000 total generated faces; 2,048 contour
+Current limits are 120,000 source faces; 240,000 total generated faces; 2,048 contour
 vertices per individual solid slice; 30,000 cap cells; 100,000 shared edge/level
-subdivisions; 64 boundary components per single-solid output; and 256 source compound
+subdivisions; 64 boundary components per single-solid output; and 512 source compound
 solids. The exporter has its own smaller native arena and fragment complexity limits.
 Welding tolerance is `max(1e-9 m, source diagonal * 1e-8)`. The plane nudge is bounded
 by 64 such tolerances, and contour height canonicalization by one tolerance. Tiny
@@ -230,3 +230,13 @@ That preserves the original collider approximation without filling new gaps betw
 children. General exact moving-mesh collision still requires bounded volumetric
 convex decomposition or a suitable constrained tetrahedralization; a single hull
 cannot represent the bore of the demonstrated tube.
+
+## Stock hull and functional-part support (2026-10-22)
+
+`SliceShellBuilder` retains valid closed solids and gives open authored panels a 4 mm backing. It welds seam positions within 10 microns, removes duplicate/degenerate faces, orients connected panels, splits sharp folds, and separates pinched vertex fans by tens of microns. Exterior normals/UV/materials survive. The ordinary manifold/volume/cap audit still gates replacement. `SliceMeshPrecision` tests the actual principal-frame float32 geometry, trying bounded edge welding through 2 microns and cancelling collapsed internal face pairs. Export must stay closed and within 0.02% volume tolerance. These checks now also run on initial ring contact.
+
+`NativeSlicePhysics` no longer requires inert-only modules. It groups the struck structural part with attached IVA children, validates/cooks all generated pieces, splits external connectors, empties only the isolated owner through `Vehicle.DepleteConsumables`, rebuilds native state and preserves its assembly pose across the mass/COM change. Original modules and IVA furnishing geometry disappear with the replaced source. Dry mass includes those internal parts. Neighbor resource networks are rebuilt by native Split. Native fragments receive a balanced 0.24 m/s relative opening velocity across the cut, compensated in the angular-momentum solution. No propellant plume or retained functioning tank is claimed.
+
+Runtime limits include 120,000 prepared source triangles, 512 authored solid groups, 100,000 triangles and 32,768 hull points per fragment, and 511 persisted solid/material groups per fragment. The source vessel isolation limit is 4,096 full parts. Glass uses persisted PartModelGlass modules. Dented source geometry, deployed cloth, occupied vessels, crossing contours and unsupported native connection graphs remain explicit refusals. Some oblique capsule planes still self-intersect after panel backing.
+
+`tools/check_stock_slices.py /path/to/Content/Core` exercises locally installed stock assets without bundling them. It tests Gemini7 tank axial/oblique planes and a medium capsule exterior axial plane through preparation, clipping, principal frames, exact export precision and fragment budgets. This does not execute native resource depletion, spawning, GPU uploads or save/load.

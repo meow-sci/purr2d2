@@ -15,9 +15,16 @@ using HarmonyLib;
 using KSA;
 using KSA.Deformation;
 using Purr2D2.Cutting;
+using Purr2D2.Slicing;
 using RenderCore;
 
 namespace Purr2D2.Rendering;
+
+internal sealed record SliceMaterial(PbrMaterialReference Reference, bool Glass = false)
+{
+    internal string Id => Reference.Id;
+    internal bool IsReferenceable => Reference.IsReferenceable;
+}
 
 internal sealed record PreparedFragment(PartTemplate Template, string TemplateId,
     double4x4 SourceToFragment, double3 Extents, float MassKg);
@@ -124,7 +131,7 @@ internal static class RuntimeFragmentAssets
         instanceData.EmissiveColor = (r << 16) | (g << 8) | b;
     }
 
-    internal static bool TryPrepare(SlicePiece piece, IReadOnlyDictionary<int, PbrMaterialReference> materials,
+    internal static bool TryPrepare(SlicePiece piece, IReadOnlyDictionary<int, SliceMaterial> materials,
         double4x4 sourceToFragment, float massKg, double3 principalSpecificInertia,
         out PreparedFragment? prepared, out string reason)
     {
@@ -137,66 +144,34 @@ internal static class RuntimeFragmentAssets
         { reason = "Fragment triangle budget, mass or principal inertia is invalid."; return false; }
         try
         {
-            var transformed = new SliceFace[piece.Faces.Length];
-            var minimum = new double3(double.MaxValue);
-            var maximum = new double3(double.MinValue);
-            for (int i = 0; i < transformed.Length; i++)
-            {
-                var face = piece.Faces[i];
-                if (face.Material != -1 && (!materials.TryGetValue(face.Material, out var material)
-                    || !material.IsReferenceable || string.IsNullOrEmpty(material.Id)))
-                { reason = "A source surface material has no persistent native asset ID."; return false; }
-                var a = Transform(face.A); var b = Transform(face.B); var c = Transform(face.C);
-                // Audit the actual float32 positions the GLB/native GPU will receive, not only
-                // the double-precision clipper output. Collapsed slivers cannot enter physics.
-                if (CutPoint.Cross(b.Position - a.Position, c.Position - a.Position).LengthSquared <= 1e-20)
-                { reason = "A clipped triangle collapses after float32 export; move the cut away from the grazing edge."; return false; }
-                // Re-sliced old cap surfaces retain cap shading/cooling rather than becoming
-                // ordinary always-emissive outer surfaces under a new material group number.
-                int materialId = face.Material == -1 || materials[face.Material].Id == CapMaterial ? -1 : face.Material;
-                transformed[i] = new SliceFace(a, b, c, materialId);
-            }
-            double3 extents = maximum - minimum;
+            if (!SliceMeshPrecision.TryPrepare(piece, sourceToFragment, out var quantizedSolids, out var extents, out reason)) return false;
             if (!Finite(extents) || extents.X <= 1e-6 || extents.Y <= 1e-6 || extents.Z <= 1e-6)
             { reason = "The exported fragment has degenerate three-dimensional bounds."; return false; }
-            bool audited;
-            double exportedVolume;
-            string auditReason;
-            var quantizedSolids = new List<SliceFace[]>();
-            if (piece.ClosedSolids is { } closedSolids)
-            {
-                if (closedSolids.Sum(s => s.Length) != transformed.Length)
-                    throw new InvalidDataException("Fragment closed-solid ranges do not match the exported surface faces.");
-                int first = 0;
-                foreach (var solid in closedSolids)
+            for (int solid = 0; solid < quantizedSolids.Length; solid++)
+                for (int i = 0; i < quantizedSolids[solid].Length; i++)
                 {
-                    quantizedSolids.Add(transformed.AsSpan(first, solid.Length).ToArray());
-                    first += solid.Length;
+                    var face = quantizedSolids[solid][i];
+                    if (face.Material != -1 && (!materials.TryGetValue(face.Material, out var material)
+                        || !material.IsReferenceable || string.IsNullOrEmpty(material.Id)))
+                    { reason = "A source surface material has no persistent native asset ID."; return false; }
+                    // Re-sliced caps keep their cooling material.
+                    if (face.Material != -1 && materials[face.Material].Id == CapMaterial)
+                        quantizedSolids[solid][i] = face with { Material = -1 };
                 }
-                audited = PlaneSlicer.TryAuditCompound(quantizedSolids, out exportedVolume, out auditReason);
-            }
-            else
-            {
-                quantizedSolids.Add(transformed);
-                audited = PlaneSlicer.TryAudit(transformed, out exportedVolume, out auditReason);
-            }
-            if (!audited)
-            { reason = "Float32 export changed the fragment's closed mesh: " + auditReason; return false; }
-            if (Math.Abs(exportedVolume - piece.Volume) > Math.Max(piece.Volume * 0.0002, 1e-10))
-            { reason = "Float32 export changed fragment volume beyond tolerance; choose a cut with larger features."; return false; }
-            int hullPoints = transformed.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Take(8193).Count();
-            if (hullPoints > 8192)
-            { reason = "Fragment exceeds the bounded 8192-point native convex-hull budget."; return false; }
+            var transformed = quantizedSolids.SelectMany(s => s).ToArray();
+            int hullPoints = transformed.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Take(32769).Count();
+            if (hullPoints > 32768)
+            { reason = "Fragment exceeds the bounded 32768-point native convex-hull budget."; return false; }
             var shapeGroups = quantizedSolids.SelectMany((solid, solidIndex) => solid.GroupBy(f => f.Material)
                 .OrderBy(g => g.Key).Select(g => new SurfaceGroup(solidIndex, g.Key, g.ToArray()))).ToArray();
-            if (shapeGroups.Length + 1 > 64)
-            { reason = "Fragment exceeds 63 persisted solid/material groups; the source was not changed."; return false; }
+            if (shapeGroups.Length + 1 > 512)
+            { reason = "Fragment exceeds 511 persisted solid/material groups; the source was not changed."; return false; }
             // Seed excludes mesh names; names can then contain the immutable geometry/material hash.
             var seedGroups = shapeGroups.Select(g => new FragmentGlbWriter.Group($"solid_{g.Solid}_surface_{g.Material}", g.Material, g.Faces)).ToArray();
             var seed = FragmentGlbWriter.Write(seedGroups);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             hash.AppendData(seed);
-            hash.AppendData(Encoding.UTF8.GetBytes(string.Join("|", shapeGroups.Select(g => g.Material == -1 ? CapMaterial : materials[g.Material].Id))));
+            hash.AppendData(Encoding.UTF8.GetBytes(string.Join("|", shapeGroups.Select(g => g.Material == -1 ? CapMaterial : materials[g.Material].Id + ":glass=" + materials[g.Material].Glass))));
             hash.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"|{massKg:R}|{principalSpecificInertia.X:R}|{principalSpecificInertia.Y:R}|{principalSpecificInertia.Z:R}")));
             string id = Prefix + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             preparingId = id;
@@ -269,18 +244,6 @@ internal static class RuntimeFragmentAssets
             prepared = new PreparedFragment(template, id, sourceToFragment, extents, massKg);
             Prepared[id] = prepared;
             return true;
-
-            SliceVertex Transform(SliceVertex vertex)
-            {
-                var p = new double3(vertex.Position.X, vertex.Position.Y, vertex.Position.Z).Transform(sourceToFragment);
-                p = double3.Unpack(float3.Pack(p));
-                var n = double3.TransformNormal(new double3(vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z), sourceToFragment);
-                double length = n.Length();
-                if (!Finite(p) || !Finite(n) || length < 1e-12) throw new InvalidDataException("A fragment vertex or normal is invalid.");
-                n /= length;
-                minimum = double3.Min(minimum, p); maximum = double3.Max(maximum, p);
-                return new SliceVertex(new CutPoint(p.X, p.Y, p.Z), new CutPoint(n.X, n.Y, n.Z), vertex.U, vertex.V);
-            }
         }
         catch (Exception error)
         {
@@ -317,7 +280,7 @@ internal static class RuntimeFragmentAssets
     }
 
     private static XDocument AssetXml(string id, string glbPath, IReadOnlyList<FragmentGlbWriter.Group> groups,
-        IReadOnlyList<SurfaceGroup> surfaces, IReadOnlyDictionary<int, PbrMaterialReference> materials, float mass, double3 inertia)
+        IReadOnlyList<SurfaceGroup> surfaces, IReadOnlyDictionary<int, SliceMaterial> materials, float mass, double3 inertia)
     {
         var part = new XElement("Part", new XAttribute("Id", id), new XAttribute("DisplayName", "Sliced metal fragment"));
         part.Add(new XElement("MeshView", new XAttribute("Id", id + "_pick"),
@@ -331,7 +294,7 @@ internal static class RuntimeFragmentAssets
             {
                 if (surfaces[i].Solid != solid) continue;
                 var group = groups[i];
-                subpart.Add(new XElement("PartModel", new XAttribute("Id", group.Name + "_model"),
+                subpart.Add(new XElement(group.Material != -1 && materials[group.Material].Glass ? "PartModelGlass" : "PartModel", new XAttribute("Id", group.Name + "_model"),
                     new XElement("Mesh", new XAttribute("Id", group.Name)),
                     new XElement("Material", new XAttribute("Id", group.Material == -1 ? CapMaterial : materials[group.Material].Id)),
                     new XElement("ShadowCaster", true)));

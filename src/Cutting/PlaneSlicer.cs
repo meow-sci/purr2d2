@@ -30,7 +30,7 @@ internal sealed record PlaneSliceResult(SlicePiece[] Pieces, SlicePlane Effectiv
 /// </summary>
 internal static class PlaneSlicer
 {
-    private const int MaximumSourceFaces = 40_000;
+    private const int MaximumSourceFaces = 120_000;
     private const int MaximumOutputFaces = 240_000;
     private const int MaximumContourVertices = 2_048;
     private const int MaximumCapCells = 30_000;
@@ -60,7 +60,7 @@ internal static class PlaneSlicer
         result = null;
         try
         {
-            Require(authoredGroups.Count > 0 && authoredGroups.Count <= 256, "Authored compound group count exceeds the runtime budget.");
+            Require(authoredGroups.Count > 0 && authoredGroups.Count <= 512, "Authored compound group count exceeds the runtime budget.");
             int triangleCount = authoredGroups.Sum(x => x.Length);
             Require(triangleCount >= 4 && triangleCount <= MaximumSourceFaces, "Compound source triangle count is outside the slicing budget.");
             var allPoints = authoredGroups.SelectMany(x => x).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
@@ -99,7 +99,7 @@ internal static class PlaneSlicer
                 }
                 foreach (var solid in solids)
                 {
-                    Require(++solidCount <= 256, "Compound contains too many independent closed solids.");
+                    Require(++solidCount <= 512, "Compound contains too many independent closed solids.");
                     var faces = solid.Faces.ToArray(); var props = Properties(faces);
                     Require(props.Volume > epsilon * epsilon * epsilon * 100, "Compound solid has nonpositive material volume.");
                     sourceVolume += props.Volume;
@@ -611,7 +611,9 @@ internal static class PlaneSlicer
             Require(a != b && a != c && b != c, "Mesh contains welded degenerate triangles.");
             Add(a, b, i); Add(b, c, i); Add(c, a, i);
         }
-        Require(edges.Values.All(x => x.Count == 2 && x.Direction == 0), "Mesh is not a closed consistently oriented 2-manifold.");
+        foreach (var edge in edges)
+            if (edge.Value.Count != 2 || edge.Value.Direction != 0)
+                throw new SliceRejected($"Mesh is not a closed consistently oriented 2-manifold (edge {positions[edge.Key.A]} to {positions[edge.Key.B]}, uses {edge.Value.Count}, winding {edge.Value.Direction}).");
         components = new(); var visited = new bool[faces.Count];
         for (int i = 0; i < faces.Count; i++)
         {

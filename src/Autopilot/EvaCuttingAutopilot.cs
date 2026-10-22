@@ -6,7 +6,7 @@ using Purr2D2.Cutting;
 
 namespace Purr2D2.Autopilot;
 
-internal enum AutopilotResult { Running, Completed, Aborted }
+internal enum AutopilotResult { Running, Completed, OrbitFinished, Aborted }
 
 internal sealed class EvaCuttingAutopilot
 {
@@ -31,6 +31,7 @@ internal sealed class EvaCuttingAutopilot
     private double _clearance;
     private double _angle;
     private double _orbitSpeed;
+    private double _bladeAxialOffset;
     private bool _cutWhenReady;
     private bool _cutStarted;
     private bool _cuttingMotionReady;
@@ -44,6 +45,8 @@ internal sealed class EvaCuttingAutopilot
     internal bool AllowsCutting => _phase == Phase.Orbit && _cuttingMotionReady;
     internal float Progress => (float)CylinderOrbitGuidance.Progress(_angle);
     internal double EffectiveOrbitSpeed => _orbitSpeed;
+    internal double OrbitAngle => _angle;
+    internal double3 FlightCenter => _ring.Center - _ring.Axis * _bladeAxialOffset;
     internal string Status { get; private set; } = "Choose a target vessel, then find a ring or pick a point on its hull.";
 
     internal bool TryGetPreview(out Vehicle target, out CutRing ring)
@@ -68,7 +71,7 @@ internal sealed class EvaCuttingAutopilot
         _owner = owner; _target = target; _ring = ring; _hasRing = true;
         _surface = surface; _topology = Topology(target);
         _clearance = settings.AutopilotClearance;
-        _angle = 0; _cutWhenReady = _cutStarted = _cuttingMotionReady = false;
+        _angle = _bladeAxialOffset = 0; _cutWhenReady = _cutStarted = _cuttingMotionReady = false;
         _phase = Phase.Captured;
         Status = $"Ring selected on {target.Id}: radius {ring.Radius:F2} m. Approach ring will fly to the marked entry.";
         return true;
@@ -156,6 +159,7 @@ internal sealed class EvaCuttingAutopilot
         if (_phase != Phase.Hold)
         { Status = "Wait until the kitten is holding at the ring, inspect the pose, then start the cut."; return false; }
         if (_owner == null || _target == null) return false;
+        if (!settings.CuttingEnabled) { Status = "Enable Cut vessels on contact before starting the ring cut."; return false; }
         settings.Validate();
         if (!CanTrackRotation(_target, AvailablePulseAcceleration(_owner), settings.AutopilotOrbitSpeed,
             out _orbitSpeed, out string reason)) { Status = reason; return false; }
@@ -167,7 +171,8 @@ internal sealed class EvaCuttingAutopilot
     }
 
     internal AutopilotResult Update(SaberSettings settings, double simulationDt,
-        float bladeDeployment, int structuralCount, bool cuttingPoseReady, double3 bladeDirectionOwnerBody)
+        float bladeDeployment, int structuralCount, bool cuttingPoseReady, double3 bladeDirectionOwnerBody,
+        double3? bladeBaseOwnerBody = null)
     {
         if (!Active || _owner == null || _target == null) return AutopilotResult.Running;
         KittenEva owner = _owner; Vehicle target = _target;
@@ -178,7 +183,7 @@ internal sealed class EvaCuttingAutopilot
                 : AbortInternal("The targeted vessel is no longer available.");
         if (!ReferenceEquals(owner.Target, target)) return AbortInternal("Target changed; MMU control released.");
         if (!ValidateFlight(owner, out string reason) || !WithinEnvelope(owner, target, out reason)) return AbortInternal(reason);
-        if (!double.IsFinite(simulationDt) || simulationDt < 0 || simulationDt > .15)
+        if (!double.IsFinite(simulationDt) || simulationDt < 0 || simulationDt > SaberLimits.MaximumSimulationStep)
             return AbortInternal("The simulation step became unsafe for close-proximity guidance.");
         if (simulationDt == 0) { Suspend(); return AutopilotResult.Running; }
         double authority = AvailablePulseAcceleration(owner);
@@ -205,6 +210,12 @@ internal sealed class EvaCuttingAutopilot
         double3 positionBody = relativeCci.Transform(targetBody2Cci.Inverse());
         double3 velocityBody = RelativeVelocity(owner, target).Transform(targetBody2Cci.Inverse());
         if (!Finite(positionBody) || !Finite(velocityBody)) return AbortInternal("Invalid target-relative navigation state.");
+        if (cuttingPoseReady && bladeBaseOwnerBody is { } bladeBase && Finite(bladeBase))
+        {
+            // Put the blade, rather than the kitten's COM, in the selected cutting plane.
+            double3 offset = bladeBase.Transform(owner.GetBody2Cci()).Transform(targetBody2Cci.Inverse());
+            _bladeAxialOffset = double3.Dot(offset, _ring.Axis);
+        }
         double ringRadius = _ring.Radius + _clearance;
         double angularVelocity = (settings.AutopilotClockwise ? -1 : 1) * _orbitSpeed / ringRadius;
         double3 currentPoint = RingPoint(ringRadius, _angle);
@@ -242,15 +253,20 @@ internal sealed class EvaCuttingAutopilot
         {
             Status = !cuttingPoseReady ? "Holding until a fresh rendered saber pose is available."
                 : !_cuttingMotionReady ? "Reacquiring the ring point before resuming the cut."
-                : $"Cutting around the ring: {Progress:P0}, {_orbitSpeed:F3} m/s"
+                : $"Ring travel: {Progress:P0}, {_orbitSpeed:F3} m/s"
                     + (_orbitSpeed < settings.AutopilotOrbitSpeed * .99 ? " (speed reduced to suit MMU thrust)." : ".");
-            if (Math.Abs(_angle) >= CylinderOrbitGuidance.FullTurn)
-                return CompleteInternal("Cut orbit complete; MMU control released.");
+            // Overlap the start to close the seam even when the kitten trails its guidance point.
+            double overlap = 2 * Math.Asin(Math.Clamp(.25 / ringRadius, 0, 1)) + .05;
+            if (Math.Abs(_angle) >= CylinderOrbitGuidance.FullTurn + overlap)
+            {
+                Abort("Lap finished; checking the structural cut result.");
+                return AutopilotResult.OrbitFinished;
+            }
         }
         return AutopilotResult.Running;
     }
 
-    private double3 RingPoint(double radius, double angle) => _ring.Center
+    private double3 RingPoint(double radius, double angle) => FlightCenter
         + CylinderOrbitGuidance.Point(_ring.Axis, 0, _ring.Radial, radius, angle);
     private static double3 RelativeVelocity(KittenEva owner, Vehicle target) =>
         owner.GetVelocityCci() - target.GetVelocityCci()
@@ -297,6 +313,7 @@ internal sealed class EvaCuttingAutopilot
             Target spin: {spin:G4} rad/s ({spin * 180 / Math.PI:F3} degrees/s)
             Flight ring radius: {_ring.Radius + _clearance:F3} m; centre offset: {_ring.Center.Length():F3} m
             Cut speed requested: {settings.AutopilotOrbitSpeed:F3} m/s; planned: {plannedSpeed:F3} m/s
+            Blade plane alignment offset: {_bladeAxialOffset:F3} m
             {tracking}
             """);
     }
@@ -412,6 +429,7 @@ internal sealed class EvaCuttingAutopilot
         double3 desiredPositionBody, SaberSettings settings, double3 bladeDirectionOwnerBody)
     {
         double3 outwardBody = desiredPositionBody - _ring.Center;
+        outwardBody -= _ring.Axis * double3.Dot(outwardBody, _ring.Axis);
         double3 inwardCci = (-outwardBody.NormalizeOrZero()).Transform(targetBody2Cci);
         double3 axisCci = _ring.Axis.Transform(targetBody2Cci);
         doubleQuat desiredBody2Cci = CylinderOrbitGuidance.DesiredBody2Cci(bladeDirectionOwnerBody, inwardCci, axisCci, settings.AutopilotRollQuarterTurns);

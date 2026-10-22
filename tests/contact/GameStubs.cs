@@ -149,6 +149,8 @@ namespace KSA
     {
         public required PartModelModule.Template Template;
     }
+    public sealed class PartModelDynamicModule { public required PartModel PartModelDynamic; }
+    public sealed class PartModelGlassModule { public required PartModel PartModelGlass; }
 
     public readonly record struct KeyHash(int Value)
     {
