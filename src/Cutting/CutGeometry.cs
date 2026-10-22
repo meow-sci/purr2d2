@@ -1,10 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Purr2D2.Core;
 
 namespace Purr2D2.Cutting;
 
-// Engine-independent doubles: tests exercise the actual contact implementation.
+// Engine-independent geometry shared by target selection, slicing and visual contact.
 internal readonly record struct CutPoint(double X, double Y, double Z)
 {
     public override string ToString() => FormattableString.Invariant($"({X:G6}, {Y:G6}, {Z:G6})");
@@ -44,18 +43,6 @@ internal readonly record struct CutBounds(CutPoint Min, CutPoint Max)
 
 internal static class CutGeometry
 {
-    // A long blade moves farther at its tip during the same paw rotation. Keep the
-    // translation guard at the hilt, and separately bound angular/extension travel.
-    public static bool BladeMotionWithinLimit(CutPoint previousA, CutPoint previousB, CutPoint a, CutPoint b, double translationLimit)
-    {
-        double reach = Math.Max((previousB - previousA).Length, (b - a).Length);
-        return MotionWithinLimit(previousA, previousA, a, a, translationLimit)
-            && MotionWithinLimit(previousB, previousB, b, b, translationLimit + reach * .4);
-    }
-    public static bool MotionWithinLimit(CutPoint previousA, CutPoint previousB, CutPoint a, CutPoint b, double limit) =>
-        previousA.Finite && previousB.Finite && a.Finite && b.Finite && double.IsFinite(limit) && limit >= 0
-        && Math.Max((previousA - a).LengthSquared, (previousB - b).LengthSquared) <= limit * limit;
-
     // Closest point on triangle, including edges/vertices. Degenerate art is skipped at import.
     public static CutPoint ClosestPoint(CutPoint p, CutTriangle t)
     {
@@ -79,79 +66,6 @@ internal static class CutGeometry
         return t.A + ab * (vb * inverse) + ac * (vc * inverse);
     }
 
-    public static double SegmentTriangleDistanceSquared(CutPoint a, CutPoint b, CutTriangle triangle, out CutPoint onSurface)
-    {
-        var delta = b - a;
-        var normal = CutPoint.Cross(triangle.B - triangle.A, triangle.C - triangle.A);
-        double denominator = CutPoint.Dot(normal, delta);
-        if (Math.Abs(denominator) > 1e-14 * Math.Max(1, normal.Length * delta.Length))
-        {
-            double t = CutPoint.Dot(normal, triangle.A - a) / denominator;
-            if (t >= 0 && t <= 1)
-            {
-                var p = a + delta * t;
-                var q = ClosestPoint(p, triangle);
-                if ((p - q).LengthSquared < 1e-20) { onSurface = q; return 0; }
-            }
-        }
-        var bestSurface = ClosestPoint(a, triangle);
-        double best = (a - bestSurface).LengthSquared;
-        var fromEnd = ClosestPoint(b, triangle);
-        double endDistance = (b - fromEnd).LengthSquared;
-        if (endDistance < best) { best = endDistance; bestSurface = fromEnd; }
-        Edge(triangle.A, triangle.B); Edge(triangle.B, triangle.C); Edge(triangle.C, triangle.A);
-        onSurface = bestSurface;
-        return best;
-
-        void Edge(CutPoint c, CutPoint d)
-        {
-            double distance = SegmentDistanceSquared(a, b, c, d, out var edgePoint);
-            if (distance < best) { best = distance; bestSurface = edgePoint; }
-        }
-    }
-
-    private static double SegmentDistanceSquared(CutPoint p, CutPoint q, CutPoint r, CutPoint s, out CutPoint onSecond)
-    {
-        var d1 = q - p; var d2 = s - r; var offset = p - r;
-        double a = d1.LengthSquared, e = d2.LengthSquared, f = CutPoint.Dot(d2, offset), u, v;
-        if (a <= 1e-24 && e <= 1e-24) { onSecond = r; return (p - r).LengthSquared; }
-        if (a <= 1e-24) { u = 0; v = Math.Clamp(f / e, 0, 1); }
-        else
-        {
-            double c = CutPoint.Dot(d1, offset);
-            if (e <= 1e-24) { v = 0; u = Math.Clamp(-c / a, 0, 1); }
-            else
-            {
-                double b = CutPoint.Dot(d1, d2), determinant = a * e - b * b;
-                u = determinant > 1e-24 ? Math.Clamp((b * f - c * e) / determinant, 0, 1) : 0;
-                v = (b * u + f) / e;
-                if (v < 0) { v = 0; u = Math.Clamp(-c / a, 0, 1); }
-                else if (v > 1) { v = 1; u = Math.Clamp((b - c) / a, 0, 1); }
-            }
-        }
-        onSecond = r + d2 * v;
-        return (p + d1 * u - onSecond).LengthSquared;
-    }
-
-    // Linear relative sweep; a bounded radius expansion covers the distance between samples.
-    // Above the motion limit the caller resets history, so teleports never cut along their path.
-    public static bool SweepContact(CutPoint previousA, CutPoint previousB, CutPoint a, CutPoint b,
-        CutTriangle triangle, double radius, out CutPoint surface)
-    {
-        double travel = Math.Max((previousA - a).Length, (previousB - b).Length);
-        int steps = Math.Clamp((int)Math.Ceiling(travel / Math.Max(radius, .001)), 1, 128);
-        double conservativeRadius = radius + travel / (steps * 2);
-        double best = double.PositiveInfinity;
-        surface = default;
-        for (int i = 0; i <= steps; i++)
-        {
-            double t = i / (double)steps;
-            double distance = SegmentTriangleDistanceSquared(previousA + (a - previousA) * t,
-                previousB + (b - previousB) * t, triangle, out var hit);
-            if (distance < best) { best = distance; surface = hit; }
-        }
-        return best <= conservativeRadius * conservativeRadius;
-    }
 }
 
 // Local-space BVH shared by every instance of an immutable native mesh.
@@ -205,16 +119,5 @@ internal sealed class CutMesh
             }
             else { Visit(node.Left); Visit(node.Right); }
         }
-    }
-}
-
-internal sealed class CutHeat
-{
-    public double Seconds { get; private set; }
-    public bool Advance(bool contact, double delta, double threshold)
-    {
-        if (!double.IsFinite(delta) || delta <= 0 || delta > SaberLimits.MaximumSimulationStep) return false;
-        Seconds = Math.Max(0, Seconds + delta * (contact ? 1 : -.5));
-        return Seconds >= Math.Max(.05, threshold);
     }
 }

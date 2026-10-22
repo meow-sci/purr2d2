@@ -13,29 +13,49 @@ internal readonly record struct SliceAttempt(bool Success, string Message);
 internal sealed class ArbitrarySlicer
 {
     internal Action<Part, double3, double3, double>? CutSparks;
-    internal SliceAttempt Check(Part struck, SlicePlane plane)
+    internal SliceAttempt PlanAssistedSlice(Part struck, out SlicePlane plane)
     {
+        plane = default;
         try
         {
             if (!NativeSlicePhysics.ValidateSource(struck, out string reason)) return new(false, reason);
-            if (!TryGather(struck.StructuralPart, out var source, out _, out reason)) return new(false, reason);
-            if (!PlaneSlicer.TrySliceCompound(source, plane, out var result, out reason))
-                return new(false, "Slice refused: " + reason);
-            foreach (var piece in result!.Pieces)
+            var full = struck.StructuralPart;
+            if (!TryGather(full, out var source, out _, out reason)) return new(false, reason);
+            if (!double4x4.Invert(full.MatrixAsmb2VehicleAsmb, out var inverse))
+                return new(false, "Part transform is unavailable.");
+            // Local coordinate planes transform by inverse transpose, including nonuniform scale.
+            CutPoint[] axes = [new(inverse.M11, inverse.M21, inverse.M31),
+                new(inverse.M12, inverse.M22, inverse.M32), new(inverse.M13, inverse.M23, inverse.M33)];
+            string failure = "No broad section could be found.";
+            foreach (var candidate in AssistedSliceGeometry.Candidates(source, axes))
             {
-                if (!SlicePrincipalFrame.TryCreate(piece, out var frame, out reason)
-                    || !SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var solids, out _, out reason))
-                    return new(false, reason);
-                int groups = solids.Sum(s => s.Select(f => f.Material).Distinct().Count());
-                int points = solids.SelectMany(s => s).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Take(32769).Count();
-                if (groups > 511 || points > 32768 || piece.Faces.Length > 100_000)
-                    return new(false, "This cut exceeds the native fragment geometry budget; choose a less detailed section.");
+                if (!PlaneSlicer.TrySliceCompound(source, candidate, out var result, out failure)) continue;
+                var check = CheckPieces(result!);
+                if (!check.Success) { failure = check.Message; continue; }
+                // Reuse the same input on commit; do not apply the slicer's microscopic seam nudge twice.
+                plane = candidate;
+                return new(true, "Slice ready.");
             }
-            return result!.Pieces.Length is >= 2 and <= 8
-                ? new(true, "Selected plane can slice this part.")
-                : new(false, "Slice would create too many disconnected fragments (maximum 8).");
+            return new(false, "This part could not be sliced: " + failure);
         }
-        catch (Exception error) { return new(false, "Slice check failed: " + error.Message); }
+        catch (Exception error) { return new(false, "Slice preparation failed: " + error.Message); }
+    }
+
+    private static SliceAttempt CheckPieces(PlaneSliceResult result)
+    {
+        foreach (var piece in result.Pieces)
+        {
+            if (!SlicePrincipalFrame.TryCreate(piece, out var frame, out string reason)
+                || !SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var solids, out _, out reason))
+                return new(false, reason);
+            int groups = solids.Sum(s => s.Select(f => f.Material).Distinct().Count());
+            int points = solids.SelectMany(s => s).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Take(65537).Count();
+            if (groups > 2047 || points > 65536 || piece.Faces.Length > 100_000)
+                return new(false, "This cut exceeds the native fragment geometry budget; choose a less detailed section.");
+        }
+        return result.Pieces.Length is >= 2 and <= 8
+            ? new(true, "Selected plane can slice this part.")
+            : new(false, "Slice would create too many disconnected fragments (maximum 8).");
     }
 
     internal SliceAttempt Slice(Part struck, SlicePlane plane, double now)

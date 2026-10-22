@@ -16,7 +16,8 @@ from validate import DEFAULT_SOURCE, _run_managed_project
 
 def fixtures(content):
     for family, target in [('FuelTankA', 'CoreFuelTankA_Prefab_LF3W3HA'),
-                           ('CommandA', 'CoreCommandA_Prefab_MediumCapsuleVariantA')]:
+                           ('CommandA', 'CoreCommandA_Prefab_MediumCapsuleVariantA'),
+                           *[('ServiceModuleA', f'CoreServiceModuleA_Prefab_SetAHeight{height}') for height in 'ABCD']]:
         def load_meshes(atlas):
             data = (content / 'Meshes' / f'{atlas}_MeshAtlas.glb').read_bytes()
             length = struct.unpack_from('<I', data, 12)[0]
@@ -47,6 +48,7 @@ def fixtures(content):
         for xml in content.glob("*Assets.xml"):
             definitions.update({e.get("Id"): e for e in ET.parse(xml).getroot() if e.tag in ("Part", "SubPart") and e.get("Id")})
         groups = []
+        materials = {}
 
         def vector(node, default):
             return [float(node.get(a, default)) if node is not None else float(default) for a in 'XYZ']
@@ -74,6 +76,8 @@ def fixtures(content):
             for model in definition:
                 if model.tag in ('PartModel', 'PartModelDynamic', 'PartModelGlass'):
                     mesh_id = model.find('Mesh').get('Id')
+                    material_key = model.find('Material').get('Id') + ':' + model.tag
+                    material_id = materials.setdefault(material_key, len(materials))
                     if mesh_id not in meshes:
                         meshes.update(load_meshes(mesh_id.split('_')[0]))
                     for triangle in meshes[mesh_id]:
@@ -82,7 +86,7 @@ def fixtures(content):
                             p, n = v[:3], v[3:6]
                             for instance in transforms:
                                 p, n = transform(p, instance), transform(n, instance, True)
-                            out.append(p + n + v[6:])
+                            out.append(p + n + v[6:] + [material_id])
                         faces.append(out)
             if faces:
                 groups.append(faces)
@@ -98,7 +102,7 @@ if __name__ == '__main__':
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(list(fixtures(content))))
     required = [DEFAULT_SOURCE / p for p in ('src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs',
-                'src/Cutting/SliceShellBuilder.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'tests/StockSliceChecks.cs')]
+                'src/Rendering/FragmentGlbWriter.cs', 'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'tests/StockSliceChecks.cs')]
     code, log = _run_managed_project(DEFAULT_SOURCE, 'StockSliceChecks', required,
         'internal static class Program { static void Main() => StockSliceChecks.Run(' + json.dumps(str(output)) + '); }')
     print(log)

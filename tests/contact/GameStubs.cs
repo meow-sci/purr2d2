@@ -123,14 +123,22 @@ namespace KSA
     public sealed class ModuleCollection
     {
         private readonly List<object> _items = [];
-        public void Add(object item) => _items.Add(item);
-        public bool HasAny<T>() => _items.OfType<T>().Any();
-        public IEnumerable<T> Get<T>() => _items.OfType<T>();
+        private readonly Dictionary<Type, Array> _typed = new();
+        public void Add(object item) { _items.Add(item); _typed.Clear(); }
+        // The native ModuleList returns Span<T>. Mirror its allocation-free reads so
+        // hot-loop measurements do not benchmark LINQ in the test boundary instead.
+        public bool HasAny<T>() => !Get<T>().IsEmpty;
+        public Span<T> Get<T>()
+        {
+            if (!_typed.TryGetValue(typeof(T), out var items)) _typed[typeof(T)] = items = _items.OfType<T>().ToArray();
+            return (T[])items;
+        }
     }
 
     public sealed class MeshReference
     {
         public double3[][]? PositionsCompare;
+        public double BoundingSphereRadius = 20;
         public MeshReference Get() => this;
     }
 

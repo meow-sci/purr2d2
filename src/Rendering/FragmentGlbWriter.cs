@@ -11,7 +11,7 @@ internal static class FragmentGlbWriter
 
     internal static byte[] Write(IReadOnlyList<Group> groups)
     {
-        if (groups.Count == 0 || groups.Count > 64) throw new InvalidDataException("Fragment material group count is outside 1..64.");
+        if (groups.Count == 0 || groups.Count > 2048) throw new InvalidDataException("Fragment material group count is outside 1..2048.");
         using var binary = new MemoryStream();
         using var writer = new BinaryWriter(binary, Encoding.UTF8, leaveOpen: true);
         var views = new List<object>();

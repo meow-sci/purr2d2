@@ -14,14 +14,12 @@ using Purr2D2.Core;
 
 namespace Purr2D2.Rendering;
 
-/// <summary>Native PBR hilt, depth-tested HDR blade, local light spill and part-anchored cut scars.</summary>
+/// <summary>Native PBR hilt, depth-tested HDR blade, local light spill and bounded cut sparks.</summary>
 public sealed unsafe class SaberRenderer : IDisposable
 {
-    private const int MaxScars = 4096;
     private static SaberRenderer? _instance;
     private readonly Dictionary<int, List<Blade>> _blades = new();
-    private readonly List<Scar> _scars = new();
-    private readonly List<Scar> _sparks = new();
+    private readonly List<Spark> _sparks = new();
     private readonly Dictionary<PassKey, PipelinePair> _pipelines = new();
     private StaticMeshRenderable? _hilt;
     private VkPipelineLayout _layout;
@@ -37,9 +35,9 @@ public sealed unsafe class SaberRenderer : IDisposable
     private double _now;
 
     private readonly record struct Blade(float4x4 EmitterToEgo, float Length, float3 Color);
-    private readonly record struct Scar(Part Part, double3 A, double3 B, double3 Normal, double Born);
+    private readonly record struct Spark(Part Part, double3 A, double3 B, double3 Normal, double Born);
     private readonly record struct PassKey(VkSampleCountFlags Samples, VkFormat Color, VkFormat Depth);
-    private readonly record struct PipelinePair(VkPipeline Glow, VkPipeline Char);
+    private readonly record struct PipelinePair(VkPipeline Glow);
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct GlowPush
@@ -49,7 +47,6 @@ public sealed unsafe class SaberRenderer : IDisposable
         public float4 Shape;
     }
 
-    public int ScarCount => _scars.Count;
     public bool HiltReady => _hilt != null;
     public bool GlowReady => _hasLayout && !_gpuFailed;
     public string? LastError { get; private set; }
@@ -109,7 +106,7 @@ public sealed unsafe class SaberRenderer : IDisposable
                 var key = Key(target);
                 if (_pipelines.ContainsKey(key)) continue;
                 var glow = BuildPipeline(renderer, target, additive: true);
-                try { _pipelines.Add(key, new PipelinePair(glow, BuildPipeline(renderer, target, additive: false))); }
+                try { _pipelines.Add(key, new PipelinePair(glow)); }
                 catch { renderer.Device.DestroyPipeline(glow, null); throw; }
             }
         }
@@ -145,31 +142,10 @@ public sealed unsafe class SaberRenderer : IDisposable
         catch (Exception ex) { Report("saber submission", ex); }
     }
 
-    public void AddScar(Part part, double3 aLocal, double3 bLocal, double3 normalLocal, double now)
-    {
-        if (_disposed || !Finite(aLocal) || !Finite(bLocal) || !Finite(normalLocal)) return;
-        AddCutSparks(part, bLocal, normalLocal, now);
-        // Coalesce nearby strokes so a slow multi-minute lap does not evict its own beginning.
-        // Keep short segments to follow curved hulls; hot glow cools, but the dark cut trace stays.
-        if (_scars.Count > 0)
-        {
-            var last = _scars[^1];
-            if (ReferenceEquals(last.Part, part) && now - last.Born < .2
-                && (last.B - aLocal).Length() < .025 && (last.A - bLocal).Length() < .075
-                && double3.Dot(last.Normal.NormalizeOrZero(), normalLocal.NormalizeOrZero()) > .98)
-            {
-                _scars[^1] = last with { B = bLocal, Born = now };
-                return;
-            }
-        }
-        if (_scars.Count == MaxScars) _scars.RemoveAt(0);
-        _scars.Add(new Scar(part, aLocal, bLocal, normalLocal, now));
-    }
-
     internal void AddCutSparks(Part part, double3 pointLocal, double3 normalLocal, double now)
     {
         if (_disposed || !Finite(pointLocal) || !Finite(normalLocal)) return;
-        if (_sparks.Count >= 192) _sparks.RemoveAt(0);
+        if (_sparks.Count >= 64) _sparks.RemoveAt(0);
         _sparks.Add(new(part, pointLocal, pointLocal, normalLocal, now));
     }
 
@@ -177,11 +153,11 @@ public sealed unsafe class SaberRenderer : IDisposable
     public void Update(double now)
     {
         _now = now;
-        _scars.RemoveAll(s => s.Part.Tree?.OwningVehicle is not { IsDisposed: false });
-        _sparks.RemoveAll(s => now - s.Born > .7 || s.Part.Tree?.OwningVehicle is not { IsDisposed: false });
+        for (int i = _sparks.Count - 1; i >= 0; i--)
+            if (now - _sparks[i].Born > .7 || _sparks[i].Part.Tree?.OwningVehicle is not { IsDisposed: false }) _sparks.RemoveAt(i);
     }
 
-    public void ClearScars() { _scars.Clear(); _sparks.Clear(); }
+    public void ClearEffects() => _sparks.Clear();
 
     private static PassKey Key(RenderTarget target) => new(target.Samples,
         target.ColorImage?.Format ?? VkFormat.Undefined, target.DepthImage?.Format ?? VkFormat.Undefined);
@@ -226,7 +202,7 @@ public sealed unsafe class SaberRenderer : IDisposable
     {
         if (_disposed || _gpuFailed || !viewport.Visible
             || !_pipelines.TryGetValue(Key(viewport.OffscreenTarget), out var pair)) return;
-        if (_scars.Count == 0 && _sparks.Count == 0 && (!_blades.TryGetValue(viewport.ShaderSlot, out var blades) || blades.Count == 0)) return;
+        if (_sparks.Count == 0 && (!_blades.TryGetValue(viewport.ShaderSlot, out var blades) || blades.Count == 0)) return;
 
         // The blade has no depth writes. Drawing before atmosphere/cloud composition makes
         // those passes attenuate its light using the distant planet's depth instead of the blade's.
@@ -284,19 +260,11 @@ public sealed unsafe class SaberRenderer : IDisposable
         var projection = camera.MVP.viewProjection;
         Program.SetViewport(commands);
 
-        if (_scars.Count > 0)
-        {
-            commands.BindPipeline(VkPipelineBindPoint.Graphics, pair.Char);
-            foreach (var scar in _scars)
-                if (TryScarFrame(scar, camera, out var a, out var b, out var normal))
-                    DrawRibbon(commands, projection, a, b, normal, 0.026f, 0.007f,
-                        new float4(0.018f, 0.012f, 0.01f, 0.88f), isChar: true, billboard: false);
-        }
         commands.BindPipeline(VkPipelineBindPoint.Graphics, pair.Glow);
         foreach (var spark in _sparks)
         {
             double age = Math.Max(0, _now - spark.Born);
-            if (age > .7 || !TryScarFrame(spark, camera, out var origin, out _, out var normal)) continue;
+            if (age > .7 || !TrySparkFrame(spark, camera, out var origin, out _, out var normal)) continue;
             var tangent = double3.Cross(normal, Math.Abs(normal.X) < .8 ? double3.UnitX : double3.UnitY).NormalizeOrZero();
             var bitangent = double3.Cross(normal, tangent);
             for (int i = 0; i < 3; i++)
@@ -308,15 +276,6 @@ public sealed unsafe class SaberRenderer : IDisposable
                     new float4(1, (float)(.65 * (1 - age / .7)), .025f, (float)(9 * Math.Pow(1 - age / .7, 2))),
                     isChar: false, billboard: true);
             }
-        }
-        foreach (var scar in _scars)
-        {
-            var age = Math.Max(0, _now - scar.Born);
-            if (age > 18 || !TryScarFrame(scar, camera, out var a, out var b, out var normal)) continue;
-            var brightness = (float)(7 * Math.Exp(-age / 3.5));
-            var green = (float)Math.Max(0.04, 0.48 * Math.Exp(-age / 4));
-            DrawRibbon(commands, projection, a, b, normal, 0.023f, 0.0055f,
-                new float4(1, green, 0.015f, brightness), isChar: false, billboard: false);
         }
         if (!_blades.TryGetValue(viewport.ShaderSlot, out var blades)) return;
         foreach (var blade in blades)
@@ -334,17 +293,17 @@ public sealed unsafe class SaberRenderer : IDisposable
         }
     }
 
-    private static bool TryScarFrame(Scar scar, Camera camera, out double3 a, out double3 b, out double3 normal)
+    private static bool TrySparkFrame(Spark spark, Camera camera, out double3 a, out double3 b, out double3 normal)
     {
         a = b = normal = double3.Zero;
-        if (scar.Part.Tree?.OwningVehicle is not { } vehicle) return false;
+        if (spark.Part.Tree?.OwningVehicle is not { } vehicle) return false;
         var vehicleMatrix = vehicle.GetMatrixAsmb2Ego(camera);
-        var matrix = scar.Part.MatrixAsmb2Ego(in vehicleMatrix);
-        a = scar.A.Transform(matrix);
-        b = scar.B.Transform(matrix);
+        var matrix = spark.Part.MatrixAsmb2Ego(in vehicleMatrix);
+        a = spark.A.Transform(matrix);
+        b = spark.B.Transform(matrix);
         // Normals require inverse-transpose when the authored part has nonuniform scale.
         if (!double4x4.Invert(matrix, out var inverse)) return false;
-        normal = double3.TransformNormal(scar.Normal, double4x4.Transpose(inverse));
+        normal = double3.TransformNormal(spark.Normal, double4x4.Transpose(inverse));
         var n = normal.Length();
         if (!Finite(a) || !Finite(b) || n < 1e-9) return false;
         normal /= n;
@@ -467,7 +426,6 @@ public sealed unsafe class SaberRenderer : IDisposable
         if (ReferenceEquals(_instance, this)) _instance = null;
         _emitterOwner = null;
         _blades.Clear();
-        _scars.Clear();
         _sparks.Clear();
         // Initialization can fail before the host renderer exists. In that case there is
         // nothing GPU-owned to free, and looking up the device would itself be unsafe.
@@ -480,7 +438,6 @@ public sealed unsafe class SaberRenderer : IDisposable
         foreach (var pair in _pipelines.Values)
         {
             device.DestroyPipeline(pair.Glow, null);
-            device.DestroyPipeline(pair.Char, null);
         }
         _pipelines.Clear();
         if (_hasLayout) device.DestroyPipelineLayout(_layout, null);

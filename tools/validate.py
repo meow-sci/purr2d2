@@ -525,11 +525,10 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     source = source.resolve()
     core_sources = [
         source / "src/Core/BladeState.cs",
+        source / "src/Core/AssistedSliceSequence.cs",
+        source / "src/Cutting/AssistedSliceGeometry.cs",
+        source / "tests/AssistedSliceChecks.cs",
         source / "src/Core/SaberSettings.cs",
-        source / "src/Autopilot/CylinderOrbitGuidance.cs",
-        source / "src/Autopilot/AutopilotGeometryLimits.cs",
-        source / "src/Autopilot/CuttingRingGeometry.cs",
-        source / "src/Autopilot/EvaApproachGuidance.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Cutting/PlaneSlicer.cs",
         source / "src/Cutting/SliceShellBuilder.cs",
@@ -537,41 +536,31 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "src/Pose/SaberPoseMath.cs",
         source / "src/Rendering/FragmentGlbWriter.cs",
         source / "src/Slicing/SlicePrincipalFrame.cs",
-        source / "tests/CuttingChecks.cs",
         source / "tests/PlaneSliceChecks.cs",
         source / "tests/ShellSliceChecks.cs",
         source / "tests/CoreChecks.cs",
         source / "tests/PoseChecks.cs",
         source / "tests/SlicingPhysicsChecks.cs",
-        source / "tests/AutopilotChecks.cs",
-        source / "tests/CuttingRingChecks.cs",
-        source / "tests/EvaApproachChecks.cs",
     ]
-    contact_sources = [
-        source / "src/Cutting/SaberCutter.cs",
-        source / "src/Cutting/RingCutCoverage.cs",
+    target_sources = [
+        source / "src/Cutting/PartSliceTargeting.cs",
+        source / "src/Cutting/PartSliceTargeting.Selection.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Cutting/PlaneSlicer.cs",
         source / "tests/contact/GameStubs.cs",
-        source / "tests/contact/ContactChecks.cs",
+        source / "tests/contact/TargetSelectionChecks.cs",
+        source / "tests/contact/ContactEffectsChecks.cs",
+        source / "src/Rendering/SaberContactProbe.cs",
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); CuttingChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); AutopilotChecks.Run(); CuttingRingChecks.Run(); EvaApproachChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); AssistedSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); } }\n"
     )
     outputs = []
     result = 0
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),
-        ("ContactChecks", contact_sources, None),
-        ("EvaControllerChecks", [source / "src/Autopilot/EvaCuttingAutopilot.cs", source / "src/Autopilot/CylinderOrbitGuidance.cs",
-            source / "src/Autopilot/EvaApproachGuidance.cs", source / "src/Autopilot/CuttingRingGeometry.cs",
-            source / "src/Autopilot/TargetSurfaceSnapshot.cs", source / "src/Autopilot/AutopilotGeometryLimits.cs",
-            source / "src/Cutting/CutGeometry.cs", source / "src/Core/SaberSettings.cs",
-            source / "tests/autopilot/GameStubs.cs", source / "tests/autopilot/ControllerChecks.cs"], None),
-        ("TargetSurfaceChecks", [source / "src/Autopilot/TargetSurfaceSnapshot.cs", source / "src/Autopilot/AutopilotGeometryLimits.cs", source / "src/Cutting/CutGeometry.cs",
-            source / "src/Cutting/PlaneSlicer.cs", source / "tests/contact/GameStubs.cs", source / "tests/TargetSurfaceSnapshotChecks.cs"],
-            "internal static class Program { private static void Main() => TargetSurfaceSnapshotChecks.Run(); }"),
+        ("TargetSelectionChecks", target_sources, None),
     ):
         code, output = _run_managed_project(source, name, required, program)
         outputs.append(output)

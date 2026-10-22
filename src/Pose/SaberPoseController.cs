@@ -23,9 +23,9 @@ public sealed class SaberPoseController : IDisposable
     private bool _changedMmu;
     private bool _hasBodyFrame;
     private double4x4 _emitterToBody;
-    private float _swingTime = SwingDuration;
     private string? _failure;
-    private const float SwingDuration = 0.62f;
+    private float3? _sliceDirection;
+    private float SwingAngle;
 
     public SaberPoseController(Action<KittenEva, IViewport, float4x4>? draw = null)
     {
@@ -104,7 +104,6 @@ public sealed class SaberPoseController : IDisposable
         float dt = double.IsFinite(dtPlayer) ? (float)Math.Clamp(dtPlayer, 0.0, 0.1) : 0f;
         float target = equipped && Eligible ? 1f : 0f;
         Blend = MoveTowards(Blend, target, dt / 0.18f);
-        _swingTime = MathF.Min(SwingDuration, _swingTime + dt);
         if (!equipped || !Eligible) _hasBodyFrame = false;
         if (_avatar is not null)
         {
@@ -119,10 +118,16 @@ public sealed class SaberPoseController : IDisposable
         }
     }
 
-    public void Swing()
+    internal void SetSliceSwing(float3 direction, float3 normal, double progress)
     {
-        if (Active && _equipped && _swingTime >= SwingDuration * 0.75f) _swingTime = 0f;
+        // One broad stroke through the selected section, followed by a short recovery.
+        float angle = (float)(Math.Clamp(progress / .8, 0, 1) * 2 - 1) * .95f;
+        SwingAngle = angle;
+        _sliceDirection = Unit(float3.Transform(Unit(direction, float3.UnitZ),
+            floatQuat.CreateFromAxisAngle(Unit(normal, float3.UnitY), angle)), float3.UnitZ);
     }
+
+    internal void ClearSliceSwing() { _sliceDirection = null; SwingAngle = 0; }
 
     /// <summary>
     /// A fresh emitter-local metres to body-COM-relative metres matrix. Rejects
@@ -163,7 +168,7 @@ public sealed class SaberPoseController : IDisposable
         _processor = null;
         _equipped = false;
         Blend = 0f;
-        _swingTime = SwingDuration;
+        ClearSliceSwing();
         _hasBodyFrame = false;
         _failure = null;
         FrameNumber = ulong.MaxValue;
@@ -194,12 +199,7 @@ public sealed class SaberPoseController : IDisposable
     private static bool Supported(LocomotionMode mode) => mode is LocomotionMode.Grounded
         or LocomotionMode.Airborne or LocomotionMode.Mmu;
 
-    internal bool Swinging => _swingTime < SwingDuration;
-    private float SwingAngle => _swingTime >= SwingDuration ? 0f
-        : MathF.Sin((_swingTime / SwingDuration) * MathF.PI * 2f) * 1.05f;
-
-    private float3 Direction => Unit(float3.Transform(BladeDirectionModel,
-        floatQuat.CreateFromAxisAngle(float3.UnitY, SwingAngle)), float3.UnitY);
+    private float3 Direction => _sliceDirection ?? Unit(BladeDirectionModel, float3.UnitY);
 
     private void Publish(float4x4 emitterInModelCm, float4x4 modelToEgo)
     {

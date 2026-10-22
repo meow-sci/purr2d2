@@ -66,7 +66,6 @@ internal static class CoreChecks
         Check(SaberLimits.AppliedDelta(false, 5, .2) == 0 && SaberLimits.AppliedDelta(true, 0, .2) == 0
             && SaberLimits.AppliedDelta(true, 10, .1) == 0 && SaberLimits.AppliedDelta(true, 5, .3) == 0,
             "duplicate steps, pause, excessive warp and stalled frames do not advance cutting");
-        Check(!new SaberSettings().ArbitrarySlicing, "arbitrary mesh slicing is opt-in by default");
         var settings = new SaberSettings
         {
             BladeLength = 99,
@@ -74,20 +73,9 @@ internal static class CoreChecks
             ColorG = float.NaN,
             ColorB = 2,
             Volume = -2,
-            ContactSeconds = 0,
-            CuttingEnabled = false,
-            FragmentStruckPart = true,
-            ArbitrarySlicing = true,
-            AutopilotClearance = 99,
-            AutopilotOrbitSpeed = float.NaN,
-            AutopilotAxis = 8,
-            AutopilotRollQuarterTurns = -1,
         };
         settings.Validate();
-        Check(settings.BladeLength == 12f && settings.ColorR == 0 && settings.ColorG == .75f
-            && settings.ColorB == 1 && settings.Volume == 0 && settings.ContactSeconds == .1f
-            && settings.AutopilotClearance == 1.5f && settings.AutopilotOrbitSpeed == .15f
-            && settings.AutopilotAxis == 2 && settings.AutopilotRollQuarterTurns == 3,
+        Check(settings.BladeLength == 12f && settings.ColorR == 0 && settings.ColorG == .75f && settings.ColorB == 1 && settings.Volume == 0,
             "settings clamp high, low, and non-finite values to supported boundaries");
 
         string directory = Path.Combine(Path.GetTempPath(), "purr2d2-checks-" + Guid.NewGuid().ToString("N"));
@@ -96,18 +84,13 @@ internal static class CoreChecks
         {
             settings.Save(path);
             var loaded = SaberSettings.Load(path);
-            Check(loaded.BladeLength == 12f && loaded.ColorR == 0 && loaded.ColorG == .75f
-                && loaded.ColorB == 1 && loaded.Volume == 0 && loaded.ContactSeconds == .1f
-                && !loaded.CuttingEnabled && loaded.FragmentStruckPart && loaded.ArbitrarySlicing
-                && loaded.AutopilotClearance == 1.5f && loaded.AutopilotAxis == 2
-                && loaded.AutopilotRollQuarterTurns == 3,
+            Check(loaded.BladeLength == 12f && loaded.ColorR == 0 && loaded.ColorG == .75f && loaded.ColorB == 1 && loaded.Volume == 0,
                 "settings save and load round-trip preserves validated preferences");
 
             File.WriteAllText(path, "{\"BladeLength\":-3,\"ColorR\":2,\"ColorG\":0.5,\"ColorB\":0.5,\"Volume\":2,\"ContactSeconds\":9}");
             loaded = SaberSettings.Load(path);
-            Check(loaded.BladeLength == .25f && loaded.ColorR == 1 && loaded.Volume == 1
-                && loaded.ContactSeconds == 5,
-                "loading persisted settings reapplies lower and upper boundaries");
+            Check(loaded.BladeLength == .25f && loaded.ColorR == 1 && loaded.Volume == 1,
+                "loading old contact settings ignores retired fields and validates remaining preferences");
         }
         finally
         {

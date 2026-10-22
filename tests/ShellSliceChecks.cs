@@ -28,6 +28,17 @@ internal static class ShellSliceChecks
         SliceFace[] touching = [..panel, new(Vertex(1, 1), Vertex(2, 1), Vertex(2, 2), 6), new(Vertex(1, 1), Vertex(2, 2), Vertex(1, 2), 6)];
         Check(SliceShellBuilder.TryPrepare([touching], out var separate, out reason)
             && separate.All(s => PlaneSlicer.TryAudit(s, out _)), "panels touching only at a vertex form independent closed shells");
+        // Reproduce a float-collapsed cap sliver: one triangle has a split edge,
+        // while its neighbour still has the original long edge (a T-junction).
+        var original = solid[0]; var face = original[0]; var midpoint = SliceVertex.Lerp(face.A, face.B, .5);
+        SliceFace[] junction = [new(face.A, midpoint, face.C, face.Material), new(midpoint, face.B, face.C, face.Material), ..original.Skip(1)];
+        var properties = PlaneSlicer.Properties(original);
+        var junctionPiece = new SlicePiece(junction, properties.Volume, properties.Centroid, properties.Inertia, true);
+        Check(!PlaneSlicer.TryAudit(junction, out _), "precision fixture starts with a real boundary T-junction");
+        Check(SliceMeshPrecision.TryPrepare(junctionPiece, double4x4.Identity, out var repaired, out _, out reason)
+            && PlaneSlicer.TryAuditCompound(repaired, out _, out _), "float export stitches collapsed edges into a closed surface: " + reason);
+        Check(!SliceMeshPrecision.TryPrepare(junctionPiece with { Faces = original.Skip(1).ToArray() }, double4x4.Identity, out _, out _, out _),
+            "precision repair refuses a missing surface instead of filling arbitrary holes");
         var damaged = panel.Select(f => f with { A = f.A with { Position = new(double.NaN, 0, 0) } }).ToArray();
         Check(!SliceShellBuilder.TryPrepare([damaged], out _, out _), "nonfinite art is refused before asset creation");
         Console.WriteLine("PASS: open shell preparation and native mesh precision checks");

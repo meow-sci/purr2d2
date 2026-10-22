@@ -60,7 +60,7 @@ internal static class PlaneSlicer
         result = null;
         try
         {
-            Require(authoredGroups.Count > 0 && authoredGroups.Count <= 512, "Authored compound group count exceeds the runtime budget.");
+            Require(authoredGroups.Count > 0 && authoredGroups.Count <= 2048, "Authored compound group count exceeds the runtime budget.");
             int triangleCount = authoredGroups.Sum(x => x.Length);
             Require(triangleCount >= 4 && triangleCount <= MaximumSourceFaces, "Compound source triangle count is outside the slicing budget.");
             var allPoints = authoredGroups.SelectMany(x => x).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
@@ -99,7 +99,7 @@ internal static class PlaneSlicer
                 }
                 foreach (var solid in solids)
                 {
-                    Require(++solidCount <= 512, "Compound contains too many independent closed solids.");
+                    Require(++solidCount <= 2048, "Compound contains too many independent closed solids.");
                     var faces = solid.Faces.ToArray(); var props = Properties(faces);
                     Require(props.Volume > epsilon * epsilon * epsilon * 100, "Compound solid has nonpositive material volume.");
                     sourceVolume += props.Volume;
@@ -147,7 +147,7 @@ internal static class PlaneSlicer
     public static bool TryAuditCompound(IReadOnlyList<SliceFace[]> solids, out double volume, out string failure)
     {
         volume = 0;
-        if (solids.Count == 0 || solids.Count > 512 || solids.Sum(s => s.Length) > MaximumOutputFaces)
+        if (solids.Count == 0 || solids.Count > 2048 || solids.Sum(s => s.Length) > MaximumOutputFaces)
         { failure = "Generated closed-solid compound exceeds the audit budget."; return false; }
         foreach (var solid in solids)
         {

@@ -40,8 +40,6 @@ static class HostInspection
                 new("KSA.Program", "PrepareFrame", "KSA.Program+OnFrameResult", false, MethodAttributes.Private, "System.Double", "System.Double"),
                 new("KSA.Program", "OnFrameEditor", "System.Void", false, MethodAttributes.Private, "System.Double"),
                 new("KSA.Program", "OnFrameViewports", "System.Void", false, MethodAttributes.Private, "System.Double"),
-                new("KSA.Program", "OnMouseButton", "System.Void", false, MethodAttributes.Public,
-                    "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwMouseButton", "Brutal.GlfwApi.GlfwButtonAction", "Brutal.GlfwApi.GlfwModifier"),
                 new("KSA.Program", "OnGameLoaded", "System.Void", true, MethodAttributes.Public),
                 new("KSA.Universe", "DeserializeSave", "System.Void", true, MethodAttributes.Public, "KSA.UniverseData"),
                 new("KSA.Program", "Dispose", "System.Void", false, MethodAttributes.Public),
@@ -49,14 +47,11 @@ static class HostInspection
                 new("KSA.SuperMeshRenderSystem", "ClearBuckets", "System.Void", false, MethodAttributes.Public, "KSA.IViewport"),
                 new("KSA.SuperMeshRenderSystem", "RenderTranslucencyPass", "System.Void", false, MethodAttributes.Public,
                     "KSA.IViewport", "Brutal.VulkanApi.CommandBuffer", "System.Boolean"),
-                new("KSA.PartFailure", "IsolateAndDestroy", "System.Void", true, MethodAttributes.Assembly,
-                    "KSA.Vehicle", "KSA.Part", "System.Collections.Generic.List`1<KSA.Vehicle>"),
                 new("KSA.PartModel", "AddInstance", "System.Void", false, MethodAttributes.Private,
                     "KSA.PartModel+PerInstanceData", "KSA.Deformation.PerInstanceDent", "KSA.IViewport", "System.Int32"),
                 new("KSA.Vehicle", "DepleteConsumables", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Vehicle", "UpdateVehicleConfiguration", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Part", "get_StructuralPart", "KSA.Part", false, MethodAttributes.Public),
-                new("KSA.Universe", "SetSimulationSpeed", "System.Void", true, MethodAttributes.Public, "System.Double", "System.Boolean"),
             ];
             MethodDefinitionHandle prepare = default;
             foreach (var expected in patches)
@@ -68,7 +63,6 @@ static class HostInspection
             CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "ClearBuckets", "viewport");
             CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "RenderTranslucencyPass", "viewport", "commandBuffer", "useCustomRenderPass");
             CheckAvatarField(host);
-            CheckManualInputField(host);
             CheckDeviceMeshFields(host);
             if (!prepare.IsNil) CheckFrameSeam(host, prepare);
             CheckRenderSeams(host);
@@ -136,23 +130,6 @@ static class HostInspection
         }
         Check(valid, "Private instance KittenRenderable._characterAvatar : KSA.CharacterAvatar",
             "The pose reflection seam changed. Update SaberPoseController before enabling its pose overlay.");
-    }
-
-    private static void CheckManualInputField(Image image)
-    {
-        var type = image.FindType("KSA.Vehicle");
-        var fields = type.IsNil ? [] : image.Reader.GetTypeDefinition(type).GetFields()
-            .Where(h => image.Reader.GetString(image.Reader.GetFieldDefinition(h).Name) == "_manualControlInputs").ToArray();
-        var valid = fields.Length == 1;
-        if (valid)
-        {
-            var field = image.Reader.GetFieldDefinition(fields[0]);
-            valid = field.DecodeSignature(image.Types, (object?)null) == "KSA.ManualControlInputs"
-                    && (field.Attributes & FieldAttributes.FieldAccessMask) == FieldAttributes.Private
-                    && (field.Attributes & FieldAttributes.Static) == 0;
-        }
-        Check(valid, "Private instance Vehicle._manualControlInputs : KSA.ManualControlInputs",
-            "The EVA MMU pulse-input seam changed. Update EvaCuttingAutopilot before enabling close-proximity guidance.");
     }
 
     private static void CheckDeviceMeshFields(Image image)

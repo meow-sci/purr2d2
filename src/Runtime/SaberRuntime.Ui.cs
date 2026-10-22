@@ -19,15 +19,6 @@ internal sealed partial class SaberRuntime
         Cleanup(_pose.Dispose, "Pose");
     }
 
-    private void ConfigureCutter()
-    {
-        _cutter.Enabled = _settings.CuttingEnabled;
-        _cutter.ContactSeconds = _settings.ContactSeconds;
-        _cutter.FragmentStruckPart = _settings.FragmentStruckPart;
-        _cutter.ArbitrarySlicing = _settings.ArbitrarySlicing;
-        _cutter.SwingCut = _pose.Swinging && !_autopilot.Active;
-    }
-
     internal void DrawUi()
     {
         if (!_windowVisible || _disposed) return;
@@ -39,7 +30,7 @@ internal sealed partial class SaberRuntime
             {
                 if (!draw) return;
                 ImGui.TextColored(new float4(.25f, .85f, 1, 1), "May the paws be with you.");
-                ImGui.Text("F7 panel  |  Ctrl+F7 equip  |  Shift+F7 ignite  |  Alt+F7 swing");
+                ImGui.Text("F7 panel  |  Ctrl+F7 equip  |  Shift+F7 ignite  |  Alt+F7 slice");
                 ImGui.Separator();
                 if (_fault != null)
                 {
@@ -55,8 +46,6 @@ internal sealed partial class SaberRuntime
                     ImGui.SameLine();
                     ImGui.BeginDisabled(!_blade.Equipped);
                     if (ImGui.Button(_blade.TargetOn ? "Retract" : "Ignite")) Queue(Command.Ignite);
-                    ImGui.SameLine();
-                    if (ImGui.Button("Swing")) Queue(Command.Swing);
                     ImGui.EndDisabled();
                 }
                 finally { ImGui.EndDisabled(); }
@@ -66,37 +55,22 @@ internal sealed partial class SaberRuntime
                 else if (Universe.GetSimulationSpeed() > SaberLimits.MaximumSimulationSpeed) ImGui.TextWrapped("Saber suspended: use timewarp of 5x or less.");
                 ImGui.Separator();
 
+                DrawAssistedSliceUi(hasKitten);
+                ImGui.Separator();
+
                 bool changed = false;
-                float length = _settings.BladeLength, volume = _settings.Volume, contact = _settings.ContactSeconds;
+                float length = _settings.BladeLength, volume = _settings.Volume;
                 float3 color = Color;
                 changed |= ImGui.SliderFloat("Blade length", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m");
                 changed |= ImGui.ColorEdit3("Blade color", ref color);
                 changed |= ImGui.SliderFloat("Sound volume", ref volume, 0, 1, "%.2f");
-                bool cutting = _settings.CuttingEnabled;
-                changed |= ImGui.Checkbox("Cut vessels on contact", ref cutting);
-                changed |= ImGui.SliderFloat("Contact to cut", ref contact, .1f, 5, "%.2f s");
-                bool slicing = _settings.ArbitrarySlicing;
-                changed |= ImGui.Checkbox("Arbitrary plane slicing (experimental)", ref slicing);
-                bool fragment = _settings.FragmentStruckPart;
-                ImGui.BeginDisabled(slicing || !_cutter.FragmentationAvailable);
-                changed |= ImGui.Checkbox("Fragment struck part", ref fragment);
-                ImGui.EndDisabled();
-                if (slicing)
-                    ImGui.TextWrapped("Swing to slice tanks, empty capsules and other hulls into wreckage with glowing cut edges. Stored propellant in the cut part is emptied. A stationary blade uses the contact time above. Occupied vessels and damaged geometry that cannot be baked remain protected. Keep Generated/Slices with saves containing cut pieces.");
-                else if (fragment)
-                    ImGui.TextWrapped("Uses native part failure without an explosion. The struck part is destroyed; up to two of its authored subparts become debris. Crewed vessels are excluded.");
-                else
-                    ImGui.TextWrapped("Contact heats the surface, then separates an eligible existing part connection. Cuts follow the vessel's authored structure.");
                 if (changed)
                 {
                     _settings.BladeLength = length;
                     _settings.ColorR = color.X; _settings.ColorG = color.Y; _settings.ColorB = color.Z;
-                    _settings.Volume = volume; _settings.ContactSeconds = contact;
-                    _settings.CuttingEnabled = cutting; _settings.FragmentStruckPart = fragment;
-                    _settings.ArbitrarySlicing = slicing;
+                    _settings.Volume = volume;
                     _settings.Validate();
                 }
-                DrawAutopilotUi(hasKitten);
                 if (ImGui.CollapsingHeader("Paw alignment"))
                 {
                     var grip = new float3(_settings.GripX, _settings.GripY, _settings.GripZ);
@@ -121,24 +95,17 @@ internal sealed partial class SaberRuntime
                     catch (Exception ex) { _fault = "Could not save preferences: " + ex.Message; }
                 }
                 ImGui.Separator();
-                ImGui.TextWrapped(_cutter.Status);
-                ImGui.Text($"Touching parts: {_cutter.Contacts}  |  Contact heat: {_cutter.HottestContactSeconds:F2} s");
-                ImGui.Text($"Severed: {_cutter.SeveredConnections}  Fragmented: {_cutter.FragmentedParts}  Sliced: {_cutter.SlicedParts}");
-                if (ImGui.CollapsingHeader("Contact diagnostics"))
+                ImGui.Text($"Parts sliced: {_targeting.SlicedParts}");
+                if (ImGui.CollapsingHeader("Slice diagnostics"))
                 {
                     string diagnostics = $"Purr2D2 {typeof(SaberRuntime).Assembly.GetName().Version}; KSA {typeof(Vehicle).Assembly.GetName().Version}\n"
-                        + $"Equipped: {_blade.Equipped}; cutting enabled: {_settings.CuttingEnabled}; fresh pose: {_freshPoseThisTick}; pose age: {_pose.FreshnessFrames}\n"
-                        + _cutter.GetDiagnostics();
+                        + $"Equipped: {_blade.Equipped}; fresh pose: {_freshPoseThisTick}; pose age: {_pose.FreshnessFrames}\n"
+                        + $"Slice active: {_sliceSequence.Active}; parts sliced: {_targeting.SlicedParts}\n{_sliceStatus}";
                     ImGui.TextWrapped(diagnostics);
-                    if (ImGui.Button("Copy contact diagnostics"))
-                    {
-                        ImGui.SetClipboardText(diagnostics);
-                        Console.WriteLine("[purr2d2] Contact diagnostics\n" + diagnostics);
-                    }
+                    if (ImGui.Button("Copy slice diagnostics")) ImGui.SetClipboardText(diagnostics);
                 }
                 if (_renderer.LastError != null) ImGui.TextWrapped(_renderer.LastError);
                 if (_audio.LastError != null) ImGui.TextWrapped(_audio.LastError);
-                if (_cutter.BudgetLimited) ImGui.TextWrapped("Contact geometry budget reached; only checked surfaces can be cut.");
             }
             finally { ImGui.End(); }
         }

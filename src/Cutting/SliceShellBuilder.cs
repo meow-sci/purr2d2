@@ -22,8 +22,8 @@ internal static class SliceShellBuilder
         {
             if (PlaneSlicer.TryAudit(group, out _)) { result.Add(group); continue; }
             if (!PrepareGroup(group, result, out reason)) { reason = $"Hull group {groups.ToList().IndexOf(group)} ({group.Length} triangles): " + reason; return false; }
-            if (result.Count > 512 || result.Sum(g => g.Length) > 120_000)
-            { reason = "Prepared hull exceeds the shell geometry budget."; return false; }
+            if (result.Count > 2048 || result.Sum(g => g.Length) > 120_000)
+            { reason = $"Prepared hull exceeds the shell geometry budget ({result.Count} solids / {result.Sum(g => g.Length)} triangles)."; return false; }
         }
         solids = result.ToArray(); reason = "";
         return solids.Length > 0;

@@ -159,13 +159,13 @@ internal static class RuntimeFragmentAssets
                         quantizedSolids[solid][i] = face with { Material = -1 };
                 }
             var transformed = quantizedSolids.SelectMany(s => s).ToArray();
-            int hullPoints = transformed.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Take(32769).Count();
-            if (hullPoints > 32768)
-            { reason = "Fragment exceeds the bounded 32768-point native convex-hull budget."; return false; }
+            int hullPoints = transformed.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Take(65537).Count();
+            if (hullPoints > 65536)
+            { reason = "Fragment exceeds the bounded 65536-point native convex-hull budget."; return false; }
             var shapeGroups = quantizedSolids.SelectMany((solid, solidIndex) => solid.GroupBy(f => f.Material)
                 .OrderBy(g => g.Key).Select(g => new SurfaceGroup(solidIndex, g.Key, g.ToArray()))).ToArray();
-            if (shapeGroups.Length + 1 > 512)
-            { reason = "Fragment exceeds 511 persisted solid/material groups; the source was not changed."; return false; }
+            if (shapeGroups.Length + 1 > 2048)
+            { reason = "Fragment exceeds 2047 persisted solid/material groups; the source was not changed."; return false; }
             // Seed excludes mesh names; names can then contain the immutable geometry/material hash.
             var seedGroups = shapeGroups.Select(g => new FragmentGlbWriter.Group($"solid_{g.Solid}_surface_{g.Material}", g.Material, g.Faces)).ToArray();
             var seed = FragmentGlbWriter.Write(seedGroups);

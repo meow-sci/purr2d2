@@ -28,7 +28,7 @@ nonunit plane normals and offsets are normalized together.
 
 The runtime gathers source model primitives into **vehicle assembly physical metres**,
 applying each subpart's complete `MatrixAsmb2VehicleAsmb`, including scale, and
-inverse-transpose normals. The cutter's blade plane uses the same frame. No source
+inverse-transpose normals. The automatic slice plane uses the same frame. No source
 scale is applied again when positioning the generated fragments. The geometry core
 itself is coordinate agnostic, so the game-free tests also use simple local metres.
 
@@ -202,7 +202,7 @@ rollback, GPU arena exhaustion and save/restart/load acceptance in KSA.
 
 Current limits are 120,000 source faces; 240,000 total generated faces; 2,048 contour
 vertices per individual solid slice; 30,000 cap cells; 100,000 shared edge/level
-subdivisions; 64 boundary components per single-solid output; and 512 source compound
+subdivisions; 64 boundary components per single-solid output; and 2,048 source compound
 solids. The exporter has its own smaller native arena and fragment complexity limits.
 Welding tolerance is `max(1e-9 m, source diagonal * 1e-8)`. The plane nudge is bounded
 by 64 such tolerances, and contour height canonicalization by one tolerance. Tiny
@@ -217,11 +217,10 @@ outside the supported contract.
 
 ## Meaning of arbitrary slicing in this prototype
 
-The user can define a free cutting plane through supported part geometry. The
-operation cuts across that plane with zero kerf and generates actual exposed faces.
-It does not follow an arbitrary curved blade path or remove only the finite region
-visited by the blade. Contact and heat choose when to attempt the plane operation;
-the geometry operation then divides the supported rigid part along the full plane.
+The explicit swing chooses a valid cutting plane through supported part geometry.
+The operation cuts across that plane with zero kerf and generates exposed faces.
+It does not follow a curved blade path or remove only the finite region visited
+by the blade. Contact has no role in selecting or triggering a structural cut.
 
 Exact concave collision can be pursued without discarding this geometry work. A
 useful next route is to clip each of the original part's already-convex collider
@@ -233,10 +232,16 @@ cannot represent the bore of the demonstrated tube.
 
 ## Stock hull and functional-part support (2026-10-22)
 
-`SliceShellBuilder` retains valid closed solids and gives open authored panels a 4 mm backing. It welds seam positions within 10 microns, removes duplicate/degenerate faces, orients connected panels, splits sharp folds, and separates pinched vertex fans by tens of microns. Exterior normals/UV/materials survive. The ordinary manifold/volume/cap audit still gates replacement. `SliceMeshPrecision` tests the actual principal-frame float32 geometry, trying bounded edge welding through 2 microns and cancelling collapsed internal face pairs. Export must stay closed and within 0.02% volume tolerance. These checks now also run on initial ring contact.
+`SliceShellBuilder` retains valid closed solids and gives open authored panels a 4 mm backing. It welds seam positions within 10 microns, removes duplicate/degenerate faces, orients connected panels, splits sharp folds, and separates pinched vertex fans by tens of microns. Exterior normals/UV/materials survive. The ordinary manifold/volume/cap audit still gates replacement. `SliceMeshPrecision` tests the actual principal-frame float32 geometry, trying bounded edge welding through 2 microns and cancelling collapsed internal face pairs. Export must stay closed and within 0.02% volume tolerance. These checks run when preparing the explicit swing. Float-collapsed T-junctions are stitched only at existing collinear boundary vertices; open holes are never filled by this precision repair.
 
 `NativeSlicePhysics` no longer requires inert-only modules. It groups the struck structural part with attached IVA children, validates/cooks all generated pieces, splits external connectors, empties only the isolated owner through `Vehicle.DepleteConsumables`, rebuilds native state and preserves its assembly pose across the mass/COM change. Original modules and IVA furnishing geometry disappear with the replaced source. Dry mass includes those internal parts. Neighbor resource networks are rebuilt by native Split. Native fragments receive a balanced 0.24 m/s relative opening velocity across the cut, compensated in the angular-momentum solution. No propellant plume or retained functioning tank is claimed.
 
-Runtime limits include 120,000 prepared source triangles, 512 authored solid groups, 100,000 triangles and 32,768 hull points per fragment, and 511 persisted solid/material groups per fragment. The source vessel isolation limit is 4,096 full parts. Glass uses persisted PartModelGlass modules. Dented source geometry, deployed cloth, occupied vessels, crossing contours and unsupported native connection graphs remain explicit refusals. Some oblique capsule planes still self-intersect after panel backing.
+Runtime limits include 120,000 prepared source triangles, 2,048 authored solid groups, 100,000 triangles and 65,536 hull points per fragment, and 2,047 persisted solid/material groups per fragment. The source vessel isolation limit is 4,096 full parts. Glass uses persisted PartModelGlass modules. Dented source geometry, deployed cloth, occupied vessels, crossing contours and unsupported native connection graphs remain explicit refusals. Some oblique capsule planes still self-intersect after panel backing.
 
-`tools/check_stock_slices.py /path/to/Content/Core` exercises locally installed stock assets without bundling them. It tests Gemini7 tank axial/oblique planes and a medium capsule exterior axial plane through preparation, clipping, principal frames, exact export precision and fragment budgets. This does not execute native resource depletion, spawning, GPU uploads or save/load.
+`tools/check_stock_slices.py /path/to/Content/Core` exercises locally installed stock assets without bundling them. It tests Gemini7 tank axial/oblique planes, a medium capsule exterior axial plane, and all four stock service-module height variants through automatic plane selection, preparation, clipping, principal frames, exact export precision, fragment budgets and the actual GLB writer. Source material IDs remain distinct in the fixtures. This does not execute native resource depletion, spawning, GPU uploads or save/load.
+
+## Explicit nearby slicing (2026-10-22)
+
+`PartSliceTargeting` reuses bounded CPU mesh caches for a nearest-visible-surface selection, independent of contact heat/history. `ArbitrarySlicer.PlanAssistedSlice` gathers the source once and tries up to nine broad axis-aligned sections in part coordinates. Each candidate uses the same clipping, principal-frame and native float32 export budgets as native fragment preparation. The exact input plane is retained, avoiding a second seam nudge at commit.
+
+`AssistedSliceSequence` separates ignition readiness, visible swing progress and a consumed commit cue. The runtime performs all selection, validation and native mutation in the existing joined solver seam. Pose directions track the locked target's assembly frame through the stroke; geometry, target identity, range and crew restrictions are rechecked before replacing it. Failed geometry does not trigger destruction or a fallback target. This is now the only structural slicing path. Autopilot, ring coverage, contact heat and automatic contact cutting have been removed; a separate bounded probe retains cosmetic contact sparks.

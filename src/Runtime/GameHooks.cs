@@ -2,7 +2,6 @@ using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
 using KSA;
-using Brutal.GlfwApi;
 
 namespace Purr2D2.Runtime;
 
@@ -17,8 +16,6 @@ internal static class GameHooks
             transpiler: new HarmonyMethod(typeof(GameHooks), nameof(InsertSettledUpdate)));
         harmony.Patch(Require(typeof(Program), "OnFrameEditor", typeof(double)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(Frame)));
-        harmony.Patch(Require(typeof(Program), nameof(Program.OnMouseButton), typeof(GlfwWindow), typeof(GlfwMouseButton), typeof(GlfwButtonAction), typeof(GlfwModifier)),
-            prefix: new HarmonyMethod(typeof(GameHooks), nameof(MouseButton)));
         harmony.Patch(Require(typeof(Program), "OnFrameViewports", typeof(double)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(Overlay)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnGameLoaded)),
@@ -68,9 +65,7 @@ internal static class GameHooks
 
     private static void SettledUpdate(double dtPlayer) => Runtime?.BeforePhysics(dtPlayer);
     private static void Frame(double dtPlayer) => Runtime?.Frame(dtPlayer);
-    private static bool MouseButton(GlfwMouseButton button, GlfwButtonAction action) =>
-        !(Runtime?.ConsumeRingSelectionMouse(button, action) ?? false);
-    private static void Overlay() { if (Program.DrawUI) Runtime?.DrawAutopilotOverlay(); }
+    private static void Overlay() { if (Program.DrawUI) Runtime?.DrawSliceOverlay(); }
     private static void WorldChanged()
     {
         try { Runtime?.ResetWorld(); }
