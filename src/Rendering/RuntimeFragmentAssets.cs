@@ -1,43 +1,29 @@
-using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Xml.Linq;
 using Brutal;
-using Brutal.GltfApi;
 using Brutal.Numerics;
 using Brutal.Render.Mesh;
 using Brutal.VulkanApi;
-using Brutal.VulkanApi.Abstractions;
 using HarmonyLib;
 using KSA;
 using KSA.Deformation;
-using Purr2D2.Cutting;
-using Purr2D2.Slicing;
 using RenderCore;
 
 namespace Purr2D2.Rendering;
 
-internal sealed record SliceMaterial(PbrMaterialReference Reference, bool Glass = false)
-{
-    internal string Id => Reference.Id;
-    internal bool IsReferenceable => Reference.IsReferenceable;
-}
-
 internal sealed record PreparedFragment(PartTemplate Template, string TemplateId,
-    double4x4 SourceToFragment, double3 Extents, float MassKg);
+    double4x4 SourceToFragment, double3 Extents, float MassKg, bool NativeReady = false);
 
 /// <summary>Immutable generated native assets, backed by a startup-reserved part mesh arena.</summary>
-internal static class RuntimeFragmentAssets
+internal static partial class RuntimeFragmentAssets
 {
     private const uint VertexCapacity = 32 * 1024 * 1024;
     private const uint IndexCapacity = 16 * 1024 * 1024;
     private const long DiskCapacity = 512L * 1024 * 1024;
     private const int EntryCapacity = 1024;
     private const string Prefix = "Purr2D2_Fragment_";
-    private const string CapMaterial = "Purr2D2_CutSurface";
     private static KSA.Mod? _mod;
     private static uint _vertexBase, _indexBase, _vertexUsed, _indexUsed;
     private static bool _initialized, _installed;
@@ -45,7 +31,6 @@ internal static class RuntimeFragmentAssets
     private static readonly Dictionary<string, double> HotCaps = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, PreparedFragment> Prepared = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> FailedPreparations = new(StringComparer.Ordinal);
-    private readonly record struct SurfaceGroup(int Solid, int Material, SliceFace[] Faces);
 
     /// <summary>Must run from ImmediateLoad, before DeviceMeshInterleaved.Shared.Build.</summary>
     internal static void Initialize(KSA.Mod mod)
@@ -131,133 +116,6 @@ internal static class RuntimeFragmentAssets
         instanceData.EmissiveColor = (r << 16) | (g << 8) | b;
     }
 
-    internal static bool TryPrepare(SlicePiece piece, IReadOnlyDictionary<int, SliceMaterial> materials,
-        double4x4 sourceToFragment, float massKg, double3 principalSpecificInertia,
-        out PreparedFragment? prepared, out string reason)
-    {
-        prepared = null; reason = "";
-        string? preparingId = null;
-        bool touchedNativeRegistry = false;
-        if (!_initialized || _mod == null) { reason = "Runtime slice assets were not initialized before native mesh binding."; return false; }
-        if (piece.Faces.Length == 0 || piece.Faces.Length > 100_000 || !float.IsFinite(massKg) || massKg <= 0
-            || !Finite(principalSpecificInertia) || principalSpecificInertia.X <= 0 || principalSpecificInertia.Y <= 0 || principalSpecificInertia.Z <= 0)
-        { reason = "Fragment triangle budget, mass or principal inertia is invalid."; return false; }
-        try
-        {
-            if (!SliceMeshPrecision.TryPrepare(piece, sourceToFragment, out var quantizedSolids, out var extents, out reason)) return false;
-            if (!Finite(extents) || extents.X <= 1e-6 || extents.Y <= 1e-6 || extents.Z <= 1e-6)
-            { reason = "The exported fragment has degenerate three-dimensional bounds."; return false; }
-            for (int solid = 0; solid < quantizedSolids.Length; solid++)
-                for (int i = 0; i < quantizedSolids[solid].Length; i++)
-                {
-                    var face = quantizedSolids[solid][i];
-                    if (face.Material != -1 && (!materials.TryGetValue(face.Material, out var material)
-                        || !material.IsReferenceable || string.IsNullOrEmpty(material.Id)))
-                    { reason = "A source surface material has no persistent native asset ID."; return false; }
-                    // Re-sliced caps keep their cooling material.
-                    if (face.Material != -1 && materials[face.Material].Id == CapMaterial)
-                        quantizedSolids[solid][i] = face with { Material = -1 };
-                }
-            var transformed = quantizedSolids.SelectMany(s => s).ToArray();
-            int hullPoints = transformed.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Take(65537).Count();
-            if (hullPoints > 65536)
-            { reason = "Fragment exceeds the bounded 65536-point native convex-hull budget."; return false; }
-            var shapeGroups = quantizedSolids.SelectMany((solid, solidIndex) => solid.GroupBy(f => f.Material)
-                .OrderBy(g => g.Key).Select(g => new SurfaceGroup(solidIndex, g.Key, g.ToArray()))).ToArray();
-            if (shapeGroups.Length + 1 > 2048)
-            { reason = "Fragment exceeds 2047 persisted solid/material groups; the source was not changed."; return false; }
-            // Seed excludes mesh names; names can then contain the immutable geometry/material hash.
-            var seedGroups = shapeGroups.Select(g => new FragmentGlbWriter.Group($"solid_{g.Solid}_surface_{g.Material}", g.Material, g.Faces)).ToArray();
-            var seed = FragmentGlbWriter.Write(seedGroups);
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            hash.AppendData(seed);
-            hash.AppendData(Encoding.UTF8.GetBytes(string.Join("|", shapeGroups.Select(g => g.Material == -1 ? CapMaterial : materials[g.Material].Id + ":glass=" + materials[g.Material].Glass))));
-            hash.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"|{massKg:R}|{principalSpecificInertia.X:R}|{principalSpecificInertia.Y:R}|{principalSpecificInertia.Z:R}")));
-            string id = Prefix + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-            preparingId = id;
-            if (FailedPreparations.TryGetValue(id, out reason!)) return false;
-            if (Prepared.TryGetValue(id, out var cached))
-            { prepared = cached with { SourceToFragment = sourceToFragment }; return true; }
-            if (ModLibrary.TryGet<PartTemplate>(id, out var restored) && restored != null)
-            {
-                prepared = new PreparedFragment(restored, id, sourceToFragment, extents, massKg);
-                Prepared[id] = prepared;
-                return true;
-            }
-            uint vertexBytes = checked((uint)transformed.Length * 3 * 32);
-            uint indexBytes = checked((uint)transformed.Length * 3 * 4);
-            if (vertexBytes > VertexCapacity - _vertexUsed || indexBytes > IndexCapacity - _indexUsed)
-            { reason = "The fixed runtime slice mesh arena is full for this session. Save and restart to reclaim it."; return false; }
-            var groups = shapeGroups.Select(g => new FragmentGlbWriter.Group($"{id}_s{g.Solid}" + (g.Material == -1 ? "_cap" : "_m" + g.Material), g.Material, g.Faces)).ToList();
-            groups.Add(new FragmentGlbWriter.Group(id + "_hull", int.MinValue, transformed));
-            var bytes = FragmentGlbWriter.Write(groups);
-            string relative = "Generated/Slices/" + id;
-            string directory = Path.Combine(_mod.DirectoryPath, "Generated", "Slices");
-            Directory.CreateDirectory(directory);
-            string glbPath = Path.Combine(directory, id + ".glb");
-            string xmlPath = Path.Combine(directory, id + ".xml");
-            var xml = AssetXml(id, relative + ".glb", groups, shapeGroups, materials, massKg, principalSpecificInertia);
-            byte[] xmlBytes = Encoding.UTF8.GetBytes(xml.ToString());
-            long existingBytes = 0;
-            int entries = 0;
-            foreach (var path in Directory.EnumerateFiles(directory))
-            {
-                existingBytes = checked(existingBytes + new FileInfo(path).Length);
-                if (Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase)) entries++;
-            }
-            long additionalBytes = (File.Exists(glbPath) ? 0 : bytes.LongLength) + (File.Exists(xmlPath) ? 0 : xmlBytes.LongLength);
-            if (existingBytes + additionalBytes > DiskCapacity || (!File.Exists(xmlPath) && entries >= EntryCapacity))
-            { reason = "The persistent slice asset budget is full (512 MiB / 1024 fragments). Existing save assets are retained; no source was changed."; return false; }
-            WriteImmutable(glbPath, bytes);
-            WriteImmutable(xmlPath, xmlBytes);
-            // Claim the whole request before uploads; a failed preparation consumes only this
-            // bounded region, never rolls global counters back, and never changes source parts.
-            uint vertexCursor = _vertexBase + _vertexUsed;
-            uint indexCursor = _indexBase + _indexUsed;
-            _vertexUsed += vertexBytes; _indexUsed += indexBytes;
-            using (var gltf = new GltfLoader(glbPath))
-            {
-                for (int i = 0; i < groups.Count; i++)
-                {
-                    var mesh = new MeshReference { Id = groups[i].Name, Simple = false, Interleaved = true };
-                    mesh.OnDataLoad(_mod);
-                    mesh.Load(gltf, i, createDeviceMesh: false);
-                    if (!ModLibrary.Register(mesh)) throw new InvalidOperationException("A generated mesh asset ID was already registered unexpectedly.");
-                    touchedNativeRegistry = true;
-                    if (i == groups.Count - 1) continue; // Complete collider CPU mesh, never rendered or uploaded.
-                    var device = MakeDeviceMesh(mesh.HostMesh, vertexCursor, indexCursor);
-                    vertexCursor += checked((uint)device.VerticesSize);
-                    indexCursor += checked((uint)device.IndicesSize);
-                    if (vertexCursor > _vertexBase + _vertexUsed || indexCursor > _indexBase + _indexUsed)
-                        throw new InvalidDataException("Generated mesh bytes exceeded their preflight allocation.");
-                    mesh.DeviceMeshesInterleaved = [device];
-                    var renderer = Program.GetRenderer();
-                    using var staging = renderer.Allocator.CreateStagingPool(renderer.Graphics, 1);
-                    mesh.Bind(renderer, staging);
-                }
-            }
-            // Register only after complete upload. Template instantiation now sees bound meshes.
-            var bundle = XmlLoader.Load<AssetBundle>(xmlPath, _mod)
-                ?? throw new InvalidDataException("Generated native Part XML could not be registered.");
-            _mod.Register(bundle);
-            var template = ModLibrary.Get<PartTemplate>(id);
-            prepared = new PreparedFragment(template, id, sourceToFragment, extents, massKg);
-            Prepared[id] = prepared;
-            return true;
-        }
-        catch (Exception error)
-        {
-            reason = "Could not prepare native slice assets: " + error.Message;
-            if (touchedNativeRegistry && preparingId != null)
-            {
-                reason += " This fragment has partially registered native assets; save and restart before retrying this same cut. The source geometry was not changed.";
-                FailedPreparations[preparingId] = reason;
-            }
-            prepared = null;
-            return false;
-        }
-    }
-
     private static DeviceMeshInterleaved MakeDeviceMesh(MeshAsset mesh, uint vertexOffset, uint indexOffset)
     {
         var positions = mesh.GetVertexSpan<float3>(RenderCore.MeshAttribute.Position);
@@ -279,51 +137,4 @@ internal static class RuntimeFragmentAssets
         return result;
     }
 
-    private static XDocument AssetXml(string id, string glbPath, IReadOnlyList<FragmentGlbWriter.Group> groups,
-        IReadOnlyList<SurfaceGroup> surfaces, IReadOnlyDictionary<int, SliceMaterial> materials, float mass, double3 inertia)
-    {
-        var part = new XElement("Part", new XAttribute("Id", id), new XAttribute("DisplayName", "Sliced metal fragment"));
-        part.Add(new XElement("MeshView", new XAttribute("Id", id + "_pick"),
-            new XElement("Mesh", new XAttribute("Id", id + "_hull"))));
-        var subparts = new List<XElement>();
-        foreach (int solid in surfaces.Select(s => s.Solid).Distinct())
-        {
-            string subpartId = id + "_solid" + solid;
-            var subpart = new XElement("SubPart", new XAttribute("Id", subpartId));
-            for (int i = 0; i < surfaces.Count; i++)
-            {
-                if (surfaces[i].Solid != solid) continue;
-                var group = groups[i];
-                subpart.Add(new XElement(group.Material != -1 && materials[group.Material].Glass ? "PartModelGlass" : "PartModel", new XAttribute("Id", group.Name + "_model"),
-                    new XElement("Mesh", new XAttribute("Id", group.Name)),
-                    new XElement("Material", new XAttribute("Id", group.Material == -1 ? CapMaterial : materials[group.Material].Id)),
-                    new XElement("ShadowCaster", true)));
-            }
-            subparts.Add(subpart);
-            part.Add(new XElement("SubPart", new XAttribute("InstanceOf", subpartId)));
-        }
-        part.Add(new XElement("Collider", new XAttribute("Id", id + "_collider"),
-            new XElement("ConvexHull", new XAttribute("Id", id + "_hullCollider"),
-                new XElement("Mesh", new XAttribute("Id", id + "_hull")))));
-        part.Add(new XElement("CustomMass", new XElement("Mass", new XAttribute("Kg", F(mass))),
-            new XElement("MassSpecificInertia", new XAttribute("Ixx", F(inertia.X)),
-                new XAttribute("Iyy", F(inertia.Y)), new XAttribute("Izz", F(inertia.Z)))));
-        return new XDocument(new XElement("Assets", new XElement("MeshAtlas", new XAttribute("Id", id + "_atlas"),
-            new XAttribute("Path", glbPath)), subparts, part));
-    }
-
-    private static string F(double number) => number.ToString("R", CultureInfo.InvariantCulture);
-    private static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
-    private static void WriteImmutable(string path, byte[] bytes)
-    {
-        if (File.Exists(path))
-        {
-            if (!File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes))
-                throw new InvalidDataException("A persistent slice asset was modified: " + path);
-            return;
-        }
-        string temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        try { File.WriteAllBytes(temporary, bytes); File.Move(temporary, path); }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
-    }
 }

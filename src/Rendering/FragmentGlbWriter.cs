@@ -47,9 +47,9 @@ internal static class FragmentGlbWriter
             }
             var minimum = new[] { float.MaxValue, float.MaxValue, float.MaxValue };
             var maximum = new[] { float.MinValue, float.MinValue, float.MinValue };
-            var position = Attribute("VEC3", 3, v => [v.Position.X, v.Position.Y, v.Position.Z], bounds: true);
-            var normal = Attribute("VEC3", 3, v => [v.Normal.X, v.Normal.Y, v.Normal.Z]);
-            var uv = Attribute("VEC2", 2, v => [v.U, v.V]);
+            var position = Attribute("VEC3", 3, 0, bounds: true);
+            var normal = Attribute("VEC3", 3, 1);
+            var uv = Attribute("VEC2", 2, 2);
             var indexOffset = checked((int)binary.Position);
             foreach (uint value in triangleIndices) writer.Write(value);
             var indexView = views.Count;
@@ -63,15 +63,16 @@ internal static class FragmentGlbWriter
             });
             nodes.Add(new { name = group.Name, mesh = meshes.Count - 1 });
 
-            int Attribute(string type, int width, Func<SliceVertex, double[]> values, bool bounds = false)
+            int Attribute(string type, int width, int attribute, bool bounds = false)
             {
                 var offset = checked((int)binary.Position);
                 foreach (var vertex in vertices)
                 {
-                    var tuple = values(vertex);
+                    // No tiny array per vertex/attribute: large service modules used millions.
+                    var point = attribute == 0 ? vertex.Position : vertex.Normal;
                     for (var c = 0; c < width; c++)
                     {
-                        var value = (float)tuple[c];
+                        var value = (float)(attribute == 2 ? (c == 0 ? vertex.U : vertex.V) : (c == 0 ? point.X : c == 1 ? point.Y : point.Z));
                         if (!float.IsFinite(value)) throw new InvalidDataException("Fragment vertices contain non-finite float attributes.");
                         writer.Write(value);
                         if (bounds) { minimum[c] = Math.Min(minimum[c], value); maximum[c] = Math.Max(maximum[c], value); }

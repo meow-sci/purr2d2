@@ -46,7 +46,7 @@ internal sealed partial class SaberRuntime : IDisposable
         try { _settings = SaberSettings.Load(_settingsPath); }
         catch (Exception ex) { _settings = new(); Report("Could not read preferences; using defaults", ex); }
         _pose.Draw += DrawSaber;
-        _targeting.SliceHandler = (part, plane) => _slicer.Slice(part, plane, _playerTime);
+        _targeting.SliceHandler = (part, plane) => _slicer.Commit(part, _playerTime);
         _slicer.CutSparks = _renderer.AddCutSparks;
     }
 
@@ -73,6 +73,7 @@ internal sealed partial class SaberRuntime : IDisposable
             {
                 ResetWorld(); _system = Universe.CurrentSystem; _owner = selected;
             }
+            _slicer.PumpRetired();
             while (_commands.TryDequeue(out var item))
             {
                 if ((_fault != null && item.Value != Command.CancelSlice) || !ReferenceEquals(item.Owner, _owner) || _owner == null) continue;
@@ -171,6 +172,7 @@ internal sealed partial class SaberRuntime : IDisposable
             double elapsed = _playerTime - _previousTipTime;
             _swingSpeed = _hasPreviousTip && elapsed > .001 && elapsed < .15
                 ? (float)Math.Clamp((tip - _previousTipBody).Length() / elapsed, 0, 15) : 0;
+            _sliceSequence.NotifyRendered();
             _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
             _audio.Update(owner, emitter, _blade.Deployment, _blade.TargetOn,
                 !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.Eligible,
@@ -204,7 +206,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         if (_disposed) return;
         _disposed = true; _ready = false;
-        Cleanup(ResetWorld, "World"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
+        Cleanup(ResetWorld, "World"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
     }
     private static void Cleanup(Action action, string component)
     {

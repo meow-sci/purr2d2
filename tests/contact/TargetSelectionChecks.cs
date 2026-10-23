@@ -4,8 +4,26 @@ using Purr2D2.Cutting;
 
 internal static class TargetSelectionChecks
 {
-    private static void Main() { AssistedSliceSelection(); ContactEffectsChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
+    private static void Main() { AssistedSliceSelection(); IncrementalSelection(); ContactEffectsChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
     private static MeshReference NewMesh() => new() { PositionsCompare = [[new(-1, 0, -1), new(1, 0, -1), new(0, 0, 1)]] };
+    private static void IncrementalSelection()
+    {
+        var fixture = new Fixture(addMesh: false);
+        var vertices = new double3[30_000];
+        for (int i = 0; i < vertices.Length; i += 3)
+        { vertices[i] = new(-1, 0, -1); vertices[i + 1] = new(1, 0, -1); vertices[i + 2] = new(0, 0, 1); }
+        fixture.Hull.Modules.Add(new MeshViewModule(new() { PositionsCompare = [vertices] }));
+        using var selection = fixture.Cutter.BeginSelection(fixture.Wielder, new(0, -1, 0), 3, null);
+        selection.Advance();
+        Check(!selection.Done && fixture.SliceCalls == 0, "detailed target search yields before scanning an entire mesh");
+        int updates = 1;
+        while (!selection.Done && updates++ < 200) selection.Advance();
+        Check(selection.Done && selection.Target?.Part == fixture.Hull && updates >= 5 && fixture.SliceCalls == 0,
+            "target search resumes across frames and cannot cut while preparing");
+        fixture.Target.IsDisposed = true;
+        Check(!fixture.Cutter.CheckSliceTarget(fixture.Wielder, selection.Target!, new(0, -1, 0), 3, out _),
+            "disposing a target invalidates the prepared selection");
+    }
     private static void AssistedSliceSelection()
     {
         var f = new Fixture();

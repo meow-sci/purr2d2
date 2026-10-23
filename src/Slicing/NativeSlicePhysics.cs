@@ -97,6 +97,18 @@ internal static class NativeSlicePhysics
 
     private static (uint, uint) Pair(Part a, Part b) => a.InstanceId < b.InstanceId ? (a.InstanceId, b.InstanceId) : (b.InstanceId, a.InstanceId);
 
+    internal static void Preflight(PreparedFragment prepared)
+    {
+        // Called in a preparation frame, never inside the atomic breakup transaction.
+        var part = new Part("Purr2D2 slice preflight", prepared.Template);
+        try
+        {
+            if (!(part.ComputeSubtreeInertMass() > 0) || part.Modules.Get<ColliderModule>().IsEmpty)
+                throw new InvalidOperationException("Prepared fragment lacks native mass or a cooked collider.");
+        }
+        finally { part.Dispose(); }
+    }
+
     internal static bool TryReplace(Part struck, IReadOnlyList<PreparedPhysicsFragment> pieces, double3 cutNormal,
         out IReadOnlyList<Vehicle> created, out string reason)
     {
@@ -110,7 +122,7 @@ internal static class NativeSlicePhysics
         double massSum = 0;
         foreach (var p in pieces)
         {
-            if (p.Asset.Template is null || !float.IsFinite(p.Asset.MassKg) || p.Asset.MassKg <= .0001f
+            if (!p.Asset.NativeReady || p.Asset.Template is null || !float.IsFinite(p.Asset.MassKg) || p.Asset.MassKg <= .0001f
                 || !(p.Asset.Extents.X > 0 && p.Asset.Extents.Y > 0 && p.Asset.Extents.Z > 0))
             { reason = "A prepared slice asset has invalid mass or dimensions."; return false; }
             // Durability boundary: native save instances must resolve the exact registered immutable template.
@@ -130,19 +142,6 @@ internal static class NativeSlicePhysics
         foreach (var item in sourceSystem.All.AsSpan()) if (item is Vehicle vehicle) previouslyPresent.Add(vehicle);
         try
         {
-            // Convex-hull cooking and native module/model resolution are lazy. Force
-            // them while the original vessel is still completely unchanged.
-            foreach (var piece in pieces)
-            {
-                var preflight = new Part("Purr2D2 slice preflight", piece.Asset.Template);
-                try
-                {
-                    if (!(preflight.ComputeSubtreeInertMass() > 0)
-                        || preflight.Modules.Get<ColliderModule>().IsEmpty)
-                        throw new InvalidOperationException("Prepared fragment lacks native mass or a cooked collider.");
-                }
-                finally { preflight.Dispose(); }
-            }
             // Assets and geometry are validated before the first native structural mutation.
             // If a later spawn fails, the isolated source remains intact rather than being deleted.
             foreach (var source in sources)

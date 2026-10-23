@@ -102,7 +102,7 @@ if __name__ == '__main__':
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(list(fixtures(content))))
     required = [DEFAULT_SOURCE / p for p in ('src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs',
-                'src/Rendering/FragmentGlbWriter.cs', 'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'tests/StockSliceChecks.cs')]
+                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentAssetWriter.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/SliceColliderGeometry.cs', 'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'tests/StockSliceChecks.cs')]
     code, log = _run_managed_project(DEFAULT_SOURCE, 'StockSliceChecks', required,
         'internal static class Program { static void Main() => StockSliceChecks.Run(' + json.dumps(str(output)) + '); }')
     print(log)

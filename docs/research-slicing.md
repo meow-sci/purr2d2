@@ -11,6 +11,20 @@ The initial physical collider encloses each generated rigid half with a convex h
 The visual cap preserves holes and recesses; the collider can fill them. This is an
 explicit approximation, not an exact collision mesh or convex decomposition.
 
+## Asynchronous preparation
+
+The runtime copies native model attributes and source identity on the settled game thread, in bounded batches. `SliceGeometryWork` receives owned arrays, material IDs, axes and dry mass. A single below-normal-priority worker performs shell backing, candidate clipping, float32 repair, mass/inertia calculation, convex-hull reduction and GLB/XML serialization. The successful cut is retained; commit does not clip or export it again. The plane is published after validation so the visible swing can overlap hull/export preparation.
+
+The same worker writes immutable files and loads detached CPU meshes with `MeshReference.Load(createDeviceMesh: false)`. It deserializes XML using its own serializer; it never runs the registry-mutating template `OnDataLoad`, native physics, or graphics calls. Mesh identity initialization touches only the detached mesh. These boundaries were inspected in KSA 2026.10.19.5638; the game does not provide a general thread-safe world API.
+
+On the game thread, `RuntimeFragmentAssets.UploadJob` prepares registration incrementally with a 1.5 ms soft budget. Prepacked vertex/index data is uploaded in at most 512 KiB batches to the already-reserved arena. A zero-timeout fence poll on later frames replaces the old per-surface `Bind`/GPU wait. Registry insertion and native collider preflight happen only after the uploads complete. The budget cannot interrupt an individual native call.
+
+Collision meshes contain the hull vertices computed with a private Bepu pool on the worker. Picking and visual meshes keep their full detail. The game cooks the much smaller collision point cloud during preparation; it does not search tens of thousands of render vertices during breakup. The GLB writer also avoids allocating tiny attribute arrays for every vertex. Export permits 200,000 triangles per fragment, matching its existing per-group limit; arena, material, hull-point, shell and disk budgets still apply.
+
+`AssistedSliceSequence` requires presentation of the final main-view swing pose and a fully ready result before consuming one commit. Ready results commit immediately on the next settled update; late results leave the game running while preparation continues. Cancellation never joins the CPU task. Already-submitted uploads and partial asset registration drain over subsequent frames without spawning anything, keeping registered IDs reusable. Source ownership, transforms, mesh/material identities and mass are rechecked before replacement.
+
+Native world isolation/spawn/removal remains one atomic operation on the game thread. Moving it onto the worker would race the engine. Diagnostics record background preparation time, the longest preparation update and final native commit time so any remaining engine-side hitch can be measured in-game. No native FPS claim follows from the managed fixture timings.
+
 ## Geometry contract
 
 `src/Cutting/PlaneSlicer.cs` has two entry points:
@@ -171,7 +185,8 @@ The local current source provides the necessary low-level pieces:
   deserialization; an in-memory template alone cannot make a saved fragment reload.
 - `KSA/ConvexHullColliderTemplate.cs` can create a moving convex collider from the
   generated CPU points. Its native point reader uses the first primitive, so the
-  exporter supplies a combined collision mesh, independent of visual material groups.
+  exporter supplies a compact hull mesh, independent of visual material groups and
+  the full-detail picking mesh.
 - `KSA/Vehicle.cs`, `CreateVehicle`, `AddToBubble`, native split/isolation, and current
   mutable physics states allow replacement craft to inherit the original rigid-body
   point velocity. The physics adapter supplies exact mass properties from the clipped
@@ -242,6 +257,6 @@ Runtime limits include 120,000 prepared source triangles, 2,048 authored solid g
 
 ## Explicit nearby slicing (2026-10-22)
 
-`PartSliceTargeting` reuses bounded CPU mesh caches for a nearest-visible-surface selection, independent of contact heat/history. `ArbitrarySlicer.PlanAssistedSlice` gathers the source once and tries up to nine broad axis-aligned sections in part coordinates. Each candidate uses the same clipping, principal-frame and native float32 export budgets as native fragment preparation. The exact input plane is retained, avoiding a second seam nudge at commit.
+`PartSliceTargeting` advances a bounded nearest-visible-surface search across frames, independent of contact heat/history. `SliceSourceCapture` copies source attributes once; `SliceGeometryWork` tries up to nine broad axis-aligned sections in part coordinates on the worker. Each candidate uses the same clipping, principal-frame and native float32 export budgets as fragment preparation. Both the successful geometry and effective plane are retained, so commit performs no second clip or seam nudge.
 
-`AssistedSliceSequence` separates ignition readiness, visible swing progress and a consumed commit cue. The runtime performs all selection, validation and native mutation in the existing joined solver seam. Pose directions track the locked target's assembly frame through the stroke; geometry, target identity, range and crew restrictions are rechecked before replacing it. Failed geometry does not trigger destruction or a fallback target. This is now the only structural slicing path. Autopilot, ring coverage, contact heat and automatic contact cutting have been removed; a separate bounded probe retains cosmetic contact sparks.
+`AssistedSliceSequence` separates ignition readiness, visible swing progress, final-pose presentation and a consumed commit cue. Native selection/capture, registration and mutation stay in the joined solver seam; pure geometry and detached CPU loading run on the worker. Pose directions track the locked target's assembly frame through the stroke; geometry, target identity, range and crew restrictions are rechecked before replacing it. Failed geometry does not trigger destruction or a fallback target. This is now the only structural slicing path. Autopilot, ring coverage, contact heat and automatic contact cutting have been removed; a separate bounded probe retains cosmetic contact sparks.

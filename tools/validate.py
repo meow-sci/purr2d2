@@ -526,6 +526,8 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     core_sources = [
         source / "src/Core/BladeState.cs",
         source / "src/Core/AssistedSliceSequence.cs",
+        source / "src/Core/BackgroundSliceWork.cs",
+        source / "tests/BackgroundSliceChecks.cs",
         source / "src/Cutting/AssistedSliceGeometry.cs",
         source / "tests/AssistedSliceChecks.cs",
         source / "src/Core/SaberSettings.cs",
@@ -554,7 +556,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); AssistedSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); } }\n"
     )
     outputs = []
     result = 0
@@ -589,6 +591,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
         for path in required
     )
     numerics_path = Path(os.path.relpath(numerics, check_dir)).as_posix()
+    extra_references = "\n".join(f'<Reference Include="{name}"><HintPath>{Path(numerics_path).with_name(name + ".dll").as_posix()}</HintPath><Private>true</Private></Reference>' for name in ("BepuPhysics", "BepuUtilities"))
     project = textwrap.dedent(f"""\
         <Project Sdk="Microsoft.NET.Sdk">
           <PropertyGroup>
@@ -602,6 +605,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
         {includes}
           </ItemGroup>
           <ItemGroup>
+            {extra_references}
             <Reference Include="Brutal.Numerics">
               <HintPath>{numerics_path}</HintPath>
               <Private>true</Private>

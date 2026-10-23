@@ -3,6 +3,9 @@ using Brutal.Numerics;
 using Purr2D2.Cutting;
 using Purr2D2.Slicing;
 using Purr2D2.Rendering;
+using BepuPhysics.Collidables;
+using BepuUtilities.Memory;
+using Vector3 = System.Numerics.Vector3;
 
 internal static class StockSliceChecks
 {
@@ -13,6 +16,34 @@ internal static class StockSliceChecks
         {
             if (Environment.GetEnvironmentVariable("PURR_STOCK_FILTER") is { Length: > 0 } filter && !fixture.Name.Contains(filter)) continue;
             var groups = fixture.Groups.Select(group => group.Select(f => new SliceFace(Vertex(f[0]), Vertex(f[1]), Vertex(f[2]), f[0].Length > 8 ? (int)f[0][8] : 0)).ToArray()).ToArray();
+            var materials = groups.SelectMany(g => g).Select(f => f.Material).Distinct().ToDictionary(id => id, id => new SliceMaterialData("FixtureMaterial" + id, false));
+            var input = new SliceInput(groups, [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, 100);
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            double planMs = 0;
+            var cpu = SliceGeometryWork.Calculate(input, CancellationToken.None, _ => planMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            foreach (var asset in cpu.Fragments)
+            {
+                using var document = JsonDocument.Parse(asset.Glb.AsMemory(20, BitConverter.ToInt32(asset.Glb, 12)));
+                if (document.RootElement.GetProperty("meshes").GetArrayLength() != asset.MeshNames.Length || asset.Uploads.Length + 2 != asset.MeshNames.Length)
+                    throw new Exception("Worker export omitted a visual, picking or collision mesh");
+                if (asset.Uploads.Any(u => u.Bytes.Length != u.VertexBytes + u.IndexBytes)) throw new Exception("Worker upload size mismatch");
+                var collision = document.RootElement.GetProperty("meshes")[asset.MeshNames.Length - 1];
+                int position = collision.GetProperty("primitives")[0].GetProperty("attributes").GetProperty("POSITION").GetInt32();
+                var accessor = document.RootElement.GetProperty("accessors")[position];
+                int hullPoints = accessor.GetProperty("count").GetInt32();
+                var view = document.RootElement.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+                int offset = 28 + BitConverter.ToInt32(asset.Glb, 12) + view.GetProperty("byteOffset").GetInt32();
+                var points = new Vector3[hullPoints];
+                for (int i = 0; i < points.Length; i++)
+                    points[i] = new(BitConverter.ToSingle(asset.Glb, offset + i * 12), BitConverter.ToSingle(asset.Glb, offset + i * 12 + 4), BitConverter.ToSingle(asset.Glb, offset + i * 12 + 8));
+                using var pool = new BufferPool();
+                long cooking = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (!ConvexHullHelper.CreateShape(points, pool, out var center, out var hull) || !float.IsFinite(center.LengthSquared()))
+                    throw new Exception("Exported collider cannot be cooked by the native hull implementation");
+                hull.Dispose(pool);
+                Console.WriteLine($"  Worker fragment: {asset.Uploads.Length} render surfaces; {hullPoints} collision vertices; native hull cook {System.Diagnostics.Stopwatch.GetElapsedTime(cooking).TotalMilliseconds:F2} ms");
+            }
+            Console.WriteLine($"PASS: {fixture.Name} worker pipeline; plan {planMs:F1} ms, complete {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
             if (!SliceShellBuilder.TryPrepare(groups, out var solids, out var reason))
                 throw new Exception(fixture.Name + " shell preparation: " + reason);
             Console.WriteLine($"{fixture.Name}: {groups.Sum(g => g.Length)} authored triangles -> {solids.Length} solids / {solids.Sum(g => g.Length)} triangles");

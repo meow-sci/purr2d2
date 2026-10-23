@@ -7,13 +7,14 @@ namespace Purr2D2.Slicing;
 internal static class SliceMeshPrecision
 {
     internal static bool TryPrepare(SlicePiece piece, double4x4 transform, out SliceFace[][] solids,
-        out double3 extents, out string reason)
+        out double3 extents, out string reason, CancellationToken cancellation = default)
     {
         solids = []; extents = default;
         var output = new List<SliceFace[]>();
         var minimum = new double3(double.MaxValue); var maximum = new double3(double.MinValue);
         foreach (var source in piece.ClosedSolids ?? [piece.Faces])
         {
+            cancellation.ThrowIfCancellationRequested();
             SliceFace[]? accepted = null;
             reason = "";
             foreach (double tolerance in new[] { 0, 1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 2e-6 })

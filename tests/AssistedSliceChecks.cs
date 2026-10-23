@@ -7,22 +7,28 @@ internal static class AssistedSliceChecks
     {
         var action = new AssistedSliceSequence();
         action.Start();
-        for (int i = 0; i < 30; i++) Check(action.Advance(.1, false, true) == SliceCue.None, "waits for ignition");
-        Check(action.Advance(.02, true, true) == SliceCue.BeginSwing, "begins a visible stroke");
+        for (int i = 0; i < 30; i++) Check(action.Advance(.1, false, true, true) == SliceCue.None, "waits for ignition");
+        Check(action.Advance(.02, true, true, true) == SliceCue.BeginSwing, "begins a visible stroke");
         double before = action.Progress;
         for (int i = 0; i < 40; i++)
         {
-            Check(action.Advance(0, true, true) == SliceCue.None, "pause cannot commit");
-            Check(action.Advance(.1, true, false) == SliceCue.None, "stale/hidden pose cannot commit");
+            Check(action.Advance(0, true, true, true) == SliceCue.None, "pause cannot commit");
+            Check(action.Advance(.1, true, false, true) == SliceCue.None, "stale/hidden pose cannot commit");
         }
         Check(action.Progress == before, "suspended motion does not skip the animation");
-        int commits = 0;
-        for (int i = 0; i < 100; i++) if (action.Advance(.02, true, true) == SliceCue.Commit) commits++;
-        Check(commits == 1 && !action.Active, "exactly one commit even if the callback fails or more frames arrive");
-        action.Start(); action.Advance(.02, true, true); action.Advance(.1, true, true); action.Cancel();
-        for (int i = 0; i < 100; i++) Check(action.Advance(.1, true, true) == SliceCue.None, "cancel removes pending cut");
+        for (int i = 0; i < 100; i++) Check(action.Advance(.02, true, true, true) != SliceCue.Commit, "ready result cannot skip presentation of final pose");
+        Check(action.Progress == 1 && action.Active && !action.Swinging, "full swing finishes before breakup");
+        action.NotifyRendered();
+        Check(action.Advance(.02, true, true, true) == SliceCue.Commit, "ready result commits on first update after final rendered pose");
+        for (int i = 0; i < 100; i++) Check(action.Advance(.02, true, true, true) == SliceCue.None, "exactly one structural commit");
         action.Start();
-        Check(action.Advance(double.NaN, true, true) == SliceCue.None, "invalid frame time cannot advance");
+        for (int i = 0; i < 100; i++) { action.Advance(.02, true, true, false); action.NotifyRendered(); }
+        Check(action.EndPresented && action.Active && action.Progress == 1, "slow worker never prevents the full animation");
+        Check(action.Advance(.02, true, true, true) == SliceCue.Commit, "late result commits immediately when ready");
+        action.Start(); action.Advance(.02, true, true, true); action.Advance(.1, true, true, true); action.Cancel();
+        for (int i = 0; i < 100; i++) Check(action.Advance(.1, true, true, true) == SliceCue.None, "cancel removes pending cut");
+        action.Start();
+        Check(action.Advance(double.NaN, true, true, true) == SliceCue.None, "invalid frame time cannot advance");
 
         SliceVertex V(double x, double y, double z) => new(new(x, y, z), new(0, 0, 1), 0, 0);
         SliceFace[][] source = [[new(V(10, -2, -1), V(18, 2, -1), V(18, 2, 1), 0)]];

@@ -11,6 +11,7 @@ internal sealed partial class SaberRuntime
 {
     private readonly AssistedSliceSequence _sliceSequence = new();
     private SliceTarget? _sliceTarget;
+    private PartSliceTargeting.Selection? _sliceSelection;
     private SlicePlane _slicePlane;
     private object? _sliceSelectedVessel;
     private double _sliceLastFreshTime;
@@ -22,6 +23,7 @@ internal sealed partial class SaberRuntime
     private void BeginAssistedSlice()
     {
         if (_sliceSequence.Active || _owner == null) return;
+        if (_slicer.Busy) { _sliceStatus = "The previous slice is finishing cleanup; try again shortly."; return; }
         if (!SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()))
         { _sliceStatus = "Unpause and use 5x timewarp or less to slice a part."; return; }
         EnsureBlade();
@@ -38,6 +40,8 @@ internal sealed partial class SaberRuntime
     private void CancelAssistedSlice(string reason)
     {
         _sliceSequence.Cancel();
+        _sliceSelection?.Dispose(); _sliceSelection = null;
+        _slicer.Cancel();
         _sliceTarget = null;
         _sliceSelectedVessel = null;
         _sliceBladeLength = 0;
@@ -66,16 +70,22 @@ internal sealed partial class SaberRuntime
         if (simulationDt <= 0) return;
         if (_sliceTarget == null)
         {
-            if (!_targeting.TryFindSliceTarget(_owner, baseBody, SliceReach, _sliceSelectedVessel as Vehicle,
-                out var target, out string reason))
-            { CancelAssistedSlice("Cannot slice: " + reason); return; }
-            var plan = _slicer.PlanAssistedSlice(target!.Part, out _slicePlane);
-            if (!plan.Success) { CancelAssistedSlice(plan.Message); return; }
+            _sliceSelection ??= _targeting.BeginSelection(_owner, baseBody, SliceReach, _sliceSelectedVessel as Vehicle);
+            _sliceSelection.Advance();
+            if (!_sliceSelection.Done) { _sliceStatus = "Finding the nearby part..."; return; }
+            if (_sliceSelection.Target is not { } target) { CancelAssistedSlice("Cannot slice: " + _sliceSelection.Reason); return; }
             _sliceTarget = target;
-            _sliceStatus = $"Slicing {target.Part.DisplayName} on {target.Vehicle.Id}...";
+            try { _slicer.Begin(target.Part); }
+            catch (Exception captureError) { CancelAssistedSlice("Cannot slice: " + captureError.Message); return; }
         }
         if (!_targeting.CheckSliceTarget(_owner, _sliceTarget, baseBody, SliceReach + .5, out string refusal))
         { CancelAssistedSlice(refusal); return; }
+        _slicer.Advance();
+        if (_slicer.Error is { } error) { CancelAssistedSlice("Cannot slice: " + error); return; }
+        if (_slicer.Plan is not { } plan) { _sliceStatus = _slicer.Phase; return; }
+        _slicePlane = plan.Plane;
+        _sliceStatus = _sliceSequence.Progress >= 1 && !_slicer.Ready
+            ? "Cut complete; preparing the pieces..." : $"Slicing {_sliceTarget.Part.DisplayName} on {_sliceTarget.Vehicle.Id}...";
 
         // Track the locked section in target assembly space while either vessel drifts/rotates.
         var normal = new double3(_slicePlane.Normal.X, _slicePlane.Normal.Y, _slicePlane.Normal.Z);
@@ -97,7 +107,7 @@ internal sealed partial class SaberRuntime
         _sliceBladeLength = (float)Math.Min(SaberLimits.MaximumBladeLength, Math.Max(_settings.BladeLength, length + .5));
         var modelDirection = double3.TransformNormal(direction, bodyToModel).NormalizeOrZero();
         var modelNormal = double3.TransformNormal(normal, targetToEgo * egoToBody * bodyToModel).NormalizeOrZero();
-        var cue = _sliceSequence.Advance(dtPlayer, _blade.Deployment >= .99f, _freshPoseThisTick);
+        var cue = _sliceSequence.Advance(dtPlayer, _blade.Deployment >= .99f, _freshPoseThisTick, _slicer.Ready);
         _pose.SetSliceSwing(new((float)modelDirection.X, (float)modelDirection.Y, (float)modelDirection.Z),
             new((float)modelNormal.X, (float)modelNormal.Y, (float)modelNormal.Z), _sliceSequence.Progress);
         if (_sliceSequence.Progress >= _sliceNextSpark && _sliceNextSpark <= .6

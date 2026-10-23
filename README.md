@@ -8,6 +8,8 @@ Targets **KSA 2026.10.19.5638**, **StarMap.API 0.3.6**, and the loader's **Harmo
 
 Take control of an EVA kitten beside a vessel and press **Slice nearby part** (or **Alt+F7**). The action equips and ignites the saber, chooses a valid section through the nearest part, swings across it, and replaces it with textured pieces, sparks and cooling cut edges. No contact history or ring flight is required. Touching a part produces **visual sparks only**; destruction happens only through the slice button.
 
+Cut geometry is calculated once on a background worker. The full swing plays before breakup; ready pieces separate on the next safe update after its final frame. If preparation takes longer, the game continues while the pieces finish. Target reading and GPU uploads are spread across frames instead of blocking on the entire cut. Slice diagnostics include preparation and final breakup timings.
+
 Selection uses the nearest visible part surface within **3 metres or the configured blade length**, whichever is greater. **Vessel target** sets the actual flight-computer target and limits slicing to that vessel; choose no target to use any nearby vessel. The blade extends as needed up to 12 m and restores your length preference afterward. A marker names the locked part. The stroke takes about **0.72 seconds** after ignition and geometry preparation. Complex geometry can take additional preparation time.
 
 | Control | Action |

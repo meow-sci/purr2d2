@@ -14,12 +14,13 @@ internal static class SliceShellBuilder
         internal static Edge Of(int a, int b) => a < b ? new(a, b) : new(b, a);
     }
 
-    internal static bool TryPrepare(IReadOnlyList<SliceFace[]> groups, out SliceFace[][] solids, out string reason)
+    internal static bool TryPrepare(IReadOnlyList<SliceFace[]> groups, out SliceFace[][] solids, out string reason, CancellationToken cancellation = default)
     {
         var result = new List<SliceFace[]>();
         solids = [];
         foreach (var group in groups)
         {
+            cancellation.ThrowIfCancellationRequested();
             if (PlaneSlicer.TryAudit(group, out _)) { result.Add(group); continue; }
             if (!PrepareGroup(group, result, out reason)) { reason = $"Hull group {groups.ToList().IndexOf(group)} ({group.Length} triangles): " + reason; return false; }
             if (result.Count > 2048 || result.Sum(g => g.Length) > 120_000)

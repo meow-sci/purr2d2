@@ -55,7 +55,7 @@ internal static class PlaneSlicer
     /// are additive exactly as in the authored compound; this is deliberately not mesh union.
     /// </summary>
     public static bool TrySliceCompound(IReadOnlyList<SliceFace[]> authoredGroups, SlicePlane plane,
-        out PlaneSliceResult? result, out string failure, int capMaterial = -1)
+        out PlaneSliceResult? result, out string failure, int capMaterial = -1, CancellationToken cancellation = default)
     {
         result = null;
         try
@@ -76,6 +76,7 @@ internal static class PlaneSlicer
             double sourceVolume = 0; int contours = 0, holes = 0, solidCount = 0;
             foreach (var group in authoredGroups)
             {
+                cancellation.ThrowIfCancellationRequested();
                 Require(TryAudit(group, out _, out var auditFailure), "Authored compound group is not a valid solid: " + auditFailure);
                 Audit(group, epsilon, out var boundaryComponents);
                 var shells = boundaryComponents.Select(c => c.Select(i => group[i]).ToArray()).ToArray();
@@ -99,6 +100,7 @@ internal static class PlaneSlicer
                 }
                 foreach (var solid in solids)
                 {
+                    cancellation.ThrowIfCancellationRequested();
                     Require(++solidCount <= 2048, "Compound contains too many independent closed solids.");
                     var faces = solid.Faces.ToArray(); var props = Properties(faces);
                     Require(props.Volume > epsilon * epsilon * epsilon * 100, "Compound solid has nonpositive material volume.");
