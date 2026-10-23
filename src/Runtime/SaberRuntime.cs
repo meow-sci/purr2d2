@@ -56,6 +56,7 @@ internal sealed partial class SaberRuntime : IDisposable
         GameHooks.Runtime = this;
         GameHooks.Install(harmony);
         _somersaultMotion.Install(harmony);
+        InitializeForce(harmony);
         _renderer.Initialize(harmony);
         RuntimeFragmentAssets.Install(harmony);
         _audio.Initialize();
@@ -80,6 +81,8 @@ internal sealed partial class SaberRuntime : IDisposable
             if (!ReferenceEquals(_owner, selected)) SetControlledKitten(selected);
             ApplyKittenSaberRequests();
             UpdateSomersault();
+            UpdateForceBeforePhysics(playerDt);
+            UpdateForcePose(playerDt);
             _slicer.PumpRetired();
             while (_commands.TryDequeue(out var item))
             {
@@ -152,6 +155,7 @@ internal sealed partial class SaberRuntime : IDisposable
         try
         {
             if (!OverlayVisible) DismissKittenColorPicker();
+            UpdateForceVisibility();
             _renderer.ConfigureVfx(_settings);
             _renderer.Prepare();
             var io = ImGui.GetIO();
@@ -216,6 +220,8 @@ internal sealed partial class SaberRuntime : IDisposable
 
     internal void ResetWorld()
     {
+        ResetForce();
+        _forcePose.Unbind();
         ResetSomersault();
         CancelAssistedSlice(""); ResetOverlaySwing(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
         _renderer.ClearEffects(); _contactProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
@@ -227,6 +233,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         if (_disposed) return;
         _disposed = true; _ready = false;
+        Cleanup(DisposeForce, "Force capture"); Cleanup(_forcePose.Dispose, "Force pose");
         Cleanup(_somersaultMotion.Dispose, "Somersault motion"); Cleanup(_somersaultPose.Dispose, "Somersault pose");
         Cleanup(ResetWorld, "World"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
     }

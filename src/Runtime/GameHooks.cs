@@ -36,6 +36,8 @@ internal static class GameHooks
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayScroll)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnFocus), typeof(GlfwWindow), typeof(GlfwFocusEvent)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayFocus)));
+        harmony.Patch(Require(typeof(Program), nameof(Program.OnKey), typeof(GlfwWindow), typeof(GlfwKey), typeof(int), typeof(GlfwKeyAction), typeof(GlfwModifier)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayKey)));
         harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnMouseButton", typeof(GlfwWindow), typeof(GlfwMouseButton), typeof(GlfwButtonAction), typeof(GlfwModifier)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiMouseButton)));
         harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnScroll", typeof(GlfwWindow), typeof(double2)),
@@ -177,6 +179,8 @@ internal static class GameHooks
         !(Runtime?.FilterOverlayMouseButton(window, button, action) ?? false);
     private static bool OverlayCursor(GlfwWindow window) => !(Runtime?.FilterOverlayCursor(window) ?? false);
     private static bool OverlayScroll(GlfwWindow window, double2 offset) => !(Runtime?.FilterOverlayScroll(window, offset) ?? false);
+    private static bool OverlayKey(GlfwWindow window, GlfwKey key, GlfwKeyAction action) =>
+        !(Runtime?.FilterForceKey(window, key, action) ?? false);
     private static void OverlayFocus(GlfwWindow window, GlfwFocusEvent focusEvent)
     {
         if (window == Program.GetWindow() && focusEvent == GlfwFocusEvent.LostFocus) Runtime?.OverlayFocusLost();

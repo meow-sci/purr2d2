@@ -546,6 +546,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SaberOverlayDrag.cs",
         source / "src/Core/SaberOverlayLayout.cs",
         source / "tests/OverlayDragChecks.cs",
+        source / "src/Core/ForceOverlayDrag.cs",
+        source / "src/Core/ForceOverlayLayout.cs",
+        source / "tests/force/ForceOverlayChecks.cs",
         source / "src/Core/BackgroundSliceWork.cs",
         source / "tests/BackgroundSliceChecks.cs",
         source / "src/Core/BackgroundJitWarmup.cs",
@@ -590,7 +593,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",
@@ -656,6 +659,22 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/somersault/PoseHostStubs.cs",
         source / "tests/SomersaultPoseChecks.cs",
     ]
+    force_pose_sources = [*somersault_pose_sources[:-1],
+        source / "src/Pose/ForcePoseMath.cs",
+        source / "src/Pose/ForcePoseController.cs",
+        source / "tests/ForcePoseChecks.cs",
+    ]
+    force_math_sources = [source / "src/Force/ForceMath.cs", source / "src/Cutting/CutGeometry.cs",
+                          source / "tests/force/ForceMathChecks.cs"]
+    force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs",
+        source / "src/Core/ForceOverlayDrag.cs", source / "src/Core/ForceOverlayLayout.cs",
+        source / "src/Core/SaberOverlayDrag.cs", source / "src/Core/SaberOverlayLayout.cs",
+        source / "tests/force/ForceUiChecks.cs", source / "tests/force/ForceUiHostStubs.cs",
+        source / "tests/force/ForceOverlayChecks.cs"]
+    force_controller_sources = [source / "src/Force/ForceController.cs", source / "src/Force/ForceController.Follow.cs",
+        source / "src/Force/ForcePhysicsPatches.cs", source / "src/Force/ForceMath.cs",
+        source / "src/Cutting/CutGeometry.cs", source / "tests/force/ControllerHostStubs.cs",
+        source / "tests/force/ForceControllerChecks.cs"]
     shader_code, shader_output = run_shader_checks(source, stage)
     outputs = [shader_output]
     result = shader_code
@@ -672,10 +691,14 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("SomersaultRuntimeChecks", somersault_runtime_sources, None),
         ("SomersaultWorkerChecks", somersault_worker_sources, None),
         ("SomersaultPoseChecks", somersault_pose_sources, None),
+        ("ForcePoseChecks", force_pose_sources, None),
+        ("ForceMathChecks", force_math_sources, None),
+        ("ForceUiChecks", force_ui_sources, None),
+        ("ForceControllerChecks", force_controller_sources, None),
         ("SaberVfxChecks", vfx_sources, None),
     ):
         code, output = _run_managed_project(source, name, required, program,
-                                           harmony=name == "SomersaultWorkerChecks")
+                                           harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks"))
         outputs.append(output)
         result = result or code
     return result, "\n".join(outputs)

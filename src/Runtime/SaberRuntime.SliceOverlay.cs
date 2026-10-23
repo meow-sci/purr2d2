@@ -11,6 +11,7 @@ internal sealed partial class SaberRuntime
         if (!_ready || _disposed || Program.EditorFlag) return;
         try
         {
+            UpdateForceFrame();
             DrawSaberOverlay();
             HandleSlicePointer();
             if ((_sliceHover ?? _sliceTarget) is not { } slice

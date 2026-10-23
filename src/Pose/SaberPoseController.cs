@@ -16,6 +16,19 @@ public sealed class SaberPoseController : IDisposable
     // The equipment-independent acrobatics layer uses this main-thread notification
     // to keep tuck -> hand solve -> root rotation explicit even when equip changes.
     internal static event Action<KittenEva>? ProcessorsChanged;
+    // Both hand overlays share ordering with the final full-body rotation, while
+    // retaining independent equipment, gesture and bone ownership.
+    internal interface IArmPoseProcessor : IAnimProcessor
+    {
+        KittenEva? Owner { get; }
+        bool Active { get; }
+        bool LeftHand { get; }
+    }
+    internal static void NotifyProcessorsChanged(KittenEva kitten) => ProcessorsChanged?.Invoke(kitten);
+    internal static bool IsArmProcessorFor(IAnimProcessor processor, KittenEva kitten) =>
+        processor is IArmPoseProcessor hand && ReferenceEquals(hand.Owner, kitten);
+    internal static bool IsActiveArmProcessor(IAnimProcessor processor, bool left) =>
+        processor is IArmPoseProcessor hand && hand.LeftHand == left && hand.Active;
     internal static bool IsProcessorFor(IAnimProcessor processor, KittenEva kitten) =>
         processor is PoseProcessor pose && ReferenceEquals(pose._owner.Kitten, kitten);
     internal static bool IsActiveProcessor(IAnimProcessor processor) => processor is PoseProcessor pose && pose._owner.Active;
@@ -98,7 +111,7 @@ public sealed class SaberPoseController : IDisposable
                 return Fail("The kitten rig is missing Shoulder_R, Elbow_R or Wrist_R.");
             _mmuWasEnabled = avatar.Attachments.Mmu.Enabled;
             avatar.Core.CharacterModel.AnimProcessors.Add(_processor);
-            ProcessorsChanged?.Invoke(kitten);
+            NotifyProcessorsChanged(kitten);
             return true;
         }
         catch (Exception error)
@@ -180,6 +193,7 @@ public sealed class SaberPoseController : IDisposable
 
     public void Unbind()
     {
+        KittenEva? previousKitten = Kitten;
         // This list belongs to the render thread/main thread, never a solver worker.
         if (_avatar is not null && _processor is not null)
             _avatar.Core.CharacterModel.AnimProcessors.Remove(_processor);
@@ -195,6 +209,7 @@ public sealed class SaberPoseController : IDisposable
         _hasBodyFrame = false;
         _failure = null;
         FrameNumber = ulong.MaxValue;
+        if (previousKitten is not null) NotifyProcessorsChanged(previousKitten);
     }
 
     public void Dispose()
@@ -254,7 +269,7 @@ public sealed class SaberPoseController : IDisposable
     private static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
     private static float3 Unit(float3 vector, float3 fallback) => SaberPoseMath.Unit(vector, fallback);
 
-    private sealed class PoseProcessor : IAnimProcessor
+    private sealed class PoseProcessor : IArmPoseProcessor
     {
         internal readonly SaberPoseController _owner;
         private readonly int _shoulder;
@@ -284,6 +299,9 @@ public sealed class SaberPoseController : IDisposable
             _visit = new byte[skeleton.BoneCount];
         }
 
+        public KittenEva? Owner => _owner.Kitten;
+        public bool Active => _owner.Active;
+        public bool LeftHand => false;
         public bool Resolved => _shoulder >= 0 && _elbow >= 0 && _wrist >= 0;
         public float Priority => 5f;
         public bool ShouldUpdate { get; set; } = true;

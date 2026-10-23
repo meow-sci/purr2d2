@@ -37,17 +37,18 @@ internal sealed partial class SaberRuntime
     private bool OverlayCanStartSwing => OverlayCanSwing && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed());
 
     // The picker runs after this overlay; retain consumption for quick press/release pairs too.
-    internal bool OverlayCapturesPointer => OverlayVisible && (KittenColorPickerVisible || _kittenColorPickerButtons != 0
+    internal bool OverlayCapturesPointer => OverlayVisible && (ForcePicking || KittenColorPickerVisible || _kittenColorPickerButtons != 0
         || _kittenColorPickerEventFrame == Program.FrameNumber || _overlayPointerCapture.AnyHeld
         || _overlayPointerCapture.EventFrame == Program.FrameNumber
         || (_overlayLayoutAvailable && ImGui.GetIO().MouseHoveredViewport == ImGui.GetMainViewport().ID
-            && _overlayLayout.Hit(ImGui.GetIO().MousePos) != OverlayHit.None));
+            && (_overlayLayout.Hit(ImGui.GetIO().MousePos) != OverlayHit.None
+                || (_forceLayoutAvailable && _forceLayout.Hit(ImGui.GetIO().MousePos) != ForceOverlayHit.None))));
 
     private void SetSaberOverlayVisible(bool visible)
     {
         _showSaberOverlay = visible;
         _overlayLayoutAvailable = false;
-        if (!visible) { ResetOverlaySwing(); DismissKittenColorPicker(); }
+        if (!visible) { ResetOverlaySwing(); ResetForceGestures(); DismissKittenColorPicker(); }
     }
 
     private void DrawSaberOverlay()
@@ -57,6 +58,7 @@ internal sealed partial class SaberRuntime
             DrawKittenColorPicker();
             _overlayLayoutAvailable = false;
             ResetOverlaySwing();
+            ResetForceGestures();
             return;
         }
         try
@@ -75,8 +77,10 @@ internal sealed partial class SaberRuntime
             _overlayLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(), kittens.Count,
                 OverlayMenuBarInset(viewport), ShowSomersaultButtons);
             _overlayLayoutAvailable = _overlayLayout.Valid;
-            if (!_overlayLayoutAvailable) { DismissKittenColorPicker(); return; }
+            if (!_overlayLayoutAvailable) { DismissKittenColorPicker(); ResetForceGestures(); return; }
             var layout = _overlayLayout;
+            _forceLayout = ForceOverlayLayout.Create(layout, viewport.WorkPos, viewport.WorkSize);
+            _forceLayoutAvailable = _forceLayout.Valid;
             bool canSomersault = CanStartSomersault(out var somersaultReason);
             float fontSize = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
             _overlayListScroll = Math.Clamp(_overlayListScroll, 0, Math.Max(0, kittens.Count * layout.RowHeight - layout.ListBodyHeight));
@@ -90,6 +94,7 @@ internal sealed partial class SaberRuntime
                 draw.PushClipRect(clipMin, clipMax);
                 try
                 {
+                    DrawForceOverlay(draw);
                     // List/swing/slice retain 50% alpha; blue action buttons use 25% below.
                     draw.AddRectFilled(layout.ListMin, layout.ListMax, new ImColor8(0, 0, 0, 128));
                     draw.AddText(layout.ListMin + new float2(layout.Padding, layout.Padding), white, "EVA lightsabers");
@@ -212,6 +217,7 @@ internal sealed partial class SaberRuntime
         catch (Exception error)
         {
             ResetOverlaySwing();
+            ResetForceGestures();
             _overlayLayoutAvailable = false;
             Report("Saber overlay failed", error);
         }
@@ -258,7 +264,7 @@ internal sealed partial class SaberRuntime
         if (action == GlfwButtonAction.Release
             && _overlayPointerCapture.Consume((int)button, false, false, false, Program.FrameNumber))
         {
-            if (button == GlfwMouseButton.Left) _overlayDrag.Release();
+            if (button == GlfwMouseButton.Left) { _overlayDrag.Release(); _forceDrag.Release(); }
             return true;
         }
         // Native picker gestures belong to ImGui. Consume only the game's route;
@@ -284,9 +290,19 @@ internal sealed partial class SaberRuntime
             || Program.IsModalOpen() || Program.HasMouseInputLatch) return false;
         var pointer = OverlayPointer(window);
         var hit = _overlayLayout.Hit(pointer);
-        if (!_overlayPointerCapture.Consume((int)button, true, hit != OverlayHit.None, Program.HasMouseInputLatch,
+        var forceHit = _forceLayoutAvailable ? _forceLayout.Hit(pointer) : ForceOverlayHit.None;
+        var io = ImGui.GetIO();
+        bool forcePick = ForcePicking && hit == OverlayHit.None && forceHit == ForceOverlayHit.None
+            && !io.WantCaptureMouse && !io.WantTextInput && CursorTarget.IsHitTestViewport(Program.MainViewport);
+        if (!_overlayPointerCapture.Consume((int)button, true,
+            hit != OverlayHit.None || forceHit != ForceOverlayHit.None || forcePick, Program.HasMouseInputLatch,
             Program.FrameNumber, out bool firstPress)) return false;
-        if (button != GlfwMouseButton.Left || !firstPress) return true;
+        if (!firstPress) return true;
+        if (ForcePicking && button == GlfwMouseButton.Right)
+        { HandleForcePickerPress(button, pointer); return true; }
+        if (forcePick) { HandleForcePickerPress(button, pointer); return true; }
+        if (button != GlfwMouseButton.Left) return true;
+        if (forceHit != ForceOverlayHit.None) return HandleForceOverlayPress(forceHit, pointer);
 
         switch (hit)
         {
@@ -343,8 +359,10 @@ internal sealed partial class SaberRuntime
     internal bool FilterOverlayCursor(GlfwWindow window)
     {
         if (KittenColorPickerVisible || _kittenColorPickerButtons != 0) return true;
+        if (ForcePicking) return true;
         if (!_overlayPointerCapture.AnyHeld) return false;
         if (_overlayDrag.Held) _overlayDrag.Move(OverlayPointer(window));
+        if (_forceDrag.Held) MoveForcePointer(OverlayPointer(window));
         return true;
     }
 
@@ -352,13 +370,16 @@ internal sealed partial class SaberRuntime
     internal bool SuppressOverlayImGuiMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action)
     {
         if (!_overlayPointerCapture.SuppressImGuiButton((int)button, action == GlfwButtonAction.Press, Program.FrameNumber)) return false;
-        if (button == GlfwMouseButton.Left && action == GlfwButtonAction.Release) _overlayDrag.Release();
+        if (button == GlfwMouseButton.Left && action == GlfwButtonAction.Release)
+        { _overlayDrag.Release(); _forceDrag.Release(); }
         return true;
     }
 
     internal void OverlayFocusLost()
     {
         ResetOverlaySwing();
+        ResetForceGestures();
+        _forceEscapeHeld = false;
         _overlayPointerCapture.Reset();
         _kittenColorPickerButtons = 0;
         _kittenColorPickerEventFrame = ulong.MaxValue;
@@ -368,6 +389,13 @@ internal sealed partial class SaberRuntime
     internal bool FilterOverlayScroll(GlfwWindow window, double2 offset)
     {
         if (window == Program.GetWindow() && (KittenColorPickerVisible || _kittenColorPickerButtons != 0)) return true;
+        if (window == Program.GetWindow() && _forceDrag.Held && OverlayVisible && double.IsFinite(offset.Y))
+        {
+            _forceDrag.Scroll(offset.Y);
+            _forceMoveOffset = _forceDrag.Offset;
+            _forceMovePending = true;
+            return true;
+        }
         if (!OverlayOwnsScroll(window, out var hit)) return false;
         if (hit == OverlayHit.Kittens && double.IsFinite(offset.Y))
             _overlayListScroll = Math.Clamp(_overlayListScroll - (float)offset.Y * _overlayLayout.RowHeight * 3,
@@ -384,7 +412,8 @@ internal sealed partial class SaberRuntime
         if (KittenColorPickerVisible || _kittenColorPickerButtons != 0) return false;
         if (window != Program.GetWindow() || !OverlayVisible || !_overlayLayoutAvailable || Program.IsModalOpen()) return false;
         hit = _overlayLayout.Hit(OverlayPointer(window));
-        return _overlayPointerCapture.OwnsScroll(hit != OverlayHit.None);
+        return _overlayPointerCapture.OwnsScroll(ForcePicking || hit != OverlayHit.None
+            || (_forceLayoutAvailable && _forceLayout.Hit(OverlayPointer(window)) != ForceOverlayHit.None));
     }
 
     private static float2 OverlayPointer(GlfwWindow window)

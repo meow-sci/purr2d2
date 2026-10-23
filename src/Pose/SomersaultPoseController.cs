@@ -17,7 +17,7 @@ internal sealed class SomersaultPoseController : IDisposable
         "_characterAvatar", BindingFlags.Instance | BindingFlags.NonPublic);
     private CharacterAvatar? _avatar;
     private LocalProcessor? _tuckProcessor, _rootProcessor;
-    private IAnimProcessor[] _sabers = [];
+    private IAnimProcessor[] _hands = [];
     private int[] _parents = [], _roots = [];
     private float4x4[] _local = [], _world = [];
     private SomersaultPoseMath.TuckRig _rig;
@@ -71,7 +71,7 @@ internal sealed class SomersaultPoseController : IDisposable
             _avatar = avatar;
             _tuckProcessor = new(this, root: false);
             _rootProcessor = new(this, root: true);
-            SaberPoseController.ProcessorsChanged += OnSaberProcessorsChanged;
+            SaberPoseController.ProcessorsChanged += OnHandProcessorsChanged;
             OrderProcessors();
             return true;
         }
@@ -121,18 +121,18 @@ internal sealed class SomersaultPoseController : IDisposable
 
     private void DetachProcessors()
     {
-        SaberPoseController.ProcessorsChanged -= OnSaberProcessorsChanged;
+        SaberPoseController.ProcessorsChanged -= OnHandProcessorsChanged;
         SetSaberVisualTransform(float4x4.Identity);
         if (_avatar is not null)
         {
             if (_tuckProcessor is not null) _avatar.Core.CharacterModel.AnimProcessors.Remove(_tuckProcessor);
             if (_rootProcessor is not null) _avatar.Core.CharacterModel.AnimProcessors.Remove(_rootProcessor);
         }
-        _sabers = [];
+        _hands = [];
         _tuckProcessor = _rootProcessor = null;
     }
 
-    private void OnSaberProcessorsChanged(KittenEva kitten)
+    private void OnHandProcessorsChanged(KittenEva kitten)
     {
         if (ReferenceEquals(kitten, Kitten)) OrderProcessors();
     }
@@ -141,43 +141,45 @@ internal sealed class SomersaultPoseController : IDisposable
     {
         if (_avatar is null || Kitten is null || _tuckProcessor is null || _rootProcessor is null) return;
         List<IAnimProcessor> processors = _avatar.Core.CharacterModel.AnimProcessors;
-        int start = processors.Count - _sabers.Length - 2;
+        int start = processors.Count - _hands.Length - 2;
         if (start >= 0 && ReferenceEquals(processors[start], _tuckProcessor)
             && ReferenceEquals(processors[^1], _rootProcessor))
         {
             bool ordered = true;
-            for (int i = 0; i < _sabers.Length; i++)
-                ordered &= ReferenceEquals(processors[start + 1 + i], _sabers[i]);
+            for (int i = 0; i < _hands.Length; i++)
+                ordered &= ReferenceEquals(processors[start + 1 + i], _hands[i]);
             if (ordered) return;
         }
-        _sabers = processors.Where(p => SaberPoseController.IsProcessorFor(p, Kitten)).ToArray();
+        _hands = processors.Where(p => SaberPoseController.IsArmProcessorFor(p, Kitten)).ToArray();
         // Priority is a distance-LOD multiplier, not execution order. Keep our local composition
-        // explicitly last, including when a saber is equipped after the motion layer attached.
+        // explicitly last, including when either hand attaches after the motion layer.
         processors.Remove(_tuckProcessor);
         processors.Remove(_rootProcessor);
-        foreach (IAnimProcessor saber in _sabers) processors.Remove(saber);
+        foreach (IAnimProcessor saber in _hands) processors.Remove(saber);
         processors.Add(_tuckProcessor);
-        foreach (IAnimProcessor saber in _sabers) processors.Add(saber);
+        foreach (IAnimProcessor saber in _hands) processors.Add(saber);
         processors.Add(_rootProcessor);
     }
 
     private void SetSaberVisualTransform(float4x4 transform)
     {
-        foreach (IAnimProcessor saber in _sabers) SaberPoseController.SetVisualRootTransform(saber, transform);
+        foreach (IAnimProcessor saber in _hands) SaberPoseController.SetVisualRootTransform(saber, transform);
     }
 
     private void ApplyTuck(Span<TransformTRS> local)
     {
         if (!SupportsTuck || _tuck <= 0) return;
         World(local);
-        // Guard arms whose actual shoulder/elbow/wrist chain is measured. An equipped right
-        // hand is exclusively owned by the following saber solve, so the two overlays do not fight.
+        // Guard only unowned measured arms; active saber and Force hands each
+        // retain exclusive ownership of their following arm solve.
         if (_rig.Spine >= 0)
             Turn(local, _rig.Spine, floatQuat.CreateFromAxisAngle(_rig.Across, .28f * _tuck));
         TuckLeg(local, _rig.Left);
         TuckLeg(local, _rig.Right);
-        if (_hasLeftArm) GuardArm(local, _leftArm, left: true);
-        if (_hasRightArm && !_sabers.Any(SaberPoseController.IsActiveProcessor)) GuardArm(local, _rightArm, left: false);
+        if (_hasLeftArm && !_hands.Any(p => SaberPoseController.IsActiveArmProcessor(p, left: true)))
+            GuardArm(local, _leftArm, left: true);
+        if (_hasRightArm && !_hands.Any(p => SaberPoseController.IsActiveArmProcessor(p, left: false)))
+            GuardArm(local, _rightArm, left: false);
     }
 
     private void TuckLeg(Span<TransformTRS> local, SomersaultPoseMath.Leg leg)

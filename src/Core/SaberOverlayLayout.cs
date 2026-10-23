@@ -53,7 +53,8 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         if (availableHeight < 120) return default;
         // Budget the list, both existing actions, all three diamond rows and status together.
         // Keep the familiar half-height swing anchor wherever the complete group fits.
-        float scale = Math.Min(Math.Clamp(fontSize / 16f, .75f, 2), Math.Min(size.X / 420, availableHeight / 820));
+        // Reserve a second large circle on the left for Force manipulation.
+        float scale = Math.Min(Math.Clamp(fontSize / 16f, .75f, 2), Math.Min(size.X / 840, availableHeight / 820));
         float pad = 12 * scale, margin = 20 * scale, row = 28 * scale;
         float radius = 132 * scale, smallRadius = 27 * scale;
         float listTop = origin.Y + Math.Max(margin, topInset);

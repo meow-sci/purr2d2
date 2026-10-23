@@ -34,6 +34,7 @@ internal sealed partial class SaberRuntime
 
     private void SelectPartToSlice()
     {
+        CancelForcePicker();
         if (SomersaultActive && !_selectingSlice) return;
         if (_sliceSequence.Active) return;
         if (_selectingSlice) { CancelAssistedSlice("Slice selection cancelled."); return; }

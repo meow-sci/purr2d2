@@ -45,6 +45,8 @@ static class HostInspection
                 new("KSA.Program", "OnCursorPos", "System.Void", false, MethodAttributes.Public, "Brutal.GlfwApi.GlfwWindow", "Brutal.Numerics.double2"),
                 new("KSA.Program", "OnScroll", "System.Void", false, MethodAttributes.Public, "Brutal.GlfwApi.GlfwWindow", "Brutal.Numerics.double2"),
                 new("KSA.Program", "OnFocus", "System.Void", false, MethodAttributes.Public, "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwFocusEvent"),
+                new("KSA.Program", "OnKey", "System.Void", false, MethodAttributes.Public,
+                    "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwKey", "System.Int32", "Brutal.GlfwApi.GlfwKeyAction", "Brutal.GlfwApi.GlfwModifier"),
                 new("KSA.ImGuiBackendGlfwImpl", "OnMouseButton", "System.Void", false, MethodAttributes.Private,
                     "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwMouseButton", "Brutal.GlfwApi.GlfwButtonAction", "Brutal.GlfwApi.GlfwModifier"),
                 new("KSA.ImGuiBackendGlfwImpl", "OnScroll", "System.Void", false, MethodAttributes.Private,
@@ -88,6 +90,7 @@ static class HostInspection
             CheckParameterNames(host, "KSA.Program", "OnMouseButton", "window", "button", "action", "mods");
             CheckParameterNames(host, "KSA.Program", "OnCursorPos", "window", "pos");
             CheckParameterNames(host, "KSA.Program", "OnScroll", "window", "offset");
+            CheckParameterNames(host, "KSA.Program", "OnKey", "window", "key", "scanCode", "action", "mods");
             CheckParameterNames(host, "KSA.Program", "OnFocus", "window", "focusEvent");
             CheckParameterNames(host, "KSA.ImGuiBackendGlfwImpl", "OnMouseButton", "window", "button", "action", "mods");
             CheckAvatarField(host);

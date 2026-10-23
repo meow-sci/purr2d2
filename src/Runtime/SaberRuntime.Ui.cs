@@ -17,6 +17,8 @@ internal sealed partial class SaberRuntime
         _windowVisible = true;
         // The caller removes our Harmony hooks after this, so release partial ownership now.
         Cleanup(ResetWorld, "World");
+        Cleanup(DisposeForce, "Force capture");
+        Cleanup(_forcePose.Dispose, "Force pose");
         Cleanup(_somersaultMotion.Dispose, "Somersault motion");
         Cleanup(_somersaultPose.Dispose, "Somersault pose");
         Cleanup(_audio.Shutdown, "Audio");
