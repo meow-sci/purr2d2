@@ -55,12 +55,16 @@ for key, value in {'OutputType': 'Exe', 'TargetFramework': 'net10.0', 'ImplicitU
     ET.SubElement(props, key).text = value
 items = ET.SubElement(project, 'ItemGroup')
 ET.SubElement(items, 'PackageReference', Include='Samboy063.Tomlet', Version='6.2.0')
+ET.SubElement(items, 'PackageReference', Include='Lib.Harmony', Version='2.4.2')
 for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentTopology.cs',
                'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/SliceShellBuilder.cs',
                'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SliceGeometryWork.cs',
                'src/Slicing/SliceColliderGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',
                'src/Slicing/SliceMeshPrecision.cs', 'src/Core/SaberLimits.cs',
+               'src/Slicing/SliceDiagnosticCounters.cs', 'src/Slicing/SliceFrameDiagnostics.cs',
+               'src/Slicing/SliceCommitTimings.cs', 'src/Runtime/GameHooks.cs',
+               'tests/SliceDiagnosticsChecks.cs', 'tests/FrameHooksChecks.cs', 'tests/FrameHooksHostStubs.cs',
                'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs']:
     ET.SubElement(items, 'Compile', Include=str(root / source))
 for dll in host.glob('*.dll'):

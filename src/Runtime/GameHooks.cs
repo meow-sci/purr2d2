@@ -1,10 +1,12 @@
 using System.Reflection;
 using System.Reflection.Emit;
+using Brutal.Concurrency.Jobs;
 using Brutal.GlfwApi;
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
 using Purr2D2.Cutting;
+using Purr2D2.Slicing;
 
 namespace Purr2D2.Runtime;
 
@@ -12,9 +14,12 @@ namespace Purr2D2.Runtime;
 internal static class GameHooks
 {
     internal static SaberRuntime? Runtime;
+    // The host marks this helper internal. Bind once, never MethodInfo.Invoke on the frame path.
+    private static Action _flushDirtyResources = null!;
 
     internal static void Install(Harmony harmony)
     {
+        _flushDirtyResources = Require(typeof(PartTree), "FlushDirtyResourceManagers").CreateDelegate<Action>();
         harmony.Patch(Require(typeof(Program), "PrepareFrame", typeof(double), typeof(double)),
             transpiler: new HarmonyMethod(typeof(GameHooks), nameof(InsertSettledUpdate)));
         harmony.Patch(Require(typeof(Program), "OnFrameEditor", typeof(double)),
@@ -53,7 +58,17 @@ internal static class GameHooks
     // Kept internal so validation can inspect the exact production transformation using real game IL.
     internal static IEnumerable<CodeInstruction> InsertSettledUpdate(IEnumerable<CodeInstruction> instructions)
     {
-        var codes = instructions.ToList();
+        var codes = instructions.Select(c => new CodeInstruction(c)).ToList();
+        var wait = Require(typeof(JobScheduler), nameof(JobScheduler.Wait));
+        var vehicleSolver = AccessTools.Field(typeof(JobSystems), nameof(JobSystems.VehicleSolver));
+        if (vehicleSolver?.FieldType != typeof(JobScheduler))
+            throw new InvalidOperationException("Purr2D2 cannot safely locate the KSA vehicle solver.");
+        int waitIndex = -1;
+        for (int index = 1; index < codes.Count; index++)
+            if (codes[index].Calls(wait) && codes[index - 1].LoadsField(vehicleSolver)) waitIndex = index;
+        if (waitIndex < 1 || codes.Count(c => c.LoadsField(vehicleSolver)) != 1
+            || codes[waitIndex - 1].opcode != OpCodes.Ldsfld)
+            throw new InvalidOperationException("Purr2D2 cannot safely locate the existing KSA vehicle wait.");
         MethodInfo[] ordered =
         [
             Require(typeof(Universe), nameof(Universe.ApplyOrbitSolvers)),
@@ -61,19 +76,29 @@ internal static class GameHooks
             Require(typeof(Universe), nameof(Universe.ApplyClothSolvers)),
             Require(typeof(InputEvents), nameof(InputEvents.ApplyInputEvents)),
             Require(typeof(Universe), nameof(Universe.ExecuteNextClothSolvers), typeof(double), typeof(SimStep)),
+            Require(typeof(PartTree), nameof(PartTree.FlushDirtyDerived)),
+            Require(typeof(PartTree), "FlushDirtyResourceManagers"),
             Require(typeof(Universe), nameof(Universe.ExecuteNextVehicleSolvers), typeof(double), typeof(SimStep)),
             Require(typeof(Universe), nameof(Universe.ExecuteNextOrbitSolvers), typeof(double), typeof(SimStep))
         ];
-        int previous = -1;
+        int previous = waitIndex;
         int inputIndex = -1;
         foreach (MethodInfo method in ordered)
         {
             int index = codes.FindIndex(c => c.Calls(method));
-            if (index <= previous || codes.Count(c => c.Calls(method)) != 1)
+            if (index <= previous || codes.Count(c => c.Calls(method)) != 1 || !method.IsStatic || method.ReturnType != typeof(void))
                 throw new InvalidOperationException($"Purr2D2 cannot safely modify this KSA frame loop: {method.Name} moved or is ambiguous.");
             previous = index;
             if (method.DeclaringType == typeof(InputEvents)) inputIndex = index;
         }
+        // Replace only existing calls. Each static wrapper consumes exactly the same
+        // stack (including the Wait receiver) and returns the same value. Labels and
+        // exception boundaries remain attached to the original call instruction.
+        ReplaceCall(codes[waitIndex], wait, Require(typeof(GameHooks), nameof(WaitVehicleSolver), typeof(JobScheduler)));
+        Wrap(Require(typeof(PartTree), nameof(PartTree.FlushDirtyDerived)), nameof(FlushDirtyDerived));
+        Wrap(Require(typeof(PartTree), "FlushDirtyResourceManagers"), nameof(FlushDirtyResources));
+        Wrap(Require(typeof(Universe), nameof(Universe.ExecuteNextVehicleSolvers), typeof(double), typeof(SimStep)),
+            nameof(PrepareAndDispatchVehicles), typeof(double), typeof(SimStep));
         // Input events have finished and no new readers/solvers have been dispatched yet.
         // This leaves GetJobSimStep untouched, allowing other mods' handoff wrappers to coexist.
         codes.InsertRange(inputIndex + 1,
@@ -81,11 +106,64 @@ internal static class GameHooks
             new CodeInstruction(OpCodes.Ldarg_2),
             new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(GameHooks), nameof(SettledUpdate)))
         ]);
+        codes.Insert(0, new CodeInstruction(OpCodes.Call, Require(typeof(SliceFrameDiagnostics), nameof(SliceFrameDiagnostics.EnterFrame))));
         return codes;
+
+        void Wrap(MethodInfo original, string wrapperName, params Type[] parameters)
+        {
+            int index = codes.FindIndex(c => c.Calls(original));
+            if (index > 0 && codes[index - 1].opcode.OpCodeType == OpCodeType.Prefix)
+                throw new InvalidOperationException("Purr2D2 cannot safely wrap a prefixed KSA call.");
+            ReplaceCall(codes[index], original, Require(typeof(GameHooks), wrapperName, parameters));
+        }
     }
 
-    private static void SettledUpdate(double dtPlayer) => Runtime?.BeforePhysics(dtPlayer);
-    private static void Frame(double dtPlayer) => Runtime?.Frame(dtPlayer);
+    private static void ReplaceCall(CodeInstruction instruction, MethodInfo original, MethodInfo replacement)
+    {
+        Type[] originalStack = (original.IsStatic ? Enumerable.Empty<Type>() : [original.DeclaringType!])
+            .Concat(original.GetParameters().Select(p => p.ParameterType)).ToArray();
+        if (!replacement.IsStatic || replacement.ReturnType != original.ReturnType
+            || !originalStack.SequenceEqual(replacement.GetParameters().Select(p => p.ParameterType))
+            || (instruction.opcode != OpCodes.Call && instruction.opcode != OpCodes.Callvirt)
+            || (original.IsStatic && instruction.opcode != OpCodes.Call))
+            throw new InvalidOperationException("Purr2D2 diagnostic call wrapper changes the KSA evaluation stack.");
+        instruction.opcode = OpCodes.Call; instruction.operand = replacement;
+    }
+
+    private static void SettledUpdate(double dtPlayer)
+    {
+        try { Runtime?.BeforePhysics(dtPlayer); }
+        finally { SliceFrameDiagnostics.HookReturned(); }
+    }
+    private static void Frame(double dtPlayer)
+    {
+        try { Runtime?.Frame(dtPlayer); }
+        finally { SliceFrameDiagnostics.PumpSummaries(); }
+    }
+    private static void WaitVehicleSolver(JobScheduler scheduler)
+    {
+        var start = SliceFrameDiagnostics.StartSegment();
+        try { scheduler.Wait(); }
+        finally { SliceFrameDiagnostics.EndSegment(SliceFrameSegment.VehicleWait, start); }
+    }
+    private static void FlushDirtyDerived()
+    {
+        var start = SliceFrameDiagnostics.StartSegment();
+        try { PartTree.FlushDirtyDerived(); }
+        finally { SliceFrameDiagnostics.EndSegment(SliceFrameSegment.DirtyDerived, start); }
+    }
+    private static void FlushDirtyResources()
+    {
+        var start = SliceFrameDiagnostics.StartSegment();
+        try { _flushDirtyResources(); }
+        finally { SliceFrameDiagnostics.EndSegment(SliceFrameSegment.ResourceFlush, start); }
+    }
+    private static void PrepareAndDispatchVehicles(double dtPlayer, SimStep simStep)
+    {
+        var start = SliceFrameDiagnostics.StartSegment();
+        try { Universe.ExecuteNextVehicleSolvers(dtPlayer, simStep); }
+        finally { SliceFrameDiagnostics.EndSegment(SliceFrameSegment.VehiclePreparationAndDispatch, start); }
+    }
     private static void Overlay() { if (Program.DrawUI) Runtime?.DrawSliceOverlay(); }
     // Main-window game callbacks precede the backend's independent subscription.
     // Consume owned input in both routes so neither camera nor covered ImGui widgets react.
@@ -107,11 +185,13 @@ internal static class GameHooks
     }
     private static void WorldChanged()
     {
+        SliceFrameDiagnostics.Reset();
         try { Runtime?.ResetWorld(); }
         catch (Exception ex) { SaberRuntime.Report("World reset cleanup failed", ex); }
     }
     private static void Shutdown()
     {
+        SliceFrameDiagnostics.Reset();
         try { Runtime?.Shutdown(); }
         catch (Exception ex) { SaberRuntime.Report("Pre-shutdown cleanup failed", ex); }
     }

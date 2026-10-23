@@ -39,6 +39,7 @@ internal static partial class NativeSlicePhysics
         foreach (var source in sources)
             foreach (var child in source.TreeChildren)
                 if (!child.IsAttachedInternal) boundaries.Add((source, child));
+        SliceFrameDiagnostics.SetSourceDetails(sources.Length, boundaries.Count);
         if (!double4x4.Invert(full.MatrixAsmb2VehicleAsmb, out var oldAssemblyToPart))
         { reason = "Source transformation is singular."; return false; }
         try

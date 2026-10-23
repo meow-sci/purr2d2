@@ -114,6 +114,8 @@ internal static class FragmentAssetChecks
         var repeated = FragmentAssetWriter.Build(fragment, materials, CancellationToken.None);
         Check(asset.Id == repeated.Id && asset.Xml.SequenceEqual(repeated.Xml) && asset.Glb.SequenceEqual(repeated.Glb),
             "merged export is deterministic without mutating worker input");
+        CheckIdentity(fragment, materials, asset);
+        CheckSavedAsset(asset);
         var combined = FragmentAssetWriter.Build(fragment with { Solids = [original] }, materials, CancellationToken.None);
         Check(combined.Id != asset.Id, "durable IDs distinguish identical render triangles with different closed-solid provenance");
         var incomplete = FragmentTopology.Read(xml)!.BeginCapture();
@@ -145,6 +147,116 @@ internal static class FragmentAssetChecks
             catch (InvalidDataException) { return; }
             throw new Exception("Fragment export: " + message);
         }
+    }
+
+    private static void CheckIdentity(CpuFragment fragment, Dictionary<int, SliceMaterialData> materials, CpuFragmentAsset asset)
+    {
+        // Frozen independently from this implementation using the documented
+        // length-delimited little-endian stream and the authored box fixture.
+        Check(asset.Id == "Purr2D2_Fragment_eb3e728ef997baa87d095444fc5f5437006c5733167633aefd65dbb9fd96cc66", "canonical identity has stable versioned little-endian field encoding");
+        var reordered = materials.Reverse().ToDictionary(m => m.Key, m => m.Value);
+        Check(Export(fragment, reordered).Id == asset.Id, "material dictionary iteration order cannot affect identity");
+        var aliases = fragment with { Solids = fragment.Solids.Select(s => s.Select(f => f.Material == 0 ? f with { Material = 1 } : f).ToArray()).ToArray() };
+        Check(Export(aliases).Id == asset.Id, "source material aliases use durable identity rather than transient indices");
+
+        Check(Export(ChangeVertex(v => v with { Position = v.Position + new CutPoint(1, 0, 0) })).Id != asset.Id,
+            "positions affect immutable identity");
+        Check(Export(ChangeVertex(v => v with { Normal = v.Normal + new CutPoint(.125, 0, 0) })).Id != asset.Id,
+            "normals affect immutable identity");
+        Check(Export(ChangeVertex(v => v with { U = v.U + .125 })).Id != asset.Id, "U coordinates affect immutable identity");
+        Check(Export(ChangeVertex(v => v with { V = v.V + .125 })).Id != asset.Id, "V coordinates affect immutable identity");
+        var sameFloat = Export(ChangeVertex(v => v with
+        {
+            Normal = v.Normal with { Z = Math.BitIncrement(v.Normal.Z) }, U = Math.BitIncrement(v.U),
+        }));
+        Check(sameFloat.Id == asset.Id && sameFloat.Glb.SequenceEqual(asset.Glb) && sameFloat.Xml.SequenceEqual(asset.Xml),
+            "normal and UV differences below exported float precision retain identical identity and bytes");
+        var pickerOrder = fragment.Solids.Select(s => s.ToArray()).ToArray();
+        (pickerOrder[0][1], pickerOrder[0][2]) = (pickerOrder[0][2], pickerOrder[0][1]);
+        Check(Export(fragment with { Solids = pickerOrder }).Id != asset.Id,
+            "cross-material face order affects the full picker identity even when render batching is unchanged");
+        var winding = fragment.Solids.Select(s => s.ToArray()).ToArray();
+        winding[0][0] = winding[0][0] with { B = winding[0][0].C, C = winding[0][0].B };
+        Check(Export(fragment with { Solids = winding }).Id != asset.Id, "ordered triangle winding affects immutable identity");
+        var changedMaterials = new Dictionary<int, SliceMaterialData>(materials) { [3] = new("OtherMetal", false) };
+        Check(Export(fragment, changedMaterials).Id != asset.Id, "durable material IDs affect immutable identity");
+        changedMaterials[3] = materials[3] with { Glass = true };
+        Check(Export(fragment, changedMaterials).Id != asset.Id, "the glass render pass affects immutable identity");
+        Check(Export(fragment with { MassKg = fragment.MassKg + 1 }).Id != asset.Id, "native mass affects immutable identity");
+        for (int axis = 0; axis < 3; axis++)
+        {
+            var inertia = fragment.Frame.PrincipalSpecificInertia;
+            var changed = new double3(axis == 0 ? Math.BitIncrement(inertia.X) : inertia.X,
+                axis == 1 ? Math.BitIncrement(inertia.Y) : inertia.Y, axis == 2 ? Math.BitIncrement(inertia.Z) : inertia.Z);
+            Check(Export(fragment with { Frame = fragment.Frame with { PrincipalSpecificInertia = changed } }).Id != asset.Id,
+                "every principal inertia component retains durable double precision");
+        }
+
+        // These pairs produce the same old delimiter-joined material text. A
+        // byte-length prefix keeps both surface boundaries and literal delimiters.
+        var twoMaterials = fragment with { Solids = fragment.Solids.Select(s => s.Select(f => f with { Material = f.Material == 0 ? 0 : 1 }).ToArray()).ToArray() };
+        var left = new Dictionary<int, SliceMaterialData> { [0] = new("A", false), [1] = new("B:glass=False|C", false) };
+        var right = new Dictionary<int, SliceMaterialData> { [0] = new("A:glass=False|B", false), [1] = new("C", false) };
+        Check(Export(twoMaterials, left).Id != Export(twoMaterials, right).Id,
+            "length-prefixed material identity cannot alias strings containing field delimiters");
+        var unicode = new Dictionary<int, SliceMaterialData>(materials) { [3] = new("δοκιμή|:glass=False🚀", false) };
+        Check(Export(fragment, unicode).Id == "Purr2D2_Fragment_8531a227ea61b38c2f59dc98e0b1154931379590860bc3452b56d1fead24dc18", "material lengths use UTF-8 bytes rather than character counts");
+        var longMaterial = new Dictionary<int, SliceMaterialData>(materials) { [3] = new(new string('x', 16_315) + "🚀tail", false) };
+        var longAsset = Export(fragment, longMaterial);
+        Check(longAsset.Id == Export(fragment, longMaterial).Id && longAsset.Id != asset.Id,
+            "UTF-8 strings and geometry remain deterministic across hash buffer boundaries");
+
+        Invalid(() => Export(ChangeVertex(v => v with { U = double.NaN })), "non-finite UVs are rejected while hashing");
+        Invalid(() => Export(ChangeVertex(v => v with { Normal = new(double.MaxValue, 0, 1) })), "attributes that overflow float are rejected while hashing");
+        Invalid(() => Export(ChangeVertex(v => v with { Position = new(Math.BitIncrement(1d), v.Position.Y, v.Position.Z) })),
+            "unprepared double positions cannot alias a different compact picker layout");
+        Invalid(() => Export(fragment with { MassKg = float.NaN }), "non-finite native mass is rejected");
+        Invalid(() => Export(fragment with { Frame = fragment.Frame with { PrincipalSpecificInertia = new(1, double.PositiveInfinity, 3) } }),
+            "non-finite native inertia is rejected");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        bool stopped = false;
+        try { FragmentAssetWriter.Build(fragment, materials, cancelled.Token); }
+        catch (OperationCanceledException) { stopped = true; }
+        Check(stopped, "cancelled export stops before native serialization");
+        Console.WriteLine("PASS: canonical fragment identity includes exported attributes, material/glass, topology, exact picker order, mass and inertia; finite/cancellation guards retained");
+
+        CpuFragmentAsset Export(CpuFragment value, IReadOnlyDictionary<int, SliceMaterialData>? mapping = null)
+            => FragmentAssetWriter.Build(value, mapping ?? materials, CancellationToken.None);
+        CpuFragment ChangeVertex(Func<SliceVertex, SliceVertex> change)
+        {
+            var solids = fragment.Solids.Select(s => s.ToArray()).ToArray();
+            solids[0][0] = solids[0][0] with { A = change(solids[0][0].A) };
+            return fragment with { Solids = solids };
+        }
+        static void Invalid(Action action, string message)
+        {
+            try { action(); }
+            catch (InvalidDataException) { return; }
+            throw new Exception("Fragment identity: " + message);
+        }
+    }
+
+    private static void CheckSavedAsset(CpuFragmentAsset asset)
+    {
+        var oldXml = File.ReadAllBytes("tests/fixtures/fragment-v3.xml");
+        var oldGlb = File.ReadAllBytes("tests/fixtures/fragment-v3.glb");
+        var legacy = XDocument.Parse(Encoding.UTF8.GetString(oldXml));
+        string oldId = (string)legacy.Root!.Element("Part")!.Attribute("Id")!;
+        Check(asset.Id != oldId, "canonical identity uses a new version and cannot replace an existing v3 saved asset");
+        var renamed = asset.Glb.ToArray();
+        int jsonLength = BinaryPrimitives.ReadInt32LittleEndian(renamed.AsSpan(12));
+        var json = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(renamed, 20, jsonLength).Replace(asset.Id, oldId, StringComparison.Ordinal));
+        Check(json.Length == jsonLength, "only fixed-width hash-derived names change between identity versions");
+        json.CopyTo(renamed, 20);
+        Check(renamed.AsSpan().SequenceEqual(oldGlb),
+            "buffered GLB serialization is byte-for-byte identical to the pre-change render, full picker and compact collider fixture");
+        FragmentTopology.Remember(legacy);
+        FragmentTopology.Remember(XDocument.Parse(Encoding.UTF8.GetString(asset.Xml)));
+        Check(FragmentTopology.Find(oldId) != null && FragmentTopology.Find(asset.Id) != null
+            && (string?)legacy.Root.Element("Part")?.Attribute("Id") == oldId,
+            "old and new immutable assets keep their original identities and coexist in the saved topology cache");
+        Console.WriteLine("PASS: frozen v3 GLB byte equality and saved topology coexistence");
     }
 
     internal static (CpuFragment Fragment, Dictionary<int, SliceMaterialData> Materials) Fixture(bool glassCap = false)

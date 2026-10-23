@@ -49,17 +49,27 @@ internal static class FragmentAssetWriter
         if (surfaces.Length > 2046) throw new InvalidDataException("Fragment surface count exceeds the export budget.");
         cancel.ThrowIfCancellationRequested();
         var collider = SliceColliderGeometry.Build(transformed, cancel);
-        var seedGroups = surfaces.Select((s, i) => new FragmentGlbWriter.Group($"surface_{i}", s.Cap ? -1 : i, s.Faces)).ToArray();
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        hash.AppendData(FragmentGlbWriter.Write(seedGroups));
-        hash.AppendData(Encoding.UTF8.GetBytes(string.Join("|", surfaces.Select(s => s.Material.Id + ":glass=" + s.Material.Glass))));
-        // Identical batched triangles can describe touching independent solids or a
-        // connected shell. Include provenance so immutable IDs cannot alias the two.
-        hash.AppendData(Encoding.UTF8.GetBytes(string.Join("|", surfaces.Select(s => string.Join(",", s.SolidRuns.Select(r => $"{r.Solid}:{r.Triangles}"))))));
         var inertia = fragment.Frame.PrincipalSpecificInertia;
-        // New collider/export layout gets new immutable IDs; old saved fragments remain untouched.
-        hash.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"|merged-surfaces-pick-v3|{fragment.MassKg:R}|{inertia.X:R}|{inertia.Y:R}|{inertia.Z:R}")));
-        string id = Prefix + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+        string id;
+        using (var hash = new IdentityHash(cancel))
+        {
+            hash.Int32(surfaces.Length);
+            foreach (var surface in surfaces)
+            {
+                hash.Text(surface.Material.Id);
+                hash.Int32(surface.Material.Glass ? 1 : 0);
+                hash.Geometry(surface.Faces);
+                // Batched triangles can represent independent touching solids or
+                // one shell. Persisted recutting provenance is part of identity.
+                hash.Int32(surface.SolidRuns.Length);
+                foreach (var run in surface.SolidRuns) { hash.Int32(run.Solid); hash.Int32(run.Triangles); }
+            }
+            // Picker order also determines its compact indices and first attributes
+            // at shared positions. Include both exported non-render meshes.
+            hash.Geometry(transformed);
+            hash.Geometry(collider);
+            id = Prefix + hash.Complete(fragment.MassKg, inertia);
+        }
         // _s now indexes render surfaces. Retain this marker and _cap suffix so old
         // saved fragments and every cap group share the existing heat-owner lookup.
         var groups = surfaces.Select((s, i) => new FragmentGlbWriter.Group($"{id}_s{i}" + (s.Cap ? "_cap" : "_m" + i), s.Cap ? -1 : i, s.Faces)).ToList();
@@ -147,5 +157,106 @@ internal static class FragmentAssetWriter
             else runs.Add(new(solid, 1));
         }
         return runs.ToArray();
+    }
+
+    /// <summary>Versioned, length-delimited little-endian content stream, without a discarded GLB.</summary>
+    private sealed class IdentityHash : IDisposable
+    {
+        // A new identity never overwrites a v3 saved asset; startup still reads its
+        // original XML/GLB and names. Bump this when durable export semantics change.
+        private const string Version = "Purr2D2|merged-surfaces-pick-v4|canonical-le";
+        private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
+        private readonly IncrementalHash _hash;
+        private readonly byte[] _buffer = new byte[16 * 1024];
+        private readonly CancellationToken _cancel;
+        private int _used;
+
+        internal IdentityHash(CancellationToken cancel)
+        {
+            _cancel = cancel;
+            cancel.ThrowIfCancellationRequested();
+            _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            Text(Version);
+        }
+
+        internal void Int32(int value)
+        {
+            Ensure(sizeof(int));
+            BinaryPrimitives.WriteInt32LittleEndian(_buffer.AsSpan(_used), value);
+            _used += sizeof(int);
+        }
+
+        internal void Text(string value)
+        {
+            Int32(Utf8.GetByteCount(value));
+            var encoder = Utf8.GetEncoder();
+            ReadOnlySpan<char> remaining = value.AsSpan();
+            bool complete;
+            do
+            {
+                Ensure(4); // Space for a complete UTF-8 scalar, even at a chunk boundary.
+                encoder.Convert(remaining, _buffer.AsSpan(_used), true, out int characters, out int bytes, out complete);
+                _used += bytes;
+                remaining = remaining[characters..];
+            } while (!complete);
+        }
+
+        internal void Geometry(SliceFace[] faces)
+        {
+            _cancel.ThrowIfCancellationRequested();
+            Int32(faces.Length);
+            foreach (var face in faces) { Vertex(face.A); Vertex(face.B); Vertex(face.C); }
+        }
+
+        private void Vertex(SliceVertex vertex)
+        {
+            Single(vertex.Position.X, position: true); Single(vertex.Position.Y, position: true); Single(vertex.Position.Z, position: true);
+            Single(vertex.Normal.X); Single(vertex.Normal.Y); Single(vertex.Normal.Z); Single(vertex.U); Single(vertex.V);
+        }
+
+        private void Single(double value, bool position = false)
+        {
+            float exported = (float)value;
+            if (!float.IsFinite(exported)) throw new InvalidDataException("Fragment vertices contain non-finite float attributes.");
+            // SliceMeshPrecision prepares positions at float32 before export. This
+            // invariant makes exact CutPoint deduplication in the picker a function
+            // of the same values hashed here, including its first-vertex ordering.
+            if (position && value != exported)
+                throw new InvalidDataException("Fragment positions must be prepared at float32 precision.");
+            Ensure(sizeof(float));
+            BinaryPrimitives.WriteSingleLittleEndian(_buffer.AsSpan(_used), exported);
+            _used += sizeof(float);
+        }
+
+        internal string Complete(float mass, double3 inertia)
+        {
+            if (!float.IsFinite(mass) || !double.IsFinite(inertia.X) || !double.IsFinite(inertia.Y) || !double.IsFinite(inertia.Z))
+                throw new InvalidDataException("Fragment mass and inertia must be finite.");
+            Single(mass);
+            Double(inertia.X); Double(inertia.Y); Double(inertia.Z);
+            Flush();
+            return Convert.ToHexString(_hash.GetHashAndReset()).ToLowerInvariant();
+        }
+
+        private void Double(double value)
+        {
+            Ensure(sizeof(double));
+            BinaryPrimitives.WriteDoubleLittleEndian(_buffer.AsSpan(_used), value);
+            _used += sizeof(double);
+        }
+
+        private void Ensure(int bytes)
+        {
+            if (_buffer.Length - _used < bytes) Flush();
+        }
+
+        private void Flush()
+        {
+            _cancel.ThrowIfCancellationRequested();
+            _hash.AppendData(_buffer.AsSpan(0, _used));
+            _used = 0;
+        }
+
+        public void Dispose() => _hash.Dispose();
     }
 }

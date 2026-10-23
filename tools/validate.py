@@ -532,6 +532,12 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "tests/OverlayDragChecks.cs",
         source / "src/Core/BackgroundSliceWork.cs",
         source / "tests/BackgroundSliceChecks.cs",
+        source / "src/Core/BackgroundJitWarmup.cs",
+        source / "tests/BackgroundJitWarmupChecks.cs",
+        source / "src/Slicing/SliceDiagnosticCounters.cs",
+        source / "src/Slicing/SliceFrameDiagnostics.cs",
+        source / "src/Slicing/SliceCommitTimings.cs",
+        source / "tests/SliceDiagnosticsChecks.cs",
         source / "src/Cutting/AssistedSliceGeometry.cs",
         source / "tests/AssistedSliceChecks.cs",
         source / "src/Core/SaberSettings.cs",
@@ -564,7 +570,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",
@@ -585,6 +591,8 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     isolation_sources = [
         source / "src/Slicing/NativeSliceIsolation.cs",
         source / "src/Slicing/SliceCommitTimings.cs",
+        source / "src/Slicing/SliceDiagnosticCounters.cs",
+        source / "src/Slicing/SliceFrameDiagnostics.cs",
         source / "tests/slicing/IsolationHostStubs.cs",
         source / "tests/slicing/IsolationChecks.cs",
     ]

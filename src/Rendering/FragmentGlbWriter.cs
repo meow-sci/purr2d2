@@ -86,7 +86,8 @@ internal static class FragmentGlbWriter
                 return accessor;
             }
         }
-        var payload = binary.ToArray();
+        if (!binary.TryGetBuffer(out var payload)) throw new InvalidOperationException("Fragment binary buffer is unavailable.");
+        int payloadLength = checked((int)binary.Length);
         var json = JsonSerializer.SerializeToUtf8Bytes(new
         {
             asset = new { version = "2.0", generator = "Purr2D2 exact plane slicer" },
@@ -95,19 +96,22 @@ internal static class FragmentGlbWriter
             nodes,
             meshes,
             materials = new[] { new { name = "NativeXmlMaterial", pbrMetallicRoughness = new { baseColorFactor = new[] { 1, 1, 1, 1 }, metallicFactor = 0, roughnessFactor = 1 } } },
-            buffers = new[] { new { byteLength = payload.Length } },
+            buffers = new[] { new { byteLength = payloadLength } },
             bufferViews = views,
             accessors,
         });
-        var jsonSize = (json.Length + 3) & ~3;
-        var binarySize = (payload.Length + 3) & ~3;
-        using var output = new MemoryStream();
+        var jsonSize = checked(json.Length + 3) & ~3;
+        var binarySize = checked(payloadLength + 3) & ~3;
+        int outputLength = checked(28 + jsonSize + binarySize);
+        using var output = new MemoryStream(outputLength);
         using var glb = new BinaryWriter(output, Encoding.UTF8, leaveOpen: true);
-        glb.Write(0x46546c67u); glb.Write(2u); glb.Write(checked((uint)(28 + jsonSize + binarySize)));
+        glb.Write(0x46546c67u); glb.Write(2u); glb.Write((uint)outputLength);
         glb.Write(jsonSize); glb.Write(0x4e4f534au); glb.Write(json);
         while (output.Position % 4 != 0) glb.Write((byte)' ');
-        glb.Write(binarySize); glb.Write(0x004e4942u); glb.Write(payload);
+        glb.Write(binarySize); glb.Write(0x004e4942u); glb.Write(payload.AsSpan(0, payloadLength));
         while (output.Position % 4 != 0) glb.Write((byte)0);
-        return output.ToArray();
+        // Exact initial capacity keeps this owned array the exact GLB length; no
+        // second payload or final-output copy is needed.
+        return output.GetBuffer();
     }
 }

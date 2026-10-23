@@ -1,0 +1,62 @@
+<Assets>
+  <MeshAtlas Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_atlas" Path="Generated/Slices/Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118.glb" />
+  <SubPart Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_visual">
+    <MeshView Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_pick">
+      <Mesh Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_hull" />
+    </MeshView>
+    <PartModel Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s0_m0_model">
+      <Mesh Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s0_m0" />
+      <Material Id="FixtureCopper" />
+      <ShadowCaster>true</ShadowCaster>
+    </PartModel>
+    <PartModel Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s1_m1_model">
+      <Mesh Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s1_m1" />
+      <Material Id="FixtureMetal" />
+      <ShadowCaster>true</ShadowCaster>
+    </PartModel>
+    <PartModelGlass Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s2_m2_model">
+      <Mesh Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s2_m2" />
+      <Material Id="FixtureMetal" />
+      <ShadowCaster>true</ShadowCaster>
+    </PartModelGlass>
+    <PartModel Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s3_cap_model">
+      <Mesh Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s3_cap" />
+      <Material Id="Purr2D2_CutSurface" />
+      <ShadowCaster>true</ShadowCaster>
+    </PartModel>
+  </SubPart>
+  <Part Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118" DisplayName="Sliced metal fragment">
+    <SubPart InstanceOf="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_visual" />
+    <Collider Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_collider">
+      <ConvexHull Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_hullCollider">
+        <Mesh Id="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_collision" />
+      </ConvexHull>
+    </Collider>
+    <CustomMass>
+      <Mass Kg="3" />
+      <MassSpecificInertia Ixx="1" Iyy="2" Izz="3" />
+    </CustomMass>
+  </Part>
+  <Purr2D2SliceTopology Version="1" Solids="3">
+    <Surface Mesh="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s0_m0">
+      <Run Solid="0" Triangles="2" />
+      <Run Solid="1" Triangles="2" />
+      <Run Solid="2" Triangles="2" />
+    </Surface>
+    <Surface Mesh="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s1_m1">
+      <Run Solid="0" Triangles="4" />
+      <Run Solid="1" Triangles="4" />
+      <Run Solid="2" Triangles="4" />
+    </Surface>
+    <Surface Mesh="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s2_m2">
+      <Run Solid="0" Triangles="2" />
+      <Run Solid="1" Triangles="2" />
+      <Run Solid="2" Triangles="2" />
+    </Surface>
+    <Surface Mesh="Purr2D2_Fragment_2b720ec818963aa983654aa3e5578a0757ccf8f2cbe9a65b0a894e21c1ece118_s3_cap">
+      <Run Solid="0" Triangles="4" />
+      <Run Solid="1" Triangles="4" />
+      <Run Solid="2" Triangles="4" />
+    </Surface>
+  </Purr2D2SliceTopology>
+</Assets>

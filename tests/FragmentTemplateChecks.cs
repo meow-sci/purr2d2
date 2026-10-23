@@ -9,6 +9,8 @@ internal static class FragmentTemplateChecks
 {
     private static void Main()
     {
+        FrameHooksChecks.Run();
+        SliceDiagnosticsChecks.Run();
         var xml = Encoding.UTF8.GetBytes("""
             <Assets>
               <MeshAtlas Id="fragment_atlas" Path="fixture.glb"/>
@@ -64,8 +66,15 @@ internal static class FragmentTemplateChecks
             throw new Exception("Actual KSA XML loader lost merged fragment material/glass/picking modules.");
         FragmentTopology.Remember(XDocument.Parse(Encoding.UTF8.GetString(generated.Xml)));
         if (FragmentTopology.Find(generated.Id) == null) throw new Exception("Generated XML did not restore its durable closed-solid metadata.");
+        var savedXml = File.ReadAllBytes("tests/fixtures/fragment-v3.xml");
+        var saved = XDocument.Parse(Encoding.UTF8.GetString(savedXml));
+        string savedId = (string)saved.Root!.Element("Part")!.Attribute("Id")!;
+        var savedBundle = FragmentTemplateLoader.Read(serializer, savedXml, savedId, 4);
+        if (savedId == generated.Id || !savedBundle.Assets.OfType<PartTemplate>().Any(p => p.Id == savedId))
+            throw new Exception("Canonical export must preserve older saved assets under their original IDs.");
         Console.WriteLine("PASS: actual KSA XML retains visual-subpart picking, legacy picking, render/glass/collider modules and mass; missing/unattached picking and plain serializer rejected");
         Console.WriteLine("PASS: actual KSA XML decodes generated merged fragment with one visual SubPart, four render surfaces and durable topology metadata");
+        Console.WriteLine("PASS: actual KSA XML still decodes frozen v3 saved fragment under its original identity");
 
         void Reject(XDocument input, string message)
         {

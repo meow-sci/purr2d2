@@ -20,7 +20,7 @@
     <PackageReference Include="Lib.Harmony" Version="2.4.2" PrivateAssets="all" IncludeAssets="compile;build;analyzers" />
   </ItemGroup>
   <ItemGroup>
-    <HostAssembly Include="KSA;BepuPhysics;BepuUtilities;Brutal.Core;Brutal.Numerics;Brutal.Collections;Brutal.Memory;Brutal.Strings;Brutal.Maths;Brutal.ImGui;Brutal.ImGui.Abstractions;Brutal.Glfw;Brutal.Fmod;Brutal.Render.Common;Brutal.Render.Mesh;Brutal.Vulkan;Brutal.Vulkan.Abstractions;Brutal.Vulkan.Vma;Brutal.ShaderC;Brutal.Gltf;Brutal.Texture;Brutal.Texture.Abstractions;Planet.Core;Planet.Render.Core" />
+    <HostAssembly Include="KSA;BepuPhysics;BepuUtilities;Brutal.Core;Brutal.Concurrency;Brutal.Numerics;Brutal.Collections;Brutal.Memory;Brutal.Strings;Brutal.Maths;Brutal.ImGui;Brutal.ImGui.Abstractions;Brutal.Glfw;Brutal.Fmod;Brutal.Render.Common;Brutal.Render.Mesh;Brutal.Vulkan;Brutal.Vulkan.Abstractions;Brutal.Vulkan.Vma;Brutal.ShaderC;Brutal.Gltf;Brutal.Texture;Brutal.Texture.Abstractions;Planet.Core;Planet.Render.Core" />
     <Reference Include="@(HostAssembly)">
       <HintPath>$(KSAFolder)/%(Identity).dll</HintPath>
       <Private>false</Private>

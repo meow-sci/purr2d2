@@ -1,6 +1,7 @@
 using HarmonyLib;
 using Purr2D2.Runtime;
 using Purr2D2.Rendering;
+using Purr2D2.Slicing;
 using StarMap.API;
 
 namespace Purr2D2;
@@ -28,6 +29,7 @@ public sealed class Mod
             _harmony = new Harmony("meow-sci.purr2d2");
             _runtime = new SaberRuntime(_directory);
             _runtime.Initialize(_harmony);
+            SliceJitWarmup.Start(); // Patches are installed; compile the cold native path off-thread.
             Console.WriteLine("[purr2d2] Ready. F7 controls; Ctrl+F7 equip; Shift+F7 ignite; Alt+F7 swing.");
         }
         catch (Exception ex)
@@ -44,6 +46,8 @@ public sealed class Mod
     [StarMapUnload]
     public void Unload()
     {
+        SliceFrameDiagnostics.Reset();
+        SliceJitWarmup.Cancel(); // Stop between methods; never join an in-progress compilation.
         try { _runtime?.Dispose(); }
         catch (Exception ex) { SaberRuntime.Report("Unload cleanup failed", ex); }
         finally

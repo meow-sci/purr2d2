@@ -26,7 +26,7 @@ internal sealed class ArbitrarySlicer : IDisposable
     private string _slowestStep = "none", _commitPhases = "";
     private double _slowestStepMs;
     internal SlicePlan? Plan => _work?.Plan;
-    internal bool Ready => _upload is { Done: true, Error: null };
+    internal bool Ready => _upload is { Done: true, Error: null } && SliceJitWarmup.Completed;
     internal string? Error { get; private set; }
     internal bool Busy => _retiredWork is { Finished: false } || _retiredUpload is { Done: false };
     internal string Diagnostics => $"Background preparation: {_workerMs:F1} ms; largest preparation update: {_maxMainMs:F2} ms"
@@ -44,7 +44,9 @@ internal sealed class ArbitrarySlicer : IDisposable
         Error = null; _workerMs = _maxMainMs = _commitMs = _isolationMs = 0;
         _isolationPhases = ""; _isolatedAtHandoff = -1;
         _slowestStep = "none"; _slowestStepMs = 0; _commitPhases = "";
+        SliceJitWarmup.Start(); // Fallback if startup was bypassed; never waits for compilation.
         _capture = new(part);
+        SliceFrameDiagnostics.Arm();
     }
     internal void Advance()
     {
@@ -82,6 +84,8 @@ internal sealed class ArbitrarySlicer : IDisposable
     internal SliceAttempt Commit(Part part, double now)
     {
         if (!Ready || _loaded == null || _capture == null) return new(false, "Slice preparation is not ready.");
+        SliceFrameDiagnostics.BeginOperation("swap", part.StructuralPart.Template.Id,
+            part.Tree?.Count ?? 0, Isolation?.Parts.Length ?? -1, boundaryConnections: 0);
         long started = Stopwatch.GetTimestamp();
         var timings = new SliceCommitTimings();
         try
@@ -115,6 +119,7 @@ internal sealed class ArbitrarySlicer : IDisposable
     {
         if (!Ready || _loaded == null || _capture == null || Isolation != null)
             return new(false, "Slice preparation is not ready for native isolation.");
+        SliceFrameDiagnostics.BeginOperation("isolation", part.StructuralPart.Template.Id, part.Tree?.Count ?? 0);
         var timings = new SliceCommitTimings();
         long started = Stopwatch.GetTimestamp();
         try
@@ -136,6 +141,7 @@ internal sealed class ArbitrarySlicer : IDisposable
     }
     internal void Cancel()
     {
+        SliceFrameDiagnostics.Disarm(); // Already captured frame windows still finish.
         _capture?.Dispose(); _capture = null;
         if (_work != null) { _work.Cancel(); _retiredWork = _work; _work = null; }
         // Finish already-started asset registration without spawning anything. This avoids
