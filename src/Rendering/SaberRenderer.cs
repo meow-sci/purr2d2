@@ -30,12 +30,16 @@ public sealed unsafe class SaberRenderer : IDisposable
     private bool _gpuFailed;
     private readonly Dictionary<KittenEva, Emitter> _emitters = new(ReferenceEqualityComparer.Instance);
     private double _now;
+    private SaberVfxTuning _lightVfx = SaberVfxTuning.LightDefault;
+    private SaberVfxTuning _darkVfx = SaberVfxTuning.DarkDefault;
+    private SaberVfxClock _lightClock;
+    private SaberVfxClock _darkClock;
 
-    private readonly record struct Blade(float4x4 EmitterToEgo, float Length, float3 Color, float Seed);
+    private readonly record struct Blade(float4x4 EmitterToEgo, float Length, float3 Color, float Seed, SaberType Type);
     private readonly record struct Emitter(double4x4 ToBody, float Length, float3 Color);
     private readonly record struct Spark(Part Part, double3 A, double3 B, double3 Normal, double Born);
     private readonly record struct PassKey(VkSampleCountFlags Samples, VkFormat Color, VkFormat Depth);
-    private readonly record struct PipelinePair(VkPipeline Glow);
+    private readonly record struct PipelinePair(VkPipeline Light, VkPipeline Dark);
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct GlowPush
@@ -50,6 +54,14 @@ public sealed unsafe class SaberRenderer : IDisposable
     public bool HiltReady => _hilt != null;
     public bool GlowReady => _hasLayout && !_gpuFailed;
     public string? LastError { get; private set; }
+
+    /// <summary>Snapshot live preferences on the main thread, outside command recording.</summary>
+    public void ConfigureVfx(SaberSettings settings)
+    {
+        if (_disposed) return;
+        _lightVfx = SaberVfxTuning.FromEffects(settings.EffectsFor(SaberType.Light), SaberType.Light);
+        _darkVfx = SaberVfxTuning.FromEffects(settings.EffectsFor(SaberType.Dark), SaberType.Dark);
+    }
 
     public void Initialize(Harmony harmony)
     {
@@ -105,9 +117,21 @@ public sealed unsafe class SaberRenderer : IDisposable
                 if (!viewport.Visible || viewport.OffscreenTarget is not { } target) continue;
                 var key = Key(target);
                 if (_pipelines.ContainsKey(key)) continue;
-                var glow = BuildPipeline(renderer, target, additive: true);
-                try { _pipelines.Add(key, new PipelinePair(glow)); }
-                catch { renderer.Device.DestroyPipeline(glow, null); throw; }
+                var dark = BuildPipeline(renderer, target, SaberType.Dark);
+                VkPipeline light = default;
+                bool hasLight = false;
+                try
+                {
+                    light = BuildPipeline(renderer, target, SaberType.Light);
+                    hasLight = true;
+                    _pipelines.Add(key, new PipelinePair(light, dark));
+                }
+                catch
+                {
+                    if (hasLight) renderer.Device.DestroyPipeline(light, null);
+                    renderer.Device.DestroyPipeline(dark, null);
+                    throw;
+                }
             }
         }
         catch (Exception ex) { _gpuFailed = true; Report("glow initialization", ex); }
@@ -126,7 +150,7 @@ public sealed unsafe class SaberRenderer : IDisposable
 
     /// <summary>Call only in the pose callback, after this viewport's final wrist transform is available.</summary>
     public void DrawSaber(KittenEva kitten, IViewport viewport, float4x4 emitterToEgo,
-        float lengthMeters, float3 color)
+        float lengthMeters, float3 color, SaberType type)
     {
         if (_disposed || !viewport.Visible) return;
         try
@@ -140,7 +164,7 @@ public sealed unsafe class SaberRenderer : IDisposable
             if (!_blades.TryGetValue(viewport.ShaderSlot, out var list))
                 _blades.Add(viewport.ShaderSlot, list = new List<Blade>(1));
             list.Add(new Blade(emitterToEgo, float.Clamp(lengthMeters, 0, SaberLimits.MaximumBladeLength),
-                color, SaberVfx.Seed(kitten.Id)));
+                color, SaberVfx.Seed(kitten.Id), type == SaberType.Dark ? SaberType.Dark : SaberType.Light));
         }
         catch (Exception ex) { Report("saber submission", ex); }
     }
@@ -155,6 +179,8 @@ public sealed unsafe class SaberRenderer : IDisposable
     /// <summary>Player-time seconds: cooling remains visible while simulation is paused.</summary>
     public void Update(double now)
     {
+        _lightClock.Advance(now, _lightVfx.ShimmerSpeed, _lightVfx.ArcFrequency);
+        _darkClock.Advance(now, _darkVfx.ShimmerSpeed, _darkVfx.ArcFrequency);
         _now = now;
         for (int i = _sparks.Count - 1; i >= 0; i--)
             if (now - _sparks[i].Born > .7 || _sparks[i].Part.Tree?.OwningVehicle is not { IsDisposed: false }) _sparks.RemoveAt(i);
@@ -165,10 +191,11 @@ public sealed unsafe class SaberRenderer : IDisposable
     private static PassKey Key(RenderTarget target) => new(target.Samples,
         target.ColorImage?.Format ?? VkFormat.Undefined, target.DepthImage?.Format ?? VkFormat.Undefined);
 
-    private VkPipeline BuildPipeline(Renderer renderer, RenderTarget target, bool additive)
+    private VkPipeline BuildPipeline(Renderer renderer, RenderTarget target, SaberType type)
     {
-        var vertex = ModLibrary.Get<ShaderReference>("Purr2D2_Glow_Vert");
-        var fragment = ModLibrary.Get<ShaderReference>("Purr2D2_Glow_Frag");
+        bool light = type == SaberType.Light;
+        var vertex = ModLibrary.Get<ShaderReference>(light ? "Purr2D2_Light_Vert" : "Purr2D2_Glow_Vert");
+        var fragment = ModLibrary.Get<ShaderReference>(light ? "Purr2D2_Light_Frag" : "Purr2D2_Glow_Frag");
         if (vertex?.Shader is not { } vert || fragment?.Shader is not { } frag)
             throw new InvalidOperationException("Purr2D2 glow shader assets did not load");
         Span<VkPipelineShaderStageCreateInfo> stages = stackalloc VkPipelineShaderStageCreateInfo[2];
@@ -193,7 +220,7 @@ public sealed unsafe class SaberRenderer : IDisposable
                 InputAssemblyState = Presets.InputAssembly.TriangleStrip,
                 RasterizationState = Presets.Rasterization.Fill.CullNone,
                 DepthStencilState = RenderingPresets.ReverseZDepthStencil.DepthTestNoWrite,
-                ColorBlendState = additive ? RenderingPresets.BlendState.BlendAdditive : RenderingPresets.BlendState.BlendColorAlphaOver,
+                ColorBlendState = RenderingPresets.BlendState.BlendAdditive,
             };
             // Each view can use a different sample count. Cache by formats+samples, never target extent.
             target.SetupGraphicsPipeline(ref info);
@@ -264,7 +291,9 @@ public sealed unsafe class SaberRenderer : IDisposable
         float time = SaberVfx.Clock(_now);
         Program.SetViewport(commands);
 
-        commands.BindPipeline(VkPipelineBindPoint.Graphics, pair.Glow);
+        // Sparks deliberately retain the original hot branch, without either style's shimmer.
+        commands.BindPipeline(VkPipelineBindPoint.Graphics, pair.Dark);
+        bool lightBound = false;
         foreach (var spark in _sparks)
         {
             double age = Math.Max(0, _now - spark.Born);
@@ -284,28 +313,40 @@ public sealed unsafe class SaberRenderer : IDisposable
         if (!_blades.TryGetValue(viewport.ShaderSlot, out var blades)) return;
         foreach (var blade in blades)
         {
+            bool light = blade.Type == SaberType.Light;
+            var tuning = light ? _lightVfx : _darkVfx;
+            var clock = light ? _lightClock : _darkClock;
+            float shimmerTime = clock.ShimmerTime;
+            if (light != lightBound)
+            {
+                commands.BindPipeline(VkPipelineBindPoint.Graphics, light ? pair.Light : pair.Dark);
+                lightBound = light;
+            }
             var start = double3.Unpack(blade.EmitterToEgo.Translation);
             var z = double3.Unpack(blade.EmitterToEgo.Z.XYZ);
             var magnitude = z.Length();
             if (magnitude < 1e-9) continue;
             var end = start + z / magnitude * blade.Length;
-            var detail = BladeDetail(viewport, camera, start, end, blade.Length);
+            var detail = BladeDetail(viewport, camera, start, end, blade.Length, tuning);
             DrawRibbon(commands, projection, start, end, double3.Zero, 0.065f, 0.009f,
                 new float4(blade.Color, 8), isChar: false, billboard: true,
-                new float4(time, blade.Seed, blade.Length * .5f, detail.ShimmerStrength));
+                new float4(shimmerTime, blade.Seed, blade.Length * .5f, detail.ShimmerStrength));
             // A line ribbon is edge-on when looking along the blade. A camera-facing end cap
             // keeps the tip round and luminous from that angle as well.
             DrawBladeTip(commands, projection, end, new float4(blade.Color, 4),
-                new float4(time, blade.Seed, blade.Length, detail.ShimmerStrength));
-            if (detail.ArcCount > 0) DrawArcs(commands, projection, blade, start, z / magnitude, time, detail);
+                new float4(shimmerTime, blade.Seed, blade.Length, detail.ShimmerStrength));
+            if (detail.ArcCount > 0)
+                DrawArcs(commands, projection, blade, start, z / magnitude, time, clock.BurstTime, detail, tuning);
         }
     }
 
     private static SaberVfxDetail BladeDetail(IViewport viewport, Camera camera, double3 start,
-        double3 end, float length)
+        double3 end, float length, SaberVfxTuning tuning)
     {
         var middle = (start + end) * .5;
-        if (!Finite(middle) || camera.IsSphereOutsideFrustum(middle, length * .5 + .1)) return default;
+        // Includes maximum configured arc displacement/width as well as the blade halo.
+        double outsideRadius = Math.Max(.1, .020 + .059 * tuning.ArcAmplitude + .008 * tuning.ArcWidth);
+        if (!Finite(middle) || camera.IsSphereOutsideFrustum(middle, length * .5 + outsideRadius)) return default;
         var projection = camera.MVP.viewProjection;
         var a = float4.Transform(new float4(float3.Pack(in start), 1), projection);
         var b = float4.Transform(new float4(float3.Pack(in end), 1), projection);
@@ -324,11 +365,11 @@ public sealed unsafe class SaberRenderer : IDisposable
         // Distance to the nearest blade point, so a long blade near the camera stays detailed.
         var axis = (end - start) / length;
         var nearest = start + axis * double.Clamp(-double3.Dot(start, axis), 0, length);
-        return SaberVfx.Detail(lengthPixels, .065f * pixelsPerMeter, nearest.Length(), length);
+        return SaberVfx.Detail(lengthPixels, .065f * pixelsPerMeter, nearest.Length(), length, tuning);
     }
 
     private void DrawArcs(CommandBuffer commands, float4x4 projection, Blade blade, double3 start,
-        double3 axis, float time, SaberVfxDetail detail)
+        double3 axis, float time, float burstTime, SaberVfxDetail detail, SaberVfxTuning tuning)
     {
         // Remove rig scale/shear. The procedural path stays in the posed saber frame, while
         // its narrow ribbon faces this viewport's camera. No vertex buffer or per-frame arrays.
@@ -348,14 +389,15 @@ public sealed unsafe class SaberRenderer : IDisposable
         var push = new GlowPush
         {
             Mvp = float4x4.Pack(in model) * projection,
-            Color = new float4(blade.Color, 2.5f),
-            Shape = new float4(blade.Length, .008f, .0015f, 2),
+            // Arc mode reuses color.a for amplitude and shape.z for the independent burst clock.
+            Color = new float4(blade.Color, tuning.ArcAmplitude),
+            Shape = new float4(blade.Length, .008f * tuning.ArcWidth, burstTime, 2 + tuning.ArcCount),
             Animation = new float4(time, blade.Seed, detail.Segments, detail.ArcLevel),
-            Camera = new float4(cameraLocal, detail.ArcVisibility),
+            Camera = new float4(cameraLocal, detail.ArcVisibility * 2.5f * tuning.ArcBrightness),
         };
         commands.PushConstants(_layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
             ByteSize.Zero, push);
-        // Each instance is one contiguous strip: 3 arcs x 10 segments is the hard maximum.
+        // Each instance is one contiguous strip: 8 arcs x 10 segments is the hard maximum.
         commands.Draw(2 * (detail.Segments + 1), detail.ArcCount, 0, 0);
     }
 
@@ -513,7 +555,8 @@ public sealed unsafe class SaberRenderer : IDisposable
         _hilt = null;
         foreach (var pair in _pipelines.Values)
         {
-            device.DestroyPipeline(pair.Glow, null);
+            device.DestroyPipeline(pair.Light, null);
+            device.DestroyPipeline(pair.Dark, null);
         }
         _pipelines.Clear();
         if (_hasLayout) device.DestroyPipelineLayout(_layout, null);

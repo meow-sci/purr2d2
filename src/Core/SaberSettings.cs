@@ -1,9 +1,61 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Purr2D2.Core;
 
+public enum SaberType { Light, Dark }
+
+public sealed class SaberEffectSettings
+{
+    public float ShimmerAmount { get; set; }
+    public float ShimmerSpeed { get; set; }
+    public int ArcCount { get; set; }
+    public float ArcFrequency { get; set; }
+    public float ArcAmplitude { get; set; }
+    public float ArcBrightness { get; set; }
+    public float ArcWidth { get; set; }
+
+    public SaberEffectSettings() => Reset(SaberType.Light);
+
+    public static SaberEffectSettings Create(SaberType type)
+    {
+        var effects = new SaberEffectSettings();
+        effects.Reset(type);
+        return effects;
+    }
+
+    public void Reset(SaberType type)
+    {
+        bool dark = type == SaberType.Dark;
+        ShimmerAmount = dark ? 1.5f : .5f;
+        ShimmerSpeed = dark ? 1.5f : .6f;
+        ArcCount = dark ? 3 : 1;
+        ArcFrequency = dark ? 1.5f : .35f;
+        ArcAmplitude = dark ? 1.3f : .5f;
+        ArcBrightness = dark ? 1.1f : .65f;
+        ArcWidth = dark ? 1 : .8f;
+    }
+
+    public void Validate(SaberType type)
+    {
+        bool dark = type == SaberType.Dark;
+        ShimmerAmount = Clamp(ShimmerAmount, 0, 4, dark ? 1.5f : .5f);
+        ShimmerSpeed = Clamp(ShimmerSpeed, 0, 4, dark ? 1.5f : .6f);
+        ArcCount = Math.Clamp(ArcCount, 0, SaberSettings.MaximumArcCount);
+        ArcFrequency = Clamp(ArcFrequency, .1f, 4, dark ? 1.5f : .35f);
+        ArcAmplitude = Clamp(ArcAmplitude, 0, 3, dark ? 1.3f : .5f);
+        ArcBrightness = Clamp(ArcBrightness, 0, 4, dark ? 1.1f : .65f);
+        ArcWidth = Clamp(ArcWidth, .25f, 3, dark ? 1 : .8f);
+    }
+
+    private static float Clamp(float value, float min, float max, float fallback) =>
+        float.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
+}
+
 public sealed class SaberSettings
 {
+    public const int MaximumArcCount = 8;
+
     public float BladeLength { get; set; } = 1.4f;
     public float ColorR { get; set; } = .12f;
     public float ColorG { get; set; } = .75f;
@@ -17,6 +69,16 @@ public sealed class SaberSettings
     public float AimZ { get; set; } = .6f;
     public float FingerCurl { get; set; } = .12f;
     public bool HideMmu { get; set; } = true;
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    public SaberEffectSettings LightEffects { get; set; } = SaberEffectSettings.Create(SaberType.Light);
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    public SaberEffectSettings DarkEffects { get; set; } = SaberEffectSettings.Create(SaberType.Dark);
+
+    public SaberEffectSettings EffectsFor(SaberType type)
+    {
+        if (type == SaberType.Dark) return DarkEffects ??= SaberEffectSettings.Create(SaberType.Dark);
+        return LightEffects ??= SaberEffectSettings.Create(SaberType.Light);
+    }
 
     public void Validate()
     {
@@ -29,6 +91,8 @@ public sealed class SaberSettings
         AimX = Clamp(AimX, -1, 1, .22f); AimY = Clamp(AimY, -1, 1, .45f); AimZ = Clamp(AimZ, -1, 1, .6f);
         if (AimX * AimX + AimY * AimY + AimZ * AimZ < .0001f) { AimX = .22f; AimY = .45f; AimZ = .6f; }
         FingerCurl = Clamp(FingerCurl, 0, .5f, .12f);
+        EffectsFor(SaberType.Light).Validate(SaberType.Light);
+        EffectsFor(SaberType.Dark).Validate(SaberType.Dark);
     }
 
     private static float Clamp(float value, float min, float max, float fallback) =>

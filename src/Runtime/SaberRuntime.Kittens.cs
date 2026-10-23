@@ -38,6 +38,7 @@ internal sealed partial class SaberRuntime
         internal double PreviousTipTime;
         internal float SwingSpeed;
         internal float3 Color = new(.12f, .75f, 1);
+        internal SaberType Type = SaberType.Light;
         internal SaberTogglePhase TogglePhase;
 
         internal KittenSaber(Action<KittenEva, IViewport, float4x4>? draw = null) => Pose = new(draw);
@@ -59,9 +60,9 @@ internal sealed partial class SaberRuntime
     private float3 DefaultSaberColor => ClampSaberColor(new(_settings.ColorR, _settings.ColorG, _settings.ColorB));
     private float3 Color => _activeSaber?.Color ?? DefaultSaberColor;
     private float3 SaberColorFor(KittenEva kitten) => _kittenSabers.TryGetValue(kitten, out var saber) ? saber.Color : DefaultSaberColor;
+    private SaberType SaberTypeFor(KittenEva kitten) => _kittenSabers.TryGetValue(kitten, out var saber) ? saber.Type : SaberType.Light;
     private KittenEva? AppearanceKitten => !Program.EditorFlag && Program.ControlledVehicle is KittenEva { IsDisposed: false } kitten
         && _currentKittens.Contains(kitten) ? kitten : null;
-    private float3 AppearanceColor => AppearanceKitten is { } kitten ? SaberColorFor(kitten) : DefaultSaberColor;
 
     private void SetKittenSaberColor(KittenEva kitten, float3 color)
     {
@@ -69,13 +70,10 @@ internal sealed partial class SaberRuntime
             saber.Color = ClampSaberColor(color);
     }
 
-    // The panel edits its selected kitten and the saved color preference. Row
-    // pickers only edit their own session record. New kittens use the palette.
-    private void SetAppearanceColor(float3 color)
+    private void SetKittenSaberType(KittenEva kitten, SaberType type)
     {
-        color = ClampSaberColor(color);
-        _settings.ColorR = color.X; _settings.ColorG = color.Y; _settings.ColorB = color.Z;
-        if (AppearanceKitten is { } kitten) SetKittenSaberColor(kitten, color);
+        if (!kitten.IsDisposed && _currentKittens.Contains(kitten) && _kittenSabers.TryGetValue(kitten, out var saber))
+            saber.Type = type == SaberType.Dark ? SaberType.Dark : SaberType.Light;
     }
 
     private static float3 ClampSaberColor(float3 color) => new(

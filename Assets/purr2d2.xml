@@ -16,4 +16,6 @@
   </PbrMaterial>
   <Shader Id="Purr2D2_Glow_Vert" Path="Assets/Shaders/SaberGlow.vert" />
   <Shader Id="Purr2D2_Glow_Frag" Path="Assets/Shaders/SaberGlow.frag" />
+  <Shader Id="Purr2D2_Light_Vert" Path="Assets/Shaders/SaberLight.vert" />
+  <Shader Id="Purr2D2_Light_Frag" Path="Assets/Shaders/SaberLight.frag" />
 </Assets>

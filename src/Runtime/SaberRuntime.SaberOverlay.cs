@@ -75,7 +75,7 @@ internal sealed partial class SaberRuntime
             _overlayLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(), kittens.Count,
                 OverlayMenuBarInset(viewport), ShowSomersaultButtons);
             _overlayLayoutAvailable = _overlayLayout.Valid;
-            if (!_overlayLayoutAvailable) return;
+            if (!_overlayLayoutAvailable) { DismissKittenColorPicker(); return; }
             var layout = _overlayLayout;
             bool canSomersault = CanStartSomersault(out var somersaultReason);
             float fontSize = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
@@ -125,6 +125,15 @@ internal sealed partial class SaberRuntime
                             draw.AddRectFilled(swatch, swatch + new float2(layout.ColorSwatchSize),
                                 new ImColor8((byte)(color.X * 255), (byte)(color.Y * 255), (byte)(color.Z * 255), 255));
                             draw.AddRect(swatch, swatch + new float2(layout.ColorSwatchSize), muted);
+                            var cue = color.X * .2126f + color.Y * .7152f + color.Z * .0722f > .55f
+                                ? new ImColor8(10, 10, 15, 255) : white;
+                            float size = layout.ColorSwatchSize;
+                            CenterOverlayText(draw, swatch + new float2(size * .34f, size * .5f), cue,
+                                SaberTypeFor(kitten) == SaberType.Dark ? "D" : "L", size * .5f, size * .65f);
+                            draw.AddLine(swatch + new float2(size * .65f, size * .43f),
+                                swatch + new float2(size * .77f, size * .59f), cue, Math.Max(.5f, layout.Scale));
+                            draw.AddLine(swatch + new float2(size * .77f, size * .59f),
+                                swatch + new float2(size * .89f, size * .43f), cue, Math.Max(.5f, layout.Scale));
                         }
                     }
                     finally { draw.PopClipRect(); }
@@ -188,7 +197,7 @@ internal sealed partial class SaberRuntime
             if (_kittenColorPickerBoundsAvailable)
             {
                 // Foreground draw lists are above native popups. Cut out the popup
-                // rectangle so even a small viewport keeps the picker unobscured.
+                // rectangle so even a small viewport keeps the saber menu unobscured.
                 var min = new float2(Math.Clamp(_kittenColorPickerMin.X, viewport.WorkPos.X, viewportMax.X),
                     Math.Clamp(_kittenColorPickerMin.Y, viewport.WorkPos.Y, viewportMax.Y));
                 var max = new float2(Math.Clamp(_kittenColorPickerMax.X, viewport.WorkPos.X, viewportMax.X),
@@ -418,6 +427,7 @@ internal sealed partial class SaberRuntime
         const string id = "##Purr2D2KittenColorPicker";
         _kittenColorPickerBoundsAvailable = false;
         bool valid = OverlayVisible && _kittenColorPickerOwner is { IsDisposed: false } kitten && _currentKittens.Contains(kitten);
+        if (!valid) { DismissKittenColorPicker(); return; }
         if (_kittenColorPickerRequested && valid)
         {
             _kittenColorPickerId = ImGui.GetID(id);
@@ -430,26 +440,52 @@ internal sealed partial class SaberRuntime
             DismissKittenColorPicker();
             return;
         }
-        // Auto-sizing may hide a popup's first BeginPopup frame. It still owns
-        // input during that frame and must already take priority over the rows.
+        // The popup owns input before its first BeginPopup frame and takes
+        // priority over the foreground overlay's rows and action buttons.
         _kittenColorPickerOpen = true;
         var viewport = ImGui.GetMainViewport();
-        float width = Math.Clamp(248 * _overlayLayout.Scale, 150, 320);
-        var position = new float2(Math.Max(viewport.WorkPos.X + 8, _kittenColorPickerAnchor.X - width),
-            Math.Clamp(_kittenColorPickerAnchor.Y, viewport.WorkPos.Y + 8, viewport.WorkPos.Y + Math.Max(8, viewport.WorkSize.Y - width - 70)));
+        float scale = Math.Clamp(ImGui.GetFontSize() / 16, .75f, 2);
+        float topInset = OverlayMenuBarInset(viewport);
+        float width = Math.Min(440 * scale, viewport.WorkSize.X - 16);
+        float height = Math.Min(690 * scale, viewport.WorkSize.Y - topInset - 16);
+        var minimum = viewport.WorkPos + new float2(8, topInset + 8);
+        var maximum = minimum + new float2(Math.Max(0, viewport.WorkSize.X - width - 16),
+            Math.Max(0, viewport.WorkSize.Y - topInset - height - 16));
+        var position = new float2(Math.Clamp(_kittenColorPickerAnchor.X - width, minimum.X, maximum.X),
+            Math.Clamp(_kittenColorPickerAnchor.Y, minimum.Y, maximum.Y));
         ImGui.SetNextWindowViewport(viewport.ID);
-        ImGui.SetNextWindowPos(position, ImGuiCond.Appearing);
-        if (!ImGui.BeginPopup(id, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoMove)) return;
+        ImGui.SetNextWindowPos(position, ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new float2(width, height), ImGuiCond.Always);
+        if (!ImGui.BeginPopup(id, ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoMove
+            | ImGuiWindowFlags.AlwaysVerticalScrollbar)) return;
         try
         {
             if (!valid) { ImGui.CloseCurrentPopup(); return; }
             var owner = _kittenColorPickerOwner!;
-            ImGui.Text(KittenLabel(owner));
-            ImGui.SetNextItemWidth(width);
+            ImGui.TextWrapped($"{KittenLabel(owner)} — saber");
+            var type = SaberTypeFor(owner);
+            ImGui.Text("Saber type");
+            if (ImGui.RadioButton("Light", type == SaberType.Light))
+            {
+                SetKittenSaberType(owner, SaberType.Light);
+                type = SaberType.Light;
+            }
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Dark", type == SaberType.Dark))
+            {
+                SetKittenSaberType(owner, SaberType.Dark);
+                type = SaberType.Dark;
+            }
+            ImGui.TextWrapped("This kitten's color and type last for this session.");
+            ImGui.Text("Color");
+            ImGui.SetNextItemWidth(Math.Min(220 * scale, ImGui.GetContentRegionAvail().X));
             float3 color = SaberColorFor(owner);
             if (ImGui.ColorPicker3("##SaberColor", ref color, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoAlpha
                 | ImGuiColorEditFlags.NoOptions | ImGuiColorEditFlags.PickerHueWheel | ImGuiColorEditFlags.InputRGB))
                 SetKittenSaberColor(owner, color);
+            DrawSaberEffectsSettings(type);
+            ImGui.Separator();
+            DrawSavePreferences();
             if (ImGui.Button("Done", new float2(-1, 0))) ImGui.CloseCurrentPopup();
             _kittenColorPickerMin = ImGui.GetWindowPos();
             _kittenColorPickerMax = _kittenColorPickerMin + ImGui.GetWindowSize();

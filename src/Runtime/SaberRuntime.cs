@@ -152,6 +152,7 @@ internal sealed partial class SaberRuntime : IDisposable
         try
         {
             if (!OverlayVisible) DismissKittenColorPicker();
+            _renderer.ConfigureVfx(_settings);
             _renderer.Prepare();
             var io = ImGui.GetIO();
             if (!io.WantTextInput && !io.WantCaptureKeyboard && ImGui.IsKeyPressed(ImGuiKey.F7, false))
@@ -177,7 +178,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         if (_disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped) return;
         float length = saber.Blade.Deployment * _settings.BladeLength;
-        _renderer.DrawSaber(owner, viewport, emitterToEgo, length, saber.Color);
+        _renderer.DrawSaber(owner, viewport, emitterToEgo, length, saber.Color, saber.Type);
         if (ReferenceEquals(viewport, Program.MainViewport) && saber.Pose.TryGetBladeSegment(length, out var emitter, out var tip))
         {
             double elapsed = _playerTime - saber.PreviousTipTime;

@@ -17,7 +17,7 @@ import wave
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from check_saber_shaders import run_shader_checks
+from check_saber_shaders import SHADER_PAIRS, run_shader_checks
 
 
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1]
@@ -422,12 +422,17 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
     if not assets_root.is_dir():
         issues.append(f"{label}: missing Assets directory")
         return issues
+    for style, stem in SHADER_PAIRS:
+        for suffix in (".vert", ".frag"):
+            shader = assets_root / "Shaders" / (stem + suffix)
+            if not shader.is_file():
+                issues.append(f"{label}: missing {style} saber shader: {shader.relative_to(root).as_posix()}")
     asset_files = [path for path in assets_root.rglob("*") if path.is_file()]
     ext_counts: dict[str, int] = {}
     for path in asset_files:
         suffix = path.suffix.lower()
         ext_counts[suffix] = ext_counts.get(suffix, 0) + 1
-        if suffix not in REQUIRED_ASSET_EXTENSIONS and suffix != ".xml":
+        if suffix not in REQUIRED_ASSET_EXTENSIONS and suffix not in {".xml", ".glsl"}:
             issues.append(f"{label}: unsupported runtime asset extension: {path.relative_to(root).as_posix()}")
     for suffix in sorted(REQUIRED_ASSET_EXTENSIONS):
         if ext_counts.get(suffix, 0) < 1:
@@ -455,14 +460,23 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
                 wave_cache[path.resolve()] = _wave_info(path, context)
             except ValidationError as exc:
                 issues.append(str(exc))
-        elif path.suffix.lower() in {".vert", ".frag"}:
+        elif path.suffix.lower() in {".vert", ".frag", ".glsl"}:
             try:
                 contents = path.read_text(encoding="utf-8").strip()
             except (OSError, UnicodeDecodeError) as exc:
                 issues.append(f"{context}: cannot read shader: {exc}")
                 continue
-            if not contents or "void main" not in contents:
-                issues.append(f"{context}: shader is empty or has no main entry point")
+            if not contents:
+                issues.append(f"{context}: shader is empty")
+            # Production entrypoints may live in shared GLSL includes. Compile/link
+            # checks establish entrypoint validity; validate packaged dependencies here.
+            for include in re.findall(r'^\s*#\s*include\s*[<"]([^>"\r\n]+)[>"]', contents, re.MULTILINE):
+                try:
+                    target = _relative_asset_path(root, include, context, path.parent)
+                    if not target.is_file():
+                        issues.append(f"{context}: included shader is missing: {include}")
+                except ValidationError as exc:
+                    issues.append(str(exc))
 
     xml_files = sorted(path for path in asset_files if path.suffix.lower() == ".xml")
     for required in (root / "Assets/purr2d2.xml", root / "Assets/Sounds.xml", root / "Assets/PracticeTargets.xml"):
@@ -523,7 +537,7 @@ def validate_stage(stage: Path, expected_version: str | None = None) -> list[str
     return issues
 
 
-def run_managed_checks(source: Path) -> tuple[int, str]:
+def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, str]:
     source = source.resolve()
     core_sources = [
         source / "src/Core/BladeState.cs",
@@ -642,10 +656,10 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "tests/somersault/PoseHostStubs.cs",
         source / "tests/SomersaultPoseChecks.cs",
     ]
-    shader_code, shader_output = run_shader_checks(source)
+    shader_code, shader_output = run_shader_checks(source, stage)
     outputs = [shader_output]
     result = shader_code
-    vfx_sources = [source / "src/Rendering/SaberVfx.cs", source / "tests/SaberVfxChecks.cs",
+    vfx_sources = [source / "src/Rendering/SaberVfx.cs", source / "src/Core/SaberSettings.cs", source / "tests/SaberVfxChecks.cs",
                    source / "artifacts/checks/SaberVfxChecks/GlowPush.cs"]
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),
@@ -750,7 +764,7 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(validate_stage(stage, version))
     test_output = ""
     if args.run_tests:
-        test_code, test_output = run_managed_checks(args.source)
+        test_code, test_output = run_managed_checks(args.source, stage)
         if test_code != 0:
             issues.append("managed checks failed (see managed test output above)")
         print(test_output, end="" if test_output.endswith("\n") else "\n")

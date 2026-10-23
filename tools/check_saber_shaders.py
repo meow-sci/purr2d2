@@ -22,7 +22,30 @@ def _compiler() -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
-def run_shader_checks(source: Path) -> tuple[int, str]:
+SHADER_PAIRS = (("Dark", "SaberGlow"), ("Light", "SaberLight"))
+
+
+def _compile_shader_pair(compiler: Path, shaders: Path, output: Path, style: str,
+                         stem: str, label: str) -> tuple[int, str]:
+    result = subprocess.run(
+        [str(compiler), "-V", "--target-env", "vulkan1.2", "-l", "-q",
+         "-I" + str(shaders), "-o", str(output / f"{label}-{stem}.linked.spv"),
+         str(shaders / f"{stem}.vert"), str(shaders / f"{stem}.frag")],
+        cwd=shaders, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        check=False, timeout=60)
+    if result.returncode:
+        return result.returncode, f"FAIL: {label} {style} saber GLSL compilation/linking\n" + result.stdout
+    expected = {"mvp": (0, "8b5c"), "color": (64, "8b52"), "shape": (80, "8b52"),
+                "animation": (96, "8b52"), "camera": (112, "8b52")}
+    reflected = {name: (int(offset), kind.lower()) for name, offset, kind in re.findall(
+        r"^GlowPush\.(\w+): offset (\d+), type ([0-9a-fA-F]+),", result.stdout, re.MULTILINE)}
+    block = re.search(r"^GlowPush:.*? size (\d+),.*? numMembers (\d+)\s*$", result.stdout, re.MULTILINE)
+    if reflected != expected or block is None or tuple(map(int, block.groups())) != (128, 5):
+        return 1, f"FAIL: {label} {style} shader GlowPush must match the 128-byte CPU ABI\n" + result.stdout
+    return 0, f"PASS: {label} {style} saber GLSL compiles/links; reflected push constants match the 128-byte CPU ABI\n"
+
+
+def run_shader_checks(source: Path, stage: Path | None = None) -> tuple[int, str]:
     source = source.resolve()
     output = source / "artifacts/checks/SaberVfxChecks"
     output.mkdir(parents=True, exist_ok=True)
@@ -43,23 +66,17 @@ def run_shader_checks(source: Path) -> tuple[int, str]:
         compiler = _compiler()
         if compiler is None:
             return 1, "FAIL: shader checks require glslangValidator on PATH or in VULKAN_SDK (Vulkan SDK)\n"
-        shaders = source / "Assets/Shaders"
-        result = subprocess.run(
-            [str(compiler), "-V", "--target-env", "vulkan1.2", "-l", "-q",
-             "-o", str(output / "SaberGlow.linked.spv"),
-             str(shaders / "SaberGlow.vert"), str(shaders / "SaberGlow.frag")],
-            cwd=source, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            check=False, timeout=60)
-        if result.returncode:
-            return result.returncode, "FAIL: saber GLSL compilation/linking\n" + result.stdout
-        expected = {"mvp": (0, "8b5c"), "color": (64, "8b52"), "shape": (80, "8b52"),
-                    "animation": (96, "8b52"), "camera": (112, "8b52")}
-        reflected = {name: (int(offset), kind.lower()) for name, offset, kind in re.findall(
-            r"^GlowPush\.(\w+): offset (\d+), type ([0-9a-fA-F]+),", result.stdout, re.MULTILINE)}
-        block = re.search(r"^GlowPush:.*? size (\d+),.*? numMembers (\d+)\s*$", result.stdout, re.MULTILINE)
-        if reflected != expected or block is None or tuple(map(int, block.groups())) != (128, 5):
-            return 1, "FAIL: shader GlowPush must match the 128-byte CPU ABI\n" + result.stdout
-        return 0, "PASS: saber GLSL compiles/links; reflected push constants are 128 bytes with matching fields\n"
+        roots = [("source", source / "Assets/Shaders")]
+        if stage is not None:
+            roots.append(("stage", stage.resolve() / "Assets/Shaders"))
+        outputs = []
+        code = 0
+        for label, shaders in roots:
+            for style, stem in SHADER_PAIRS:
+                result, message = _compile_shader_pair(compiler, shaders, output, style, stem, label)
+                code = code or result
+                outputs.append(message)
+        return code, "".join(outputs)
     except (OSError, UnicodeDecodeError, subprocess.TimeoutExpired) as exc:
         return 1, f"FAIL: saber shader checks: {exc}\n"
 
@@ -67,6 +84,8 @@ def run_shader_checks(source: Path) -> tuple[int, str]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[1])
-    code, message = run_shader_checks(parser.parse_args().source)
+    parser.add_argument("--stage", type=Path, help="also compile the packaged shaders and shared includes")
+    arguments = parser.parse_args()
+    code, message = run_shader_checks(arguments.source, arguments.stage)
     print(message, end="")
     raise SystemExit(code)

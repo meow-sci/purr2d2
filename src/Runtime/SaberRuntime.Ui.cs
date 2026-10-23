@@ -8,6 +8,7 @@ namespace Purr2D2.Runtime;
 internal sealed partial class SaberRuntime
 {
     private double _preferencesSavedUntil;
+    private string? _preferencesSaveError;
 
     internal void SetInitializationFault(string message)
     {
@@ -62,19 +63,11 @@ internal sealed partial class SaberRuntime
 
                 ImGui.SeparatorText("Saber settings");
                 DrawSaberAppearanceSettings();
+                ImGui.TextWrapped("Open a kitten's saber menu in the overlay for color, type and effects.");
                 if (ImGui.CollapsingHeader("Character & grip")) DrawSaberCharacterSettings();
 
                 ImGui.Separator();
-                if (ImGui.Button("Save preferences"))
-                {
-                    try { _settings.Save(_settingsPath); _preferencesSavedUntil = _playerTime + 3; }
-                    catch (Exception ex) { _fault = "Could not save preferences: " + ex.Message; }
-                }
-                if (_playerTime < _preferencesSavedUntil)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextDisabled("Saved");
-                }
+                DrawSavePreferences();
                 if (ImGui.CollapsingHeader("Slice diagnostics"))
                 {
                     string diagnostics = $"Purr2D2 {typeof(SaberRuntime).Assembly.GetName().Version}; KSA {typeof(Vehicle).Assembly.GetName().Version}\n"
@@ -125,15 +118,10 @@ internal sealed partial class SaberRuntime
     private void DrawSaberAppearanceSettings()
     {
         if (!BeginSaberSettingsTable("##SaberAppearance")) return;
-        bool changed = false, colorChanged = false;
+        bool changed = false;
         float length = _settings.BladeLength, volume = _settings.Volume;
-        float3 color = AppearanceColor;
         try
         {
-            SaberSettingsRow(AppearanceKitten != null ? "Kitten color" : "Color preference");
-            colorChanged = ImGui.ColorEdit3("##BladeColor", ref color, ImGuiColorEditFlags.NoInputs);
-            changed |= colorChanged;
-            ShowSaberControlTip("Per-kitten colors last for this session. New EVA kittens cycle red, green, yellow and purple.");
             SaberSettingsRow("Blade length");
             changed |= ImGui.SliderFloat("##BladeLength", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m");
             SaberSettingsRow("Sound volume");
@@ -142,10 +130,87 @@ internal sealed partial class SaberRuntime
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.BladeLength = length;
-        if (colorChanged) SetAppearanceColor(color);
         _settings.Volume = volume;
         _settings.Validate();
         _preferencesSavedUntil = 0;
+    }
+
+    private void DrawSaberEffectsSettings(SaberType type)
+    {
+        string typeName = type == SaberType.Dark ? "Dark" : "Light";
+        ImGui.Separator();
+        ImGui.TextWrapped($"{typeName} effects — shared by all {typeName} sabers");
+        var effects = _settings.EffectsFor(type);
+        if (!BeginSaberSettingsTable("##SaberEffects", "Shimmer amount")) return;
+        float shimmerAmount = effects.ShimmerAmount, shimmerSpeed = effects.ShimmerSpeed;
+        int arcCount = effects.ArcCount;
+        float arcFrequency = effects.ArcFrequency, arcAmplitude = effects.ArcAmplitude;
+        float arcBrightness = effects.ArcBrightness, arcWidth = effects.ArcWidth;
+        bool changed = false;
+        try
+        {
+            SaberSettingsRow("Shimmer amount");
+            changed |= ImGui.SliderFloat("##ShimmerAmount", ref shimmerAmount, 0, 4, "%.2fx");
+            ShowSaberControlTip("Strength of the blade shimmer. 0 keeps the halo steady; 1x is the baseline.");
+            SaberSettingsRow("Shimmer speed");
+            changed |= ImGui.SliderFloat("##ShimmerSpeed", ref shimmerSpeed, 0, 4, "%.2fx");
+            ShowSaberControlTip("Motion speed of the blade shimmer. 0 freezes it; 1x is the baseline.");
+            SaberSettingsRow("Arc count");
+            changed |= ImGui.SliderInt("##ArcCount", ref arcCount, 0, SaberSettings.MaximumArcCount);
+            ShowSaberControlTip("Maximum arcs per saber. Distance and screen size can reduce the count; 0 disables arcs.");
+            SaberSettingsRow("Arc frequency");
+            changed |= ImGui.SliderFloat("##ArcFrequency", ref arcFrequency, .1f, 4, "%.2fx");
+            ShowSaberControlTip("Burst rate per arc. 1x gives one burst every two seconds; higher rates make bursts more frequent and shorter.");
+            SaberSettingsRow("Arc amplitude");
+            changed |= ImGui.SliderFloat("##ArcAmplitude", ref arcAmplitude, 0, 3, "%.2fx");
+            ShowSaberControlTip("How far arcs stray from the blade. 0 removes the outward spread; 1x is the baseline.");
+            SaberSettingsRow("Arc brightness");
+            changed |= ImGui.SliderFloat("##ArcBrightness", ref arcBrightness, 0, 4, "%.2fx");
+            ShowSaberControlTip("Brightness of the electrical arcs. 0 hides them; 1x is the baseline.");
+            SaberSettingsRow("Arc width");
+            changed |= ImGui.SliderFloat("##ArcWidth", ref arcWidth, .25f, 3, "%.2fx");
+            ShowSaberControlTip("Width of each electrical arc. 1x is the baseline width.");
+        }
+        finally { ImGui.EndTable(); }
+        if (changed)
+        {
+            effects.ShimmerAmount = shimmerAmount; effects.ShimmerSpeed = shimmerSpeed;
+            effects.ArcCount = arcCount; effects.ArcFrequency = arcFrequency;
+            effects.ArcAmplitude = arcAmplitude; effects.ArcBrightness = arcBrightness;
+            effects.ArcWidth = arcWidth;
+            effects.Validate(type);
+            _preferencesSavedUntil = 0;
+        }
+        if (ImGui.Button($"Reset {typeName} effects"))
+        {
+            effects.Reset(type);
+            _preferencesSavedUntil = 0;
+        }
+        ShowSaberControlTip($"Restores only the shared {typeName} effects. Use Save preferences to keep the changes.");
+    }
+
+    private void DrawSavePreferences()
+    {
+        if (ImGui.Button("Save preferences"))
+        {
+            try
+            {
+                _settings.Save(_settingsPath);
+                _preferencesSavedUntil = _playerTime + 3;
+                _preferencesSaveError = null;
+            }
+            catch (Exception ex)
+            {
+                _preferencesSavedUntil = 0;
+                _preferencesSaveError = "Could not save preferences: " + ex.Message;
+            }
+        }
+        if (_playerTime < _preferencesSavedUntil)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled("Saved");
+        }
+        if (_preferencesSaveError != null) ImGui.TextWrapped(_preferencesSaveError);
     }
 
     private void DrawSaberCharacterSettings()
@@ -177,11 +242,13 @@ internal sealed partial class SaberRuntime
         _preferencesSavedUntil = 0;
     }
 
-    private static bool BeginSaberSettingsTable(string id)
+    private static bool BeginSaberSettingsTable(string id, string? widestLabel = null)
     {
         if (!ImGui.BeginTable(id, 2, ImGuiTableFlags.NoPadOuterX)) return false;
+        float labelWidth = Math.Max(ImGui.CalcTextSize("Blade direction").X, ImGui.CalcTextSize("Color preference").X);
+        if (widestLabel != null) labelWidth = Math.Max(labelWidth, ImGui.CalcTextSize(widestLabel).X);
         ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed,
-            Math.Max(ImGui.CalcTextSize("Blade direction").X, ImGui.CalcTextSize("Color preference").X));
+            labelWidth);
         ImGui.TableSetupColumn("Control", ImGuiTableColumnFlags.WidthStretch);
         return true;
     }

@@ -70,16 +70,37 @@ internal sealed partial class SaberRuntime
         var secondPalette = new float3(13 / 255f, 81 / 255f, 1 / 255f);
         Check(runtime.SaberColorFor(first) == firstPalette && runtime.SaberColorFor(second) == secondPalette,
             "first and second EVA kittens receive exact normalized red and green palette entries");
+        Check(runtime.SaberTypeFor(first) == SaberType.Light && runtime.SaberTypeFor(second) == SaberType.Light,
+            "every newly observed kitten starts with the Light saber style");
         runtime.SetKittenSaberColor(first, new(1, 0, .2f));
         Check(runtime.SaberColorFor(first) == new float3(1, 0, .2f) && runtime.SaberColorFor(second) == secondPalette
             && !runtime.SaberEnabledFor(first) && runtime._kittenSaberRequests.Count == 0
             && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0,
             "changing one row color neither changes another kitten nor equips, ignites or binds its saber");
+        runtime.SetKittenSaberType(first, SaberType.Dark);
+        Check(runtime.SaberTypeFor(first) == SaberType.Dark && runtime.SaberTypeFor(second) == SaberType.Light
+            && runtime.SaberColorFor(first) == new float3(1, 0, .2f) && runtime.SaberColorFor(second) == secondPalette
+            && !runtime.SaberEnabledFor(first) && runtime._kittenSaberRequests.Count == 0
+            && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0,
+            "choosing a kitten's Dark style preserves color, other kittens and equipment intent");
+        runtime.SetKittenSaberType(first, (SaberType)999);
+        Check(runtime.SaberTypeFor(first) == SaberType.Light,
+            "invalid type values recover the supported Light style");
+        runtime.SetKittenSaberType(first, SaberType.Dark);
+        runtime.SetKittenSaberType(second, SaberType.Dark);
+        var sharedDark = runtime._settings.EffectsFor(runtime.SaberTypeFor(first));
+        sharedDark.ArcCount = 7;
+        Check(ReferenceEquals(sharedDark, runtime._settings.EffectsFor(runtime.SaberTypeFor(second)))
+            && runtime._settings.EffectsFor(runtime.SaberTypeFor(second)).ArcCount == 7
+            && runtime._settings.LightEffects.ArcCount == 1,
+            "two Dark kittens resolve the same editable profile without changing Light's profile");
+        runtime.SetKittenSaberType(second, SaberType.Light);
         Program.ControlledVehicle = second;
-        runtime.SetAppearanceColor(new(.4f, 1, .3f));
-        Check(runtime.AppearanceColor == new float3(.4f, 1, .3f) && runtime.SaberColorFor(second) == runtime.DefaultSaberColor
+        var savedFallback = runtime.DefaultSaberColor;
+        runtime.SetKittenSaberColor(second, new(.4f, 1, .3f));
+        Check(runtime.SaberColorFor(second) == new float3(.4f, 1, .3f) && runtime.DefaultSaberColor == savedFallback
             && runtime.SaberColorFor(first) == new float3(1, 0, .2f),
-            "the panel changes its controlled kitten and saved color preference without recoloring existing peers");
+            "a popup changes its selected kitten's session color without changing saved fallback or peers");
         KittenEva third = new("Third"), fourth = new("Fourth"), fifth = new("Fifth");
         system.All.Items = [first, second, third, fourth, fifth]; runtime.RefreshOverlayKittens();
         Check(runtime.SaberColorFor(third) == new float3(49 / 255f, 49 / 255f, 5 / 255f)
@@ -87,6 +108,8 @@ internal sealed partial class SaberRuntime
             && runtime.SaberColorFor(fifth) == firstPalette,
             "new EVA colors cycle yellow, purple and red independently of the saved preference");
         runtime.RefreshOverlayKittens();
+        Check(runtime.SaberTypeFor(first) == SaberType.Dark && runtime.SaberTypeFor(second) == SaberType.Light,
+            "fleet refresh preserves each kitten's selected saber type");
         Check(runtime.SaberColorFor(first) == new float3(1, 0, .2f)
             && runtime.SaberColorFor(second) == new float3(.4f, 1, .3f) && runtime._nextKittenColor == 1,
             "repeated snapshots preserve manual colors and do not advance the palette");
@@ -123,6 +146,17 @@ internal sealed partial class SaberRuntime
         Check(firstSaber.Blade.TargetOn && firstSaber.Blade.Deployment > 0 && firstSaber.Blade.Deployment < 1,
             "ignition extends continuously after the equip motion finishes");
         for (int i = 0; i < 3; i++) runtime.UpdateOtherSabers(.1);
+        var phaseBeforeType = firstSaber.TogglePhase;
+        float deploymentBeforeType = firstSaber.Blade.Deployment;
+        var colorBeforeType = firstSaber.Color;
+        runtime.SetKittenSaberType(first, SaberType.Light);
+        Check(firstSaber.Blade.Equipped && firstSaber.Blade.TargetOn
+            && firstSaber.Blade.Deployment == deploymentBeforeType && firstSaber.TogglePhase == phaseBeforeType
+            && firstSaber.Color == colorBeforeType && runtime._kittenSaberRequests.Count == 0
+            && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 1
+            && secondSaber.Type == SaberType.Light,
+            "changing a lit saber's style preserves its deployment, ignition, pose, color and other owners");
+        runtime.SetKittenSaberType(first, SaberType.Dark);
         runtime._kittenColorPickerOwner = first;
         runtime.SetControlledKitten(first); runtime.SetControlledKitten(second);
         Check(ReferenceEquals(runtime._blade, secondSaber.Blade) && ReferenceEquals(runtime._pose, secondSaber.Pose)
@@ -210,8 +244,13 @@ internal sealed partial class SaberRuntime
 
         runtime.QueueKittenSaber(first, true);
         runtime.SetKittenSaberColor(first, float3.Zero);
+        runtime.SetKittenSaberType(first, SaberType.Dark);
         Check(runtime._kittenSaberRequests.Count == 0 && !runtime._kittenSabers.ContainsKey(first),
-            "stale removed kittens cannot enqueue a saber or recreate a color record");
+            "stale removed kittens cannot enqueue a saber or recreate an appearance record");
+        var unseen = new KittenEva("Unseen");
+        runtime.SetKittenSaberType(unseen, SaberType.Dark);
+        Check(runtime.SaberTypeFor(unseen) == SaberType.Light && !runtime._kittenSabers.ContainsKey(unseen),
+            "a kitten outside the settled fleet cannot gain a session record from a stale type selection");
         runtime.QueueKittenSaber(second, false); runtime.ResetKittenSabers();
         Check(runtime._kittenSabers.Count == 0 && runtime._kittenSaberRequests.Count == 0
             && runtime.OverlayKittens.Count == 0 && runtime._activeSaber == null
@@ -221,7 +260,8 @@ internal sealed partial class SaberRuntime
             "world reset disposes every remaining kitten, clears queued UI work and restores idle aliases");
         KittenEva afterReset = new("After reset");
         system.All.Items = [afterReset]; runtime.RefreshOverlayKittens();
-        Check(runtime.SaberColorFor(afterReset) == firstPalette, "world reset restarts palette assignment at red");
+        Check(runtime.SaberColorFor(afterReset) == firstPalette && runtime.SaberTypeFor(afterReset) == SaberType.Light,
+            "world reset starts a new Light saber session and restarts palette assignment at red");
         runtime.ResetKittenSabers();
     }
 

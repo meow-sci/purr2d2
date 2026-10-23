@@ -66,6 +66,49 @@ internal static class CoreChecks
         Check(defaults.BladeLength == 1.4f && defaults.GripX == -24.5f && defaults.GripY == -14.7f && defaults.GripZ == 16
             && defaults.AimX == .22f && defaults.AimY == .45f && defaults.AimZ == .6f && defaults.FingerCurl == .12f,
             "new preferences use the chosen blade reach and measured kitten grip");
+        Check(DefaultEffects(defaults.LightEffects, SaberType.Light) && DefaultEffects(defaults.DarkEffects, SaberType.Dark),
+            "Light and Dark begin with distinct intentional effect profiles");
+        Check(!ReferenceEquals(defaults.LightEffects, defaults.DarkEffects)
+            && ReferenceEquals(defaults.LightEffects, defaults.EffectsFor(SaberType.Light))
+            && ReferenceEquals(defaults.DarkEffects, defaults.EffectsFor(SaberType.Dark)),
+            "all sabers of a type share one profile while the other type remains isolated");
+        defaults.EffectsFor(SaberType.Light).ArcCount = 6;
+        Check(defaults.EffectsFor(SaberType.Light).ArcCount == 6 && defaults.DarkEffects.ArcCount == 3,
+            "editing a shared Light profile updates subsequent Light lookups without changing Dark");
+
+        var invalidEffects = new SaberEffectSettings
+        {
+            ShimmerAmount = float.NaN, ShimmerSpeed = -1, ArcCount = 999,
+            ArcFrequency = float.PositiveInfinity, ArcAmplitude = -1, ArcBrightness = 99, ArcWidth = 0,
+        };
+        invalidEffects.Validate(SaberType.Light);
+        Check(invalidEffects.ShimmerAmount == .5f && invalidEffects.ShimmerSpeed == 0 && invalidEffects.ArcCount == 8
+            && invalidEffects.ArcFrequency == .35f && invalidEffects.ArcAmplitude == 0
+            && invalidEffects.ArcBrightness == 4 && invalidEffects.ArcWidth == .25f,
+            "profile validation clamps invalid controls and uses that type's fallback values");
+        var invalidDark = new SaberEffectSettings
+        {
+            ShimmerAmount = float.NegativeInfinity, ShimmerSpeed = float.NaN, ArcCount = -1,
+            ArcFrequency = 0, ArcAmplitude = float.PositiveInfinity,
+            ArcBrightness = float.NaN, ArcWidth = float.NaN,
+        };
+        invalidDark.Validate(SaberType.Dark);
+        Check(invalidDark.ShimmerAmount == 1.5f && invalidDark.ShimmerSpeed == 1.5f && invalidDark.ArcCount == 0
+            && invalidDark.ArcFrequency == .1f && invalidDark.ArcAmplitude == 1.3f
+            && invalidDark.ArcBrightness == 1.1f && invalidDark.ArcWidth == 1,
+            "Dark's nonfinite controls recover Dark defaults and zero arc count remains disabled");
+        defaults.BladeLength = 2.5f; defaults.ColorR = .4f; defaults.Volume = .3f;
+        defaults.GripX = -12; defaults.HideMmu = false;
+        defaults.DarkEffects.ArcBrightness = 2.75f;
+        var selectedProfile = defaults.EffectsFor(SaberType.Light);
+        selectedProfile.Reset(SaberType.Light);
+        Check(ReferenceEquals(selectedProfile, defaults.LightEffects) && DefaultEffects(selectedProfile, SaberType.Light)
+            && defaults.DarkEffects.ArcBrightness == 2.75f && defaults.BladeLength == 2.5f && defaults.ColorR == .4f
+            && defaults.Volume == .3f && defaults.GripX == -12 && !defaults.HideMmu,
+            "reset selected effects preserves shared profile identity, the other type, color, reach, audio and grip");
+        defaults.DarkEffects.Reset(SaberType.Dark);
+        Check(DefaultEffects(defaults.DarkEffects, SaberType.Dark) && DefaultEffects(defaults.LightEffects, SaberType.Light),
+            "resetting Dark restores Dark defaults without altering Light");
         Check(SaberLimits.AppliedDelta(true, 5, .2) == .2, "5x consumes all applied simulation time without clipping to 0.1 seconds");
         Check(SaberLimits.AppliedDelta(false, 5, .2) == 0 && SaberLimits.AppliedDelta(true, 0, .2) == 0
             && SaberLimits.AppliedDelta(true, 10, .1) == 0 && SaberLimits.AppliedDelta(true, 5, .3) == 0,
@@ -80,23 +123,54 @@ internal static class CoreChecks
         };
         settings.Validate();
         Check(settings.BladeLength == 12f && settings.ColorR == 0 && settings.ColorG == .75f && settings.ColorB == 1 && settings.Volume == 0,
-            "settings clamp high, low, and non-finite values to supported boundaries");
+            "settings clamp high, low, and nonfinite values to supported boundaries");
 
         string directory = Path.Combine(Path.GetTempPath(), "purr2d2-checks-" + Guid.NewGuid().ToString("N"));
         string path = Path.Combine(directory, "settings.json");
         try
         {
             Directory.CreateDirectory(directory);
+            Check(DefaultEffects(SaberSettings.Load(path).DarkEffects, SaberType.Dark),
+                "a missing preferences file starts with Dark defaults");
             File.WriteAllText(path, "{\"BladeLength\":0.85,\"GripX\":-13,\"GripY\":-8,\"GripZ\":18,\"AimX\":0.05,\"AimY\":0.8,\"AimZ\":0.6,\"FingerCurl\":0.2}");
             var explicitPreferences = SaberSettings.Load(path);
             Check(explicitPreferences.BladeLength == .85f && explicitPreferences.GripX == -13 && explicitPreferences.GripY == -8
                 && explicitPreferences.GripZ == 18 && explicitPreferences.AimX == .05f && explicitPreferences.AimY == .8f
                 && explicitPreferences.AimZ == .6f && explicitPreferences.FingerCurl == .2f,
                 "existing explicit preferences survive the new defaults unchanged");
-            settings.Save(path);
+            Check(DefaultEffects(explicitPreferences.LightEffects, SaberType.Light)
+                && DefaultEffects(explicitPreferences.DarkEffects, SaberType.Dark),
+                "legacy JSON without profiles acquires the distinct Light and Dark defaults");
+            File.WriteAllText(path, "{\"LightEffects\":null,\"DarkEffects\":null}");
             var loaded = SaberSettings.Load(path);
+            Check(DefaultEffects(loaded.LightEffects, SaberType.Light) && DefaultEffects(loaded.DarkEffects, SaberType.Dark)
+                && !ReferenceEquals(loaded.LightEffects, loaded.DarkEffects),
+                "null JSON profiles recover independent defaults before rendering");
+            File.WriteAllText(path, "{\"LightEffects\":{\"ArcCount\":0},\"DarkEffects\":{\"ArcCount\":8}}");
+            loaded = SaberSettings.Load(path);
+            Check(loaded.LightEffects.ArcCount == 0 && loaded.LightEffects.ShimmerAmount == .5f
+                && loaded.LightEffects.ArcFrequency == .35f && loaded.DarkEffects.ArcCount == 8
+                && loaded.DarkEffects.ShimmerAmount == 1.5f && loaded.DarkEffects.ArcFrequency == 1.5f,
+                "partial profiles preserve omitted members from the matching type's defaults");
+
+            SetEffects(settings.LightEffects, 2.5f, .75f, 7, 1.75f, 2, .5f, 1.5f);
+            SetEffects(settings.DarkEffects, 0, 0, 0, .25f, 0, 0, .25f);
+            settings.Save(path);
+            loaded = SaberSettings.Load(path);
             Check(loaded.BladeLength == 12f && loaded.ColorR == 0 && loaded.ColorG == .75f && loaded.ColorB == 1 && loaded.Volume == 0,
-                "settings save and load round-trip preserves validated preferences");
+                "settings save and load preserves validated preferences");
+            Check(loaded.LightEffects.ShimmerAmount == 2.5f && loaded.LightEffects.ShimmerSpeed == .75f
+                && loaded.LightEffects.ArcCount == 7 && loaded.LightEffects.ArcFrequency == 1.75f
+                && loaded.LightEffects.ArcAmplitude == 2 && loaded.LightEffects.ArcBrightness == .5f && loaded.LightEffects.ArcWidth == 1.5f,
+                "all seven Light controls survive save and reload");
+            Check(loaded.DarkEffects.ShimmerAmount == 0 && loaded.DarkEffects.ShimmerSpeed == 0
+                && loaded.DarkEffects.ArcCount == 0 && loaded.DarkEffects.ArcFrequency == .25f
+                && loaded.DarkEffects.ArcAmplitude == 0 && loaded.DarkEffects.ArcBrightness == 0 && loaded.DarkEffects.ArcWidth == .25f,
+                "all seven Dark controls persist independently, including disabled effects and frozen shimmer");
+            using (var saved = JsonDocument.Parse(File.ReadAllText(path)))
+                Check(saved.RootElement.TryGetProperty("LightEffects", out _) && saved.RootElement.TryGetProperty("DarkEffects", out _)
+                    && !saved.RootElement.TryGetProperty("ShimmerAmount", out _),
+                    "saved preferences contain two profiles rather than ambiguous top-level effect controls");
 
             File.WriteAllText(path, "{\"BladeLength\":-3,\"ColorR\":2,\"ColorG\":0.5,\"ColorB\":0.5,\"Volume\":2,\"ContactSeconds\":9}");
             loaded = SaberSettings.Load(path);
@@ -107,7 +181,21 @@ internal static class CoreChecks
         {
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
-        Pass("settings validation and persistence");
+        Pass("settings validation and profile persistence");
+    }
+
+    private static bool DefaultEffects(SaberEffectSettings settings, SaberType type) => type == SaberType.Dark
+        ? settings.ShimmerAmount == 1.5f && settings.ShimmerSpeed == 1.5f && settings.ArcCount == 3
+            && settings.ArcFrequency == 1.5f && settings.ArcAmplitude == 1.3f && settings.ArcBrightness == 1.1f && settings.ArcWidth == 1
+        : settings.ShimmerAmount == .5f && settings.ShimmerSpeed == .6f && settings.ArcCount == 1
+            && settings.ArcFrequency == .35f && settings.ArcAmplitude == .5f && settings.ArcBrightness == .65f && settings.ArcWidth == .8f;
+
+    private static void SetEffects(SaberEffectSettings settings, float amount, float speed, int count,
+        float frequency, float amplitude, float brightness, float width)
+    {
+        settings.ShimmerAmount = amount; settings.ShimmerSpeed = speed; settings.ArcCount = count;
+        settings.ArcFrequency = frequency; settings.ArcAmplitude = amplitude;
+        settings.ArcBrightness = brightness; settings.ArcWidth = width;
     }
 
     private static void FragmentGlbWriterRoundTrip()

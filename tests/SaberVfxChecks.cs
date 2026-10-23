@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Purr2D2.Rendering;
+using Purr2D2.Core;
 
 internal static class SaberVfxChecks
 {
@@ -7,10 +8,12 @@ internal static class SaberVfxChecks
     {
         CpuShaderAbi();
         DetailPolicy();
+        TunedDetailPolicy();
         DetailBoundaries();
         StableTimeAndSeed();
+        RateScaledClock();
         AllocationBudget();
-        Console.WriteLine("Saber VFX checks passed (ABI, LOD bounds, retraction/end-on, clocks/seeds, zero allocations).");
+        Console.WriteLine("Saber VFX checks passed (both profiles, ABI, bounded tuning/LOD, retraction/end-on, continuous clocks/seeds, zero allocations).");
     }
 
     private static void CpuShaderAbi()
@@ -65,6 +68,60 @@ internal static class SaberVfxChecks
         foreach (double invalid in new[] { -1, double.NaN, double.PositiveInfinity, double.NegativeInfinity })
             Check(SaberVfx.Detail(200, 8, invalid, 1.4f) == default, "invalid camera ranges fail closed");
         Check(SaberVfx.Detail(200, 8, 2, 0) == default, "a fully retracted blade has no VFX");
+    }
+
+    private static void TunedDetailPolicy()
+    {
+        var settings = new SaberSettings();
+        var light = SaberVfxTuning.FromEffects(settings.LightEffects, SaberType.Light);
+        var dark = SaberVfxTuning.FromEffects(settings.DarkEffects, SaberType.Dark);
+        Check(light == SaberVfxTuning.LightDefault && dark == SaberVfxTuning.DarkDefault && light != dark,
+            "render snapshots retain each shared type profile's distinct defaults");
+        var lightDetail = SaberVfx.Detail(200, 8, 2, 1.4f, light);
+        var darkDetail = SaberVfx.Detail(200, 8, 2, 1.4f, dark);
+        Check(lightDetail.ArcCount == 1 && darkDetail.ArcCount == 3
+            && lightDetail.ShimmerStrength == .06f * .5f && darkDetail.ShimmerStrength == .06f * 1.5f,
+            "Light's calmer profile and Dark's stronger profile reach the detail policy independently");
+        settings.LightEffects.ArcCount = 8;
+        settings.LightEffects.ShimmerAmount = 4;
+        var strong = SaberVfxTuning.FromEffects(settings.LightEffects, SaberType.Light);
+        Check(light.ArcCount == 1 && strong.ArcCount == 8 && dark.ArcCount == 3,
+            "immutable frame snapshots do not change underneath another type or viewport");
+        var strongest = SaberVfx.Detail(200, 8, 2, 1.4f, strong);
+        Check(strongest.ArcCount == 8 && strongest.Segments == 10
+            && strongest.ArcCount * 2 * (strongest.Segments + 1) == 176,
+            "maximum effects stay within eight ribbon instances and 176 procedural vertices");
+        var invalid = new SaberVfxTuning(float.NaN, -1, int.MaxValue, float.PositiveInfinity,
+            -1, float.MaxValue, 0).Clamped();
+        Check(invalid.ShimmerAmount == 1 && invalid.ShimmerSpeed == 0 && invalid.ArcCount == 8
+            && invalid.ArcFrequency == 1 && invalid.ArcAmplitude == 0
+            && invalid.ArcBrightness == 4 && invalid.ArcWidth == .25f,
+            "render snapshots independently bound unvalidated settings before shader use");
+        foreach (int count in new[] { -99, 0, 1, 3, 8, int.MaxValue })
+        foreach (float pixels in new[] { 0, 24, 80, 180, float.MaxValue })
+        foreach (float radius in new[] { 0, 1, 2, 6, float.MaxValue })
+        foreach (double distance in new[] { 0, 10, 40, double.MaxValue })
+        foreach (float length in new[] { .001f, .12f, .18f, 1.4f, 12f })
+        {
+            var tuning = new SaberVfxTuning(4, 4, count, 4, 3, 4, 3);
+            var detail = SaberVfx.Detail(pixels, radius, distance, length, tuning);
+            Check(detail.ArcCount is >= 0 and <= 8 && detail.ArcVisibility is >= 0 and <= 1
+                && detail.ShimmerStrength is >= 0 and <= .24f && detail.ArcLevel is >= 0 and <= 8,
+                "all supported tuning, footprints, ranges and lengths produce finite bounded detail");
+            Check(detail.ArcCount == 0 ? detail.Segments == 0
+                : detail.Segments is >= 6 and <= 10 && detail.ArcCount * 2 * (detail.Segments + 1) <= 176,
+                "tuning cannot exceed the GPU arc vertex budget");
+        }
+        foreach (var disabled in new[] { dark with { ArcCount = 0 }, dark with { ArcBrightness = 0 } })
+        {
+            var detail = SaberVfx.Detail(200, 8, 2, 1.4f, disabled);
+            Check(detail.ArcCount == 0 && detail.Segments == 0 && detail.ArcVisibility == 0 && detail.ArcLevel == 0
+                && detail.ShimmerStrength == darkDetail.ShimmerStrength,
+                "zero arc count or brightness removes the arc draw budget while preserving independent shimmer");
+        }
+        var noShimmer = SaberVfx.Detail(200, 8, 2, 1.4f, dark with { ShimmerAmount = 0 });
+        Check(noShimmer.ShimmerStrength == 0 && noShimmer.ArcCount == darkDetail.ArcCount,
+            "disabling shimmer preserves the chosen arc style and budget");
     }
 
     private static void DetailBoundaries()
@@ -125,14 +182,91 @@ internal static class SaberVfxChecks
         Check(seeds.Count >= 245, "different kittens have distinct phases with a small collision budget");
     }
 
+    private static void RateScaledClock()
+    {
+        var clock = new SaberVfxClock();
+        clock.Advance(0, .6f, .35f);
+        clock.Advance(255.5, .6f, .35f);
+        float shimmer = clock.ShimmerTime, burst = clock.BurstTime;
+        clock.Advance(256.5, .6f, .35f);
+        Check(Near(PhaseDelta(shimmer, clock.ShimmerTime), .6f)
+            && Near(PhaseDelta(burst, clock.BurstTime), .35f),
+            "fractional rates advance continuously through the unscaled clock's wrap boundary");
+        shimmer = clock.ShimmerTime; burst = clock.BurstTime;
+        clock.Advance(256.5, 3.25f, 2.75f);
+        Check(clock.ShimmerTime == shimmer && clock.BurstTime == burst,
+            "changing rates while paused cannot jump either existing phase");
+        clock.Advance(257, 3.25f, 2.75f);
+        Check(Near(PhaseDelta(shimmer, clock.ShimmerTime), 1.625f)
+            && Near(PhaseDelta(burst, clock.BurstTime), 1.375f),
+            "new rates affect only elapsed time after a settings change");
+        shimmer = clock.ShimmerTime; burst = clock.BurstTime;
+        clock.Advance(258, 0, .5f);
+        Check(clock.ShimmerTime == shimmer && Near(PhaseDelta(burst, clock.BurstTime), .5f),
+            "zero shimmer speed freezes its phase while arc frequency still advances");
+        clock.Advance(259, 0, .5f);
+        Check(clock.ShimmerTime == shimmer, "multiple frozen frames do not reset shimmer to a fixed pattern");
+        clock.Advance(259.25, 2, .5f);
+        Check(Near(PhaseDelta(shimmer, clock.ShimmerTime), .5f), "unfreezing resumes continuously from the retained phase");
+        shimmer = clock.ShimmerTime; burst = clock.BurstTime;
+        foreach (double invalid in new[] { -1, double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+        {
+            clock.Advance(invalid, 4, 4);
+            Check(clock.ShimmerTime == shimmer && clock.BurstTime == burst, "invalid world clocks preserve both visual phases");
+        }
+        clock.Advance(900, 4, 4);
+        Check(clock.ShimmerTime == shimmer && clock.BurstTime == burst,
+            "the first valid clock after invalid data reanchors without a catch-up jump");
+        clock.Advance(900.125, 4, 4);
+        Check(Near(PhaseDelta(shimmer, clock.ShimmerTime), .5f), "motion resumes normally after invalid clock recovery");
+        shimmer = clock.ShimmerTime; burst = clock.BurstTime;
+        clock.Advance(0, 4, 4);
+        Check(clock.ShimmerTime == shimmer && clock.BurstTime == burst,
+            "a world-clock reset reanchors without rewinding visible animation");
+        clock.Advance(.125, 4, 4);
+        Check(Near(PhaseDelta(shimmer, clock.ShimmerTime), .5f), "time after a world-clock reset advances from the preserved phase");
+
+        foreach (float rate in new[] { .1f, .35f, .6f, 1.5f, 4 })
+        foreach (double uptime in new[] { 1e9, 1e12, double.MaxValue })
+        {
+            var longSession = new SaberVfxClock();
+            longSession.Advance(uptime, rate, rate);
+            Check(float.IsFinite(longSession.ShimmerTime) && longSession.ShimmerTime is >= 0 and < 256
+                && float.IsFinite(longSession.BurstTime) && longSession.BurstTime is >= 0 and < 256,
+                "fractional rates and very large initial clocks cannot overflow shader phases");
+            if (uptime == double.MaxValue) continue;
+            float before = longSession.ShimmerTime;
+            longSession.Advance(uptime + .125, rate, rate);
+            Check(Near(PhaseDelta(before, longSession.ShimmerTime), .125f * rate),
+                "rate-scaled phases retain sub-frame precision after years of uptime");
+        }
+        var lightClock = new SaberVfxClock(); var darkClock = new SaberVfxClock();
+        lightClock.Advance(100, .6f, .35f); darkClock.Advance(100, 1.5f, 1.5f);
+        float lightTime = lightClock.ShimmerTime;
+        darkClock.Advance(101, 4, 4);
+        Check(lightClock.ShimmerTime == lightTime, "editing Dark's clock cannot advance Light's retained profile state");
+        lightClock = default;
+        lightClock.Advance(0, .6f, .35f);
+        Check(lightClock.ShimmerTime == 0 && lightClock.BurstTime == 0, "world reset can clear both profile phases for a new session");
+    }
+
+    private static float PhaseDelta(float before, float after) => (after - before + 256) % 256;
+    private static bool Near(float actual, float expected) => Math.Abs(actual - expected) < .0001f;
+
     private static void AllocationBudget()
     {
         for (int i = 0; i < 1000; i++) SaberVfx.Detail(200, 8, 2, 1.4f);
+        var clock = new SaberVfxClock();
+        var tuning = SaberVfxTuning.DarkDefault;
+        for (int i = 0; i < 1000; i++) clock.Advance(i * .016, .6f, .35f);
         long before = GC.GetAllocatedBytesForCurrentThread();
         float accumulated = 0;
         for (int i = 0; i < 10000; i++)
-            accumulated += SaberVfx.Detail(200, 8, 2, 1.4f).ArcVisibility
-                + SaberVfx.Clock(i * .016) + SaberVfx.Seed("kitten-one");
+        {
+            clock.Advance(i * .016, .6f, .35f);
+            accumulated += SaberVfx.Detail(200, 8, 2, 1.4f, tuning).ArcVisibility
+                + clock.ShimmerTime + clock.BurstTime + SaberVfx.Clock(i * .016) + SaberVfx.Seed("kitten-one");
+        }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Check(accumulated > 0 && allocated == 0, "per-saber detail, time, and seed policy allocate no frame memory");
     }
