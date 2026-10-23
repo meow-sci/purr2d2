@@ -7,13 +7,25 @@ internal sealed partial class ForceController
 {
     private bool Valid(Held held)
     {
-        if (!ForceTargeting.IsLive(held.Source) || !ReferenceEquals(held.Parent, _parent)
-            || !ReferenceEquals(held.Source.Parent, held.Parent) || !ReferenceEquals(held.Source.Parts, held.Tree)) return false;
-        var parts = held.Source.Parts.Parts;
+        if (!ReferenceEquals(held.Parent, _parent)) return false;
+        if (held.ClutterHold is { } hold)
+            return held.Source == null && Owner is { } owner && hold.IsValid && hold.Target.IsLocalTo(owner)
+                && ReferenceEquals(hold.Target.Parent, held.Parent)
+                && ReferenceEquals(hold.Target.System, _system);
+        if (held.Source is not { } source || !ForceTargeting.IsLive(source)
+            || !ReferenceEquals(source.Parent, held.Parent) || !ReferenceEquals(source.Parts, held.Tree)) return false;
+        var parts = source.Parts.Parts;
         if (parts.Length != held.Parts.Length) return false;
         for (int i = 0; i < parts.Length; i++)
-            if (!ReferenceEquals(parts[i], held.Parts[i]) || !ReferenceEquals(parts[i].Tree?.OwningVehicle, held.Source)) return false;
+            if (!ReferenceEquals(parts[i], held.Parts[i]) || !ReferenceEquals(parts[i].Tree?.OwningVehicle, source)) return false;
         return true;
+    }
+
+    private static ForceRigidState? ReadState(Held held)
+    {
+        if (held.Source is { } source)
+            return new(source.GetPositionCci(), source.GetVelocityCci(), source.GetBody2Cci(), source.BodyRates);
+        return held.ClutterHold is { } hold && hold.TryRead(out var state) ? state : null;
     }
 
     private ForceRigidState FollowState(Held held)
@@ -36,7 +48,10 @@ internal sealed partial class ForceController
         foreach (var held in _held)
         {
             if (!Valid(held)) throw new InvalidOperationException("A held object changed ownership, parent or topology.");
-            WriteState(held.Source, FollowState(held), time);
+            var state = FollowState(held);
+            if (held.Source is { } source) WriteState(source, state, time);
+            else if (held.ClutterHold is { } hold) hold.Write(state);
+            else throw new InvalidOperationException("A physical ground object could not be captured.");
         }
         _hasFrame = true; _offsetDirty = false; _lastTime = time;
         _lastOwnerPosition = position; _lastOwnerVelocity = velocity; _lastOwnerRotation = rotation; _lastOwnerRates = rates;

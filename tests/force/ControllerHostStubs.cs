@@ -12,6 +12,7 @@ namespace KSA
     {
         internal readonly List<Vehicle> Items = [];
         internal bool Contains(Vehicle vehicle) => Items.Contains(vehicle);
+        internal ReadOnlySpan<Vehicle> AsSpan() => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(Items);
     }
     internal static class Program
     {
@@ -37,22 +38,47 @@ namespace KSA
     internal sealed class Scheduler
     {
         internal bool ThrowOnWait;
-        internal void Wait() { if (ThrowOnWait) throw new InvalidOperationException("fixture join failure"); }
+        internal int Waits;
+        internal void Wait() { Waits++; if (ThrowOnWait) throw new InvalidOperationException("fixture join failure"); }
     }
     internal static class JobSystems
     {
         internal static readonly Scheduler OrbitSolvers = new();
         internal static readonly Scheduler NearestOrbitAndPerformanceWorker = new();
+        internal static readonly Scheduler VehicleSolver = new();
     }
     internal sealed class Part
     {
         internal PartTree? Tree;
+        internal bool IsAttachedInternal = false;
+        internal double4x4 MatrixAsmb2VehicleAsmb = double4x4.Identity;
+        internal readonly List<Part> SubParts = [];
+        internal readonly Modules Modules = new();
     }
+    internal sealed class Modules
+    {
+        internal readonly List<object> Items = [];
+        internal IEnumerable<T> Get<T>() => Items.OfType<T>();
+    }
+    internal sealed class MeshReference { internal double3[][]? PositionsCompare; internal MeshReference Get() => this; }
+    internal sealed class ModelTemplate { internal MeshReference? Mesh = null; }
+    internal sealed class Model { internal ModelTemplate Template = new(); }
+    internal sealed class PartModelModule { internal Model PartModel = new(); }
+    internal sealed class PartModelDynamicModule { internal Model PartModelDynamic = new(); }
+    internal sealed class PartModelGlassModule { internal Model PartModelGlass = new(); }
+    internal sealed class MeshViewModule { internal MeshReference? MeshView; }
     internal sealed class PartTree
     {
         internal readonly List<Part> Items = [];
         internal Vehicle OwningVehicle;
-        internal PartTree(Vehicle owner) { OwningVehicle = owner; Items.Add(new() { Tree = this }); }
+        internal PartTree(Vehicle owner)
+        {
+            OwningVehicle = owner;
+            var part = new Part { Tree = this };
+            part.Modules.Items.Add(new MeshViewModule { MeshView = new MeshReference {
+                PositionsCompare = [[double3.Zero, new(0, .1, 0), new(0, 0, .1)]] } });
+            Items.Add(part);
+        }
         internal ReadOnlySpan<Part> Parts => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(Items);
     }
     internal readonly record struct StateVectors(UniverseTime StateTime, double3 PositionCci, double3 VelocityCci);
@@ -93,6 +119,8 @@ namespace KSA
         internal Orbit Orbit => FlightPlan.Orbit;
         internal doubleQuat Body2Cce = doubleQuat.Identity;
         internal double3 BodyRates;
+        internal double3 CenterOfMassAsmb = double3.Zero;
+        internal double BoundingSphereRadiusBody = 1;
         internal bool HasPhysicsBubble => _threadWorkerUpdateState.Bubble != null;
         internal int PlanWrites;
         internal int FailPlanWrite;
@@ -135,26 +163,95 @@ namespace KSA
         internal static doubleQuat NormalizedOrZero(this doubleQuat value) => doubleQuat.NormalizeOrZero(value);
         internal static doubleQuat Inverse(this doubleQuat value) => doubleQuat.Inverse(value);
         internal static double3 Transform(this double3 value, doubleQuat rotation) => double3.Transform(value, rotation);
+        internal static double3 Transform(this double3 value, double4x4 matrix) => double3.Transform(value, matrix);
     }
 }
 
 namespace Purr2D2.Force
 {
     using KSA;
-    internal sealed record ForcePick(Vehicle Vehicle, Part Part, IParentBody Parent, CelestialSystem System, double3 HitBody);
-    // Deliberately substitutes only native selection. The actual controller/physics filter are compiled unchanged.
-    internal static class ForceTargeting
+    internal sealed record ForcePick(Vehicle? Vehicle, Part? Part, ClutterForceTarget? Clutter,
+        IParentBody Parent, CelestialSystem System, double3 HitBody, double3 HitCci)
     {
-        internal static Vehicle[] Candidates = [];
+        internal ForcePick(Vehicle vehicle, Part part, IParentBody parent, CelestialSystem system, double3 hitBody)
+            : this(vehicle, part, null, parent, system, hitBody,
+                vehicle.GetPositionCci() + hitBody.Transform(vehicle.GetBody2Cci())) { }
+        internal ForcePick(ClutterForceTarget clutter, double3 hitCci)
+            : this(null, null, clutter, clutter.Parent, clutter.System, double3.Zero, hitCci) { }
+    }
+    // Only the native host boundary is substituted. Production mixed gathering, geometry math,
+    // controller and worker filter are compiled unchanged.
+    internal static partial class ForceTargeting
+    {
+        internal const int MaximumVehicles = 2048, MaximumParts = 32768;
         internal static bool IsLive(Vehicle source) => !source.IsDisposed && !source.IsEditedVehicle
             && ReferenceEquals(source.System, Universe.CurrentSystem) && source.System.All.Contains(source);
-        internal static bool Gather(KittenEva owner, ForcePick pick, bool angry, List<Vehicle> result, out string reason)
+        internal static bool Valid(KittenEva owner, ForcePick pick) => IsLive(owner)
+            && ReferenceEquals(owner, Program.ControlledVehicle) && !Program.EditorFlag
+            && ReferenceEquals(pick.Parent, owner.Parent) && ReferenceEquals(pick.System, owner.System)
+            && (pick.Vehicle is { } vehicle ? IsLive(vehicle) && ReferenceEquals(pick.Part?.Tree?.OwningVehicle, vehicle)
+                : pick.Clutter?.IsValid == true);
+    }
+    internal readonly record struct ClutterForceIdentity(string Key);
+    internal sealed class ClutterForceTarget
+    {
+        internal readonly IParentBody Parent;
+        internal readonly CelestialSystem System;
+        internal readonly ClutterForceIdentity StableKey;
+        internal string DisplayName => StableKey.Key;
+        internal bool Live = true, Local = true, Captured, FailCapture;
+        internal int Captures, Releases, Writes, FailWrite;
+        internal ForceRigidState State;
+        internal bool IsValid => Live && ReferenceEquals(System, Universe.CurrentSystem);
+        internal bool IsLocalTo(KittenEva owner) => Local && IsValid && ReferenceEquals(owner.System, System)
+            && ReferenceEquals(owner.Parent, Parent);
+        internal ClutterForceTarget(KittenEva owner, string key, double3 position, double3 velocity)
+        { Parent = owner.Parent; System = owner.System; StableKey = new(key); State = new(position, velocity, doubleQuat.Identity, double3.Zero); }
+        internal bool TryRead(out ForceRigidState state) { state = State; return IsValid; }
+        internal bool TryCapture(out ClutterForceHold? hold, out string reason)
         {
-            reason = "stale fixture pick";
-            if (!IsLive(owner) || !IsLive(pick.Vehicle) || !ReferenceEquals(owner, Program.ControlledVehicle)
-                || !ReferenceEquals(pick.Parent, owner.Parent) || !ReferenceEquals(pick.Part.Tree?.OwningVehicle, pick.Vehicle)) return false;
-            result.Add(pick.Vehicle);
-            if (angry) foreach (var item in Candidates) if (!ReferenceEquals(item, pick.Vehicle)) result.Add(item);
+            Captures++; reason = "fixture promotion failed"; hold = null;
+            if (!IsValid || FailCapture || Captured) return false;
+            Captured = true; hold = new(this); return true;
+        }
+    }
+    internal sealed class ClutterForceHold(ClutterForceTarget target) : IDisposable
+    {
+        private bool _released;
+        internal ClutterForceTarget Target => target;
+        internal bool IsValid => !_released && target.IsValid && target.Captured;
+        internal bool TryRead(out ForceRigidState state) => target.TryRead(out state);
+        internal void Write(ForceRigidState state)
+        {
+            if (!IsValid || ++target.Writes == target.FailWrite) throw new InvalidOperationException("fixture clutter-write failure");
+            target.State = state;
+        }
+        internal bool Release(ForceRigidState? state = null)
+        {
+            if (_released) return true;
+            _released = true; target.Captured = false; target.Releases++;
+            if (state.HasValue && target.IsValid) target.State = state.Value;
+            return true;
+        }
+        public void Dispose() => Release();
+    }
+    internal static class ClutterForceTargets
+    {
+        internal static ClutterForceTarget[] Candidates = [];
+        internal static bool QueryFails;
+        internal static void Install(HarmonyLib.Harmony harmony) { }
+        internal static void Remove(HarmonyLib.Harmony harmony) { }
+        internal static bool GatherNear(KittenEva owner, double3 center, double radius,
+            List<ClutterForceTarget> destination, int maximum, out string reason)
+        {
+            destination.Clear(); reason = "fixture native query refused";
+            if (QueryFails) return false;
+            foreach (var target in Candidates)
+                if ((target.State.Position - center).LengthSquared() <= radius * radius + 1e-9)
+                {
+                    if (destination.Count >= maximum) return false;
+                    destination.Add(target);
+                }
             return true;
         }
     }

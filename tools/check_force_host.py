@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Force/somersault patch composition against the actual managed KSA method IL."""
+"""Check actual KSA handoff/clutter contracts and Bepu overlap/mobility behavior."""
 
 from pathlib import Path
 import os
@@ -61,7 +61,9 @@ items = ET.SubElement(project, "ItemGroup")
 ET.SubElement(items, "PackageReference", Include="Samboy063.Tomlet", Version="6.2.0")
 ET.SubElement(items, "PackageReference", Include="Lib.Harmony", Version="2.4.2")
 for source in ["src/Core/SaberLimits.cs", "src/Core/SomersaultMotion.cs", "src/Core/SomersaultSequence.cs",
-               "src/Runtime/SomersaultMotionController.cs", "src/Force/ForcePhysicsPatches.cs", "tests/ForceHostChecks.cs"]:
+               "src/Runtime/SomersaultMotionController.cs", "src/Cutting/CutGeometry.cs",
+               "tests/ForceHostChecks.cs", "tests/ForceClutterBepuChecks.cs",
+               *(str(path.relative_to(root)) for path in sorted((root / "src/Force").glob("*.cs")))]:
     ET.SubElement(items, "Compile", Include=str(root / source))
 for dll in host.glob("*.dll"):
     if dll.stem.startswith(("System.", "Microsoft.")) or dll.stem in ("mscorlib", "netstandard"):

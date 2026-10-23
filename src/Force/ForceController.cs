@@ -18,8 +18,13 @@ internal sealed partial class ForceController : IDisposable
     private double3 _lastOwnerPosition, _lastOwnerVelocity, _lastOwnerRates;
     private doubleQuat _lastOwnerRotation;
 
-    private sealed record Held(Vehicle Source, IParentBody Parent, PartTree Tree, Part[] Parts,
-        double3 PositionBody, doubleQuat SourceToOwner, ForceRigidState Original);
+    private sealed record Held(ForceTarget Target, IParentBody Parent, PartTree? Tree, Part[] Parts,
+        double3 PositionBody, doubleQuat SourceToOwner, ForceRigidState Original)
+    {
+        internal Vehicle? Source => Target.Vehicle;
+        internal ClutterForceHold? ClutterHold { get; set; }
+        internal string DisplayName => Source?.Id ?? Target.Clutter?.DisplayName ?? "Unavailable object";
+    }
 
     internal int CapturedCount => _held.Count;
     internal bool HasCapture => _held.Count != 0;
@@ -30,9 +35,16 @@ internal sealed partial class ForceController : IDisposable
     internal void Install(Harmony harmony)
     {
         if (_available || _disposed) return;
-        try { ForcePhysicsPatches.Install(harmony); _harmony = harmony; _available = true; }
+        try
+        {
+            ForcePhysicsPatches.Install(harmony);
+            ClutterForceTargets.Install(harmony);
+            _harmony = harmony; _available = true;
+        }
         catch (Exception ex)
         {
+            try { ClutterForceTargets.Remove(harmony); }
+            catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter patch cleanup failed: {cleanup}"); }
             try { ForcePhysicsPatches.Remove(harmony); }
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force patch cleanup failed: {cleanup}"); }
             Status = "Force physics is incompatible with this game build.";
@@ -44,10 +56,12 @@ internal sealed partial class ForceController : IDisposable
     {
         if (!_available || _disposed) { Status = "Force physics is unavailable."; return false; }
         if (HasCapture) { Status = "Release the held objects before another capture."; return false; }
-        var candidates = new List<Vehicle>(MaximumCaptured);
+        var candidates = new List<ForceTarget>(MaximumCaptured);
         try
         {
             if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal)) { Status = refusal; return false; }
+            if (candidates.Count is < 1 or > MaximumCaptured)
+            { Status = "The Force target group exceeds the capture limit; nothing was captured."; return false; }
         }
         catch (Exception ex) { Status = "Force target query failed: " + ex.Message; return false; }
         try
@@ -55,24 +69,43 @@ internal sealed partial class ForceController : IDisposable
             var ownerRotation = owner.GetBody2Cci().NormalizedOrZero();
             var ownerPosition = owner.GetPositionCci();
             if (ownerRotation == default || !ForceMath.Finite(ownerPosition)) throw new InvalidOperationException("Kitten frame is invalid.");
-            foreach (var source in candidates)
+            // Snapshot the entire group before promoting or detaching any candidate.
+            foreach (var candidate in candidates)
             {
-                var position = source.GetPositionCci();
-                var rotation = source.GetBody2Cci().NormalizedOrZero();
-                var original = new ForceRigidState(position, source.GetVelocityCci(), rotation, source.BodyRates);
+                ForceRigidState original;
+                IParentBody parent;
+                PartTree? tree = null;
+                Part[] parts = [];
+                if (candidate.Vehicle is { } source && candidate.Clutter == null)
+                {
+                    parent = source.Parent; tree = source.Parts; parts = source.Parts.Parts.ToArray();
+                    original = new(source.GetPositionCci(), source.GetVelocityCci(), source.GetBody2Cci(), source.BodyRates);
+                }
+                else if (candidate.Vehicle == null && candidate.Clutter is { } clutter && clutter.IsValid && clutter.IsLocalTo(owner)
+                    && clutter.TryRead(out original)) parent = clutter.Parent;
+                else throw new InvalidOperationException("A selected object is no longer available.");
+                var position = original.Position;
+                var rotation = original.Body2Cci.NormalizedOrZero();
                 if (rotation == default || !ForceMath.Finite(position) || !ForceMath.Finite(original.Velocity)
                     || !ForceMath.Finite(original.BodyRates)) throw new InvalidOperationException("An object has invalid physics state.");
-                _held.Add(new(source, source.Parent, source.Parts, source.Parts.Parts.ToArray(),
+                if (!ReferenceEquals(parent, owner.Parent)) throw new InvalidOperationException("An object changed parent frame.");
+                _held.Add(new(candidate, parent, tree, parts,
                     (position - ownerPosition).Transform(ownerRotation.Inverse()),
                     doubleQuat.Concatenate(rotation, ownerRotation.Inverse()), original));
             }
             Owner = owner; _system = owner.System; _parent = owner.Parent;
             GroupOffsetBody = double3.Zero;
-            var hit = target.Vehicle.GetPositionCci() + target.HitBody.Transform(target.Vehicle.GetBody2Cci());
-            _anchorBody = (hit - ownerPosition).Transform(ownerRotation.Inverse());
+            _anchorBody = (target.HitCci - ownerPosition).Transform(ownerRotation.Inverse());
+            foreach (var held in _held)
+                if (held.Target.Clutter is { } clutter)
+                {
+                    if (!clutter.TryCapture(out var hold, out var refusal) || hold == null)
+                        throw new InvalidOperationException(refusal);
+                    held.ClutterHold = hold;
+                }
             Follow(Universe.GetLastSimStep().NextTime);
             // Publish only after every source has actually left its bubble and accepted its held state.
-            ForcePhysicsPatches.Publish(_held.Select(item => item.Source).ToArray());
+            ForcePhysicsPatches.Publish(_held.Where(item => item.Source != null).Select(item => item.Source!).ToArray());
             Status = $"Holding {CapturedCount} object{(CapturedCount == 1 ? "" : "s")}.";
             return true;
         }
@@ -83,7 +116,12 @@ internal sealed partial class ForceController : IDisposable
                 JoinOrbitReaders();
                 foreach (var held in _held)
                 {
-                    try { if (ForceTargeting.IsLive(held.Source)) WriteState(held.Source, held.Original, Universe.GetLastSimStep().NextTime); }
+                    try
+                    {
+                        if (held.Source is { } source && ForceTargeting.IsLive(source))
+                            WriteState(source, held.Original, Universe.GetLastSimStep().NextTime);
+                        else held.ClutterHold?.Release(held.Original);
+                    }
                     catch (Exception restoreError) { Console.WriteLine($"[purr2d2] Force capture rollback failed: {restoreError}"); }
                 }
             }
@@ -139,18 +177,19 @@ internal sealed partial class ForceController : IDisposable
             var time = Universe.GetLastSimStep().NextTime;
             foreach (var held in _held)
             {
-                if (!ForceTargeting.IsLive(held.Source)) continue;
                 try
                 {
+                    if (held.Source is { } source && !ForceTargeting.IsLive(source)) continue;
                     bool follows = Owner is { } owner && ForceTargeting.IsLive(owner) && ReferenceEquals(owner.Parent, held.Parent)
                         && ReferenceEquals(_system, Universe.CurrentSystem) && Valid(held);
-                    var state = follows ? FollowState(held) : new ForceRigidState(held.Source.GetPositionCci(),
-                        held.Source.GetVelocityCci(), held.Source.GetBody2Cci(), held.Source.BodyRates);
+                    ForceRigidState? state = follows ? FollowState(held) : ReadState(held);
                     if (throwObjects && follows)
-                        state = state with { Velocity = ForceMath.ThrowVelocity(state, Owner!.GetPositionCci(), Owner.GetBody2Cci()) };
-                    WriteState(held.Source, state, time);
+                        state = state!.Value with { Velocity = ForceMath.ThrowVelocity(state.Value, Owner!.GetPositionCci(), Owner.GetBody2Cci()) };
+                    if (held.Source is { } vehicle && state.HasValue) WriteState(vehicle, state.Value, time);
+                    else if (held.ClutterHold is { } hold && !hold.Release(state))
+                        throw new InvalidOperationException("The physical ground object left the local physics bubble.");
                 }
-                catch (Exception ex) { failure = ex.Message; Console.WriteLine($"[purr2d2] Force release failed for {held.Source.Id}: {ex}"); }
+                catch (Exception ex) { failure = ex.Message; Console.WriteLine($"[purr2d2] Force release failed for {held.DisplayName}: {ex}"); }
             }
         }
         catch (Exception ex) { failure = ex.Message; Console.WriteLine($"[purr2d2] Force release could not join native readers: {ex}"); }
@@ -159,11 +198,25 @@ internal sealed partial class ForceController : IDisposable
             : $"{(throwObjects ? "Threw" : "Released")} {count} object{(count == 1 ? "" : "s")}.";
     }
 
-    // During world teardown only ownership is discarded; native state remains game-owned.
-    internal void Reset() { Clear(); Status = ""; }
+    // Teardown can arrive outside the settled seam. Join before restoring any native clutter body.
+    internal void Reset()
+    {
+        if (HasCapture)
+        {
+            try { JobSystems.VehicleSolver.Wait(); Release(false); }
+            catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force reset could not release native readers: {cleanup}"); }
+            finally { Clear(); }
+        }
+        else Clear();
+        Status = "";
+    }
     private void Clear()
     {
         ForcePhysicsPatches.Clear();
+        // Also handles partial capture, a lost bubble and exceptions before ordinary Release reached every peer.
+        foreach (var held in _held)
+            try { held.ClutterHold?.Dispose(); }
+            catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter release cleanup failed: {cleanup}"); }
         _held.Clear(); Owner = null; _system = null; _parent = null;
         GroupOffsetBody = double3.Zero; _anchorBody = double3.Zero; _hasFrame = false; _offsetDirty = false;
     }
@@ -171,8 +224,15 @@ internal sealed partial class ForceController : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        Reset();
-        if (_harmony != null) ForcePhysicsPatches.Remove(_harmony);
-        _available = false; _disposed = true;
+        try { Reset(); }
+        finally
+        {
+            try { if (_harmony != null) ClutterForceTargets.Remove(_harmony); }
+            finally
+            {
+                try { if (_harmony != null) ForcePhysicsPatches.Remove(_harmony); }
+                finally { _available = false; _disposed = true; }
+            }
+        }
     }
 }

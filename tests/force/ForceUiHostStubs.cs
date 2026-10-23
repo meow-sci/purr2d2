@@ -70,17 +70,20 @@ namespace KSA
 }
 namespace Purr2D2.Force
 {
-    internal sealed record ForcePick(KSA.Vehicle Vehicle) { internal bool Live = true; }
+    internal sealed record ForcePick(KSA.Vehicle Vehicle) { internal bool Live = true; internal string DisplayName => Vehicle.Id; }
+    internal readonly record struct ForcePickRay(KSA.Ray Cci);
     internal static class ForceTargeting
     {
         internal static int Picks;
         internal static KSA.Ray LastRay;
         internal static ForcePick? Next;
         internal static bool FailPick;
-        internal static bool TryPick(KSA.KittenEva owner, KSA.Ray ray, out ForcePick? pick, out string reason)
+        internal static bool TrySnapshotRay(KSA.KittenEva owner, KSA.Ray ray, out ForcePickRay snapshot)
+        { snapshot = new(ray); return true; }
+        internal static bool TryPick(KSA.KittenEva owner, ForcePickRay ray, out ForcePick? pick, out string reason)
         {
             if (FailPick) throw new InvalidOperationException("Test picker read failure");
-            Picks++; LastRay = ray; pick = Next; reason = "No target"; return pick != null;
+            Picks++; LastRay = ray.Cci; pick = Next; reason = "No target"; return pick != null;
         }
         internal static bool TryHitEgo(ForcePick pick, KSA.Camera camera, out double3 point) { point = new(0, 0, -5); return true; }
     }

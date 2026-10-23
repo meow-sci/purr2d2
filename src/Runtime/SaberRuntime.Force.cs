@@ -22,9 +22,11 @@ internal sealed partial class SaberRuntime
     private bool _forceClickPending;
     private float2 _forceClickPointer;
     private double _forceNextHoverTime;
+    private ForceQuery? _forceQuery;
     private string _forceStatus = "";
     private enum ForceAction { Capture, Release, Throw }
     private readonly record struct ForceRequest(KittenEva Owner, ForceAction Action, ForcePick? Target = null, bool Angry = false);
+    private readonly record struct ForceQuery(KittenEva Owner, ForcePickRay Ray, bool Capture, bool Angry);
 
     internal bool ForceHolding => !_forceDisposed && _force.HasCapture;
     internal KittenEva? ForceOwner => !_forceDisposed ? _force.Owner : null;
@@ -50,6 +52,7 @@ internal sealed partial class SaberRuntime
             bool wasHolding = _force.HasCapture;
             _force.Update(_owner);
             if (wasHolding && !_force.HasCapture) _forceStatus = _force.Status;
+            ResolveForceQuery();
             while (_forceRequests.TryDequeue(out var request))
             {
                 if (!ForceCanUse || !ReferenceEquals(request.Owner, _owner) || request.Owner.IsDisposed)
@@ -84,6 +87,36 @@ internal sealed partial class SaberRuntime
         }
     }
 
+    // Clutter queries read live Bepu bodies. Only the settled phase may resolve
+    // a frame's immutable ray snapshot; UI callbacks never touch that simulation.
+    private void ResolveForceQuery()
+    {
+        var query = _forceQuery;
+        _forceQuery = null;
+        if (query is not { } pending || !ForcePicking || !ForceCanUse || KittenColorPickerVisible
+            || ImGui.GetIO().AppFocusLost || Program.IsModalOpen() || !ReferenceEquals(pending.Owner, _owner)
+            || !ReferenceEquals(_forcePickOwner, _owner)) return;
+        try
+        {
+            ForceTargeting.TryPick(pending.Owner, pending.Ray, out _forceHover, out var reason);
+            _forceStatus = _forceHover != null
+                ? $"Click to hold {_forceHover.DisplayName}." + (pending.Angry ? " Includes nearby objects within 2 m of the hit." : "")
+                : reason;
+            if (pending.Capture && _forceHover != null && _forceRequests.Count < 32)
+            {
+                _forceRequests.Enqueue(new(pending.Owner, ForceAction.Capture, _forceHover, pending.Angry));
+                _forceStatus = "Capturing " + _forceHover.DisplayName + "...";
+                CancelForcePicker();
+            }
+        }
+        catch (Exception error)
+        {
+            _forceStatus = "Force picker failed: " + error.Message;
+            CancelForcePicker();
+            Report("Force picker failed", error);
+        }
+    }
+
     // Frame visibility can change even when KSA skips the overlay drawing hook.
     private void UpdateForceVisibility()
     {
@@ -94,7 +127,7 @@ internal sealed partial class SaberRuntime
         if (_forceDrag.Held && !ReferenceEquals(_forceMoveOwner, _owner)) _forceDrag.Release();
     }
 
-    // Read-only hover work, after the game's native viewport picker has been updated.
+    // Snapshot the fresh camera ray; resolve it after workers join next frame.
     private void UpdateForceFrame()
     {
         try { UpdateForceFrameCore(); }
@@ -112,35 +145,28 @@ internal sealed partial class SaberRuntime
         if (!ForcePicking || !ForceCanUse || KittenColorPickerVisible) return;
         var io = ImGui.GetIO();
         if (io.AppFocusLost) { ResetForceGestures(); return; }
+        if (_forceQuery is { Capture: true }) return;
         var pointer = _forceClickPending ? _forceClickPointer : io.MousePos;
         if ((!_forceClickPending && (io.WantCaptureMouse || !CursorTarget.IsHitTestViewport(Program.MainViewport)))
             || io.WantTextInput || Program.IsModalOpen()
             || (_overlayLayoutAvailable && _overlayLayout.Hit(pointer) != SaberOverlayHit.None)
             || (_forceLayoutAvailable && _forceLayout.Hit(pointer) != ForceOverlayHit.None))
-        { _forceHover = null; _forceClickPending = false; return; }
+        { _forceHover = null; _forceClickPending = false; _forceQuery = null; return; }
         if (!_forceClickPending && _playerTime < _forceNextHoverTime) return;
         _forceNextHoverTime = _playerTime + .05;
         var viewport = Program.MainViewport;
         var local = Cursor.ToViewportLocal(viewport, pointer);
         if (!float.IsFinite(local.X) || !float.IsFinite(local.Y)
             || local.X < 0 || local.Y < 0 || local.X >= viewport.Width || local.Y >= viewport.Height)
-        { _forceClickPending = false; _forceHover = null; return; }
+        { _forceClickPending = false; _forceHover = null; _forceQuery = null; return; }
         var ray = viewport.GetCamera().ScreenToEgoRay(local);
         ray.Direction = double3.NormalizeOrZero(ray.Direction);
-        ForceTargeting.TryPick(_owner!, ray, out _forceHover, out var reason);
-        _forceStatus = _forceHover != null
-            ? $"Click to hold {_forceHover.Vehicle.Id}." + (_angryForce ? " Includes nearby objects within 2 m of the hit." : "")
-            : reason;
-        if (_forceClickPending)
+        if (ForceTargeting.TrySnapshotRay(_owner!, ray, out var snapshot))
         {
-            _forceClickPending = false;
-            if (_forceHover != null && _forceRequests.Count < 32)
-            {
-                _forceRequests.Enqueue(new(_owner!, ForceAction.Capture, _forceHover, _angryForce));
-                _forceStatus = "Capturing " + _forceHover.Vehicle.Id + "...";
-                CancelForcePicker();
-            }
+            _forceQuery = new(_owner!, snapshot, _forceClickPending, _angryForce);
         }
+        else { _forceQuery = null; _forceHover = null; }
+        _forceClickPending = false;
     }
 
     private void BeginForcePicker(bool angry)
@@ -148,14 +174,14 @@ internal sealed partial class SaberRuntime
         if (!ForceCanUse || _force.HasCapture) return;
         if (_selectingSlice) Queue(Command.CancelSlice);
         _forcePickOwner = _owner; _angryForce = angry; _selectingForce = true;
-        _forceHover = null; _forceClickPending = false; _forceNextHoverTime = 0;
+        _forceHover = null; _forceClickPending = false; _forceQuery = null; _forceNextHoverTime = 0;
         _forceStatus = angry ? "Angry Force: select a target and objects within 2 m of the hit. Right-click or Esc cancels."
-            : "Force: point at a vessel or debris and click. Right-click or Esc cancels.";
+            : "Force: point at a vessel, debris or nearby rock and click. Right-click or Esc cancels.";
     }
 
     private void CancelForcePicker()
     {
-        _selectingForce = false; _forcePickOwner = null; _forceHover = null; _forceClickPending = false;
+        _selectingForce = false; _forcePickOwner = null; _forceHover = null; _forceClickPending = false; _forceQuery = null;
     }
 
     private void QueueForceAction(ForceAction action)
@@ -314,7 +340,7 @@ internal sealed partial class SaberRuntime
             draw.AddCircle(position, 19, new ImColor8(0, 0, 0, 220), 48, 5);
             draw.AddCircle(position, 19, green, 48, 2);
             draw.AddCircleFilled(position, 3, green, 16);
-            string label = _forceHover.Vehicle.Id + (_angryForce ? " + objects within 2 m" : " — click to hold");
+            string label = _forceHover.DisplayName + (_angryForce ? " + objects within 2 m" : " — click to hold");
             float wrap = Math.Max(100, Math.Min(320, ui.Size.X - 24));
             var labelSize = ImGui.CalcTextSize(label, false, wrap);
             var labelPosition = new float2(Math.Clamp(position.X + 25, ui.Pos.X + 8,

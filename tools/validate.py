@@ -672,6 +672,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/force/ForceUiChecks.cs", source / "tests/force/ForceUiHostStubs.cs",
         source / "tests/force/ForceOverlayChecks.cs"]
     force_controller_sources = [source / "src/Force/ForceController.cs", source / "src/Force/ForceController.Follow.cs",
+        source / "src/Force/ForceTarget.cs", source / "src/Force/ForceTargeting.Proximity.cs",
         source / "src/Force/ForcePhysicsPatches.cs", source / "src/Force/ForceMath.cs",
         source / "src/Cutting/CutGeometry.cs", source / "tests/force/ControllerHostStubs.cs",
         source / "tests/force/ForceControllerChecks.cs"]
