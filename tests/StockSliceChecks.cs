@@ -24,6 +24,14 @@ internal static class StockSliceChecks
             var cpu = SliceGeometryWork.Calculate(input, CancellationToken.None, _ => planMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             foreach (var asset in cpu.Fragments)
             {
+                var xml = XDocument.Parse(System.Text.Encoding.UTF8.GetString(asset.Xml));
+                if (xml.Root!.Elements("SubPart").Count() != 1 || xml.Root.Element("Part")!.Elements("SubPart").Count() != 1
+                    || asset.Uploads.Length > materials.Count + 1)
+                    throw new Exception("Worker export did not merge fragment material surfaces into one visual SubPart");
+                int legacySurfaces = xml.Descendants("Run").Count();
+                var reload = Reload(asset);
+                if (reload.Groups.Sum(s => s.Length) * 3 != asset.Uploads.Sum(u => u.IndexBytes / 4))
+                    throw new Exception("Merged export/reload changed the visual triangle count");
                 using var document = JsonDocument.Parse(asset.Glb.AsMemory(20, BitConverter.ToInt32(asset.Glb, 12)));
                 if (document.RootElement.GetProperty("meshes").GetArrayLength() != asset.MeshNames.Length || asset.Uploads.Length + 2 != asset.MeshNames.Length)
                     throw new Exception("Worker export omitted a visual, picking or collision mesh");
@@ -42,13 +50,39 @@ internal static class StockSliceChecks
                 if (!ConvexHullHelper.CreateShape(points, pool, out var center, out var hull) || !float.IsFinite(center.LengthSquared()))
                     throw new Exception("Exported collider cannot be cooked by the native hull implementation");
                 hull.Dispose(pool);
-                Console.WriteLine($"  Worker fragment: {asset.Uploads.Length} render surfaces; {hullPoints} collision vertices; native hull cook {System.Diagnostics.Stopwatch.GetElapsedTime(cooking).TotalMilliseconds:F2} ms");
+                Console.WriteLine($"  Worker fragment: {legacySurfaces} legacy surfaces -> {asset.Uploads.Length} render surfaces; one visual SubPart; {hullPoints} collision vertices; native hull cook {System.Diagnostics.Stopwatch.GetElapsedTime(cooking).TotalMilliseconds:F2} ms");
             }
             Console.WriteLine($"PASS: {fixture.Name} worker pipeline; faceted={cpu.Faceted}, attempts={cpu.Attempts}, fallback={cpu.FacetFallback}; plan {planMs:F1} ms, complete {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
             if (fixture.Name.Contains("FuelTank"))
             {
                 RepeatedTankSlices(input, fixture.Name);
                 FreshTankSeeds(input, fixture.Name);
+            }
+            if (fixture.Name.Contains("ServiceModule") && fixture.Name.EndsWith("HeightB", StringComparison.Ordinal))
+            {
+                int completed = 0;
+                foreach (var asset in cpu.Fragments)
+                {
+                    var reload = Reload(asset) with { Seed = 731 };
+                    double beforeVolume = reload.Groups.Sum(s => PlaneSlicer.Properties(s).Volume);
+                    // This stock model has an existing global-weld precision limit,
+                    // reproduced with the committed per-solid exporter as well.
+                    // Classify only that exact production input-audit rejection.
+                    var auditPlane = AssistedSliceGeometry.Candidates(reload.Groups, reload.Axes, reload.Seed).First();
+                    if (!PlaneSlicer.TrySliceCompound(reload.Groups, auditPlane, out _, out var auditFailure)
+                        && auditFailure == "Mesh contains welded degenerate triangles.")
+                    {
+                        Console.WriteLine($"KNOWN LIMITATION: {fixture.Name} reloaded half input audit refuses recut: {auditFailure} (same with legacy per-solid export)");
+                        continue;
+                    }
+                    var recut = SliceGeometryWork.Calculate(reload, CancellationToken.None, _ => { });
+                    double afterVolume = recut.Fragments.Sum(a => Reload(a).Groups.Sum(s => PlaneSlicer.Properties(s).Volume));
+                    if (recut.Fragments.Length != 2 || Math.Abs(afterVolume - beforeVolume) > beforeVolume * .0006
+                        || Math.Abs(recut.Fragments.Sum(a => a.MassKg) - reload.MassKg) > .001)
+                        throw new Exception("Merged service-module reload/recut lost closed-solid volume or mass");
+                    completed++;
+                }
+                Console.WriteLine($"INFO: {fixture.Name} merged XML/GLB reload preserved topology; {completed}/2 successful recuts, {2 - completed}/2 known input-audit precision limits");
             }
             if (!SliceShellBuilder.TryPrepare(groups, out var solids, out var reason))
                 throw new Exception(fixture.Name + " shell preparation: " + reason);
@@ -65,7 +99,7 @@ internal static class StockSliceChecks
                     if (!SlicePrincipalFrame.TryCreate(piece, out var frame, out rejection)
                         || !SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var export, out _, out rejection))
                     { Console.WriteLine($"  Candidate {candidate} export refused: {rejection}"); valid = false; continue; }
-                    int materialGroups = export.Sum(s => s.Select(f => f.Material).Distinct().Count());
+                    int materialGroups = FragmentAssetWriter.CountRenderSurfaces(export, materials);
                     int points = export.SelectMany(s => s).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Count();
                     if (materialGroups > 2047 || points > 65536)
                     { Console.WriteLine($"  Candidate {candidate} budget: {materialGroups} groups, {points} points"); valid = false; }
@@ -88,7 +122,8 @@ internal static class StockSliceChecks
                     // Audit after the same native float32 conversion used by fragment export.
                     if (!SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var quantized, out _, out reason)) throw new Exception(reason);
                     int points = quantized.SelectMany(s => s).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct().Count();
-                    if (points > 65536 || quantized.Length > 2047) throw new Exception("Stock fragment exceeds native preparation budgets");
+                    if (points > 65536 || FragmentAssetWriter.CountRenderSurfaces(quantized, materials) > 2046)
+                        throw new Exception("Stock fragment exceeds native preparation budgets");
                     var exportGroups = quantized.SelectMany((solid, i) => solid.GroupBy(f => f.Material)
                         .Select(g => new FragmentGlbWriter.Group($"s{i}_m{g.Key}", g.Key, g.ToArray()))).ToList();
                     exportGroups.Add(new("hull", int.MinValue, quantized.SelectMany(s => s).ToArray()));
@@ -173,6 +208,7 @@ internal static class StockSliceChecks
         var materials = new Dictionary<int, SliceMaterialData>();
         var materialIds = new Dictionary<string, int>();
         var groups = new List<SliceFace[]>();
+        var topology = FragmentTopology.Read(xml)?.BeginCapture();
         foreach (var reference in part.Elements("SubPart"))
         {
             var definition = definitions[(string)reference.Attribute("InstanceOf")!];
@@ -185,6 +221,7 @@ internal static class StockSliceChecks
                 if (!materialIds.TryGetValue(key, out int materialId))
                 { materialId = materialIds.Count; materialIds.Add(key, materialId); materials.Add(materialId, new(material, glass)); }
                 var mesh = meshes[(string)model.Element("Mesh")!.Attribute("Id")!];
+                topology?.BeginSurface((string)model.Element("Mesh")!.Attribute("Id")!);
                 foreach (var primitive in mesh.GetProperty("primitives").EnumerateArray())
                 {
                     var attributes = primitive.GetProperty("attributes");
@@ -204,9 +241,11 @@ internal static class StockSliceChecks
                         faces.Add(new(V(i), V(i + 1), V(i + 2), materialId));
                     }
                 }
+                if (topology != null) { topology.AppendChunk(faces); faces.Clear(); topology.EndSurface(); }
             }
             if (faces.Count > 0) groups.Add(faces.ToArray());
         }
+        if (topology != null) groups.AddRange(topology.Complete());
         var collisionPrimitive = meshes[asset.Id + "_collision"].GetProperty("primitives")[0];
         var collisionPoints = Read(collisionPrimitive.GetProperty("attributes").GetProperty("POSITION").GetInt32(), 3);
         var hullPoints = Enumerable.Range(0, collisionPoints.Length / 3).Select(i => new Vector3((float)collisionPoints[i * 3], (float)collisionPoints[i * 3 + 1], (float)collisionPoints[i * 3 + 2])).ToArray();

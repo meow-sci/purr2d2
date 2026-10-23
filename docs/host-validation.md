@@ -19,8 +19,9 @@ Use `--file` explicitly: without it, `dotnet run tools/inspect_host.cs` selects 
 - The private instance field `KittenRenderable._characterAvatar : KSA.CharacterAvatar`.
 - The private instance field `Vehicle._manualControlInputs : KSA.ManualControlInputs` used to publish native EVA MMU pulse commands.
 - The internal static native fragmentation method `PartFailure.IsolateAndDestroy(Vehicle, Part, List<Vehicle>) : void`.
+- The public native `Vehicle.Split(Connection, IConnector, double, out PoseChange, string)` overload and `PartTree.BeginBulkChange` / `EndBulkChange` methods used by staged source isolation.
 - The exact private PartModel submission overload used for generated cap cooling, and the complete plain-public-field layout of `DeviceMeshInterleaved` used to initialize objects inside the startup-reserved fragment arena without growing native counters at runtime.
-- The actual decoded `Program.PrepareFrame` IL contains exactly one call to each apply/input/dispatch method in the production hook's required order. The inspector reads operands correctly, including two-byte opcodes and variable-size switch tables, and resolves call tokens through metadata. Negative controls ensure the same validator rejects missing, duplicate and reordered calls.
+- The actual decoded `Program.PrepareFrame` IL contains exactly one call to each apply/input/dispatch method in the production hook's required order. Vehicle membership refresh and dirty derived/resource flushes must run after the hook and before vehicle dispatch, so early isolation receives that engine follow-up before the next swap update. The inspector reads operands correctly, including two-byte opcodes and variable-size switch tables, and resolves call tokens through metadata. Negative controls ensure the same validator rejects missing, duplicate and reordered calls.
 - Exactly one public concrete `[StarMapMod]` class, `Purr2D2.Mod`, a public parameterless constructor, and the four expected public instance lifecycle callbacks with their actual full attribute names/signatures: `ImmediateLoad(KSA.Mod)`, `AllModsLoaded()`, `AfterGui(double)` and `Unload()`, all returning void.
 - The built mod references KSA, StarMap.API and Harmony; its KSA assembly-reference version matches the inspected host. All assembly references are listed from metadata without resolving or loading them.
 
@@ -36,7 +37,10 @@ The local host reports `KSA 2026.10.19.5638`, PE machine `Amd64`. The built mod 
 | `00F2` | `Universe.ApplyVehicleSolvers()` |
 | `0110` | `Universe.ApplyClothSolvers()` |
 | `017B` | `InputEvents.ApplyInputEvents()` |
+| `01A8` | `Program.RefreshVehiclesInFrame()` |
 | `0263` | `Universe.ExecuteNextClothSolvers(double, SimStep)` |
+| `0268` | `PartTree.FlushDirtyDerived()` |
+| `026D` | `PartTree.FlushDirtyResourceManagers()` |
 | `0274` | `Universe.ExecuteNextVehicleSolvers(double, SimStep)` |
 | `027B` | `Universe.ExecuteNextOrbitSolvers(double, SimStep)` |
 

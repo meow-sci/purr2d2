@@ -6,6 +6,19 @@ internal static class SlicingPhysicsChecks
 {
     public static void Run()
     {
+        var originalFrame = double4x4.CreateFromQuaternion(doubleQuat.CreateFromAxisAngle(double3.UnitZ, .4))
+            * double4x4.CreateTranslation(new double3(3, 4, 5));
+        var isolationFrame = double4x4.CreateFromQuaternion(doubleQuat.CreateFromAxisAngle(double3.UnitY, -.8))
+            * double4x4.CreateTranslation(new double3(-7, 2, 6));
+        Check(SliceSourceFrame.SameTransform(originalFrame * isolationFrame, originalFrame * isolationFrame),
+            "capture geometry can be rebased through a rotated native docking isolation");
+        Check(!SliceSourceFrame.SameTransform(originalFrame * isolationFrame, originalFrame),
+            "isolation validation rejects an unrebased assembly transform");
+        var changed = originalFrame * isolationFrame * double4x4.CreateTranslation(new double3(.001, 0, 0));
+        Check(!SliceSourceFrame.SameTransform(changed, originalFrame * isolationFrame),
+            "a subsequent local geometry change invalidates the isolated capture");
+        var invalidFrame = originalFrame; invalidFrame.M41 = double.NaN;
+        Check(!SliceSourceFrame.SameTransform(invalidFrame, originalFrame), "nonfinite capture transforms cannot pass freshness validation");
         // Symmetric tensor rotated 45 degrees about Z has a known pair of principal moments.
         var piece = new SlicePiece(Array.Empty<SliceFace>(), 2, new(3, 4, 5), new(6, 6, 10, -2, 0, 0), true);
         Check(SlicePrincipalFrame.TryCreate(piece, out var frame, out _), "finite full fragment tensor has a principal frame");

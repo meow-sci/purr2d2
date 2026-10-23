@@ -542,6 +542,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "src/Pose/SaberPoseMath.cs",
         source / "src/Rendering/FragmentGlbWriter.cs",
         source / "src/Slicing/SlicePrincipalFrame.cs",
+        source / "src/Slicing/SliceSourceFrame.cs",
         source / "tests/PlaneSliceChecks.cs",
         source / "tests/ShellSliceChecks.cs",
         source / "tests/CoreChecks.cs",
@@ -578,6 +579,26 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "tests/slicing/GameStubs.cs",
         source / "tests/slicing/DetachedSliceChecks.cs",
     ]
+    isolation_sources = [
+        source / "src/Slicing/NativeSliceIsolation.cs",
+        source / "src/Slicing/SliceCommitTimings.cs",
+        source / "tests/slicing/IsolationHostStubs.cs",
+        source / "tests/slicing/IsolationChecks.cs",
+    ]
+    fragment_asset_sources = [
+        source / "src/Rendering/FragmentTopology.cs",
+        source / "src/Cutting/CutGeometry.cs",
+        source / "src/Cutting/PlaneSlicer.cs",
+        source / "src/Cutting/SliceShellBuilder.cs",
+        source / "src/Cutting/AssistedSliceGeometry.cs",
+        source / "src/Slicing/SlicePrincipalFrame.cs",
+        source / "src/Slicing/SliceMeshPrecision.cs",
+        source / "src/Slicing/SliceColliderGeometry.cs",
+        source / "src/Slicing/SliceGeometryWork.cs",
+        source / "src/Rendering/FragmentGlbWriter.cs",
+        source / "src/Rendering/FragmentAssetWriter.cs",
+        source / "tests/FragmentAssetChecks.cs",
+    ]
     outputs = []
     result = 0
     for name, required, program in (
@@ -585,6 +606,9 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         ("TargetSelectionChecks", target_sources, None),
         ("KittenSaberChecks", kitten_sources, None),
         ("DetachedSliceChecks", fragment_sources, None),
+        ("IsolationChecks", isolation_sources, None),
+        ("FragmentAssetChecks", fragment_asset_sources,
+         "internal static class Program { static void Main() => FragmentAssetChecks.Run(); }"),
     ):
         code, output = _run_managed_project(source, name, required, program)
         outputs.append(output)

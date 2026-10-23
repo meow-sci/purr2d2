@@ -1,5 +1,32 @@
 # Acceptance record
 
+## Material grouping and staged native isolation (2026-10-22)
+
+New fragment assets merge render surfaces by durable material ID and glass flag into one visual SubPart, while preserving separate cap surfaces and full picking geometry. Original closed-solid grouping must survive export/reload for repeat cuts: flattening adjacent closed cubes into one authored group was shown to reinterpret volume 2 as 0.048 of backed panels. The merged format therefore preserves topology provenance independently of render-module membership. Existing generated assets remain valid and are not rewritten.
+
+Native isolation snapshots the original external boundaries, splits the parent first, then resolves each remaining boundary's current owner. Bulk-change scopes close on every touched owning tree before the hook returns. Isolation happens only after the full swing is presented and all fragment assets/instances are ready. The final fragment creation/source removal swap occurs on a later safe update, with live motion and revalidated source geometry. Cancelling between those steps retains the intact source and separated neighboring vessels; it does not rejoin native connections.
+
+Release builds with zero warnings/errors. Full managed checks, actual KSA XML decoding, host metadata/IL inspection, staged assets and archive integrity/checksum checks pass. New fixtures cover material/glass aliases, cap identity, exact exported attributes, touching-solid provenance, missing/malformed topology rejection, incremental restoration, parent-first owner changes, docking reroots, bulk-scope failure cleanup, stale/disposed sources, and cancellation between isolation and swap. Logs: `artifacts/slice-performance-build.log`, `artifacts/slice-performance-checks.log`, `artifacts/slice-performance-template-checks.log`, and `artifacts/slice-performance-host-checks.log`.
+
+All six stock fixtures pass the worker/export/collider pipeline. The tank exports 2 render surfaces per fragment instead of 58, and passes persisted XML/GLB cuts through halves, quarters and eighths plus eight fresh cut seeds. The medium capsule drops from 165/145 surfaces to 3/4. Service-module variants A–D drop from 286–532 surfaces to 2 per fragment; height B specifically drops from 437/532 to 2/2. Both height-B halves refuse a repeat cut because of welded degenerate triangles, also reproduced using the committed old exporter; this is an existing geometry limit, not successful repeat-cut acceptance. These are asset/module count reductions, not measured FPS gains. Stock logs are under `artifacts/merged-stock-*.log`; the old-exporter comparisons are `artifacts/baseline-stock-service-b-recut.log` and `artifacts/baseline-stock-service-b-audits.log`.
+
+### User-provided baseline
+
+The user supplied these timings from the preceding build, whose commit still includes isolation. No source-part identities or full-frame measurements were supplied. Values are milliseconds; rows retain the supplied order.
+
+| Cut | Background | Largest preparation update | Commit | Validation | Isolation | Drain | Registration | Motion | Source removal |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 4066.4 | 7.34 | 36.25 | 11.23 | 18.44 | 0.13 | 0.36 | 1.69 | 4.13 |
+| 2 | 400.2 | 0.60 | 4.50 | 0.10 | 3.78 | 0.37 | 0.13 | 0.06 | 0.07 |
+| 3 | 516.4 | 0.37 | 0.54 | 0.11 | 0.00 | 0.00 | 0.31 | 0.03 | 0.06 |
+| 4 | 766.2 | 0.40 | 0.38 | 0.06 | 0.01 | 0.00 | 0.20 | 0.03 | 0.06 |
+| 5 | 3699.9 | 5.88 | 3.03 | 0.11 | 2.62 | 0.00 | 0.22 | 0.02 | 0.04 |
+| 6 | 2048.9 | 0.92 | 0.83 | 0.10 | 0.50 | 0.00 | 0.15 | 0.02 | 0.07 |
+
+Validation plus isolation account for 29.67 ms of the first 36.25 ms commit. The two near-zero-isolation commits take 0.38–0.54 ms. These observations support moving isolation earlier, but do not establish the cause of the first validation spike or measure engine follow-up, GC pauses, next-frame solver waits or FPS. The new diagnostics separate the earlier isolation pass from final swap time; their sum must be considered when comparing total main-thread work.
+
+Native retest: compare cold and repeated cuts on the same leaf, root and mid-stack parts; record both isolation and swap timing plus full-frame timing. Exercise docking-root restoration, occupied neighboring branches, pause/resume, 1×/5×, cancellation between isolation and swap, stowing/switching kittens, source destruction and loading. Confirm source/fragment colliders never coexist across a physics step, separated branches preserve their crew/resources, and fragments use the source's current motion. Inspect glass/cooling caps, cut merged fragments again, and save/reload both new and old generated assets. Native frame-time improvements remain unmeasured for this revision.
+
 ## Varied repeat cuts, palette and interaction defaults (2026-10-22)
 
 Targeted strokes run at half speed (1.24 seconds); ordinary Swing remains 0.62 seconds. Reach is twice the current deployed blade length from the live hilt to the hovered ray hit. Crew aboard no longer blocks targeting or replacement. Native destruction handles occupants of the isolated source, while separated branches retain their crew and roster assignments. Generated picking meshes now live on a native visual subpart; a constructor hook repairs old saved fragment instances before tree ownership.

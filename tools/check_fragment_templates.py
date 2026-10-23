@@ -55,7 +55,13 @@ for key, value in {'OutputType': 'Exe', 'TargetFramework': 'net10.0', 'ImplicitU
     ET.SubElement(props, key).text = value
 items = ET.SubElement(project, 'ItemGroup')
 ET.SubElement(items, 'PackageReference', Include='Samboy063.Tomlet', Version='6.2.0')
-for source in ['src/Rendering/FragmentTemplateLoader.cs', 'tests/FragmentTemplateChecks.cs']:
+for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
+               'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentTopology.cs',
+               'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/SliceShellBuilder.cs',
+               'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SliceGeometryWork.cs',
+               'src/Slicing/SliceColliderGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',
+               'src/Slicing/SliceMeshPrecision.cs', 'src/Core/SaberLimits.cs',
+               'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs']:
     ET.SubElement(items, 'Compile', Include=str(root / source))
 for dll in host.glob('*.dll'):
     if dll.stem.startswith(('System.', 'Microsoft.')) or dll.stem in ('mscorlib', 'netstandard'):

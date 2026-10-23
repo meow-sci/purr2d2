@@ -52,7 +52,20 @@ internal static class FragmentTemplateChecks
         picker.Remove();
         document.Root.Add(new XElement("SubPart", new XAttribute("Id", "orphan"), picker));
         Reject(document, "An unattached template cannot supply the picking geometry.");
+        var (fixture, materials) = FragmentAssetChecks.Fixture();
+        var generated = FragmentAssetWriter.Build(fixture, materials, CancellationToken.None);
+        var merged = FragmentTemplateLoader.Read(serializer, generated.Xml, generated.Id, generated.Uploads.Length);
+        var mergedRoot = merged.Assets.OfType<PartTemplate>().Single(p => p.Id == generated.Id);
+        var mergedVisual = merged.Assets.OfType<SubPartTemplate>().Single();
+        if (mergedRoot.SubPartInstances.Count != 1 || mergedRoot.SubPartInstances.Single().InstanceOf != mergedVisual.Id
+            || mergedVisual.Components.OfType<PartModelModule.Template>().Count() != 3
+            || mergedVisual.Components.OfType<PartModelGlassModule.Template>().Count() != 1
+            || mergedVisual.Components.OfType<MeshViewModule.Template>().Single().MeshView.Id != generated.Id + "_hull")
+            throw new Exception("Actual KSA XML loader lost merged fragment material/glass/picking modules.");
+        FragmentTopology.Remember(XDocument.Parse(Encoding.UTF8.GetString(generated.Xml)));
+        if (FragmentTopology.Find(generated.Id) == null) throw new Exception("Generated XML did not restore its durable closed-solid metadata.");
         Console.WriteLine("PASS: actual KSA XML retains visual-subpart picking, legacy picking, render/glass/collider modules and mass; missing/unattached picking and plain serializer rejected");
+        Console.WriteLine("PASS: actual KSA XML decodes generated merged fragment with one visual SubPart, four render surfaces and durable topology metadata");
 
         void Reject(XDocument input, string message)
         {

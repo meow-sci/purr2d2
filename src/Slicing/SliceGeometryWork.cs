@@ -45,12 +45,12 @@ internal static class SliceGeometryWork
                 cancel.ThrowIfCancellationRequested();
                 if (!SlicePrincipalFrame.TryCreate(piece, out var frame, out failure)
                     || !SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var solids, out var extents, out failure, cancel)) break;
-                int groups = 0; var points = new HashSet<CutPoint>();
+                var points = new HashSet<CutPoint>();
                 foreach (var solid in solids)
                 {
-                    groups += solid.Select(f => f.Material).Distinct().Count();
                     foreach (var f in solid) { points.Add(f.A.Position); points.Add(f.B.Position); points.Add(f.C.Position); }
                 }
+                int groups = FragmentAssetWriter.CountRenderSurfaces(solids, input.Materials);
                 if (groups > 2046 || points.Count > 65536 || solids.Sum(s => s.Length) > 200_000)
                 { failure = "This cut exceeds the native fragment geometry budget."; break; }
                 float mass = (float)(input.MassKg * piece.Volume / volume);

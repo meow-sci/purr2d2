@@ -54,6 +54,7 @@ internal static partial class RuntimeFragmentAssets
             foreach (var path in Directory.EnumerateFiles(directory, "*.xml").Order(StringComparer.Ordinal))
             {
                 var document = XDocument.Load(path);
+                FragmentTopology.Remember(document);
                 foreach (var atlas in document.Descendants("MeshAtlas"))
                 {
                     string source = (string?)atlas.Attribute("Path") ?? "";

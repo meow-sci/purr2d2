@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Text;
+using System.Xml.Linq;
 using Brutal;
 using Brutal.GltfApi;
 using Brutal.VulkanApi;
@@ -54,6 +56,7 @@ internal static partial class RuntimeFragmentAssets
                     meshes[m] = mesh;
                 }
             var bundle = FragmentTemplateLoader.Read(serializer, fragment.Xml, fragment.Id, fragment.Uploads.Length);
+            FragmentTopology.Remember(XDocument.Parse(Encoding.UTF8.GetString(fragment.Xml)));
             // Bytes are durable; stop retaining large duplicate GLB/XML buffers in the handoff.
             loaded[i] = new(fragment with { Glb = [], Xml = [] }, meshes, bundle);
         }

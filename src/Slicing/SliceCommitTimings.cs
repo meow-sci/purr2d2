@@ -5,7 +5,7 @@ namespace Purr2D2.Slicing;
 
 internal enum SliceCommitPhase { Validation, Isolation, Drain, Registration, Motion, SourceRemoval }
 
-/// <summary>Measures the indivisible native handoff. This diagnoses real host
+/// <summary>Measures one native isolation or swap handoff. This diagnoses real host
 /// costs without adding a profiler, a worker join or a log per fragment/frame.</summary>
 internal sealed class SliceCommitTimings
 {

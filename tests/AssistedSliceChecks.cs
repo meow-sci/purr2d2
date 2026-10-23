@@ -33,12 +33,22 @@ internal static class AssistedSliceChecks
         for (int i = 0; i < 100; i++) Check(action.Advance(.02, true, true, true) != SliceCue.Commit, "ready result cannot skip presentation of final pose");
         Check(action.Progress == 1 && action.Active && !action.Swinging, "full swing finishes before breakup");
         action.NotifyRendered();
-        Check(action.Advance(.02, true, true, true) == SliceCue.Commit, "ready result commits on first update after final rendered pose");
+        Check(action.Advance(.02, true, true, true) == SliceCue.Isolate && action.Active && action.IsolationRequested,
+            "ready result isolates after final presented pose and stays cancellable");
+        Check(action.Advance(.02, true, true, true) == SliceCue.Commit && !action.Active,
+            "fragment swap occurs on a separate following handoff");
         for (int i = 0; i < 100; i++) Check(action.Advance(.02, true, true, true) == SliceCue.None, "exactly one structural commit");
         action.Start();
         for (int i = 0; i < 100; i++) { action.Advance(.02, true, true, false); action.NotifyRendered(); }
         Check(action.EndPresented && action.Active && action.Progress == 1, "slow worker never prevents the full animation");
-        Check(action.Advance(.02, true, true, true) == SliceCue.Commit, "late result commits immediately when ready");
+        Check(action.Advance(.02, true, true, true) == SliceCue.Isolate, "late result begins isolation only when all pieces are ready");
+        Check(action.Advance(0, true, true, true) == SliceCue.None && action.Active,
+            "zero player delta cannot consume the pending swap");
+        action.Cancel();
+        Check(!action.IsolationRequested && action.Advance(.02, true, true, true) == SliceCue.None,
+            "cancelling between isolation and replacement prevents the swap");
+        action.Start();
+        Check(!action.IsolationRequested, "new request cannot inherit the previous isolated phase");
         action.Start(); action.Advance(.02, true, true, true); action.Advance(.1, true, true, true); action.Cancel();
         for (int i = 0; i < 100; i++) Check(action.Advance(.1, true, true, true) == SliceCue.None, "cancel removes pending cut");
         action.Start();

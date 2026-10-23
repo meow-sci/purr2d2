@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Brutal.Numerics;
 using Brutal.Render.Mesh;
 using KSA;
+using Purr2D2.Rendering;
 using Purr2D2.Slicing;
 using RenderCore;
 
@@ -35,13 +36,22 @@ internal sealed class SliceSourceCapture : IDisposable
         do { if (!_steps.MoveNext()) { Done = true; _steps.Dispose(); break; } }
         while (++units < 8 && Stopwatch.GetElapsedTime(start).TotalMilliseconds < 1.5);
     }
-    internal bool IsCurrent(Part source)
+    internal bool IsCurrent(Part source, IsolatedSliceSource? isolated = null)
     {
-        if (source.StructuralPart != _full || _vehicle.IsDisposed || _full.Tree?.OwningVehicle != _vehicle
-            || _full.SubParts.Length + 1 != _nodes.Count) return false;
+        if (source.StructuralPart != _full || _full.SubParts.Length + 1 != _nodes.Count) return false;
+        if (isolated == null)
+        {
+            if (_vehicle.IsDisposed || _full.Tree?.OwningVehicle != _vehicle) return false;
+        }
+        else if (isolated.Source != _full || !isolated.IsCurrent(out _)) return false;
         foreach (var node in _nodes)
         {
-            if (node.Part.FullPart != _full || !node.Part.MatrixAsmb2VehicleAsmb.Equals(node.Transform)) return false;
+            var expected = isolated == null ? node.Transform : node.Transform * isolated.SourceToIsolated;
+            // Split can rotate/rebase an assembly, including docking-port roots.
+            // Compare transformed capture points with numerical tolerance while
+            // retaining the exact owner/tree gate above against later edits.
+            if (node.Part.FullPart != _full || (isolated == null
+                ? !node.Part.MatrixAsmb2VehicleAsmb.Equals(expected) : !SliceSourceFrame.SameTransform(node.Part.MatrixAsmb2VehicleAsmb, expected))) return false;
             var models = Models(node.Part);
             if (models.Count != node.Meshes.Length) return false;
             for (int i = 0; i < models.Count; i++)
@@ -55,8 +65,10 @@ internal sealed class SliceSourceCapture : IDisposable
         var groups = new List<SliceFace[]>();
         var materials = new Dictionary<int, SliceMaterialData>();
         var indices = new Dictionary<string, int>(StringComparer.Ordinal);
-        int total = 0;
         var parts = new[] { _full }.Concat(_full.SubParts.ToArray()).ToArray();
+        var topology = FragmentTopology.Find(_full.Template.Id,
+            required: parts.Any(p => p.Template.Id == _full.Template.Id + "_visual"))?.BeginCapture();
+        int total = 0;
         foreach (var part in parts)
         {
             if (_vehicle.IsDisposed || part.FullPart.Tree?.OwningVehicle != _vehicle) throw new InvalidOperationException("Source changed during capture.");
@@ -74,6 +86,7 @@ internal sealed class SliceSourceCapture : IDisposable
                 var mesh = model.Mesh?.Get(); var material = model.Material?.Get();
                 if (mesh?.HostPrimitives == null || material == null || !material.IsReferenceable || string.IsNullOrEmpty(material.Id))
                     throw new InvalidDataException("Part has no accessible native mesh or durable material reference.");
+                topology?.BeginSurface(mesh.Id);
                 string key = material.Id + ":glass=" + model.Glass;
                 if (!indices.TryGetValue(key, out int materialId))
                 {
@@ -90,13 +103,22 @@ internal sealed class SliceSourceCapture : IDisposable
                     for (int start = 0; start < primitive.IndexBuffer.Count; start += 768)
                     {
                         CopyChunk(primitive, start, faces, transform, inverse, determinant < 0, materialId);
+                        if (topology != null)
+                        {
+                            topology.AppendChunk(faces);
+                            total += faces.Count;
+                            faces.Clear();
+                        }
                         yield return 0;
                     }
                 }
+                topology?.EndSurface();
             }
             if (faces.Count > 0) { total += faces.Count; groups.Add(faces.ToArray()); }
             yield return 0;
         }
+        if (topology != null)
+            foreach (var solid in topology.Complete()) { groups.Add(solid); yield return 0; }
         if (groups.Count == 0) throw new InvalidDataException("No supported native part-model surfaces found.");
         if (!double4x4.Invert(_full.MatrixAsmb2VehicleAsmb, out var inv)) throw new InvalidDataException("Part transform is unavailable.");
         CutPoint[] axes = [new(inv.M11, inv.M21, inv.M31), new(inv.M12, inv.M22, inv.M32), new(inv.M13, inv.M23, inv.M33)];

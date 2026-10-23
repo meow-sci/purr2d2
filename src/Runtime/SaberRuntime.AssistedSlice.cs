@@ -62,6 +62,8 @@ internal sealed partial class SaberRuntime
 
     private void CancelAssistedSlice(string reason)
     {
+        if (_slicer.Isolation is { Owner.IsDisposed: false } && reason.Length > 0)
+            reason += " Detached parts remain separated.";
         _selectingSlice = false; _sliceHover = null;
         _sliceSequence.Cancel();
         _sliceSelection?.Dispose(); _sliceSelection = null;
@@ -141,6 +143,19 @@ internal sealed partial class SaberRuntime
             _sliceNextSpark += .25;
         }
         _sliceStatus = !_sliceSequence.EndPresented ? "Slicing " + _sliceTarget.Part.DisplayName + "..." : _slicer.Phase;
+        if (cue == SliceCue.Isolate)
+        {
+            if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
+            var result = _slicer.Isolate(_sliceTarget.Part);
+            if (!result.Success) { CancelAssistedSlice("Slice failed: " + result.Message); return; }
+            var isolated = _slicer.Isolation!;
+            // The selection's hit is in the original assembly frame. Only our
+            // successful native separation authorizes rebasing this target.
+            _sliceTarget = _sliceTarget with { Vehicle = isolated.Owner, PartTransform = isolated.PartTransform,
+                HitAssembly = _sliceTarget.HitAssembly.Transform(isolated.SourceToIsolated) };
+            _sliceStatus = _slicer.Phase;
+            return;
+        }
         if (cue == SliceCue.Commit)
         {
             if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
