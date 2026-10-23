@@ -87,7 +87,8 @@ internal struct LadderNode { }
 internal struct KittenLocomotionTuning
 {
     internal float FeetDownTiltDeg, LiftoffGraceTime;
-    internal static KittenLocomotionTuning Current = new() { FeetDownTiltDeg = 45, LiftoffGraceTime = .2f };
+    internal float WalkSpeed, RunSpeed;
+    internal static KittenLocomotionTuning Current = new() { FeetDownTiltDeg = 45, LiftoffGraceTime = .2f, WalkSpeed = 2, RunSpeed = 5 };
 }
 internal struct VehicleProperties
 {

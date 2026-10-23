@@ -12,6 +12,7 @@ internal static class SomersaultWorkerChecks
     {
         HookTransformation();
         OneShotAndAppliedAcknowledgement();
+        RunningLaunchUsesPreparedSpeed();
         PausedBoundaryAndInterruption();
         FinalCopiesAndFailureAtomicity();
         return 0;
@@ -189,10 +190,34 @@ internal static class SomersaultWorkerChecks
         Check(!motion.CanStart(owner, out var reason) && reason.Contains("RCS"), "RCS has an explicit eligibility reason");
         owner.FlightComputer.RCSMode = FlightComputerRCSMode.Disabled;
         owner.Kinematic.VelocityPhys = new(8, 0, 0);
-        Check(!motion.Request(owner, SomersaultDirection.Backward) && motion.Request(owner, SomersaultDirection.Forward),
-            "each new requested direction uses its own bounded correction rather than the previous direction");
+        Check(motion.Request(owner, SomersaultDirection.Backward),
+            "a running backward request fits the bounded directional correction");
         Universe.CurrentSystem = new(); motion.Update(owner);
         Check(!motion.Active, "world replacement clears a pending launch");
+    }
+
+    private static void RunningLaunchUsesPreparedSpeed()
+    {
+        foreach (SomersaultDirection direction in Enum.GetValues<SomersaultDirection>())
+        {
+            using var motion = Setup(out var owner, out _);
+            owner.FrameVelocity = new(4200, -1700, 300);
+            owner.Kinematic.VelocityPhys = owner.FrameVelocity + new double3(2, 0, 0);
+            Check(motion.Request(owner, direction), "a moving flip can queue before reaching full running speed");
+            owner.Kinematic.VelocityPhys = owner.FrameVelocity + new double3(5, 0, 0);
+            var step = Step(0, .02);
+            Universe.PrepareVehicleWorkers(step);
+            var velocity = owner.Worker.Kinematic.VelocityPhys - owner.FrameVelocity;
+            Check(Math.Abs(Math.Sqrt(velocity.X * velocity.X + velocity.Y * velocity.Y) - 5.5) < 1e-8,
+                "prepared launch uses current running momentum, preserving the moving frame");
+            Check(Math.Abs(velocity.Z * velocity.Z / (2 * 9.81) - 1.495) < 1e-8,
+                "prepared running launch reaches the higher apex");
+            Universe.Apply(step); motion.Update(owner);
+            var launched = owner.Kinematic.VelocityPhys;
+            Universe.PrepareVehicleWorkers(Step(.02, .04));
+            Check(owner.Worker.Kinematic.VelocityPhys == launched,
+                "running boost is applied once and retained in subsequent airborne preparation");
+        }
     }
 
     private static void SetGrounded(KittenEva owner)

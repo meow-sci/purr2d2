@@ -87,7 +87,8 @@ internal sealed class SomersaultMotionController : IDisposable
         if (!owner.HasPhysicsBubble || !physics.Environment.InPhysicsRadius) return false;
         physics.GetStatesCcf(out var position, out var velocity, out var body2Ccf);
         return SomersaultMotion.TryLaunch(position, velocity, body2Ccf, physics.Kinematic.Body2Phys,
-            direction, physics.Environment.GravitationBub.Length(), out _, out reason);
+            direction, physics.Environment.GravitationBub.Length(), out _, out reason,
+            KittenLocomotionTuning.Current.WalkSpeed, KittenLocomotionTuning.Current.RunSpeed);
     }
 
     internal bool Request(KittenEva owner, SomersaultDirection direction)
@@ -195,7 +196,8 @@ internal sealed class SomersaultMotionController : IDisposable
                 var physics = worker.GetReadOnlyStates();
                 physics.GetStatesCcf(out var position, out var velocity, out var body2Ccf);
                 if (!SomersaultMotion.TryLaunch(position, velocity, body2Ccf, physics.Kinematic.Body2Phys,
-                    Direction, physics.Environment.GravitationBub.Length(), out var launch, out reason))
+                    Direction, physics.Environment.GravitationBub.Length(), out var launch, out reason,
+                    KittenLocomotionTuning.Current.WalkSpeed, KittenLocomotionTuning.Current.RunSpeed))
                 { Release(reason); return; }
                 CommitLaunch(worker, step, launch);
             }

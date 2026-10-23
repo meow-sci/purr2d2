@@ -29,14 +29,17 @@ internal static class SomersaultMotion
 {
     internal const double MaximumStepSeconds = .25;
     internal const double MaximumSurfaceSpeed = 8;
-    internal const double MaximumDeltaSpeed = 10;
+    // Allow a directional running flip to reverse up to 8 m/s of surface motion
+    // into an 8.8 m/s launch, plus the jump, without removing the impulse bound.
+    internal const double MaximumDeltaSpeed = 20;
 
     internal static bool NormalSpeed(double speed) => double.IsFinite(speed) && Math.Abs(speed - 1) < 1e-6;
     internal static bool ValidStep(double dt) => double.IsFinite(dt) && dt > 0 && dt <= MaximumStepSeconds;
     internal static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
 
     internal static bool TryLaunch(double3 positionCcf, double3 velocityCcf, doubleQuat body2Ccf,
-        doubleQuat body2Phys, SomersaultDirection direction, double gravity, out SomersaultLaunch launch, out string reason)
+        doubleQuat body2Phys, SomersaultDirection direction, double gravity, out SomersaultLaunch launch, out string reason,
+        double walkSpeed = 2, double runSpeed = 5)
     {
         launch = default;
         reason = "Local gravity is unsupported.";
@@ -59,6 +62,17 @@ internal static class SomersaultMotion
         };
         reason = "Slow down before jumping.";
         if (velocityCcf.LengthSquared() > MaximumSurfaceSpeed * MaximumSurfaceSpeed) return false;
+        reason = "Ground movement tuning is unsupported.";
+        if (!double.IsFinite(walkSpeed) || !double.IsFinite(runSpeed) || walkSpeed <= 0 || runSpeed <= walkSpeed) return false;
+        // Measure actual tangential speed, not the sprint key or the radial
+        // velocity on a slope. Ramp the extra height/speed in while accelerating.
+        double surfaceSpeed = (velocityCcf - up * double3.Dot(velocityCcf, up)).Length();
+        double running = Math.Clamp((surfaceSpeed - walkSpeed) / (runSpeed - walkSpeed), 0, 1);
+        if (!SomersaultProfile.TryCreate(gravity, out profile, height: profile.Height * (1 + .15 * running))) return false;
+        double travelSpeed = Math.Max(profile.TravelSpeed, surfaceSpeed * (1 + .10 * running));
+        // Moving launches travel farther; the standing hop's distance is not a cap.
+        profile = profile with { TravelSpeed = travelSpeed, Distance = travelSpeed * profile.FlightSeconds };
+        reason = "Slow down before jumping.";
         double3 deltaCcf = up * profile.UpSpeed + travel * profile.TravelSpeed - velocityCcf;
         if (!Finite(deltaCcf) || deltaCcf.LengthSquared() > MaximumDeltaSpeed * MaximumDeltaSpeed) return false;
         // GetStatesCcf includes the moving/rotating frame. Only rotate the delta;

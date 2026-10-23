@@ -7,6 +7,7 @@ internal static class SomersaultMotionChecks
     {
         GravityAndTravel();
         FramesAndVelocityBounds();
+        RunningMomentum();
         SequenceAcknowledgementAndContact();
         EarlyImpactAndTimeout();
     }
@@ -73,14 +74,59 @@ internal static class SomersaultMotionChecks
         Check(!SomersaultMotion.TryLaunch(position, new(9, 0, 0), doubleQuat.Identity, doubleQuat.Identity,
             SomersaultDirection.Forward, 9.81, out _, out var reason) && reason.Contains("Slow"),
             "fast surface motion is declined rather than abruptly cancelled");
+        Check(SomersaultMotion.TryLaunch(position, new(8, 0, 0), doubleQuat.Identity, doubleQuat.Identity,
+            SomersaultDirection.Backward, 9.81, out _, out _), "the bounded correction allows a backward running flip");
         Check(!SomersaultMotion.TryLaunch(position, new(8, 0, 0), doubleQuat.Identity, doubleQuat.Identity,
-            SomersaultDirection.Backward, 9.81, out _, out _), "a large opposing correction is separately bounded");
+            SomersaultDirection.Backward, 100, out _, out _), "an excessive combined reversal and vertical impulse is still rejected");
         Check(SomersaultMotion.TryLaunch(position, new(8, 0, 0), doubleQuat.Identity, doubleQuat.Identity,
             SomersaultDirection.Forward, 9.81, out _, out _), "direction-specific correction can allow the same speed forward");
         Check(!SomersaultMotion.TryLaunch(double3.Zero, double3.Zero, doubleQuat.Identity, doubleQuat.Identity,
             SomersaultDirection.Forward, 9.81, out _, out _), "a missing radial surface frame is rejected");
         Check(!SomersaultMotion.TryLaunch(position, double3.Zero, new(0, 0, 0, 0), doubleQuat.Identity,
             SomersaultDirection.Forward, 9.81, out _, out _), "invalid orientations cannot enter velocity transforms");
+    }
+
+    private static void RunningMomentum()
+    {
+        var position = new double3(0, 0, -1000);
+        foreach (double gravity in new[] { 9.81, 3.71, 1.62 })
+        foreach (SomersaultDirection direction in Enum.GetValues<SomersaultDirection>())
+        {
+            var incoming = new double3(5, 0, .2);
+            Check(SomersaultMotion.TryLaunch(position, incoming, doubleQuat.Identity, doubleQuat.Identity,
+                direction, gravity, out var launch, out _), "all four running flips launch on Earth/Mars/Luna");
+            double3 travel = direction switch
+            {
+                SomersaultDirection.Backward => -double3.UnitX,
+                SomersaultDirection.Left => double3.UnitY,
+                SomersaultDirection.Right => -double3.UnitY,
+                _ => double3.UnitX
+            };
+            var velocity = incoming + launch.DeltaVelocityPhys;
+            Near(velocity, travel * 5.5 - double3.UnitZ * launch.Profile.UpSpeed,
+                "a running launch is 10% faster in the selected direction without double-counting incoming velocity");
+            Near(velocity.Z * velocity.Z / (2 * gravity), 1.495, "a running launch has a 15% higher apex");
+            Near(launch.Profile.Distance, 5.5 * launch.Profile.FlightSeconds,
+                "travel grows with momentum and airtime instead of being capped at the standing distance");
+            Near(velocity.Z * launch.Profile.FlightSeconds + .5 * gravity * Math.Pow(launch.Profile.FlightSeconds, 2), 0,
+                "animation timing follows the higher ballistic arc");
+        }
+        foreach (double speed in new[] { 0, 2, 3.5, 5, 8 })
+        {
+            Check(SomersaultMotion.TryLaunch(position, new(speed, 0, 0), doubleQuat.Identity, doubleQuat.Identity,
+                SomersaultDirection.Forward, 9.81, out var launch, out _), "standing through bounded running speeds are supported");
+            double blend = Math.Clamp((speed - 2) / 3, 0, 1);
+            Near(launch.Profile.Height, 1.3 * (1 + .15 * blend), "height blends smoothly from walking to running");
+            Check(launch.Profile.TravelSpeed >= speed, "launch never reduces the incoming ground speed");
+            if (speed == 0) Near(launch.Profile.Distance, 1.5, "standing flips retain their original travel");
+            if (speed == 2) Near(launch.Profile.TravelSpeed, 2, "walking momentum is retained without a running boost");
+        }
+        Check(SomersaultMotion.TryLaunch(position, new(3, 0, 0), doubleQuat.Identity, doubleQuat.Identity,
+            SomersaultDirection.Forward, 9.81, out var tuned, out _, walkSpeed: 1, runSpeed: 3),
+            "custom native walking/running thresholds are supported");
+        Near(tuned.Profile.TravelSpeed, 3.3, "boost follows native tuning rather than a hardcoded run threshold");
+        Check(!SomersaultMotion.TryLaunch(position, double3.Zero, doubleQuat.Identity, doubleQuat.Identity,
+            SomersaultDirection.Forward, 9.81, out _, out _, runSpeed: double.NaN), "invalid tuning cannot produce a launch");
     }
 
     private static void SequenceAcknowledgementAndContact()
