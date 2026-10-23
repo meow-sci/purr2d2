@@ -34,6 +34,10 @@ Without saved preferences, defaults are **1.4 m** blade length, grip **(-24.5, -
 
 ## Slicing and effects
 
+Lit blades have a subtle travelling shimmer and brief electrical arcs around the blade. The bright core stays readable while the surrounding glow ripples. Arcs follow the paw and current blade length, inherit each kitten's blade color, and fade out at a distance. These cosmetic effects use player time, including while paused, like the existing cooling sparks.
+
+Shimmer uses the existing glow shader. Electrical ribbons share its depth-tested HDR pass and are batched into at most one additional draw per eligible blade per viewport, with bounded arc geometry and reduced detail at a distance. They add no particle emitters or dynamic lights. Background heat distortion is not part of this effect; native appearance and frame-time acceptance still require an in-game check.
+
 The slice clips the actual native mesh triangles, preserves UVs/materials and glass layers, and seals new surfaces. Supported open hull panels receive a thin backing. The resulting native wreckage has generated colliders, volume-weighted mass, principal-axis inertia and conserved momentum. Hot cut rims cool into persistent dark caps; a gentle separating impulse opens the seam. Geometry failures report a reason and leave the original intact.
 
 Each new fragment combines surfaces sharing a material and glass setting into one visual subpart, with cut caps kept separate. This reduces render modules, draw submissions and preparation steps without changing the exported triangles or materials. Existing saved fragments keep their original assets.
@@ -62,7 +66,7 @@ The Release build produces the installable folder `artifacts/stage/purr2d2/`, `a
 
 Every Release build recreates the folder from the project's explicit file set, so stale files and host DLLs cannot survive a rebuild. The ZIP contains one `purr2d2/` folder. Extract that folder into your configured KSA/StarMap mod directory and enable the `purr2d2` mod ID. A game restart is needed. Preserve existing `settings.json` and `Generated/Slices/` when updating.
 
-Optional development checks are separate from building the distribution:
+Optional development checks are separate from building the distribution. `--run-tests` also requires `glslangValidator` from the Vulkan SDK, found on `PATH`, under `VULKAN_SDK`, or in a standard `~/VulkanSDK/*/macOS/` installation. It compiles and links the saber shaders, checks the reflected 128-byte push-constant layout against the production C# declaration, and exercises VFX detail/time bounds without starting KSA:
 
 ```sh
 python3 tools/validate.py --run-tests --stage artifacts/stage/purr2d2

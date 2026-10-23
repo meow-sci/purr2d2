@@ -17,6 +17,8 @@ import wave
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from check_saber_shaders import run_shader_checks
+
 
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"\A(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -640,8 +642,11 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "tests/somersault/PoseHostStubs.cs",
         source / "tests/SomersaultPoseChecks.cs",
     ]
-    outputs = []
-    result = 0
+    shader_code, shader_output = run_shader_checks(source)
+    outputs = [shader_output]
+    result = shader_code
+    vfx_sources = [source / "src/Rendering/SaberVfx.cs", source / "tests/SaberVfxChecks.cs",
+                   source / "artifacts/checks/SaberVfxChecks/GlowPush.cs"]
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),
         ("TargetSelectionChecks", target_sources, None),
@@ -653,6 +658,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         ("SomersaultRuntimeChecks", somersault_runtime_sources, None),
         ("SomersaultWorkerChecks", somersault_worker_sources, None),
         ("SomersaultPoseChecks", somersault_pose_sources, None),
+        ("SaberVfxChecks", vfx_sources, None),
     ):
         code, output = _run_managed_project(source, name, required, program,
                                            harmony=name == "SomersaultWorkerChecks")
@@ -732,7 +738,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE, help="mod source root (default: repository root)")
     parser.add_argument("--stage", type=Path, help="optional staging directory; defaults to artifacts/stage/purr2d2 when present")
-    parser.add_argument("--run-tests", action="store_true", help="generate and run the temporary .NET 10 managed test harness")
+    parser.add_argument("--run-tests", action="store_true", help="compile/link saber GLSL and run the isolated .NET 10 managed checks")
     args = parser.parse_args(argv)
 
     version, issues = validate_source(args.source)

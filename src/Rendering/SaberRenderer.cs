@@ -14,7 +14,7 @@ using Purr2D2.Core;
 
 namespace Purr2D2.Rendering;
 
-/// <summary>Native PBR hilt, depth-tested HDR blade, local light spill and bounded cut sparks.</summary>
+/// <summary>Native PBR hilt, depth-tested HDR blade/VFX, local light spill and bounded cut sparks.</summary>
 public sealed unsafe class SaberRenderer : IDisposable
 {
     private static SaberRenderer? _instance;
@@ -31,7 +31,7 @@ public sealed unsafe class SaberRenderer : IDisposable
     private readonly Dictionary<KittenEva, Emitter> _emitters = new(ReferenceEqualityComparer.Instance);
     private double _now;
 
-    private readonly record struct Blade(float4x4 EmitterToEgo, float Length, float3 Color);
+    private readonly record struct Blade(float4x4 EmitterToEgo, float Length, float3 Color, float Seed);
     private readonly record struct Emitter(double4x4 ToBody, float Length, float3 Color);
     private readonly record struct Spark(Part Part, double3 A, double3 B, double3 Normal, double Born);
     private readonly record struct PassKey(VkSampleCountFlags Samples, VkFormat Color, VkFormat Depth);
@@ -43,6 +43,8 @@ public sealed unsafe class SaberRenderer : IDisposable
         public float4x4 Mvp;
         public float4 Color;
         public float4 Shape;
+        public float4 Animation;
+        public float4 Camera;
     }
 
     public bool HiltReady => _hilt != null;
@@ -137,7 +139,8 @@ public sealed unsafe class SaberRenderer : IDisposable
             if (lengthMeters <= 0.0001f) return;
             if (!_blades.TryGetValue(viewport.ShaderSlot, out var list))
                 _blades.Add(viewport.ShaderSlot, list = new List<Blade>(1));
-            list.Add(new Blade(emitterToEgo, float.Clamp(lengthMeters, 0, SaberLimits.MaximumBladeLength), color));
+            list.Add(new Blade(emitterToEgo, float.Clamp(lengthMeters, 0, SaberLimits.MaximumBladeLength),
+                color, SaberVfx.Seed(kitten.Id)));
         }
         catch (Exception ex) { Report("saber submission", ex); }
     }
@@ -258,6 +261,7 @@ public sealed unsafe class SaberRenderer : IDisposable
     {
         var camera = viewport.GetCamera();
         var projection = camera.MVP.viewProjection;
+        float time = SaberVfx.Clock(_now);
         Program.SetViewport(commands);
 
         commands.BindPipeline(VkPipelineBindPoint.Graphics, pair.Glow);
@@ -285,12 +289,74 @@ public sealed unsafe class SaberRenderer : IDisposable
             var magnitude = z.Length();
             if (magnitude < 1e-9) continue;
             var end = start + z / magnitude * blade.Length;
+            var detail = BladeDetail(viewport, camera, start, end, blade.Length);
             DrawRibbon(commands, projection, start, end, double3.Zero, 0.065f, 0.009f,
-                new float4(blade.Color, 8), isChar: false, billboard: true);
+                new float4(blade.Color, 8), isChar: false, billboard: true,
+                new float4(time, blade.Seed, blade.Length * .5f, detail.ShimmerStrength));
             // A line ribbon is edge-on when looking along the blade. A camera-facing end cap
             // keeps the tip round and luminous from that angle as well.
-            DrawBladeTip(commands, projection, end, new float4(blade.Color, 4));
+            DrawBladeTip(commands, projection, end, new float4(blade.Color, 4),
+                new float4(time, blade.Seed, blade.Length, detail.ShimmerStrength));
+            if (detail.ArcCount > 0) DrawArcs(commands, projection, blade, start, z / magnitude, time, detail);
         }
+    }
+
+    private static SaberVfxDetail BladeDetail(IViewport viewport, Camera camera, double3 start,
+        double3 end, float length)
+    {
+        var middle = (start + end) * .5;
+        if (!Finite(middle) || camera.IsSphereOutsideFrustum(middle, length * .5 + .1)) return default;
+        var projection = camera.MVP.viewProjection;
+        var a = float4.Transform(new float4(float3.Pack(in start), 1), projection);
+        var b = float4.Transform(new float4(float3.Pack(in end), 1), projection);
+        var center = float4.Transform(new float4(float3.Pack(in middle), 1), projection);
+        if (center.W <= .0001f) return default;
+
+        var extent = viewport.OffscreenTarget.Extent;
+        float pixelsPerMeter = Math.Abs(camera.MVP.projection.M22) * extent.Height / (2 * center.W);
+        float lengthPixels = 0;
+        if (a.W > .0001f && b.W > .0001f)
+        {
+            float dx = (a.X / a.W - b.X / b.W) * extent.Width * .5f;
+            float dy = (a.Y / a.W - b.Y / b.W) * extent.Height * .5f;
+            lengthPixels = MathF.Sqrt(dx * dx + dy * dy);
+        }
+        // Distance to the nearest blade point, so a long blade near the camera stays detailed.
+        var axis = (end - start) / length;
+        var nearest = start + axis * double.Clamp(-double3.Dot(start, axis), 0, length);
+        return SaberVfx.Detail(lengthPixels, .065f * pixelsPerMeter, nearest.Length(), length);
+    }
+
+    private void DrawArcs(CommandBuffer commands, float4x4 projection, Blade blade, double3 start,
+        double3 axis, float time, SaberVfxDetail detail)
+    {
+        // Remove rig scale/shear. The procedural path stays in the posed saber frame, while
+        // its narrow ribbon faces this viewport's camera. No vertex buffer or per-frame arrays.
+        var right = double3.Unpack(blade.EmitterToEgo.X.XYZ);
+        right -= axis * double3.Dot(right, axis);
+        if (right.Length() < 1e-8) right = double3.Cross(axis, double3.UnitY);
+        if (right.Length() < 1e-8) right = double3.Cross(axis, double3.UnitX);
+        right /= right.Length();
+        var up = double3.Cross(axis, right);
+        var model = new double4x4(
+            right.X, right.Y, right.Z, 0,
+            up.X, up.Y, up.Z, 0,
+            axis.X, axis.Y, axis.Z, 0,
+            start.X, start.Y, start.Z, 1);
+        var cameraLocal = new float3((float)-double3.Dot(start, right), (float)-double3.Dot(start, up),
+            (float)-double3.Dot(start, axis));
+        var push = new GlowPush
+        {
+            Mvp = float4x4.Pack(in model) * projection,
+            Color = new float4(blade.Color, 2.5f),
+            Shape = new float4(blade.Length, .008f, .0015f, 2),
+            Animation = new float4(time, blade.Seed, detail.Segments, detail.ArcLevel),
+            Camera = new float4(cameraLocal, detail.ArcVisibility),
+        };
+        commands.PushConstants(_layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
+            ByteSize.Zero, push);
+        // Each instance is one contiguous strip: 3 arcs x 10 segments is the hard maximum.
+        commands.Draw(2 * (detail.Segments + 1), detail.ArcCount, 0, 0);
     }
 
     private static bool TrySparkFrame(Spark spark, Camera camera, out double3 a, out double3 b, out double3 normal)
@@ -313,7 +379,8 @@ public sealed unsafe class SaberRenderer : IDisposable
     }
 
     private void DrawRibbon(CommandBuffer commands, float4x4 projection, double3 a, double3 b,
-        double3 normal, float radius, float core, float4 color, bool isChar, bool billboard)
+        double3 normal, float radius, float core, float4 color, bool isChar, bool billboard,
+        float4 animation = default)
     {
         var segment = b - a;
         var length = segment.Length();
@@ -335,13 +402,15 @@ public sealed unsafe class SaberRenderer : IDisposable
             Mvp = float4x4.Pack(in model) * projection,
             Color = color,
             Shape = new float4((float)half, radius, core, isChar ? 1 : 0),
+            Animation = animation,
         };
         commands.PushConstants(_layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
             ByteSize.Zero, push);
         commands.Draw(4, 1, 0, 0);
     }
 
-    private void DrawBladeTip(CommandBuffer commands, float4x4 projection, double3 point, float4 color)
+    private void DrawBladeTip(CommandBuffer commands, float4x4 projection, double3 point, float4 color,
+        float4 animation)
     {
         const float radius = 0.065f;
         var towardCamera = point.Length() > 1e-8 ? -point / point.Length() : double3.UnitZ;
@@ -359,6 +428,7 @@ public sealed unsafe class SaberRenderer : IDisposable
             Mvp = float4x4.Pack(in model) * projection,
             Color = color,
             Shape = new float4(0, radius, 0.009f, 0),
+            Animation = animation,
         };
         commands.PushConstants(_layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
             ByteSize.Zero, push);

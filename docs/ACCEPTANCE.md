@@ -1,5 +1,15 @@
 # Acceptance record
 
+## Blade shimmer and electrical ribbons (2026-10-23)
+
+The existing HDR glow pass now includes subtle travelling blade shimmer and brief, blade-colored electrical ribbons. Arc paths use each kitten's stable seed and local emitter frame; they follow the current deployment and paw pose independently of camera direction. Geometry and draw submissions are bounded per saber, with screen-size and distance reductions. No particle emitter, additional scene light, collision or cutting behavior is introduced. The cosmetic clock continues during pause, matching existing spark cooling.
+
+At most three arcs use six to ten segments each (66 vertices maximum), submitted in one extra instanced draw per eligible saber per viewport. Bursts last 0.24–0.38 seconds within staggered two-second windows; inactive instances skip path generation. The shared push-constant block is 128 bytes. Managed VFX checks cover that production layout, finite detail bounds, short/end-on blades, independent viewport detail, deterministic seeds, long-running/wrapping clocks and allocation-free policy calculations. Actual GLSL compilation/linking, reflected shader layout and SPIR-V validation pass. These checks do not execute the shader on a GPU.
+
+Release build passes with zero warnings/errors. Full source/staged validation and all ten isolated managed harnesses pass, including the new VFX checks. The ZIP's 21 files match staging and its SHA-256 checksum verifies. Logs: `artifacts/checks/saber-vfx-release-build.log`, `artifacts/checks/saber-vfx-validation.log`, `artifacts/checks/saber-vfx-spirv.log` and `artifacts/checks/saber-vfx-package.log`.
+
+Native acceptance remains pending. Inspect short/default/12 m blades through ignition and retraction; look along the blade and orbit around it; swing, drag the paw and somersault. Check multiple differently colored kittens in both main and secondary viewports, changing view order and control without changing the electrical pattern. Inspect against space, atmosphere and clouds and behind an intervening vessel, with MSAA on/off and after resizing. Check distant arcs fade without obvious popping, the core and tip stay readable, contact sparks retain their appearance, and shutdown/loading/boarding leave no effects behind. Compare CPU/GPU frame times at the same resolution and camera with one and many sabers, including close-up overlapping blades; bounded draw counts are not measured FPS acceptance.
+
 ## Sequenced saber toggles and ignite control (2026-10-22)
 
 EVA checkboxes now raise the equipped hilt before ignition. Disabling keeps the blade, hand pose and audio alive while retracting, then lowers the arm before removing the hilt and restoring the MMU cosmetics. Switching direction preserves the current blade length and arm blend. Pause holds every stage; control changes preserve each kitten's pending sequence. Boarding/world changes retain immediate resource cleanup.
