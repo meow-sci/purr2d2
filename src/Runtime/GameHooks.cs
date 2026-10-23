@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
+using Brutal.GlfwApi;
+using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
 
@@ -20,6 +22,18 @@ internal static class GameHooks
         // OnFrameViewports is earlier and would pair last frame's hit with this frame's ray.
         harmony.Patch(Require(typeof(Program), "OnDrawUiThreadSafe", typeof(double)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(Overlay)));
+        harmony.Patch(Require(typeof(Program), nameof(Program.OnMouseButton), typeof(GlfwWindow), typeof(GlfwMouseButton), typeof(GlfwButtonAction), typeof(GlfwModifier)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayMouseButton)));
+        harmony.Patch(Require(typeof(Program), nameof(Program.OnCursorPos), typeof(GlfwWindow), typeof(double2)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayCursor)));
+        harmony.Patch(Require(typeof(Program), nameof(Program.OnScroll), typeof(GlfwWindow), typeof(double2)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayScroll)));
+        harmony.Patch(Require(typeof(Program), nameof(Program.OnFocus), typeof(GlfwWindow), typeof(GlfwFocusEvent)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayFocus)));
+        harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnMouseButton", typeof(GlfwWindow), typeof(GlfwMouseButton), typeof(GlfwButtonAction), typeof(GlfwModifier)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiMouseButton)));
+        harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnScroll", typeof(GlfwWindow), typeof(double2)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiScroll)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnGameLoaded)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(WorldChanged)));
         harmony.Patch(Require(typeof(Universe), nameof(Universe.DeserializeSave), typeof(UniverseData)),
@@ -68,6 +82,19 @@ internal static class GameHooks
     private static void SettledUpdate(double dtPlayer) => Runtime?.BeforePhysics(dtPlayer);
     private static void Frame(double dtPlayer) => Runtime?.Frame(dtPlayer);
     private static void Overlay() { if (Program.DrawUI) Runtime?.DrawSliceOverlay(); }
+    // Main-window game callbacks precede the backend's independent subscription.
+    // Consume owned input in both routes so neither camera nor covered ImGui widgets react.
+    private static bool OverlayMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action) =>
+        !(Runtime?.FilterOverlayMouseButton(window, button, action) ?? false);
+    private static bool OverlayCursor(GlfwWindow window) => !(Runtime?.FilterOverlayCursor(window) ?? false);
+    private static bool OverlayScroll(GlfwWindow window, double2 offset) => !(Runtime?.FilterOverlayScroll(window, offset) ?? false);
+    private static void OverlayFocus(GlfwWindow window, GlfwFocusEvent focusEvent)
+    {
+        if (window == Program.GetWindow() && focusEvent == GlfwFocusEvent.LostFocus) Runtime?.OverlayFocusLost();
+    }
+    private static bool OverlayImGuiMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action) =>
+        !(Runtime?.SuppressOverlayImGuiMouseButton(window, button, action) ?? false);
+    private static bool OverlayImGuiScroll(GlfwWindow __0) => !(Runtime?.SuppressOverlayImGuiScroll(__0) ?? false);
     private static void WorldChanged()
     {
         try { Runtime?.ResetWorld(); }

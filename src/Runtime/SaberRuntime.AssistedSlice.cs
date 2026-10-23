@@ -11,12 +11,16 @@ internal sealed partial class SaberRuntime
 {
     private readonly AssistedSliceSequence _sliceSequence = new();
     private SliceTarget? _sliceTarget, _sliceHover;
+    private bool _sliceHoverAllowed;
     private PartSliceTargeting.Selection? _sliceSelection;
     private bool _selectingSlice, _sliceStarted;
     private string? _sliceError;
     private float3 _sliceAim = float3.UnitZ;
     private double _sliceNextSpark;
+    private double _sliceMessageUntil;
     private string _sliceStatus = "";
+    private bool SliceStatusVisible => _sliceStatus.Length > 0
+        && (_selectingSlice || _sliceSequence.Active || _playerTime < _sliceMessageUntil);
     // Use the rendered blade length and live hilt position, never a kitten-centred allowance.
     private bool TrySliceReach(out double3 baseBody, out double reach, out string reason)
     {
@@ -31,7 +35,7 @@ internal sealed partial class SaberRuntime
     private void SelectPartToSlice()
     {
         if (_sliceSequence.Active || _owner == null) return;
-        if (_slicer.Busy) { _sliceStatus = "Finishing the previous slice; try again shortly."; return; }
+        if (_slicer.Busy) { _sliceStatus = "Finishing the previous slice; try again shortly."; _sliceMessageUntil = _playerTime + 5; return; }
         EnsureBlade(); _blade.SetIgnited(true);
         _selectingSlice = true;
         _sliceStatus = "Point at a part and click to slice. Right-click or Esc to cancel.";
@@ -63,6 +67,7 @@ internal sealed partial class SaberRuntime
         _sliceTarget = null; _sliceStarted = false; _sliceError = null;
         _pose.ClearSliceSwing();
         _sliceStatus = reason;
+        _sliceMessageUntil = reason.Length > 0 ? _playerTime + 5 : 0;
     }
 
     // Main-thread handoff. Animation never waits for a plane, export or upload.
@@ -133,8 +138,7 @@ internal sealed partial class SaberRuntime
             _renderer.AddCutSparks(_sliceTarget.Part, _sliceTarget.HitAssembly.Transform(assemblyToPart), double3.UnitY, _playerTime);
             _sliceNextSpark += .25;
         }
-        _sliceStatus = !_sliceSequence.EndPresented ? "Swinging across " + _sliceTarget.Part.DisplayName + "..."
-            : _slicer.Phase + " You can keep flying while the cut finishes.";
+        _sliceStatus = !_sliceSequence.EndPresented ? "Slicing " + _sliceTarget.Part.DisplayName + "..." : _slicer.Phase;
         if (cue == SliceCue.Commit)
         {
             if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
@@ -147,9 +151,10 @@ internal sealed partial class SaberRuntime
     private void HandleSlicePointer()
     {
         _sliceHover = null;
+        _sliceHoverAllowed = false;
         if (!_selectingSlice || _owner == null || !Program.DrawUI || Program.EditorFlag) return;
         var io = ImGui.GetIO();
-        if (io.WantCaptureMouse || io.WantTextInput || !CursorTarget.IsHitTestViewport(Program.MainViewport)) return;
+        if (OverlayCapturesPointer || io.WantCaptureMouse || io.WantTextInput || !CursorTarget.IsHitTestViewport(Program.MainViewport)) return;
         if (ImGui.IsMouseClicked(ImGuiMouseButton.Right)) { Queue(Command.CancelSlice); return; }
         if (!TrySliceReach(out var baseBody, out var reach, out var reachReason))
         { _sliceStatus = reachReason; return; }
@@ -159,10 +164,11 @@ internal sealed partial class SaberRuntime
         string reason = "Point at a vessel part and click to slice.";
         // Reuse the game's current-frame hover hit. No fleet-wide scan on each mouse move.
         if (picker.Part is { } hovered && double.IsFinite(picker.Distance))
-            _targeting.TryPointTarget(_owner, hovered, ray.Origin + ray.Direction * picker.Distance, baseBody, reach, out _sliceHover, out reason);
-        _sliceStatus = _sliceHover is { } hit ? "Click to slice " + hit.Part.DisplayName + "." : reason;
+            _sliceHover = _targeting.PreviewPointTarget(_owner, hovered, ray.Origin + ray.Direction * picker.Distance,
+                baseBody, reach, out _sliceHoverAllowed, out reason);
+        _sliceStatus = _sliceHoverAllowed && _sliceHover is { } hit ? "Click to slice " + hit.Part.DisplayName + "." : reason;
         if (!ImGui.IsMouseClicked(ImGuiMouseButton.Left)) return;
-        if (picker.Part != null && _sliceHover == null) return;
+        if (picker.Part != null && !_sliceHoverAllowed) return;
         if (_commands.Count < 16)
         {
             _commands.Enqueue(new(_owner, Command.CutPicked, PartTarget: _sliceHover, PickRay: ray));
@@ -176,7 +182,9 @@ internal sealed partial class SaberRuntime
         ImGui.BeginDisabled(!_ready || !hasKitten || _fault != null);
         try
         {
-            if (ImGui.BeginCombo("Vessel target", owner?.Target?.Id ?? "None"))
+            ImGui.Text("Vessel target");
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.BeginCombo("##VesselTarget", owner?.Target?.Id ?? "None"))
             {
                 try
                 {
@@ -197,9 +205,6 @@ internal sealed partial class SaberRuntime
             else if (ImGui.Button("Select part to slice", new float2(-1, 32))) Queue(Command.SelectSlice);
         }
         finally { ImGui.EndDisabled(); }
-        ImGui.TextWrapped("Select part to slice, then point and click on the vessel. The saber swings immediately; the pieces separate when ready.");
-        ImGui.TextWrapped($"Blade reach: {Length:F2} m from the hilt. Select a point the blade can reach; slicing never extends it automatically.");
-        ImGui.TextWrapped("Swing makes a normal saber swipe; contact makes sparks. Tank contents are emptied; occupied vessels are protected.");
-        if (_sliceStatus.Length > 0) ImGui.TextWrapped(_sliceStatus);
+        if (SliceStatusVisible) ImGui.TextWrapped(_sliceStatus);
     }
 }

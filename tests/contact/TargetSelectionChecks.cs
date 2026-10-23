@@ -4,7 +4,7 @@ using Purr2D2.Cutting;
 
 internal static class TargetSelectionChecks
 {
-    private static void Main() { AssistedSliceSelection(); BladeReach(); PointerOcclusion(); IncrementalSelection(); ContactEffectsChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
+    private static void Main() { AssistedSliceSelection(); BladeReach(); HoverPreview(); PointerOcclusion(); IncrementalSelection(); ContactEffectsChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
     private static MeshReference NewMesh() => new() { PositionsCompare = [[new(-1, 0, -1), new(1, 0, -1), new(0, 0, 1)]] };
     private static void BladeReach()
     {
@@ -48,6 +48,20 @@ internal static class TargetSelectionChecks
             && picked!.Part == fixture.Hull, "cursor chooses the front surface even when another part is closer to the kitten");
         Check(fixture.Cutter.TryPointTarget(fixture.Wielder, new Part { PartParent = rear }, new(0, 1, 0), default, 3, out picked, out _)
             && picked!.Part == rear, "native subpart hover selects its full structural part");
+    }
+    private static void HoverPreview()
+    {
+        var f = new Fixture();
+        var preview = f.Cutter.PreviewPointTarget(f.Wielder, f.Hull, default, new(0, -2, 0), 1, out bool allowed, out string reason);
+        Check(preview?.Part == f.Hull && !allowed && reason.Contains("blade reach"),
+            "out-of-range surface remains available for red hover feedback");
+        Check(!f.Cutter.TryPointTarget(f.Wielder, f.Hull, default, new(0, -2, 0), 1, out var target, out _) && target == null,
+            "rejected hover cannot become an authorized click target");
+        preview = f.Cutter.PreviewPointTarget(f.Wielder, f.Hull, default, new(0, -1, 0), 1, out allowed, out _);
+        Check(preview?.Part == f.Hull && allowed && f.SliceCalls == 0, "reachable preview is green without performing a cut");
+        f.Target.Crew = [new IVASeat { AssignedKittenHash = new(1) }];
+        preview = f.Cutter.PreviewPointTarget(f.Wielder, f.Hull, default, default, 1, out allowed, out _);
+        Check(preview?.Part == f.Hull && !allowed, "protected vessel retains a red hover marker");
     }
     private static void IncrementalSelection()
     {

@@ -6,7 +6,9 @@ Targets **KSA 2026.10.19.5638**, **StarMap.API 0.3.6**, and the loader's **Harmo
 
 ## Controls
 
-Take control of an EVA kitten beside a vessel. **Swing / Alt+F7** performs the original ordinary saber swing. To break up a part, press **Select part to slice** (or **Ctrl+Alt+F7**), point at that part, and click. A marker names the part under the pointer. The action equips and ignites the saber, swings across the selected part, and replaces it with textured pieces, sparks and cooling cut edges. No contact history or ring flight is required. Touching a part produces **visual sparks only**; destruction happens only through an explicit slice.
+Take control of an EVA kitten beside a vessel. **Swing / Alt+F7** performs the original ordinary saber swing. To break up a part, press **Select part to slice** (or **Ctrl+Alt+F7**), point at that part, and click. A large marker names the part under the pointer: green for an eligible point in reach, red with a reason otherwise. The action equips and ignites the saber, swings across the selected part, and replaces it with textured pieces, sparks and cooling cut edges. No contact history or ring flight is required. Touching a part produces **visual sparks only**; destruction happens only through an explicit slice.
+
+**Show saber overlay** opens three frameless, half-transparent controls. The top-right list equips and ignites each checked EVA kitten independently, including kittens you are not controlling. Hold and drag inside the black **SWING** circle to move the controlled kitten's paw and saber; the circle stays fixed and releasing smoothly restores the starting pose. The smaller red **SLICE** circle opens the part picker. The overlay remains visible when the settings panel closes; **Hide saber overlay** hides it without stowing anyone's saber.
 
 The **0.62-second** swing starts as soon as the selected part is locked and the blade is ignited, without waiting for geometry preparation. Cut geometry is calculated once on a background worker. The full swing plays before breakup; ready pieces separate on the next safe update after its final frame. If preparation takes longer, normal flying and ordinary swings remain available while the pieces finish. Even a preparation failure lets the full animation finish before reporting the error. Target reading and GPU uploads are spread across frames instead of blocking on the entire cut. Slice diagnostics include preparation and final breakup timings.
 
@@ -26,7 +28,7 @@ Reach is checked when selecting the part and again before the stroke starts, usi
 
 Hotkeys are ignored while ImGui captures keyboard input. The effects continue with the HUD hidden. Pause suspends blade motion, contact emission and sound. Supported simulation speeds extend to **5×**; ignition and swings run at normal player-time speed, independently of physics-step timing. Contact probing skips applied steps above 0.25 seconds. Ladder climbing, swimming, tumbling and righting stow the saber.
 
-The panel controls color, blade length (**0.25–12 m**), volume and paw alignment. **Save preferences** writes `settings.json` beside the installed mod. Old contact/autopilot preferences are ignored. Equipping is scoped to the controlled EVA kitten and clears on switching, boarding, loading or entering the editor.
+The panel groups color, blade length (**0.25–12 m**), volume and paw alignment. These preferences apply to all equipped sabers; overlay drags never change saved alignment. **Save preferences** writes `settings.json` beside the installed mod. Old contact/autopilot preferences are ignored. Equipped sabers remain with their kittens when control switches; boarding, loading or entering the editor releases their resources. Overlay visibility and per-kitten equip choices last for the current session.
 
 ## Slicing and effects
 

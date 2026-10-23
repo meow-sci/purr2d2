@@ -31,7 +31,7 @@ The authority for this build is the supplied `ksa-game-assemblies/current` snaps
 | Arbitrary geometry | PartModelModule templates and native host primitives | Closed authored solids and backed open panels; interpolate attributes, cap and audit before replacement |
 | Fragment upload | DeviceMeshInterleaved.Shared startup counters and native Bind | Reserve a bounded arena before binding; require the exact plain-field layout, never advance global counters at runtime |
 | Molten caps | Private PartModel.AddInstance(PerInstanceData,PerInstanceDent,IViewport,int) | Changes emission on submitted generated cap instances only; saved caps reload cold |
-| Generated physics | ConvexHullColliderTemplate, CustomMass, SpawnSubPartDebris, private Vehicle.BodyRates setter | Preflight native shapes, restore principal inertia and conserve CCI momentum before source deletion |
+| Generated physics | ConvexHullColliderTemplate, CustomMass, PartTree.CreateFromNewPartTree, Vehicle.CreateVehicle, private AdoptSeparatedVehicle and _threadWorkerUpdateState, private BodyRates setter | Stage native roots/trees once, adopt into the existing bubble, retain principal inertia and conserve CCI momentum before source deletion |
 | Generated saves | XmlLoader.Load<AssetBundle> during ImmediateLoad; PartInstance.InstanceOf | Register immutable generated IDs before save validation; preserve Generated/Slices with affected saves |
 
 Full path/symbol evidence and caveats are in the `research-*.md` documents, including the slicing geometry, native physics and actual native-asset feasibility reports. Flexo is reference material, not a runtime dependency. Unscience is likewise a source of demonstrated patterns; no Unscience assembly is required.

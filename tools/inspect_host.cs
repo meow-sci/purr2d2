@@ -40,6 +40,15 @@ static class HostInspection
                 new("KSA.Program", "PrepareFrame", "KSA.Program+OnFrameResult", false, MethodAttributes.Private, "System.Double", "System.Double"),
                 new("KSA.Program", "OnFrameEditor", "System.Void", false, MethodAttributes.Private, "System.Double"),
                 new("KSA.Program", "OnDrawUiThreadSafe", "System.Void", false, MethodAttributes.Private, "System.Double"),
+                new("KSA.Program", "OnMouseButton", "System.Void", false, MethodAttributes.Public,
+                    "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwMouseButton", "Brutal.GlfwApi.GlfwButtonAction", "Brutal.GlfwApi.GlfwModifier"),
+                new("KSA.Program", "OnCursorPos", "System.Void", false, MethodAttributes.Public, "Brutal.GlfwApi.GlfwWindow", "Brutal.Numerics.double2"),
+                new("KSA.Program", "OnScroll", "System.Void", false, MethodAttributes.Public, "Brutal.GlfwApi.GlfwWindow", "Brutal.Numerics.double2"),
+                new("KSA.Program", "OnFocus", "System.Void", false, MethodAttributes.Public, "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwFocusEvent"),
+                new("KSA.ImGuiBackendGlfwImpl", "OnMouseButton", "System.Void", false, MethodAttributes.Private,
+                    "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwMouseButton", "Brutal.GlfwApi.GlfwButtonAction", "Brutal.GlfwApi.GlfwModifier"),
+                new("KSA.ImGuiBackendGlfwImpl", "OnScroll", "System.Void", false, MethodAttributes.Private,
+                    "Brutal.GlfwApi.GlfwWindow", "Brutal.Numerics.double2"),
                 new("KSA.Program", "OnGameLoaded", "System.Void", true, MethodAttributes.Public),
                 new("KSA.Universe", "DeserializeSave", "System.Void", true, MethodAttributes.Public, "KSA.UniverseData"),
                 new("KSA.Program", "Dispose", "System.Void", false, MethodAttributes.Public),
@@ -51,6 +60,14 @@ static class HostInspection
                     "KSA.PartModel+PerInstanceData", "KSA.Deformation.PerInstanceDent", "KSA.IViewport", "System.Int32"),
                 new("KSA.Vehicle", "DepleteConsumables", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Vehicle", "UpdateVehicleConfiguration", "System.Void", false, MethodAttributes.Public),
+                new("KSA.Vehicle", "UpdateAfterPartTreeModification", "System.Void", false, MethodAttributes.Public),
+                new("KSA.Vehicle", "AdoptSeparatedVehicle", "System.Void", false, MethodAttributes.Private,
+                    "KSA.Vehicle", "KSA.PhysicsBubble", "Brutal.Numerics.double3"),
+                new("KSA.Vehicle", "CreateVehicle", "KSA.Vehicle", true, MethodAttributes.Public,
+                    "KSA.CelestialSystem", "Brutal.Numerics.doubleQuat", "Brutal.Numerics.double3", "KSA.IParentBody", "System.String", "KSA.Part", "KSA.Orbit"),
+                new("KSA.Vehicle", "GenerateSplitId", "System.Span`1<System.Char>", false, MethodAttributes.Public, "System.Span`1<System.Char>"),
+                new("KSA.PartTree", "CreateFromNewPartTree", "KSA.PartTree", true, MethodAttributes.Public, "KSA.Part"),
+                new("KSA.LookupCollection`1", "Deregister", "System.Void", false, MethodAttributes.Public, "!0"),
                 new("KSA.Part", "get_StructuralPart", "KSA.Part", false, MethodAttributes.Public),
             ];
             MethodDefinitionHandle prepare = default;
@@ -62,7 +79,13 @@ static class HostInspection
             // Harmony matches these render postfix arguments by name as well as by type.
             CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "ClearBuckets", "viewport");
             CheckParameterNames(host, "KSA.SuperMeshRenderSystem", "RenderTranslucencyPass", "viewport", "commandBuffer", "useCustomRenderPass");
+            CheckParameterNames(host, "KSA.Program", "OnMouseButton", "window", "button", "action", "mods");
+            CheckParameterNames(host, "KSA.Program", "OnCursorPos", "window", "pos");
+            CheckParameterNames(host, "KSA.Program", "OnScroll", "window", "offset");
+            CheckParameterNames(host, "KSA.Program", "OnFocus", "window", "focusEvent");
+            CheckParameterNames(host, "KSA.ImGuiBackendGlfwImpl", "OnMouseButton", "window", "button", "action", "mods");
             CheckAvatarField(host);
+            CheckPrivateField(host, "KSA.Vehicle", "_threadWorkerUpdateState", "KSA.VehicleUpdateState");
             CheckDeviceMeshFields(host);
             if (!prepare.IsNil) CheckFrameSeam(host, prepare);
             CheckRenderSeams(host);
@@ -130,6 +153,23 @@ static class HostInspection
         }
         Check(valid, "Private instance KittenRenderable._characterAvatar : KSA.CharacterAvatar",
             "The pose reflection seam changed. Update SaberPoseController before enabling its pose overlay.");
+    }
+
+    private static void CheckPrivateField(Image image, string typeName, string fieldName, string fieldType)
+    {
+        var type = image.FindType(typeName);
+        var fields = type.IsNil ? [] : image.Reader.GetTypeDefinition(type).GetFields()
+            .Where(h => image.Reader.GetString(image.Reader.GetFieldDefinition(h).Name) == fieldName).ToArray();
+        bool valid = fields.Length == 1;
+        if (valid)
+        {
+            var field = image.Reader.GetFieldDefinition(fields[0]);
+            valid = field.DecodeSignature(image.Types, (object?)null) == fieldType
+                && (field.Attributes & FieldAttributes.FieldAccessMask) == FieldAttributes.Private
+                && (field.Attributes & FieldAttributes.Static) == 0;
+        }
+        Check(valid, $"Private instance {typeName}.{fieldName} : {fieldType}",
+            "The native fragment adoption seam changed; inspect it before enabling slicing.");
     }
 
     private static void CheckDeviceMeshFields(Image image)

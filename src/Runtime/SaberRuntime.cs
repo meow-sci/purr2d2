@@ -15,10 +15,12 @@ internal sealed partial class SaberRuntime : IDisposable
     private enum Command { Equip, Ignite, Swing, SelectSlice, CutPicked, CancelSlice, SetTarget }
     private readonly record struct Request(KittenEva Owner, Command Value, Vehicle? Target = null, SliceTarget? PartTarget = null, Ray? PickRay = null);
     private readonly Queue<Request> _commands = new();
-    private readonly BladeState _blade = new();
-    private readonly SaberPoseController _pose = new();
+    // These aliases always belong to the controlled kitten. Other partials use them
+    // for explicit slicing; the records keep every equipped kitten alive on switches.
+    private BladeState _blade;
+    private SaberPoseController _pose;
     private readonly SaberRenderer _renderer = new();
-    private readonly SaberAudio _audio = new();
+    private SaberAudio _audio;
     private readonly SaberContactProbe _contactProbe = new();
     private readonly PartSliceTargeting _targeting = new();
     private readonly ArbitrarySlicer _slicer = new();
@@ -42,10 +44,10 @@ internal sealed partial class SaberRuntime : IDisposable
 
     internal SaberRuntime(string directory)
     {
+        _blade = _idleSaber.Blade; _pose = _idleSaber.Pose; _audio = _idleSaber.Audio;
         _settingsPath = Path.Combine(directory, "settings.json");
         try { _settings = SaberSettings.Load(_settingsPath); }
         catch (Exception ex) { _settings = new(); Report("Could not read preferences; using defaults", ex); }
-        _pose.Draw += DrawSaber;
         _targeting.SliceHandler = (part, plane) => _slicer.Commit(part, _playerTime);
         _slicer.CutSparks = _renderer.AddCutSparks;
     }
@@ -69,10 +71,14 @@ internal sealed partial class SaberRuntime : IDisposable
             _playerTime += playerDt;
             var selected = !Program.EditorFlag ? Program.ControlledVehicle as KittenEva : null;
             if (selected?.IsDisposed == true) selected = null;
-            if (!ReferenceEquals(_system, Universe.CurrentSystem) || !ReferenceEquals(_owner, selected))
+            if (!ReferenceEquals(_system, Universe.CurrentSystem))
             {
-                ResetWorld(); _system = Universe.CurrentSystem; _owner = selected;
+                ResetWorld(); _system = Universe.CurrentSystem;
             }
+            RefreshOverlayKittens();
+            if (selected != null && !_currentKittens.Contains(selected)) selected = null;
+            if (!ReferenceEquals(_owner, selected)) SetControlledKitten(selected);
+            ApplyKittenSaberRequests();
             _slicer.PumpRetired();
             while (_commands.TryDequeue(out var item))
             {
@@ -107,9 +113,15 @@ internal sealed partial class SaberRuntime : IDisposable
             _pose.BladeDirectionModel = new(_settings.AimX, _settings.AimY, _settings.AimZ);
             _pose.FingerCurlRadians = _settings.FingerCurl;
             _pose.HideMmuWhenEquipped = _settings.HideMmu;
+            ApplyOverlaySwing(playerDt);
             _pose.Update(supportedSpeed ? playerDt : 0, _blade.Equipped);
             _freshPoseThisTick = _pose.MainPoseGeneration != _consumedPoseGeneration && _pose.HasFreshBodyFrame;
             _consumedPoseGeneration = _pose.MainPoseGeneration;
+            if (_activeSaber != null)
+            {
+                _activeSaber.ConsumedPoseGeneration = _consumedPoseGeneration;
+                _activeSaber.FreshPoseThisTick = _freshPoseThisTick;
+            }
             if (!_pose.Eligible) _blade.SetIgnited(false);
             // Equip/ignition and swings are visual: use player time, even between solver steps.
             _blade.Advance(supportedSpeed ? playerDt : 0);
@@ -122,22 +134,21 @@ internal sealed partial class SaberRuntime : IDisposable
                 _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
             _renderer.Update(_playerTime);
             RuntimeFragmentAssets.Update(_playerTime);
+            _renderer.ClearEmitters();
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBodyFrame(out var emitter))
                 _renderer.SetEmitter(_owner, emitter, Length, Color);
             else
             {
-                _renderer.SetEmitter(null, default, 0, Color);
                 if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
             }
+            UpdateOtherSabers(supportedSpeed ? playerDt : 0);
         }
         catch (Exception ex)
         {
             _fault = "Saber suspended: " + ex.Message;
             Report("Simulation handoff failed", ex);
             CancelAssistedSlice("Slice cancelled after a simulation error.");
-            _blade.Reset(); _commands.Clear(); _freshPoseThisTick = false;
-            _renderer.SetEmitter(null, default, 0, Color);
-            _audio.Stop();
+            ResetWorld();
         }
     }
 
@@ -162,24 +173,32 @@ internal sealed partial class SaberRuntime : IDisposable
                     !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.HasFreshBodyFrame,
                     _settings.Volume, swingSpeed: _swingSpeed, contact: _sliceSequence.Swinging ? 1 : 0);
             else if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
+            UpdateOtherSaberAudio();
         }
         catch (Exception ex) { Queue(Command.CancelSlice); _fault = ex.Message; Report("Frame update failed", ex); }
     }
 
     private void DrawSaber(KittenEva owner, IViewport viewport, float4x4 emitterToEgo)
     {
-        if (_disposed || !_blade.Equipped || !ReferenceEquals(owner, _owner)) return;
-        _renderer.DrawSaber(owner, viewport, emitterToEgo, Length, Color);
-        if (ReferenceEquals(viewport, Program.MainViewport) && _pose.TryGetBladeSegment(Length, out var emitter, out var tip))
+        if (_disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped) return;
+        float length = saber.Blade.Deployment * _settings.BladeLength;
+        _renderer.DrawSaber(owner, viewport, emitterToEgo, length, Color);
+        if (ReferenceEquals(viewport, Program.MainViewport) && saber.Pose.TryGetBladeSegment(length, out var emitter, out var tip))
         {
-            double elapsed = _playerTime - _previousTipTime;
-            _swingSpeed = _hasPreviousTip && elapsed > .001 && elapsed < .15
-                ? (float)Math.Clamp((tip - _previousTipBody).Length() / elapsed, 0, 15) : 0;
-            _sliceSequence.NotifyRendered();
-            _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
-            _audio.Update(owner, emitter, _blade.Deployment, _blade.TargetOn,
-                !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.Eligible,
-                _settings.Volume, swingSpeed: _swingSpeed, contact: _sliceSequence.Swinging ? 1 : 0);
+            double elapsed = _playerTime - saber.PreviousTipTime;
+            saber.SwingSpeed = saber.HasPreviousTip && elapsed > .001 && elapsed < .15
+                ? (float)Math.Clamp((tip - saber.PreviousTipBody).Length() / elapsed, 0, 15) : 0;
+            saber.PreviousTipBody = tip; saber.PreviousTipTime = _playerTime; saber.HasPreviousTip = true;
+            bool controlled = ReferenceEquals(saber, _activeSaber);
+            if (controlled)
+            {
+                _swingSpeed = saber.SwingSpeed;
+                _sliceSequence.NotifyRendered();
+                _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
+            }
+            saber.Audio.Update(owner, emitter, saber.Blade.Deployment, saber.Blade.TargetOn,
+                !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !saber.Pose.Eligible,
+                _settings.Volume, swingSpeed: saber.SwingSpeed, contact: controlled && _sliceSequence.Swinging ? 1 : 0);
         }
     }
 
@@ -199,9 +218,9 @@ internal sealed partial class SaberRuntime : IDisposable
 
     internal void ResetWorld()
     {
-        CancelAssistedSlice(""); _commands.Clear(); _blade.Reset(); _pose.Unbind(); _audio.Reset(); _targeting.Reset();
+        CancelAssistedSlice(""); ResetOverlaySwing(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
         _renderer.ClearEffects(); _contactProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
-        _renderer.SetEmitter(null, default, 0, new(.12f, .75f, 1));
+        _renderer.ClearEmitters();
         _owner = null; _system = null; _hasConsumedTime = _hasPreviousTip = _freshPoseThisTick = false;
         _swingSpeed = 0; _consumedPoseGeneration = _pose.MainPoseGeneration;
     }

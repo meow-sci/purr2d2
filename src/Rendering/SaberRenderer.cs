@@ -28,13 +28,11 @@ public sealed unsafe class SaberRenderer : IDisposable
     private bool _disposed;
     private bool _hiltFailed;
     private bool _gpuFailed;
-    private KittenEva? _emitterOwner;
-    private double4x4 _emitterToBody;
-    private float _length;
-    private float3 _color;
+    private readonly Dictionary<KittenEva, Emitter> _emitters = new(ReferenceEqualityComparer.Instance);
     private double _now;
 
     private readonly record struct Blade(float4x4 EmitterToEgo, float Length, float3 Color);
+    private readonly record struct Emitter(double4x4 ToBody, float Length, float3 Color);
     private readonly record struct Spark(Part Part, double3 A, double3 B, double3 Normal, double Born);
     private readonly record struct PassKey(VkSampleCountFlags Samples, VkFormat Color, VkFormat Depth);
     private readonly record struct PipelinePair(VkPipeline Glow);
@@ -116,11 +114,13 @@ public sealed unsafe class SaberRenderer : IDisposable
     /// <summary>Publish the last posed emitter in the kitten's COM/body frame for next-frame light submission.</summary>
     public void SetEmitter(KittenEva? kitten, double4x4 emitterToBody, float lengthMeters, float3 color)
     {
-        _emitterOwner = kitten;
-        _emitterToBody = emitterToBody;
-        _length = float.Clamp(lengthMeters, 0, SaberLimits.MaximumBladeLength);
-        _color = color;
+        if (_disposed) return;
+        if (kitten == null) { ClearEmitters(); return; }
+        _emitters[kitten] = new(emitterToBody, float.Clamp(lengthMeters, 0, SaberLimits.MaximumBladeLength), color);
     }
+
+    public void ClearEmitters() => _emitters.Clear();
+    public void RemoveEmitter(KittenEva kitten) => _emitters.Remove(kitten);
 
     /// <summary>Call only in the pose callback, after this viewport's final wrist transform is available.</summary>
     public void DrawSaber(KittenEva kitten, IViewport viewport, float4x4 emitterToEgo,
@@ -367,24 +367,30 @@ public sealed unsafe class SaberRenderer : IDisposable
 
     private void SubmitLights()
     {
-        if (_disposed || _emitterOwner is not { IsDisposed: false } owner || _length <= 0.0001f) return;
+        if (_disposed || _emitters.Count == 0) return;
         foreach (var viewport in ViewportRegistry.Views)
         {
             if (!viewport.Visible || viewport.LightMode == ViewportLightMode.None) continue;
             var camera = viewport.GetCamera();
-            var bodyToEgo = double4x4.CreateFromQuaternion(owner.Body2Ego)
-                            * double4x4.CreateTranslation(camera.GetPositionEgo(owner));
-            var emitter = _emitterToBody * bodyToEgo;
-            var direction = emitter.Z.XYZ;
-            var axisLength = direction.Length();
-            if (axisLength <= 1e-9) continue;
-            direction /= axisLength;
-            int lightCount = Math.Clamp((int)Math.Ceiling(_length / 1.5f), 2, 8);
-            for (var i = 0; i < lightCount; i++)
+            foreach (var pair in _emitters)
             {
-                var point = emitter.Translation + direction * (_length * (i + .5) / lightCount);
-                Program.LightSystem.CreateLightInstance(Light.CreatePointLight(point, 3.6f, _color,
-                    12 * float.Clamp(_length / 0.9f, 0, 1)), viewport);
+                var owner = pair.Key;
+                var source = pair.Value;
+                if (owner.IsDisposed || source.Length <= 0.0001f) continue;
+                var bodyToEgo = double4x4.CreateFromQuaternion(owner.Body2Ego)
+                                * double4x4.CreateTranslation(camera.GetPositionEgo(owner));
+                var emitter = source.ToBody * bodyToEgo;
+                var direction = emitter.Z.XYZ;
+                var axisLength = direction.Length();
+                if (axisLength <= 1e-9) continue;
+                direction /= axisLength;
+                int lightCount = Math.Clamp((int)Math.Ceiling(source.Length / 1.5f), 2, 8);
+                for (var i = 0; i < lightCount; i++)
+                {
+                    var point = emitter.Translation + direction * (source.Length * (i + .5) / lightCount);
+                    Program.LightSystem.CreateLightInstance(Light.CreatePointLight(point, 3.6f, source.Color,
+                        12 * float.Clamp(source.Length / 0.9f, 0, 1)), viewport);
+                }
             }
         }
     }
@@ -424,7 +430,7 @@ public sealed unsafe class SaberRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
         if (ReferenceEquals(_instance, this)) _instance = null;
-        _emitterOwner = null;
+        _emitters.Clear();
         _blades.Clear();
         _sparks.Clear();
         // Initialization can fail before the host renderer exists. In that case there is

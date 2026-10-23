@@ -79,9 +79,14 @@ internal static partial class RuntimeFragmentAssets
         private readonly IEnumerator<int> _steps;
         private StagingPool? _pending;
         private string? _registering;
+        private DetachedSliceFragment? _nativePreparing;
+        private bool _cancelled;
         internal readonly List<PreparedPhysicsFragment> Fragments = new();
         internal bool Done { get; private set; }
         internal string? Error { get; private set; }
+        internal string SlowestStep { get; private set; } = "none";
+        internal double SlowestStepMs { get; private set; }
+        private string _step = "asset setup";
         internal UploadJob(LoadedSlice source) { _source = source; _steps = Prepare().GetEnumerator(); }
         internal void Advance()
         {
@@ -91,9 +96,14 @@ internal static partial class RuntimeFragmentAssets
             {
                 do
                 {
-                    if (!_steps.MoveNext()) { Done = true; _steps.Dispose(); break; }
+                    long stepStarted = Stopwatch.GetTimestamp();
+                    bool more = _steps.MoveNext();
+                    double elapsed = Stopwatch.GetElapsedTime(stepStarted).TotalMilliseconds;
+                    if (elapsed > SlowestStepMs) { SlowestStepMs = elapsed; SlowestStep = _step; }
+                    if (!more) { Done = true; _steps.Dispose(); break; }
                     // Submission or a zero-timeout fence poll consumes this frame's GPU work.
-                    if (_pending != null) break;
+                    // A native unit is indivisible; never stack a second one in this frame.
+                    if (_pending != null || _steps.Current != 0) break;
                 } while (++units < 32 && Stopwatch.GetElapsedTime(start).TotalMilliseconds < 1.5);
             }
             catch (Exception error)
@@ -107,11 +117,13 @@ internal static partial class RuntimeFragmentAssets
         {
             foreach (var loaded in _source.Fragments)
             {
+                // Drain only a fragment whose registration/upload has already begun.
+                // Unstarted fragments and ephemeral native instances need no cancellation work.
+                if (_cancelled) yield break;
                 var data = loaded.Data;
                 if (FailedPreparations.TryGetValue(data.Id, out var failed)) throw new InvalidOperationException(failed);
-                if (Prepared.TryGetValue(data.Id, out var cached))
-                { Fragments.Add(new(cached with { SourceToFragment = data.Frame.SourceToFragment }, data.Frame, data.PositiveSide)); continue; }
-                PartTemplate? template = null;
+                Prepared.TryGetValue(data.Id, out var cached);
+                PartTemplate? template = cached?.Template;
                 if (ModLibrary.TryGet<PartTemplate>(data.Id, out var restored)) template = restored;
                 if (template == null)
                 {
@@ -124,6 +136,7 @@ internal static partial class RuntimeFragmentAssets
                     var regions = new List<UploadRegion>();
                     for (int i = 0; i < loaded.Meshes.Length; i++)
                     {
+                        _step = "mesh binding";
                         var mesh = loaded.Meshes[i];
                         if (i < data.Uploads.Length)
                         {
@@ -141,6 +154,7 @@ internal static partial class RuntimeFragmentAssets
                     int region = 0, consumed = 0;
                     while (region < regions.Count)
                     {
+                        _step = "GPU upload";
                         _pending = SubmitBatch(regions, ref region, ref consumed);
                         yield return 0;
                         while (!_pending.WaitFor(0)) yield return 0;
@@ -150,32 +164,66 @@ internal static partial class RuntimeFragmentAssets
                     _registering = data.Id;
                     foreach (var mesh in loaded.Meshes)
                     {
+                        _step = "mesh registration";
                         if (!ModLibrary.Register(mesh)) throw new InvalidOperationException("Generated mesh ID was unexpectedly registered.");
                         yield return 0;
                     }
                     foreach (var asset in loaded.Bundle.Assets)
                     {
+                        _step = "template initialization";
                         // Runtime meshes are already loaded. Keep atlas only in the durable XML.
                         if (asset is not MeshAtlasFileReference) asset.OnDataLoad(_mod!);
-                        yield return 0;
+                        yield return 1;
                     }
+                    _step = "bundle registration";
                     _mod!.Register(loaded.Bundle);
                     template = ModLibrary.Get<PartTemplate>(data.Id);
                     _registering = null; // A preflight failure can retry a completely registered template.
                 }
                 yield return 0;
+                if (_cancelled) continue;
                 var prepared = new PreparedFragment(template, data.Id, data.Frame.SourceToFragment, data.Extents, data.MassKg);
-                NativeSlicePhysics.Preflight(prepared);
+                // Resolve/cook each lazy collider in its own settled preparation frame.
+                // These native global shape pools must never be touched by the CPU worker.
+                foreach (var component in template.Components.OfType<ColliderModule.Template>())
+                    foreach (var collider in component.Colliders)
+                    {
+                        _step = "native collider preparation";
+                        collider.Resolve();
+                        if (!collider.GetShape().Exists) throw new InvalidOperationException("Prepared fragment collider could not be cooked.");
+                        yield return 1;
+                        if (_cancelled) break;
+                    }
+                if (_cancelled) continue;
+                _step = "native fragment construction";
+                _nativePreparing = new(prepared);
+                yield return 1;
+                if (_cancelled)
+                {
+                    _nativePreparing.Dispose(); _nativePreparing = null;
+                    yield return 1;
+                    continue;
+                }
+                _step = "native fragment tree preparation";
+                _nativePreparing.PrepareTree();
+                yield return 1;
                 prepared = prepared with { NativeReady = true };
                 Prepared[data.Id] = prepared;
-                Fragments.Add(new(prepared, data.Frame, data.PositiveSide));
+                Fragments.Add(new(prepared, data.Frame, data.PositiveSide, _nativePreparing));
+                _nativePreparing = null;
                 _registering = null;
                 yield return 0;
             }
         }
+        internal void Cancel() => _cancelled = true;
         // Called only at shutdown or after Done. Normal cancellation drains preparation in
         // the background of subsequent frames so partially registered IDs remain reusable.
-        public void Dispose() { _steps.Dispose(); _pending?.Dispose(); _pending = null; }
+        public void Dispose()
+        {
+            _steps.Dispose(); _pending?.Dispose(); _pending = null;
+            _nativePreparing?.Dispose(); _nativePreparing = null;
+            foreach (var fragment in Fragments) fragment.Native.Dispose();
+        }
     }
 
     private readonly record struct UploadRegion(byte[] Bytes, int Start, int Count, uint Destination, bool Index);

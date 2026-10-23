@@ -20,11 +20,15 @@ internal sealed class ArbitrarySlicer : IDisposable
     private LoadedSlice? _loaded;
     private long _workerStarted;
     private double _workerMs, _maxMainMs, _commitMs;
+    private string _slowestStep = "none", _commitPhases = "";
+    private double _slowestStepMs;
     internal SlicePlan? Plan => _work?.Plan;
     internal bool Ready => _upload is { Done: true, Error: null };
     internal string? Error { get; private set; }
     internal bool Busy => _retiredWork is { Finished: false } || _retiredUpload is { Done: false };
-    internal string Diagnostics => $"Background preparation: {_workerMs:F1} ms; largest preparation update: {_maxMainMs:F2} ms; native commit: {_commitMs:F2} ms";
+    internal string Diagnostics => $"Background preparation: {_workerMs:F1} ms; largest preparation update: {_maxMainMs:F2} ms"
+        + $"; slowest preparation unit: {_slowestStep} {_slowestStepMs:F2} ms; native commit: {_commitMs:F2} ms"
+        + (_commitPhases.Length == 0 ? "" : "; " + _commitPhases);
     internal string Phase => _capture is { Done: false } ? "Reading nearby part..."
         : _upload != null ? "Preparing the pieces..." : "Preparing the cut...";
 
@@ -32,6 +36,7 @@ internal sealed class ArbitrarySlicer : IDisposable
     {
         if (Busy || _capture != null) throw new InvalidOperationException("The previous slice is finishing cleanup; try again shortly.");
         Error = null; _workerMs = _maxMainMs = _commitMs = 0;
+        _slowestStep = "none"; _slowestStepMs = 0; _commitPhases = "";
         _capture = new(part);
     }
     internal void Advance()
@@ -58,6 +63,7 @@ internal sealed class ArbitrarySlicer : IDisposable
                 _loaded = result!; _upload = new(result!);
             }
             _upload!.Advance();
+            _slowestStep = _upload.SlowestStep; _slowestStepMs = _upload.SlowestStepMs;
             if (_upload.Error != null) Error = _upload.Error;
         }
         catch (Exception error) { Error = error.Message; }
@@ -67,12 +73,15 @@ internal sealed class ArbitrarySlicer : IDisposable
     {
         if (!Ready || _loaded == null || _capture == null) return new(false, "Slice preparation is not ready.");
         long started = Stopwatch.GetTimestamp();
+        var timings = new SliceCommitTimings();
         try
         {
             if (!_capture.IsCurrent(part)) return new(false, "The source geometry changed during preparation. Try again.");
             var plane = _loaded.Data.Plane;
-            if (!NativeSlicePhysics.TryReplace(part, _upload!.Fragments, new(plane.Normal.X, plane.Normal.Y, plane.Normal.Z), out var created, out var reason))
-                return new(false, reason);
+            bool replaced = NativeSlicePhysics.TryReplace(part, _upload!.Fragments,
+                new(plane.Normal.X, plane.Normal.Y, plane.Normal.Z), out var created, out var reason, timings);
+            timings.Stop();
+            if (!replaced) return new(false, reason);
             for (int i = 0; i < created.Count; i++)
             {
                 RuntimeFragmentAssets.MarkHot(_upload.Fragments[i].Asset, now);
@@ -86,6 +95,7 @@ internal sealed class ArbitrarySlicer : IDisposable
         finally
         {
             _commitMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            timings.Stop(); _commitPhases = timings.ToString();
             Console.WriteLine("[purr2d2] " + Diagnostics);
         }
     }
@@ -95,7 +105,7 @@ internal sealed class ArbitrarySlicer : IDisposable
         if (_work != null) { _work.Cancel(); _retiredWork = _work; _work = null; }
         // Finish already-started asset registration without spawning anything. This avoids
         // corrupt partial IDs and lets a later cut reuse the prepared assets after cancellation.
-        if (_upload != null) { _retiredUpload = _upload; _upload = null; }
+        if (_upload != null) { _upload.Cancel(); _retiredUpload = _upload; _upload = null; }
         _loaded = null;
     }
     internal void PumpRetired()

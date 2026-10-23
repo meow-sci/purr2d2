@@ -52,8 +52,7 @@ public sealed class SaberPoseController : IDisposable
     public ulong MainPoseGeneration { get; private set; }
     public ulong FrameNumber { get; private set; } = ulong.MaxValue;
     public ulong FreshnessFrames => SaberPoseMath.AgeFrames(_hasBodyFrame, FrameNumber, Program.FrameNumber);
-    public bool HasFreshBodyFrame => Active && !Program.EditorFlag
-        && ReferenceEquals(Kitten, Program.ControlledVehicle) && FreshnessFrames <= 1;
+    public bool HasFreshBodyFrame => Active && !Program.EditorFlag && FreshnessFrames <= 1;
     public string Status => _failure ?? (Kitten is null ? "Control an EVA kitten to equip the saber."
         : !Supported(Kitten.LocomotionState.Mode) ? $"Saber stowed while {Kitten.LocomotionState.Mode.ToString().ToLowerInvariant()}."
         : Active ? "Saber held in the right paw." : "Saber stowed.");
@@ -216,7 +215,7 @@ public sealed class SaberPoseController : IDisposable
     {
         if (!Active || Kitten is not { } kitten || _avatar is null) return;
         IViewport viewport = Program.RenderedViewport;
-        if (!GameplayView(viewport) || !ReferenceEquals(kitten, Program.ControlledVehicle)) return;
+        if (!GameplayView(viewport)) return;
         // Model centimetres to emitter metres. The translation is already in model cm.
         float4x4 metresToModel = float4x4.CreateScale(100f) * emitterInModelCm;
         // Secondary cameras can render the saber, but only the gameplay main view

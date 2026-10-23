@@ -5,7 +5,8 @@ using Purr2D2.Rendering;
 
 namespace Purr2D2.Slicing;
 
-internal readonly record struct PreparedPhysicsFragment(PreparedFragment Asset, PrincipalFragment Frame, bool PositiveSide);
+internal readonly record struct PreparedPhysicsFragment(PreparedFragment Asset, PrincipalFragment Frame, bool PositiveSide,
+    DetachedSliceFragment Native);
 
 /// <summary>
 /// Commits already durable/bound fragment assets at the joined simulation handoff.
@@ -17,6 +18,14 @@ internal static class NativeSlicePhysics
     private static readonly Action<Vehicle, double3>? SetBodyRates = typeof(Vehicle)
         .GetProperty(nameof(Vehicle.BodyRates), BindingFlags.Instance | BindingFlags.Public)?
         .GetSetMethod(true)?.CreateDelegate<Action<Vehicle, double3>>();
+    // Narrow adapters for the same native adoption path used by SpawnSubPartDebris.
+    // No global patches or alternate physics implementation are involved.
+    private static readonly FieldInfo? WorkerState = typeof(Vehicle)
+        .GetField("_threadWorkerUpdateState", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly Action<Vehicle, Vehicle, PhysicsBubble, double3>? AdoptSeparated = typeof(Vehicle)
+        .GetMethod("AdoptSeparatedVehicle", BindingFlags.Instance | BindingFlags.NonPublic,
+            [typeof(Vehicle), typeof(PhysicsBubble), typeof(double3)])?
+        .CreateDelegate<Action<Vehicle, Vehicle, PhysicsBubble, double3>>();
 
     internal static bool ValidateSource(Part struck, out string reason)
     {
@@ -25,6 +34,8 @@ internal static class NativeSlicePhysics
         reason = "The source part is unavailable or outside native physics.";
         if (owner is null || owner.IsDisposed || owner is KittenEva || !owner.HasPhysicsBubble || Program.EditorFlag) return false;
         if (SetBodyRates is null) { reason = "The native angular-rate synchronization seam is unavailable."; return false; }
+        if (AdoptSeparated is null || WorkerState?.FieldType != typeof(VehicleUpdateState))
+        { reason = "The native prepared-fragment adoption seam is unavailable."; return false; }
         foreach (var seat in owner.Crew)
             if (seat.AssignedKittenHash != KeyHash.Zero) { reason = "Crewed vessels cannot be sliced."; return false; }
         var sources = SourceParts(full);
@@ -97,24 +108,8 @@ internal static class NativeSlicePhysics
 
     private static (uint, uint) Pair(Part a, Part b) => a.InstanceId < b.InstanceId ? (a.InstanceId, b.InstanceId) : (b.InstanceId, a.InstanceId);
 
-    internal static void Preflight(PreparedFragment prepared)
-    {
-        // Called in a preparation frame, never inside the atomic breakup transaction.
-        var part = new Part("Purr2D2 slice preflight", prepared.Template);
-        try
-        {
-            if (!(part.ComputeSubtreeInertMass() > 0))
-                throw new InvalidOperationException("Prepared fragment has no native mass.");
-            if (part.Modules.Get<ColliderModule>().IsEmpty)
-                throw new InvalidOperationException("Prepared fragment has no native collider module.");
-            foreach (var collider in part.Modules.Get<ColliderModule>())
-                if (!collider.Handle.Exists) throw new InvalidOperationException("Prepared fragment collider could not be cooked.");
-        }
-        finally { part.Dispose(); }
-    }
-
     internal static bool TryReplace(Part struck, IReadOnlyList<PreparedPhysicsFragment> pieces, double3 cutNormal,
-        out IReadOnlyList<Vehicle> created, out string reason)
+        out IReadOnlyList<Vehicle> created, out string reason, SliceCommitTimings timings)
     {
         created = Array.Empty<Vehicle>();
         if (!ValidateSource(struck, out reason)) return false;
@@ -126,7 +121,8 @@ internal static class NativeSlicePhysics
         double massSum = 0;
         foreach (var p in pieces)
         {
-            if (!p.Asset.NativeReady || p.Asset.Template is null || !float.IsFinite(p.Asset.MassKg) || p.Asset.MassKg <= .0001f
+            if (!p.Asset.NativeReady || !p.Native.Ready || p.Native.Root.Template != p.Asset.Template
+                || p.Asset.Template is null || !float.IsFinite(p.Asset.MassKg) || p.Asset.MassKg <= .0001f
                 || !(p.Asset.Extents.X > 0 && p.Asset.Extents.Y > 0 && p.Asset.Extents.Z > 0))
             { reason = "A prepared slice asset has invalid mass or dimensions."; return false; }
             // Durability boundary: native save instances must resolve the exact registered immutable template.
@@ -142,10 +138,12 @@ internal static class NativeSlicePhysics
         var spawned = new List<Vehicle>(pieces.Count);
         var previouslyPresent = new HashSet<Vehicle>();
         var generatedTemplates = pieces.Select(p => p.Asset.Template).ToHashSet();
+        var registeringIds = new HashSet<string>(StringComparer.Ordinal);
         double emptiedMass = 0;
         foreach (var item in sourceSystem.All.AsSpan()) if (item is Vehicle vehicle) previouslyPresent.Add(vehicle);
         try
         {
+            timings.Next(SliceCommitPhase.Isolation);
             // Assets and geometry are validated before the first native structural mutation.
             // If a later spawn fails, the isolated source remains intact rather than being deleted.
             foreach (var source in sources)
@@ -165,19 +163,29 @@ internal static class NativeSlicePhysics
             // Only the isolated cut part is drained. Neighboring tanks and their
             // resource networks have already been separated by native Split.
             // Preserve the assembly's world pose when removing off-centre fuel.
-            var oldCom = owner.CenterOfMassAsmb;
-            emptiedMass = owner.TotalMass;
-            owner.DepleteConsumables();
-            owner.UpdateVehicleConfiguration();
-            var drainedState = owner.GetPhysicsStatesMutable();
-            var newCom = drainedState.Props.CenterOfMassAsmb;
-            var shift = (new double3(newCom.X, newCom.Y, newCom.Z) - oldCom).Transform(drainedState.Kinematic.Body2Phys);
-            drainedState.Kinematic.PositionPhys += shift;
-            drainedState.Kinematic.VelocityPhys += double3.Cross(drainedState.Kinematic.AngularVelocityPhys, shift);
-            drainedState.Props.SetOnRails(false);
-            owner.SetFlightPlan(new FlightPlan(drainedState.ComputeOrbit(owner.OrbitColor), owner.Hash));
-            owner.UpdatePerFrameData();
-            emptiedMass -= owner.TotalMass;
+            timings.Next(SliceCommitPhase.Drain);
+            var isolatedState = owner.GetPhysicsStatesMutable();
+            if (isolatedState.Props.Situation.IsOnRails())
+                isolatedState.UpdateFromAnalytic(owner.Orbit, in owner.Orbit.StateVectors, owner.Body2Cce, owner.BodyRates, Situation.Maneuvering);
+            isolatedState.Props.SetOnRails(false);
+            if (!owner.Parts.SubstanceStores.IsEmpty)
+            {
+                var oldCom = owner.CenterOfMassAsmb;
+                emptiedMass = owner.TotalMass;
+                owner.DepleteConsumables();
+                // Contents changed, not module membership. Rebuild the native mass/collider
+                // configuration without allocating a duplicate VehicleUpdateData snapshot.
+                owner.UpdateAfterPartTreeModification();
+                var drainedState = owner.GetPhysicsStatesMutable();
+                var newCom = drainedState.Props.CenterOfMassAsmb;
+                var shift = (new double3(newCom.X, newCom.Y, newCom.Z) - oldCom).Transform(drainedState.Kinematic.Body2Phys);
+                drainedState.Kinematic.PositionPhys += shift;
+                drainedState.Kinematic.VelocityPhys += double3.Cross(drainedState.Kinematic.AngularVelocityPhys, shift);
+                drainedState.Props.SetOnRails(false);
+                owner.SetFlightPlan(new FlightPlan(drainedState.ComputeOrbit(owner.OrbitColor), owner.Hash));
+                owner.UpdatePerFrameData();
+                emptiedMass -= owner.TotalMass;
+            }
             var beforeStates = owner.GetPhysicsStates();
             beforeStates.GetStatesCci(out var beforePosition, out var beforeVelocity, out var beforeBody2Cci);
             double3 beforeOmega = beforeStates.GetBodyRates().Transform(beforeBody2Cci);
@@ -188,26 +196,36 @@ internal static class NativeSlicePhysics
                     nativeInertia.YX, nativeInertia.ZX, nativeInertia.ZY) * sourceRotation;
             var sourceAngularMomentum = SlicePrincipalFrame.ApplyTensor(beforeOmega, sourceInertia);
 
+            timings.Next(SliceCommitPhase.Registration);
+            if ((WorkerState!.GetValue(owner) as VehicleUpdateState)?.Bubble is not { } bubble)
+                throw new InvalidOperationException("The isolated source lost its native physics bubble.");
+            var ownerStates = owner.GetPhysicsStates();
+            Span<char> idBuffer = stackalloc char[256];
             foreach (var piece in pieces)
             {
                 var centroid = new double3(piece.Frame.Centroid.X, piece.Frame.Centroid.Y, piece.Frame.Centroid.Z);
-                var descriptor = new Part("Purr2D2 fragment spawn descriptor", piece.Asset.Template)
-                {
-                    PositionParentAsmb = double3.Transform(centroid, sourceToIsolated),
-                    Asmb2ParentAsmb = doubleQuat.Concatenate(piece.Frame.FragmentToSource, sourceToIsolatedRotation),
-                };
-                try
-                {
-                    descriptor.ResetCachedPosMatrixValues();
-                    var fragment = owner.SpawnSubPartDebris(descriptor, piece.Asset.Extents, piece.Asset.MassKg, 0);
-                    if (fragment is null) throw new InvalidOperationException("Native fragment creation refused a prepared piece.");
-                    spawned.Add(fragment);
-                    // SpawnSubPartDebris installs a temporary box inertia; restore the durable exact native template mass.
-                    if (!fragment.Parts.Root.RecomputeInertMass()) throw new InvalidOperationException("Fragment template has no persistent inertia.");
-                    fragment.UpdateVehicleConfiguration();
-                }
-                finally { descriptor.Dispose(); }
+                var rotation = doubleQuat.Concatenate(piece.Frame.FragmentToSource, sourceToIsolatedRotation);
+                var deltaAsmb = double3.Transform(centroid, sourceToIsolated) - owner.CenterOfMassAsmb;
+                var deltaPhys = deltaAsmb.Transform(ownerStates.Kinematic.Body2Phys);
+                string id = owner.GenerateSplitId(idBuffer).ToString();
+                registeringIds.Add(id);
+                // The actual root, modules, exact inertia, collider and tree were built
+                // during earlier frames. Native construction now configures them once.
+                var fragment = Vehicle.CreateVehicle(owner.System, doubleQuat.Concatenate(rotation, owner.Body2Cce),
+                    owner.BodyRates.Transform(doubleQuat.Inverse(rotation)), owner.Parent, id, piece.Native.Root, owner.Orbit);
+                spawned.Add(fragment); // Rollback owns registered vehicles before any later operation can throw.
+                piece.Native.TransferredTo(fragment);
+                AdoptSeparated!(owner, fragment, bubble, deltaPhys.NormalizeOrZero());
+                var state = fragment.GetPhysicsStatesMutable();
+                state.Kinematic.PositionPhys = ownerStates.Kinematic.PositionPhys + deltaPhys;
+                state.Kinematic.VelocityPhys = ownerStates.Kinematic.VelocityPhys
+                    + double3.Cross(owner.BodyRates, deltaAsmb).Transform(ownerStates.Kinematic.Body2Phys);
+                state.Props.SetOnRails(false);
+                fragment.MarkAsDebris();
+                // Flight plan/per-frame data are finalized after the conserved group
+                // motion below, avoiding two orbit and navigation refreshes per piece.
             }
+            timings.Next(SliceCommitPhase.Motion);
             double actualMass = spawned.Sum(v => (double)v.TotalMass);
             if (Math.Abs(actualMass - owner.TotalMass) > Math.Max(.001, owner.TotalMass * 2e-5))
                 throw new InvalidOperationException("Native fragment mass changed during creation.");
@@ -269,6 +287,7 @@ internal static class NativeSlicePhysics
                 fragment.UpdatePerFrameData();
             }
             // This is the only deletion. Both complete fragments exist with native collision and durable IDs.
+            timings.Next(SliceCommitPhase.SourceRemoval);
             Universe.DestroyVehicle(owner);
             created = spawned.ToArray();
             reason = $"Sliced into {spawned.Count} separating fragments."
@@ -291,12 +310,34 @@ internal static class NativeSlicePhysics
             // vehicles too; detached neighboring branches have different templates.
             foreach (var item in sourceSystem.All.AsSpan())
                 if (item is Vehicle vehicle && !previouslyPresent.Contains(vehicle) && !spawned.Contains(vehicle)
-                    && vehicle.Parts?.Root is { } root && generatedTemplates.Contains(root.Template)) spawned.Add(vehicle);
+                    && (registeringIds.Contains(vehicle.Id)
+                        || vehicle.Parts?.Root is { } root && generatedTemplates.Contains(root.Template))) spawned.Add(vehicle);
             foreach (var fragment in spawned)
-                try { if (!fragment.IsDisposed) Universe.DestroyVehicle(fragment); }
+                try { RollBackFragment(fragment, sourceSystem); }
                 catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Fragment rollback cleanup: {cleanup.Message}"); }
             reason = $"Slice commit refused; original source retained{(emptiedMass > .001 ? " with tanks emptied" : "")}: {error.Message}";
             return false;
+        }
+    }
+
+    private static void RollBackFragment(Vehicle fragment, CelestialSystem sourceSystem)
+    {
+        if (WorkerState!.GetValue(fragment) != null)
+        {
+            if (!fragment.IsDisposed) Universe.DestroyVehicle(fragment);
+            return;
+        }
+        // Astronomical registers before Vehicle's constructor assigns Parts/worker.
+        // A failed worker constructor has never reached GameAudio.Register or bubble
+        // adoption. Native Dispose sets IsDisposed but then dereferences that missing
+        // worker (or an even earlier missing Parts). Finish only the owned resources
+        // and raw registration that are known to exist in this exceptional state.
+        try { if (!fragment.IsDisposed) fragment.Dispose(endMission: false); }
+        catch (Exception cleanup) { Console.WriteLine("[purr2d2] Incomplete native fragment teardown: " + cleanup.Message); }
+        finally
+        {
+            sourceSystem.All.Deregister(fragment);
+            if (fragment.Parts is { IsDisposed: false } tree) tree.Dispose();
         }
     }
 

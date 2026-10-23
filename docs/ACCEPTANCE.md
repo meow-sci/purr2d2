@@ -1,5 +1,19 @@
 # Acceptance record
 
+## Saber overlay and per-kitten equipment (2026-10-22)
+
+The settings panel now has compact action rows and aligned preference controls, with contextual status instead of instructional paragraphs. Show/Hide saber overlay toggles the three chromeless, half-transparent surfaces together. EVA checkboxes equip and ignite independent kitten sabers; switching control preserves them. The fixed swing pad drives a temporary bounded arm pose and eases back on release. The red slice circle arms the existing picker, whose enlarged marker stays red for a rejected candidate and green for an eligible point. See [overlay implementation](research-saber-overlay.md).
+
+Native retest: toggle repeatedly and close the settings panel; the overlay should remain usable independently. Enable two EVA kittens, switch control, retract one and board the other. Confirm separate poses, blades, illumination, sound and cleanup. Drag every direction and beyond the circle, release outside, re-grab during return, pause/resume, hide the HUD, resize and change UI scale. No gesture should move the widget, steer the camera, alter saved alignment or slice a part under the overlay. A camera drag that starts outside must still release normally. Click the red circle and inspect the enlarged green/red picker on reachable, distant and occupied targets. Check list scrolling with many kittens and confirm normal Swing still works.
+
+Validation passes: Release build with zero warnings/errors; 44 overlay gesture/layout/input checks; 15 per-kitten lifetime/pose checks; existing geometry, blade, contact and targeting checks, including rejected-hover feedback. Host metadata/IL checks cover both game and ImGui-backend input seams. The staged folder, release DLL, ZIP contents and checksum agree. Logs are under `artifacts/overlay-build.log`, `artifacts/overlay-checks.log`, `artifacts/overlay-host-checks.log` and `artifacts/fragment-ownership-checks.log`. Build and managed checks cannot establish native visual/input acceptance or in-game frame times.
+
+## Reduced breakup-frame work (2026-10-22)
+
+Following a report of a remaining slight stutter, native fragment preparation now retains the real Part and detached PartTree for the final swap. It eliminates the throwaway preflight/descriptor copies, repeated mass/configuration repair and duplicate fragment orbit refresh. Indivisible native preparation units yield between frames; cancellation skips unstarted work. The final isolation, vehicle adoption and source removal remain on the joined game thread. Diagnostics now separate these costs and identify the slowest preparation unit.
+
+The detached-fragment fixture checks single construction, ownership transfer without cloning, cancellation, exactly-once disposal and preparation failures against a small host model. Host metadata checks validate the actual native construction/adoption signatures. In-game retest must compare first and repeated tank/service-module cuts using both the preparation-unit and commit-phase timings; no measured FPS improvement is claimed from these fixtures.
+
 ## Cursor-selected slicing, normal swings and cosmetic sparks (2026-10-22)
 
 The user observed a tank physically split with the previous implementation, but reported failures on service modules/capsules and severe slowdown while touching parts. They requested removal of contact-progress tracking and all autopilot functionality, retaining a first-class slicing swing and visual contact sparks.

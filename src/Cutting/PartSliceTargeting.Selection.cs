@@ -106,14 +106,23 @@ internal sealed partial class PartSliceTargeting
 
     internal bool TryPointTarget(KittenEva wielder, Part part, double3 hitEgo, double3 baseBody, double reach, out SliceTarget? target, out string reason)
     {
-        _wielder = wielder; target = null;
+        var preview = PreviewPointTarget(wielder, part, hitEgo, baseBody, reach, out bool allowed, out reason);
+        target = allowed ? preview : null;
+        return allowed;
+    }
+
+    // Retain a rejected surface for red hover feedback without authorizing a cut.
+    internal SliceTarget? PreviewPointTarget(KittenEva wielder, Part part, double3 hitEgo, double3 baseBody, double reach,
+        out bool allowed, out string reason)
+    {
+        _wielder = wielder; allowed = false;
         reason = "Point at a vessel part.";
         var full = part.StructuralPart;
         if (full.Tree?.OwningVehicle is not { } vehicle || Program.GetMainCamera() is not { } camera
-            || !double4x4.Invert(vehicle.GetMatrixAsmb2Ego(camera), out var inverse)) return false;
+            || !double4x4.Invert(vehicle.GetMatrixAsmb2Ego(camera), out var inverse)) return null;
         var candidate = new SliceTarget(full, vehicle, hitEgo.Transform(inverse), full.MatrixAsmb2VehicleAsmb);
-        if (!CheckSliceTarget(wielder, candidate, baseBody, reach, out reason)) return false;
-        target = candidate; return true;
+        allowed = CheckSliceTarget(wielder, candidate, baseBody, reach, out reason);
+        return candidate;
     }
 
     private static void CollectMeshes(Part part, List<MeshReference> meshes)

@@ -11,6 +11,7 @@ internal sealed partial class SaberRuntime
         if (!_ready || _disposed || Program.EditorFlag) return;
         try
         {
+            DrawSaberOverlay();
             HandleSlicePointer();
             if ((_sliceHover ?? _sliceTarget) is not { } slice
                 || slice.Vehicle.IsDisposed || slice.Part.Tree?.OwningVehicle != slice.Vehicle
@@ -27,14 +28,29 @@ internal sealed partial class SaberRuntime
             var position = ui.Pos + new float2(pixels.X * ui.Size.X / framebuffer.X, pixels.Y * ui.Size.Y / framebuffer.Y);
             if (!float.IsFinite(position.X) || !float.IsFinite(position.Y)) return;
             var draw = ImGui.GetBackgroundDrawList(ui);
-            var color = _selectingSlice ? new ImColor8(90, 255, 160, 255) : new ImColor8(255, 185, 60, 255);
+            bool allowed = _selectingSlice ? _sliceHoverAllowed : _sliceError == null;
+            var color = allowed ? new ImColor8(90, 255, 135, 255) : new ImColor8(255, 80, 80, 255);
+            float scale = Math.Clamp(ImGui.GetFontSize() / 16f, 1, 2.5f);
+            float radius = 22 * scale;
             draw.PushClipRect(ui.Pos, ui.Pos + ui.Size);
             try
             {
-                draw.AddCircle(position, 7, color, 16, 2);
-                draw.AddLine(position - new float2(10, 0), position + new float2(10, 0), color);
-                draw.AddLine(position - new float2(0, 10), position + new float2(0, 10), color);
-                draw.AddText(position + new float2(12, -8), color, slice.Part.DisplayName + (_selectingSlice ? " — click to slice" : ""));
+                draw.AddCircle(position, radius, new ImColor8(0, 0, 0, 200), 48, 6 * scale);
+                draw.AddCircle(position, radius, color, 48, 3 * scale);
+                draw.AddCircleFilled(position, 4 * scale, color, 16);
+                for (int sign = -1; sign <= 1; sign += 2)
+                {
+                    draw.AddLine(position + new float2(sign * 10 * scale, 0), position + new float2(sign * 29 * scale, 0), color, 2 * scale);
+                    draw.AddLine(position + new float2(0, sign * 10 * scale), position + new float2(0, sign * 29 * scale), color, 2 * scale);
+                }
+                string label = slice.Part.DisplayName + (_selectingSlice ? allowed ? " — click to slice" : " — cannot slice" : "");
+                if (_selectingSlice && !allowed) label += "\n" + _sliceStatus;
+                var labelSize = ImGui.CalcTextSize(label);
+                var labelPosition = new float2(
+                    Math.Max(ui.Pos.X + 8, Math.Min(position.X + 34 * scale, ui.Pos.X + ui.Size.X - labelSize.X - 8)),
+                    Math.Max(ui.Pos.Y + 8, Math.Min(position.Y - labelSize.Y / 2, ui.Pos.Y + ui.Size.Y - labelSize.Y - 8)));
+                draw.AddText(labelPosition + new float2(1, 1), new ImColor8(0, 0, 0, 255), label);
+                draw.AddText(labelPosition, color, label);
             }
             finally { draw.PopClipRect(); }
         }

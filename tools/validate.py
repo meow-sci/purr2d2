@@ -527,6 +527,9 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "src/Core/BladeState.cs",
         source / "src/Core/AssistedSliceSequence.cs",
         source / "src/Core/SaberSwing.cs",
+        source / "src/Core/SaberOverlayDrag.cs",
+        source / "src/Core/SaberOverlayLayout.cs",
+        source / "tests/OverlayDragChecks.cs",
         source / "src/Core/BackgroundSliceWork.cs",
         source / "tests/BackgroundSliceChecks.cs",
         source / "src/Cutting/AssistedSliceGeometry.cs",
@@ -557,13 +560,31 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); } }\n"
     )
+    kitten_sources = [
+        source / "src/Runtime/SaberRuntime.Kittens.cs",
+        source / "src/Pose/SaberPoseController.cs",
+        source / "src/Pose/SaberPoseMath.cs",
+        source / "src/Core/BladeState.cs",
+        source / "src/Core/SaberSwing.cs",
+        source / "src/Core/SaberSettings.cs",
+        source / "src/Core/AssistedSliceSequence.cs",
+        source / "tests/kittens/HostStubs.cs",
+        source / "tests/kittens/KittenSaberChecks.cs",
+    ]
+    fragment_sources = [
+        source / "src/Slicing/DetachedSliceFragment.cs",
+        source / "tests/slicing/GameStubs.cs",
+        source / "tests/slicing/DetachedSliceChecks.cs",
+    ]
     outputs = []
     result = 0
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),
         ("TargetSelectionChecks", target_sources, None),
+        ("KittenSaberChecks", kitten_sources, None),
+        ("DetachedSliceChecks", fragment_sources, None),
     ):
         code, output = _run_managed_project(source, name, required, program)
         outputs.append(output)
