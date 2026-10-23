@@ -6,23 +6,25 @@ Targets **KSA 2026.10.19.5638**, **StarMap.API 0.3.6**, and the loader's **Harmo
 
 ## Controls
 
-Take control of an EVA kitten beside a vessel and press **Slice nearby part** (or **Alt+F7**). The action equips and ignites the saber, chooses a valid section through the nearest part, swings across it, and replaces it with textured pieces, sparks and cooling cut edges. No contact history or ring flight is required. Touching a part produces **visual sparks only**; destruction happens only through the slice button.
+Take control of an EVA kitten beside a vessel. **Swing / Alt+F7** performs the original ordinary saber swing. To break up a part, press **Select part to slice** (or **Ctrl+Alt+F7**), point at that part, and click. A marker names the part under the pointer. The action equips and ignites the saber, swings across the selected part, and replaces it with textured pieces, sparks and cooling cut edges. No contact history or ring flight is required. Touching a part produces **visual sparks only**; destruction happens only through an explicit slice.
 
-Cut geometry is calculated once on a background worker. The full swing plays before breakup; ready pieces separate on the next safe update after its final frame. If preparation takes longer, the game continues while the pieces finish. Target reading and GPU uploads are spread across frames instead of blocking on the entire cut. Slice diagnostics include preparation and final breakup timings.
+The **0.62-second** swing starts as soon as the selected part is locked and the blade is ignited, without waiting for geometry preparation. Cut geometry is calculated once on a background worker. The full swing plays before breakup; ready pieces separate on the next safe update after its final frame. If preparation takes longer, normal flying and ordinary swings remain available while the pieces finish. Even a preparation failure lets the full animation finish before reporting the error. Target reading and GPU uploads are spread across frames instead of blocking on the entire cut. Slice diagnostics include preparation and final breakup timings.
 
-Selection uses the nearest visible part surface within **3 metres or the configured blade length**, whichever is greater. **Vessel target** sets the actual flight-computer target and limits slicing to that vessel; choose no target to use any nearby vessel. The blade extends as needed up to 12 m and restores your length preference afterward. A marker names the locked part. The stroke takes about **0.72 seconds** after ignition and geometry preparation. Complex geometry can take additional preparation time.
+Selection uses the part under the pointer within **3 metres or the configured blade length plus 1 metre**, whichever is greater, measured from the kitten. The extra metre accommodates the arm/hilt offset. Empty space never selects a nearby substitute. Native hover picking is reused; geometry without a native hover hit uses a bounded ray search after clicking. **Vessel target** sets the actual flight-computer target independently of slicing. The blade extends as needed up to 12 m and restores your length preference after the stroke.
 
 | Control | Action |
 |---|---|
 | F7 | Open/close the saber panel |
 | Ctrl+F7 | Equip/unequip |
 | Shift+F7 | Ignite/retract |
-| Alt+F7 / Slice nearby part | Swing and slice the nearby part |
-| Cancel slice / Esc | Cancel before the slice completes |
+| Alt+F7 / Swing | Ordinary saber swing; cosmetic contact sparks |
+| Ctrl+Alt+F7 / Select part to slice | Point and click a part to swing and slice it |
+| Cancel slice / Esc | Cancel before breakup |
+| Right-click while selecting | Cancel part selection |
 
-Changing target, losing the visible pose, leaving reach or switching kittens cancels a pending slice. The action does not steer the kitten or modify the flight computer's attitude controls. Autopilot, ring tracking, contact heat and automatic contact cutting have been removed.
+Reach is checked when selecting the part. Moving away or changing the flight-computer target afterward does not undo that stroke. Switching kittens, boarding, loading, stowing or cancelling clears the pending action. The animation waits while its main-view pose is hidden; once the complete stroke has been shown, looking away does not delay a ready breakup. The action does not steer the kitten or modify the flight computer's attitude controls. Autopilot, ring tracking, contact heat and automatic contact cutting have been removed.
 
-Hotkeys are ignored while ImGui captures keyboard input. The effects continue with the HUD hidden. Pause suspends blade motion, contact emission and sound. Supported simulation speeds extend to **5×** with applied steps up to 0.25 seconds; the swing remains visible in player time. Ladder climbing, swimming, tumbling and righting stow the saber.
+Hotkeys are ignored while ImGui captures keyboard input. The effects continue with the HUD hidden. Pause suspends blade motion, contact emission and sound. Supported simulation speeds extend to **5×**; ignition and swings run at normal player-time speed, independently of physics-step timing. Contact probing skips applied steps above 0.25 seconds. Ladder climbing, swimming, tumbling and righting stow the saber.
 
 The panel controls color, blade length (**0.25–12 m**), volume and paw alignment. **Save preferences** writes `settings.json` beside the installed mod. Old contact/autopilot preferences are ignored. Equipping is scoped to the controlled EVA kitten and clears on switching, boarding, loading or entering the editor.
 
@@ -54,9 +56,10 @@ Optional development checks are separate from building the distribution:
 
 ```sh
 python3 tools/validate.py --run-tests --stage artifacts/stage/purr2d2
+python3 tools/check_fragment_templates.py
 ```
 
-This repository contains exactly one runtime `.csproj`; validation generates temporary game-free harness projects under ignored `artifacts/`. The solution and all mod code target `net10.0`.
+This repository contains exactly one runtime `.csproj`; validation generates temporary harness projects under ignored `artifacts/`. The fragment-template check uses the actual managed KSA XML types without starting graphics or physics. On ARM hosts it adapts only the PE machine fields in an ignored copy of the unsigned IL-only game assembly; the original game files and mod distribution are unchanged. The solution and all mod code target `net10.0`.
 
 ## Assets and implementation
 

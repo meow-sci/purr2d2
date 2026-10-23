@@ -95,6 +95,7 @@ namespace KSA
         public bool IsAttachedInternal;
         public bool IsSubPart => PartParent != null;
         public Part FullPart => PartParent ?? this;
+        public Part StructuralPart => FullPart;
         public double3 Scale = double3.One;
         public doubleQuat Asmb2ParentAsmb = doubleQuat.Identity;
         public double3 PositionParentAsmb;

@@ -16,7 +16,9 @@ internal static class GameHooks
             transpiler: new HarmonyMethod(typeof(GameHooks), nameof(InsertSettledUpdate)));
         harmony.Patch(Require(typeof(Program), "OnFrameEditor", typeof(double)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(Frame)));
-        harmony.Patch(Require(typeof(Program), "OnFrameViewports", typeof(double)),
+        // Native PartPicker is populated by Universe.OnDrawUi in this method.
+        // OnFrameViewports is earlier and would pair last frame's hit with this frame's ray.
+        harmony.Patch(Require(typeof(Program), "OnDrawUiThreadSafe", typeof(double)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(Overlay)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnGameLoaded)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(WorldChanged)));

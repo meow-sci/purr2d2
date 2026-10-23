@@ -4,8 +4,20 @@ using Purr2D2.Cutting;
 
 internal static class TargetSelectionChecks
 {
-    private static void Main() { AssistedSliceSelection(); IncrementalSelection(); ContactEffectsChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
+    private static void Main() { AssistedSliceSelection(); PointerOcclusion(); IncrementalSelection(); ContactEffectsChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
     private static MeshReference NewMesh() => new() { PositionsCompare = [[new(-1, 0, -1), new(1, 0, -1), new(0, 0, 1)]] };
+    private static void PointerOcclusion()
+    {
+        var fixture = new Fixture();
+        fixture.Wielder.PositionEgo = new(0, 2, 0);
+        var rear = new Part { Tree = fixture.Target.Parts, PositionParentAsmb = new(0, 1, 0) };
+        rear.Modules.Add(new MeshViewModule(NewMesh()));
+        fixture.Target.Parts.Parts.Add(rear);
+        Check(fixture.Cutter.TryFindSliceTarget(fixture.Wielder, new(0, -10, 0), double3.UnitY, 3, out var picked, out _)
+            && picked!.Part == fixture.Hull, "cursor chooses the front surface even when another part is closer to the kitten");
+        Check(fixture.Cutter.TryPointTarget(fixture.Wielder, new Part { PartParent = rear }, new(0, 1, 0), 3, out picked, out _)
+            && picked!.Part == rear, "native subpart hover selects its full structural part");
+    }
     private static void IncrementalSelection()
     {
         var fixture = new Fixture(addMesh: false);
@@ -13,7 +25,7 @@ internal static class TargetSelectionChecks
         for (int i = 0; i < vertices.Length; i += 3)
         { vertices[i] = new(-1, 0, -1); vertices[i + 1] = new(1, 0, -1); vertices[i + 2] = new(0, 0, 1); }
         fixture.Hull.Modules.Add(new MeshViewModule(new() { PositionsCompare = [vertices] }));
-        using var selection = fixture.Cutter.BeginSelection(fixture.Wielder, new(0, -1, 0), 3, null);
+        using var selection = fixture.Cutter.BeginSelection(fixture.Wielder, new(0, -1, 0), double3.UnitY, 3);
         selection.Advance();
         Check(!selection.Done && fixture.SliceCalls == 0, "detailed target search yields before scanning an entire mesh");
         int updates = 1;
@@ -28,21 +40,27 @@ internal static class TargetSelectionChecks
     {
         var f = new Fixture();
         // No Update/contact/heat or slicing-mode toggle is required by the explicit action.
-        Check(f.Cutter.TryFindSliceTarget(f.Wielder, new(0, -1, 0), 3, null, out var target, out var reason)
-            && target!.Part == f.Hull, "explicit slice selects nearby visible hull without prior contact: " + reason);
+        Check(f.Cutter.TryFindSliceTarget(f.Wielder, new(0, -1, 0), double3.UnitY, 3, out var target, out var reason)
+            && target!.Part == f.Hull, "cursor ray selects the visible hull without prior contact: " + reason);
         Check(f.SliceCalls == 0, "selection alone never mutates a vessel");
         var cut = f.Cutter.CommitAssistedSlice(f.Wielder, target!, new(0, -1, 0), 3, new(new(1, 0, 0), 0));
         Check(cut.Success && f.SliceCalls == 1 && f.Cutter.SlicedParts == 1,
             "explicit action invokes mesh slicing without any contact-cutting mode");
-        Check(!f.Cutter.TryFindSliceTarget(f.Wielder, new(0, -8, 0), 3, null, out _, out _), "distant parts cannot be selected");
-        Check(!f.Cutter.TryFindSliceTarget(f.Wielder, new(0, -1, 0), 3, new Vehicle(), out _, out _),
-            "selected vessel never falls back to a different nearby vessel");
+        Check(f.Cutter.TryFindSliceTarget(f.Wielder, new(0, -80, 0), double3.UnitY, 3, out _, out _),
+            "zooming the camera out does not change reach from the kitten");
+        Check(!f.Cutter.TryFindSliceTarget(f.Wielder, new(8, -1, 0), double3.UnitY, 3, out _, out _),
+            "clicking empty space never falls back to a nearby part");
+        Check(!f.Cutter.TryFindSliceTarget(f.Wielder, new(0, -1, 0), -double3.UnitY, 3, out _, out _),
+            "a part behind the camera ray cannot be selected");
+        Check(f.Cutter.TryPointTarget(f.Wielder, f.Hull, default, 3, out var hovered, out _) && hovered!.Part == f.Hull,
+            "native hover can lock the exact clicked part without scanning");
         f.Target.Crew = [new IVASeat { AssignedKittenHash = new(1) }];
         Check(!f.Cutter.CommitAssistedSlice(f.Wielder, target!, new(0, -1, 0), 3, default).Success
             && f.SliceCalls == 1, "crew protection is rechecked after the swing");
         f.Target.Crew = [];
         f.Target.PositionEgo = new(10, 0, 0);
-        Check(!f.Cutter.CheckSliceTarget(f.Wielder, target!, new(0, -1, 0), 3, out _), "target moving away cancels the pending cut");
+        Check(!f.Cutter.CheckSliceTarget(f.Wielder, target!, default, 3, out _), "out-of-reach click is refused");
+        Check(f.Cutter.CheckSliceTarget(f.Wielder, target!, default, double.PositiveInfinity, out _), "moving after an in-range stroke does not cancel the pending result");
         f.Target.PositionEgo = default;
         f.Hull.PositionParentAsmb = new(0, 1, 0);
         Check(!f.Cutter.CheckSliceTarget(f.Wielder, target!, new(0, -1, 0), 3, out _), "part transform changes invalidate the prepared plane");
@@ -58,7 +76,10 @@ internal static class TargetSelectionChecks
         var sub = new Part { PartParent = transformed.Hull, Tree = transformed.Target.Parts, PositionParentAsmb = new(.1, .2, .3) };
         sub.Modules.Add(new PartModelDynamicModule { PartModelDynamic = new() { Template = new() { Mesh = NewMesh() } } });
         transformed.Hull.SubParts.Add(sub);
-        Check(transformed.Cutter.TryFindSliceTarget(transformed.Wielder, new(0, -1, 0), 3, transformed.Target, out var picked, out reason)
+        var matrix = sub.MatrixAsmb2Ego(transformed.Target.GetMatrixAsmb2Ego(KSA.Program.Camera!));
+        var point = double3.Zero.Transform(matrix);
+        var direction = double3.TransformNormal(double3.UnitY, matrix).NormalizeOrZero();
+        Check(transformed.Cutter.TryFindSliceTarget(transformed.Wielder, point - direction * 10, direction, 3, out var picked, out reason)
             && picked!.Part == transformed.Hull && transformed.Cutter.CheckSliceTarget(transformed.Wielder, picked, new(0, -1, 0), 3, out _),
             "transformed render-only tank subpart resolves to the full part in assembly coordinates: " + reason);
     }

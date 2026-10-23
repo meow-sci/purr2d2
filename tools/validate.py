@@ -526,6 +526,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     core_sources = [
         source / "src/Core/BladeState.cs",
         source / "src/Core/AssistedSliceSequence.cs",
+        source / "src/Core/SaberSwing.cs",
         source / "src/Core/BackgroundSliceWork.cs",
         source / "tests/BackgroundSliceChecks.cs",
         source / "src/Cutting/AssistedSliceGeometry.cs",

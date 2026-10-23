@@ -12,8 +12,8 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime : IDisposable
 {
-    private enum Command { Equip, Ignite, SliceNearby, CancelSlice, SetTarget }
-    private readonly record struct Request(KittenEva Owner, Command Value, Vehicle? Target = null);
+    private enum Command { Equip, Ignite, Swing, SelectSlice, CutPicked, CancelSlice, SetTarget }
+    private readonly record struct Request(KittenEva Owner, Command Value, Vehicle? Target = null, SliceTarget? PartTarget = null, Ray? PickRay = null);
     private readonly Queue<Request> _commands = new();
     private readonly BladeState _blade = new();
     private readonly SaberPoseController _pose = new();
@@ -38,7 +38,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private bool _freshPoseThisTick;
     private string? _fault;
     private float3 Color => new(_settings.ColorR, _settings.ColorG, _settings.ColorB);
-    private float Length => _blade.Deployment * (_sliceBladeLength > 0 ? _sliceBladeLength : _settings.BladeLength);
+    private float Length => _blade.Deployment * (!_sliceSequence.EndPresented && _sliceBladeLength > 0 ? _sliceBladeLength : _settings.BladeLength);
 
     internal SaberRuntime(string directory)
     {
@@ -77,10 +77,13 @@ internal sealed partial class SaberRuntime : IDisposable
             while (_commands.TryDequeue(out var item))
             {
                 if ((_fault != null && item.Value != Command.CancelSlice) || !ReferenceEquals(item.Owner, _owner) || _owner == null) continue;
-                if (_sliceSequence.Active && item.Value != Command.SliceNearby) CancelAssistedSlice("Slice cancelled by manual control.");
+                if ((_sliceSequence.Active || _selectingSlice) && item.Value is Command.Equip or Command.Ignite)
+                    CancelAssistedSlice("Slice cancelled by manual control.");
                 switch (item.Value)
                 {
-                    case Command.SliceNearby: BeginAssistedSlice(); break;
+                    case Command.SelectSlice: SelectPartToSlice(); break;
+                    case Command.CutPicked: BeginAssistedSlice(item.PartTarget, item.PickRay); break;
+                    case Command.Swing: if (!_sliceSequence.Active || _sliceSequence.EndPresented) _pose.Swing(); break;
                     case Command.CancelSlice: CancelAssistedSlice("Slice cancelled."); break;
                     case Command.Equip:
                         _blade.Equip(!_blade.Equipped);
@@ -100,9 +103,6 @@ internal sealed partial class SaberRuntime : IDisposable
             double speed = Universe.GetSimulationSpeed();
             bool supportedSpeed = SaberLimits.SupportsSpeed(speed);
             double simulationDt = SaberLimits.AppliedDelta(newStep, speed, applied.DeltaTime);
-            if (_sliceSequence.Active && newStep && supportedSpeed && (!double.IsFinite(applied.DeltaTime)
-                || applied.DeltaTime < 0 || applied.DeltaTime > SaberLimits.MaximumSimulationStep))
-                CancelAssistedSlice("Slice cancelled: simulation step too large. Switch to 1x and try again.");
             _pose.GripOffsetFromChestCm = new(_settings.GripX, _settings.GripY, _settings.GripZ);
             _pose.BladeDirectionModel = new(_settings.AimX, _settings.AimY, _settings.AimZ);
             _pose.FingerCurlRadians = _settings.FingerCurl;
@@ -111,10 +111,12 @@ internal sealed partial class SaberRuntime : IDisposable
             _freshPoseThisTick = _pose.MainPoseGeneration != _consumedPoseGeneration && _pose.HasFreshBodyFrame;
             _consumedPoseGeneration = _pose.MainPoseGeneration;
             if (!_pose.Eligible) _blade.SetIgnited(false);
-            _blade.Advance(simulationDt);
+            // Equip/ignition and swings are visual: use player time, even between solver steps.
+            _blade.Advance(supportedSpeed ? playerDt : 0);
             // Structural work happens only for the explicit swing. Contact is visual only.
-            if (_sliceSequence.Active) UpdateAssistedSlice(playerDt, simulationDt);
-            else if (_owner != null && _blade.Equipped && simulationDt > 0 && _freshPoseThisTick
+            if (_sliceSequence.Active) UpdateAssistedSlice(playerDt);
+            if ((!_sliceSequence.Active || _sliceSequence.EndPresented)
+                && _owner != null && _blade.Equipped && simulationDt > 0 && _freshPoseThisTick
                 && _pose.TryGetBladeSegment(Length, out var contactBase, out var contactTip)
                 && _contactProbe.TrySample(_owner, contactBase, contactTip, _playerTime, out var contact))
                 _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
@@ -148,16 +150,17 @@ internal sealed partial class SaberRuntime : IDisposable
             var io = ImGui.GetIO();
             if (!io.WantTextInput && !io.WantCaptureKeyboard && ImGui.IsKeyPressed(ImGuiKey.F7, false))
             {
-                if (io.KeyCtrl) Queue(Command.Equip);
+                if (io.KeyCtrl && io.KeyAlt) Queue(Command.SelectSlice);
+                else if (io.KeyCtrl) Queue(Command.Equip);
                 else if (io.KeyShift) Queue(Command.Ignite);
-                else if (io.KeyAlt) Queue(Command.SliceNearby);
+                else if (io.KeyAlt) Queue(Command.Swing);
                 else _windowVisible = !_windowVisible;
             }
-            if (_sliceSequence.Active && !io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Escape, false)) Queue(Command.CancelSlice);
+            if ((_sliceSequence.Active || _selectingSlice) && !io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Escape, false)) Queue(Command.CancelSlice);
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
                     !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.HasFreshBodyFrame,
-                    _settings.Volume, _swingSpeed, _sliceSequence.Swinging ? 1 : 0);
+                    _settings.Volume, _swingSpeed, _sliceSequence.Swinging || _pose.Swinging ? 1 : 0);
             else if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
         }
         catch (Exception ex) { Queue(Command.CancelSlice); _fault = ex.Message; Report("Frame update failed", ex); }
@@ -176,7 +179,7 @@ internal sealed partial class SaberRuntime : IDisposable
             _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
             _audio.Update(owner, emitter, _blade.Deployment, _blade.TargetOn,
                 !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.Eligible,
-                _settings.Volume, _swingSpeed, _sliceSequence.Swinging ? 1 : 0);
+                _settings.Volume, _swingSpeed, _sliceSequence.Swinging || _pose.Swinging ? 1 : 0);
         }
     }
 

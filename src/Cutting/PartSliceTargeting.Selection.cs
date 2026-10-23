@@ -10,7 +10,7 @@ internal sealed partial class PartSliceTargeting
     internal sealed class Selection : IDisposable
     {
         internal SliceTarget? Target;
-        internal string Reason = "No nearby part found. Move closer or increase the blade length.";
+        internal string Reason = "No part under the pointer. Click a visible vessel part.";
         internal bool Done;
         internal IEnumerator<int>? Steps;
         internal void Advance()
@@ -24,38 +24,39 @@ internal sealed partial class PartSliceTargeting
         public void Dispose() { Steps?.Dispose(); Steps = null; }
     }
 
-    internal Selection BeginSelection(KittenEva wielder, double3 baseBody, double reach, Vehicle? selected)
+    internal Selection BeginSelection(KittenEva wielder, double3 rayOrigin, double3 rayDirection, double reach)
     {
         if (_wielder != wielder) { Reset(); _wielder = wielder; }
         var request = new Selection();
-        request.Steps = SelectSteps(request, wielder, baseBody, reach, selected).GetEnumerator();
+        request.Steps = SelectSteps(request, wielder, rayOrigin, rayDirection, reach).GetEnumerator();
         return request;
     }
 
     // Synchronous wrapper is only used by the small managed fixtures. Runtime advances
     // the same iterator across frames; cold selection never builds a fleet-sized BVH.
-    internal bool TryFindSliceTarget(KittenEva wielder, double3 baseBody, double reach, Vehicle? selected,
+    internal bool TryFindSliceTarget(KittenEva wielder, double3 rayOrigin, double3 rayDirection, double reach,
         out SliceTarget? target, out string reason)
     {
-        using var request = BeginSelection(wielder, baseBody, reach, selected);
+        using var request = BeginSelection(wielder, rayOrigin, rayDirection, reach);
         while (!request.Done) request.Advance();
         target = request.Target; reason = request.Reason;
         return target != null && CanCut(target.Part, out reason);
     }
 
-    private IEnumerable<int> SelectSteps(Selection request, KittenEva wielder, double3 baseBody, double reach, Vehicle? selected)
+    private IEnumerable<int> SelectSteps(Selection request, KittenEva wielder, double3 rayOrigin, double3 rayDirection, double reach)
     {
         if (Program.EditorFlag || Universe.CurrentSystem == null || Program.GetMainCamera() is not { } camera
-            || !ToPoint(baseBody).Finite || !double.IsFinite(reach) || reach <= 0) yield break;
-        var origin = baseBody.Transform(double4x4.CreateFromQuaternion(wielder.Body2Ego)) + camera.GetPositionEgo(wielder);
-        double best = reach * reach;
+            || !ToPoint(rayOrigin).Finite || !ToPoint(rayDirection).Finite || rayDirection.LengthSquared() < .5
+            || !double.IsFinite(reach) || reach <= 0) yield break;
+        var origin = camera.GetPositionEgo(wielder);
+        double best = double.PositiveInfinity;
         int tests = 0, nodes = 0;
         var meshes = new List<MeshReference>();
         // Snapshot only references here; every part/mesh access stays on the game thread.
         foreach (var item in Universe.CurrentSystem.All.AsSpan().ToArray())
         {
             if (item is not Vehicle vehicle || vehicle == wielder || vehicle is KittenEva || vehicle.IsDisposed || vehicle.IsEditedVehicle
-                || !ReferenceEquals(vehicle.Parent, wielder.Parent) || (selected != null && selected != vehicle)) continue;
+                || !ReferenceEquals(vehicle.Parent, wielder.Parent)) continue;
             if ((camera.GetPositionEgo(vehicle) - origin).Length() > vehicle.BoundingSphereRadiusBody + reach) continue;
             foreach (var full in vehicle.Parts.Parts.ToArray())
             {
@@ -73,7 +74,7 @@ internal sealed partial class PartSliceTargeting
                         if (mesh.PositionsCompare is not { } primitives) continue;
                         // Conservative world-space sphere avoids reading distant triangles.
                         double scale = Math.Max(Math.Abs(part.ScaleTotal.X), Math.Max(Math.Abs(part.ScaleTotal.Y), Math.Abs(part.ScaleTotal.Z)));
-                        if ((origin - double3.Zero.Transform(matrix)).Length() > mesh.BoundingSphereRadius * Math.Abs(scale) + Math.Sqrt(best)) continue;
+                        if ((origin - double3.Zero.Transform(matrix)).Length() > mesh.BoundingSphereRadius * scale + reach) continue;
                         foreach (var vertices in primitives)
                         {
                             if (vertices == null) continue;
@@ -83,12 +84,12 @@ internal sealed partial class PartSliceTargeting
                                 var triangle = new CutTriangle(ToPoint(vertices[i].Transform(matrix)), ToPoint(vertices[i + 1].Transform(matrix)), ToPoint(vertices[i + 2].Transform(matrix)));
                                 if (triangle.A.Finite && triangle.B.Finite && triangle.C.Finite && triangle.Normal.LengthSquared > .5)
                                 {
-                                    var hit = CutGeometry.ClosestPoint(ToPoint(origin), triangle);
-                                    double distance = (hit - ToPoint(origin)).LengthSquared;
-                                    if (distance < best || (distance == best && (request.Target == null || full.InstanceId < request.Target.Part.InstanceId)))
+                                    if (CutGeometry.TryRayTriangle(ToPoint(rayOrigin), ToPoint(rayDirection), triangle, out double distance)
+                                        && (distance < best || (distance == best && (request.Target == null || full.InstanceId < request.Target.Part.InstanceId))))
                                     {
                                         best = distance;
-                                        request.Target = new(full, vehicle, ToGame(hit).Transform(inverse).Transform(part.MatrixAsmb2VehicleAsmb), full.MatrixAsmb2VehicleAsmb);
+                                        var hit = rayOrigin + rayDirection * distance;
+                                        request.Target = new(full, vehicle, hit.Transform(inverse).Transform(part.MatrixAsmb2VehicleAsmb), full.MatrixAsmb2VehicleAsmb);
                                     }
                                 }
                                 if (tests % 256 == 0) yield return 0;
@@ -99,7 +100,20 @@ internal sealed partial class PartSliceTargeting
                 }
             }
         }
-        if (request.Target is { } target && !CanCut(target.Part, out var refusal)) { request.Target = null; request.Reason = refusal; }
+        if (request.Target is { } target && !CheckSliceTarget(wielder, target, default, reach, out var refusal))
+        { request.Target = null; request.Reason = refusal; }
+    }
+
+    internal bool TryPointTarget(KittenEva wielder, Part part, double3 hitEgo, double reach, out SliceTarget? target, out string reason)
+    {
+        _wielder = wielder; target = null;
+        reason = "Point at a vessel part.";
+        var full = part.StructuralPart;
+        if (full.Tree?.OwningVehicle is not { } vehicle || Program.GetMainCamera() is not { } camera
+            || !double4x4.Invert(vehicle.GetMatrixAsmb2Ego(camera), out var inverse)) return false;
+        var candidate = new SliceTarget(full, vehicle, hitEgo.Transform(inverse), full.MatrixAsmb2VehicleAsmb);
+        if (!CheckSliceTarget(wielder, candidate, default, reach, out reason)) return false;
+        target = candidate; return true;
     }
 
     private static void CollectMeshes(Part part, List<MeshReference> meshes)
@@ -114,14 +128,16 @@ internal sealed partial class PartSliceTargeting
 
     internal bool CheckSliceTarget(KittenEva wielder, SliceTarget target, double3 baseBody, double reach, out string reason)
     {
-        reason = "Slice cancelled: the selected part changed or moved out of reach.";
+        reason = "The selected part is no longer available.";
         if (_wielder != wielder || target.Vehicle.IsDisposed || target.Part.Tree?.OwningVehicle != target.Vehicle
             || !target.Part.MatrixAsmb2VehicleAsmb.Equals(target.PartTransform)
             || Program.GetMainCamera() is not { } camera || Program.EditorFlag) return false;
         var origin = baseBody.Transform(double4x4.CreateFromQuaternion(wielder.Body2Ego)) + camera.GetPositionEgo(wielder);
         var hit = target.HitAssembly.Transform(target.Vehicle.GetMatrixAsmb2Ego(camera));
         double distance = (hit - origin).Length();
-        return double.IsFinite(distance) && distance <= reach && CanCut(target.Part, out reason);
+        if (!double.IsFinite(distance) || distance > reach)
+        { reason = $"Part is {distance:F1} m away; move within {reach:F1} m or extend the blade."; return false; }
+        return CanCut(target.Part, out reason);
     }
 
     internal SliceAttempt CommitAssistedSlice(KittenEva wielder, SliceTarget target, double3 baseBody, double reach, SlicePlane plane)

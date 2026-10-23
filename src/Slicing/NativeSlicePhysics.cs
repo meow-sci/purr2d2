@@ -103,8 +103,12 @@ internal static class NativeSlicePhysics
         var part = new Part("Purr2D2 slice preflight", prepared.Template);
         try
         {
-            if (!(part.ComputeSubtreeInertMass() > 0) || part.Modules.Get<ColliderModule>().IsEmpty)
-                throw new InvalidOperationException("Prepared fragment lacks native mass or a cooked collider.");
+            if (!(part.ComputeSubtreeInertMass() > 0))
+                throw new InvalidOperationException("Prepared fragment has no native mass.");
+            if (part.Modules.Get<ColliderModule>().IsEmpty)
+                throw new InvalidOperationException("Prepared fragment has no native collider module.");
+            foreach (var collider in part.Modules.Get<ColliderModule>())
+                if (!collider.Handle.Exists) throw new InvalidOperationException("Prepared fragment collider could not be cooked.");
         }
         finally { part.Dispose(); }
     }

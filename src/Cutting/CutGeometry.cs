@@ -43,6 +43,20 @@ internal readonly record struct CutBounds(CutPoint Min, CutPoint Max)
 
 internal static class CutGeometry
 {
+    // Two-sided cursor ray: selection follows the visible surface, not nearest-to-kitten proximity.
+    internal static bool TryRayTriangle(CutPoint origin, CutPoint direction, CutTriangle triangle, out double distance)
+    {
+        distance = 0;
+        var ab = triangle.B - triangle.A; var ac = triangle.C - triangle.A;
+        var p = CutPoint.Cross(direction, ac); double det = CutPoint.Dot(ab, p);
+        if (Math.Abs(det) <= 1e-12) return false;
+        var fromA = origin - triangle.A; double u = CutPoint.Dot(fromA, p) / det;
+        if (u < -1e-9 || u > 1 + 1e-9) return false;
+        var q = CutPoint.Cross(fromA, ab); double v = CutPoint.Dot(direction, q) / det;
+        if (v < -1e-9 || u + v > 1 + 1e-9) return false;
+        distance = CutPoint.Dot(ac, q) / det;
+        return double.IsFinite(distance) && distance >= 0;
+    }
     // Closest point on triangle, including edges/vertices. Degenerate art is skipped at import.
     public static CutPoint ClosestPoint(CutPoint p, CutTriangle t)
     {

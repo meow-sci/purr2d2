@@ -13,7 +13,7 @@ Use `--file` explicitly: without it, `dotnet run tools/inspect_host.cs` selects 
 
 ## Checks performed
 
-- Exact parameter/return types, visibility, static/instance flags and non-generic status for all patched methods: `Program.PrepareFrame`, `OnFrameEditor`, `OnFrameViewports`, `OnMouseButton`, `OnGameLoaded`, `Dispose`, `UpdateRenderingResources`, `Universe.DeserializeSave`, `SuperMeshRenderSystem.ClearBuckets` and `RenderTranslucencyPass`.
+- Exact parameter/return types, visibility, static/instance flags and non-generic status for all patched methods: `Program.PrepareFrame`, `OnFrameEditor`, `OnDrawUiThreadSafe`, `OnMouseButton`, `OnGameLoaded`, `Dispose`, `UpdateRenderingResources`, `Universe.DeserializeSave`, `SuperMeshRenderSystem.ClearBuckets` and `RenderTranslucencyPass`. Cursor slicing runs after `OnDrawUiThreadSafe`, where native main-view picking has been refreshed; `OnFrameViewports` is too early for current-frame hover hits.
 - Render-hook parameter names that Harmony binds by name.
 - Actual host IL order for `RenderGame`, `RenderViewport` and `RenderEditor`: translucency follows the opaque scene and applicable atmosphere/MSAA composition, and precedes bloom or attachment resolve. This guards the late saber pass against host render-order changes; it does not execute GPU commands.
 - The private instance field `KittenRenderable._characterAvatar : KSA.CharacterAvatar`.

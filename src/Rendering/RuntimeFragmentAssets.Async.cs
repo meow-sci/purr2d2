@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Xml.Serialization;
 using Brutal;
 using Brutal.GltfApi;
 using Brutal.VulkanApi;
@@ -27,7 +26,7 @@ internal static partial class RuntimeFragmentAssets
     internal static LoadedSlice LoadDetached(CpuSlice data, string directory, KSA.Mod mod, CancellationToken cancel)
     {
         Directory.CreateDirectory(directory);
-        var serializer = new XmlSerializer(typeof(AssetBundle)); // Do not touch XmlHelper's shared cache.
+        var serializer = FragmentTemplateLoader.CreateSerializer();
         var loaded = new LoadedFragment[data.Fragments.Length];
         for (int i = 0; i < loaded.Length; i++)
         {
@@ -54,9 +53,7 @@ internal static partial class RuntimeFragmentAssets
                     mesh.Load(gltf, m, createDeviceMesh: false); // CPU only; never invokes Bind/Shared.Build.
                     meshes[m] = mesh;
                 }
-            using var xmlStream = new MemoryStream(fragment.Xml, writable: false);
-            var bundle = serializer.Deserialize(xmlStream) as AssetBundle ?? throw new InvalidDataException("Fragment XML could not be decoded.");
-            bundle.Assets.RemoveAll(asset => asset is MeshAtlasFileReference);
+            var bundle = FragmentTemplateLoader.Read(serializer, fragment.Xml, fragment.Id, fragment.Uploads.Length);
             // Bytes are durable; stop retaining large duplicate GLB/XML buffers in the handoff.
             loaded[i] = new(fragment with { Glb = [], Xml = [] }, meshes, bundle);
         }
@@ -101,8 +98,8 @@ internal static partial class RuntimeFragmentAssets
             }
             catch (Exception error)
             {
-                Error = "Could not prepare slice assets: " + error.Message; Done = true;
-                if (_registering != null) FailedPreparations[_registering] = Error + " Restart before retrying this same fragment.";
+                Error = error.Message; Done = true;
+                if (_registering != null) FailedPreparations[_registering] = Error + " Asset registration was interrupted; restart to reload it.";
                 _steps.Dispose();
             }
         }
@@ -164,6 +161,7 @@ internal static partial class RuntimeFragmentAssets
                     }
                     _mod!.Register(loaded.Bundle);
                     template = ModLibrary.Get<PartTemplate>(data.Id);
+                    _registering = null; // A preflight failure can retry a completely registered template.
                 }
                 yield return 0;
                 var prepared = new PreparedFragment(template, data.Id, data.Frame.SourceToFragment, data.Extents, data.MassKg);

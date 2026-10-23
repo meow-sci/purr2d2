@@ -5,6 +5,17 @@ internal static class AssistedSliceChecks
 {
     internal static void Run()
     {
+        foreach (int fps in new[] { 30, 60, 144 })
+        {
+            var timing = new AssistedSliceSequence(); timing.Start();
+            Check(timing.Advance(1.0 / fps, true, true, false) == SliceCue.BeginSwing, "stroke starts before any background result exists");
+            int frames = 0;
+            while (timing.Progress < 1 && frames < fps * 2) { timing.Advance(1.0 / fps, true, true, false); frames++; }
+            Check(frames / (double)fps >= .62 && frames / (double)fps < .62 + 1.01 / fps, "original swing duration is independent of frame rate or preparation latency");
+        }
+        Check(SaberSwing.Angle(0) == 0 && SaberSwing.Angle(1) == 0
+            && Math.Abs(SaberSwing.Angle(.25) - 1.05) < 1e-6 && Math.Abs(SaberSwing.Angle(.75) + 1.05) < 1e-6,
+            "normal swing keeps the original swipe and full recovery without an initial snap");
         var action = new AssistedSliceSequence();
         action.Start();
         for (int i = 0; i < 30; i++) Check(action.Advance(.1, false, true, true) == SliceCue.None, "waits for ignition");

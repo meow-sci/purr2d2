@@ -3,6 +3,7 @@ using Brutal.Numerics;
 using KSA;
 using RenderCore;
 using RenderCore.Animation;
+using Purr2D2.Core;
 
 namespace Purr2D2.Pose;
 
@@ -25,7 +26,10 @@ public sealed class SaberPoseController : IDisposable
     private double4x4 _emitterToBody;
     private string? _failure;
     private float3? _sliceDirection;
-    private float SwingAngle;
+    private float _sliceAngle;
+    private double _swingTime = SaberSwing.Duration;
+    internal bool Swinging => _swingTime < SaberSwing.Duration;
+    private float SwingAngle => _sliceDirection.HasValue ? _sliceAngle : SaberSwing.Angle(_swingTime / SaberSwing.Duration);
 
     public SaberPoseController(Action<KittenEva, IViewport, float4x4>? draw = null)
     {
@@ -104,6 +108,7 @@ public sealed class SaberPoseController : IDisposable
         float dt = double.IsFinite(dtPlayer) ? (float)Math.Clamp(dtPlayer, 0.0, 0.1) : 0f;
         float target = equipped && Eligible ? 1f : 0f;
         Blend = MoveTowards(Blend, target, dt / 0.18f);
+        _swingTime = Math.Min(SaberSwing.Duration, _swingTime + dt);
         if (!equipped || !Eligible) _hasBodyFrame = false;
         if (_avatar is not null)
         {
@@ -120,14 +125,18 @@ public sealed class SaberPoseController : IDisposable
 
     internal void SetSliceSwing(float3 direction, float3 normal, double progress)
     {
-        // One broad stroke through the selected section, followed by a short recovery.
-        float angle = (float)(Math.Clamp(progress / .8, 0, 1) * 2 - 1) * .95f;
-        SwingAngle = angle;
+        float angle = SaberSwing.Angle(progress);
+        _sliceAngle = angle;
         _sliceDirection = Unit(float3.Transform(Unit(direction, float3.UnitZ),
             floatQuat.CreateFromAxisAngle(Unit(normal, float3.UnitY), angle)), float3.UnitZ);
     }
 
-    internal void ClearSliceSwing() { _sliceDirection = null; SwingAngle = 0; }
+    internal void ClearSliceSwing() { _sliceDirection = null; _sliceAngle = 0; }
+
+    public void Swing()
+    {
+        if (Active && _equipped && _swingTime >= SaberSwing.Duration * .75) _swingTime = 0;
+    }
 
     /// <summary>
     /// A fresh emitter-local metres to body-COM-relative metres matrix. Rejects
@@ -168,6 +177,7 @@ public sealed class SaberPoseController : IDisposable
         _processor = null;
         _equipped = false;
         Blend = 0f;
+        _swingTime = SaberSwing.Duration;
         ClearSliceSwing();
         _hasBodyFrame = false;
         _failure = null;
@@ -199,7 +209,8 @@ public sealed class SaberPoseController : IDisposable
     private static bool Supported(LocomotionMode mode) => mode is LocomotionMode.Grounded
         or LocomotionMode.Airborne or LocomotionMode.Mmu;
 
-    private float3 Direction => _sliceDirection ?? Unit(BladeDirectionModel, float3.UnitY);
+    private float3 Direction => _sliceDirection ?? Unit(float3.Transform(BladeDirectionModel,
+        floatQuat.CreateFromAxisAngle(float3.UnitY, SwingAngle)), float3.UnitY);
 
     private void Publish(float4x4 emitterInModelCm, float4x4 modelToEgo)
     {

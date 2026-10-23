@@ -30,7 +30,8 @@ internal sealed partial class SaberRuntime
             {
                 if (!draw) return;
                 ImGui.TextColored(new float4(.25f, .85f, 1, 1), "May the paws be with you.");
-                ImGui.Text("F7 panel  |  Ctrl+F7 equip  |  Shift+F7 ignite  |  Alt+F7 slice");
+                ImGui.Text("F7 panel  |  Ctrl+F7 equip  |  Shift+F7 ignite  |  Alt+F7 swing");
+                ImGui.Text("Ctrl+Alt+F7: select a part to slice");
                 ImGui.Separator();
                 if (_fault != null)
                 {
@@ -46,6 +47,10 @@ internal sealed partial class SaberRuntime
                     ImGui.SameLine();
                     ImGui.BeginDisabled(!_blade.Equipped);
                     if (ImGui.Button(_blade.TargetOn ? "Retract" : "Ignite")) Queue(Command.Ignite);
+                    ImGui.SameLine();
+                    ImGui.BeginDisabled(_sliceSequence.Active && !_sliceSequence.EndPresented);
+                    if (ImGui.Button("Swing")) Queue(Command.Swing);
+                    ImGui.EndDisabled();
                     ImGui.EndDisabled();
                 }
                 finally { ImGui.EndDisabled(); }

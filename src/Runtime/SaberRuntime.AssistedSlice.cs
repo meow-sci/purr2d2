@@ -10,158 +10,179 @@ namespace Purr2D2.Runtime;
 internal sealed partial class SaberRuntime
 {
     private readonly AssistedSliceSequence _sliceSequence = new();
-    private SliceTarget? _sliceTarget;
+    private SliceTarget? _sliceTarget, _sliceHover;
     private PartSliceTargeting.Selection? _sliceSelection;
-    private SlicePlane _slicePlane;
-    private object? _sliceSelectedVessel;
-    private double _sliceLastFreshTime;
+    private bool _selectingSlice, _sliceStarted;
+    private string? _sliceError;
+    private float3 _sliceAim = float3.UnitZ;
     private float _sliceBladeLength;
     private double _sliceNextSpark;
     private string _sliceStatus = "";
-    private double SliceReach => Math.Max(3, _settings.BladeLength);
+    // Reach is measured from the kitten, with room for the paw/hilt offset.
+    private double SliceReach => Math.Max(3, _settings.BladeLength + 1);
 
-    private void BeginAssistedSlice()
+    private void SelectPartToSlice()
     {
         if (_sliceSequence.Active || _owner == null) return;
-        if (_slicer.Busy) { _sliceStatus = "The previous slice is finishing cleanup; try again shortly."; return; }
-        if (!SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()))
-        { _sliceStatus = "Unpause and use 5x timewarp or less to slice a part."; return; }
-        EnsureBlade();
-        _blade.SetIgnited(true);
-        _sliceTarget = null;
-        _sliceSelectedVessel = _owner.Target;
+        if (_slicer.Busy) { _sliceStatus = "Finishing the previous slice; try again shortly."; return; }
+        EnsureBlade(); _blade.SetIgnited(true);
+        _selectingSlice = true;
+        _sliceStatus = "Point at a part and click to slice. Right-click or Esc to cancel.";
+    }
+
+    private void BeginAssistedSlice(SliceTarget? target, Ray? ray)
+    {
+        if (_sliceSequence.Active || _owner == null || _slicer.Busy) return;
+        if (target != null && !_targeting.CheckSliceTarget(_owner, target, default, SliceReach, out var reason))
+        { _selectingSlice = true; _sliceStatus = reason; return; }
+        EnsureBlade(); _blade.SetIgnited(true);
+        _selectingSlice = false; _sliceHover = null;
+        _sliceTarget = target;
+        if (target == null && ray is { } pick)
+            _sliceSelection = _targeting.BeginSelection(_owner, pick.Origin, pick.Direction, SliceReach);
+        if (target == null && _sliceSelection == null) return;
+        _sliceStarted = false; _sliceError = null;
         _sliceBladeLength = _settings.BladeLength;
-        _sliceLastFreshTime = _playerTime;
-        _sliceSequence.Start();
-        _sliceNextSpark = .3;
-        _sliceStatus = "Preparing saber for a nearby slice...";
+        _sliceSequence.Start(); _sliceNextSpark = .2;
+        _sliceStatus = "Slicing the selected part...";
     }
 
     private void CancelAssistedSlice(string reason)
     {
+        _selectingSlice = false; _sliceHover = null;
         _sliceSequence.Cancel();
         _sliceSelection?.Dispose(); _sliceSelection = null;
         _slicer.Cancel();
-        _sliceTarget = null;
-        _sliceSelectedVessel = null;
+        _sliceTarget = null; _sliceStarted = false; _sliceError = null;
         _sliceBladeLength = 0;
         _pose.ClearSliceSwing();
         _sliceStatus = reason;
     }
 
-    // Runs only in BeforePhysics, after the previous visible pose and sim step are consumed.
-    private void UpdateAssistedSlice(double dtPlayer, double simulationDt)
+    // Main-thread handoff. Animation never waits for a plane, export or upload.
+    private void UpdateAssistedSlice(double dtPlayer)
     {
         if (!_sliceSequence.Active || _owner == null) return;
-        if (_fault != null) { CancelAssistedSlice("Slice cancelled: saber controls are suspended."); return; }
-        if (!ReferenceEquals(_sliceSelectedVessel, _owner.Target) || !_blade.Equipped || !_blade.TargetOn)
-        { CancelAssistedSlice("Slice cancelled: target or saber state changed."); return; }
-        double speed = Universe.GetSimulationSpeed();
-        if (!double.IsFinite(speed) || speed > SaberLimits.MaximumSimulationSpeed)
-        { CancelAssistedSlice("Slice cancelled: use timewarp of 5x or less."); return; }
-        if (speed <= 0) { _sliceLastFreshTime = _playerTime; return; }
-        if (!_freshPoseThisTick || !_pose.TryGetBladeSegment(1, out var baseBody, out _))
-        {
-            if (_playerTime - _sliceLastFreshTime > 3)
-                CancelAssistedSlice("Slice cancelled: keep the equipped kitten visible in the main view.");
-            return;
-        }
-        _sliceLastFreshTime = _playerTime;
-        if (simulationDt <= 0) return;
+        if (_fault != null || !_blade.Equipped || !_blade.TargetOn)
+        { CancelAssistedSlice("Slice cancelled: saber was stowed."); return; }
         if (_sliceTarget == null)
         {
-            _sliceSelection ??= _targeting.BeginSelection(_owner, baseBody, SliceReach, _sliceSelectedVessel as Vehicle);
-            _sliceSelection.Advance();
-            if (!_sliceSelection.Done) { _sliceStatus = "Finding the nearby part..."; return; }
-            if (_sliceSelection.Target is not { } target) { CancelAssistedSlice("Cannot slice: " + _sliceSelection.Reason); return; }
+            _sliceSelection!.Advance();
+            if (!_sliceSelection.Done) { _sliceStatus = "Selecting the part under the pointer..."; return; }
+            if (_sliceSelection.Target is not { } target)
+            {
+                string reason = _sliceSelection.Reason;
+                CancelAssistedSlice(reason); _selectingSlice = true; return;
+            }
             _sliceTarget = target;
-            try { _slicer.Begin(target.Part); }
-            catch (Exception captureError) { CancelAssistedSlice("Cannot slice: " + captureError.Message); return; }
+            _sliceSelection.Dispose(); _sliceSelection = null;
         }
-        if (!_targeting.CheckSliceTarget(_owner, _sliceTarget, baseBody, SliceReach + .5, out string refusal))
-        { CancelAssistedSlice(refusal); return; }
-        _slicer.Advance();
-        if (_slicer.Error is { } error) { CancelAssistedSlice("Cannot slice: " + error); return; }
-        if (_slicer.Plan is not { } plan) { _sliceStatus = _slicer.Phase; return; }
-        _slicePlane = plan.Plane;
-        _sliceStatus = _sliceSequence.Progress >= 1 && !_slicer.Ready
-            ? "Cut complete; preparing the pieces..." : $"Slicing {_sliceTarget.Part.DisplayName} on {_sliceTarget.Vehicle.Id}...";
-
-        // Track the locked section in target assembly space while either vessel drifts/rotates.
-        var normal = new double3(_slicePlane.Normal.X, _slicePlane.Normal.Y, _slicePlane.Normal.Z);
-        var hit = _sliceTarget.HitAssembly;
-        var aim = hit + normal * (_slicePlane.Offset - double3.Dot(hit, normal));
-        var camera = Program.GetMainCamera()!;
-        var targetToEgo = _sliceTarget.Vehicle.GetMatrixAsmb2Ego(camera);
-        var bodyToEgo = double4x4.CreateFromQuaternion(_owner.Body2Ego)
-            * double4x4.CreateTranslation(camera.GetPositionEgo(_owner));
-        if (!double4x4.Invert(bodyToEgo, out var egoToBody)
-            || !double4x4.Invert(SaberPoseMath.ModelToBody(1, float3.Zero), out var bodyToModel))
-        { CancelAssistedSlice("Slice cancelled: saber alignment is unavailable."); return; }
-        var aimBody = aim.Transform(targetToEgo * egoToBody);
-        var direction = aimBody - baseBody;
-        double length = direction.Length();
-        if (!double.IsFinite(length) || length < .02 || length > SaberLimits.MaximumBladeLength - .25)
-        { CancelAssistedSlice("Move beside the middle of this part so the saber can reach its cut section."); return; }
-        // Temporary extension only; the player's blade-length preference is unchanged.
-        _sliceBladeLength = (float)Math.Min(SaberLimits.MaximumBladeLength, Math.Max(_settings.BladeLength, length + .5));
-        var modelDirection = double3.TransformNormal(direction, bodyToModel).NormalizeOrZero();
-        var modelNormal = double3.TransformNormal(normal, targetToEgo * egoToBody * bodyToModel).NormalizeOrZero();
-        var cue = _sliceSequence.Advance(dtPlayer, _blade.Deployment >= .99f, _freshPoseThisTick, _slicer.Ready);
-        _pose.SetSliceSwing(new((float)modelDirection.X, (float)modelDirection.Y, (float)modelDirection.Z),
-            new((float)modelNormal.X, (float)modelNormal.Y, (float)modelNormal.Z), _sliceSequence.Progress);
-        if (_sliceSequence.Progress >= _sliceNextSpark && _sliceNextSpark <= .6
-            && double4x4.Invert(_sliceTarget.PartTransform, out var assemblyToPart))
+        if (!_sliceStarted)
         {
-            _renderer.AddCutSparks(_sliceTarget.Part, aim.Transform(assemblyToPart),
-                double3.TransformNormal(normal, assemblyToPart).NormalizeOrZero(), _playerTime);
-            _sliceNextSpark += .15;
+            _sliceStarted = true;
+            try { _slicer.Begin(_sliceTarget.Part); }
+            catch (Exception error) { _sliceError = error.Message; }
         }
+        _slicer.Advance();
+        _sliceError ??= _slicer.Error;
+        if (!_targeting.CheckSliceTarget(_owner, _sliceTarget, default, double.PositiveInfinity, out var refusal))
+            _sliceError ??= refusal;
+        double speed = Universe.GetSimulationSpeed();
+        if (!SaberLimits.SupportsSpeed(speed)) return;
+        if (!_sliceSequence.EndPresented && (!_freshPoseThisTick || !_pose.TryGetBladeSegment(1, out _, out _))) return;
+
+        if (!_sliceTarget.Vehicle.IsDisposed && Program.GetMainCamera() is { } camera)
+        {
+            var hitEgo = _sliceTarget.HitAssembly.Transform(_sliceTarget.Vehicle.GetMatrixAsmb2Ego(camera));
+            var bodyToEgo = double4x4.CreateFromQuaternion(_owner.Body2Ego)
+                * double4x4.CreateTranslation(camera.GetPositionEgo(_owner));
+            if (double4x4.Invert(bodyToEgo, out var egoToBody)
+                && double4x4.Invert(SaberPoseMath.ModelToBody(1, float3.Zero), out var bodyToModel))
+            {
+                var direction = hitEgo.Transform(egoToBody);
+                double length = direction.Length();
+                if (double.IsFinite(length) && length > .02)
+                {
+                    var modelDirection = double3.TransformNormal(direction, bodyToModel).NormalizeOrZero();
+                    _sliceAim = new((float)modelDirection.X, (float)modelDirection.Y, (float)modelDirection.Z);
+                    _sliceBladeLength = (float)Math.Min(SaberLimits.MaximumBladeLength, Math.Max(_settings.BladeLength, length + .5));
+                }
+            }
+        }
+        var cue = _sliceSequence.Advance(dtPlayer, _blade.Deployment >= .99f, _freshPoseThisTick || _sliceSequence.EndPresented,
+            _slicer.Ready || _sliceError != null);
+        if (!_sliceSequence.EndPresented) _pose.SetSliceSwing(_sliceAim, float3.UnitY, _sliceSequence.Progress);
+        else _pose.ClearSliceSwing();
+        if (_sliceSequence.Progress >= _sliceNextSpark && _sliceNextSpark <= .7
+            && !_sliceTarget.Vehicle.IsDisposed && double4x4.Invert(_sliceTarget.PartTransform, out var assemblyToPart))
+        {
+            _renderer.AddCutSparks(_sliceTarget.Part, _sliceTarget.HitAssembly.Transform(assemblyToPart), double3.UnitY, _playerTime);
+            _sliceNextSpark += .25;
+        }
+        _sliceStatus = !_sliceSequence.EndPresented ? "Swinging across " + _sliceTarget.Part.DisplayName + "..."
+            : _slicer.Phase + " You can keep flying while the cut finishes.";
         if (cue == SliceCue.Commit)
         {
-            // Sequence consumes the request before this call, so neither an error nor another
-            // frame can repeat a structural cut.
-            var result = _targeting.CommitAssistedSlice(_owner, _sliceTarget, baseBody, SliceReach + .5, _slicePlane);
+            if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
+            // Reach was checked at the click. Moving after the stroke does not undo the cut.
+            var result = _targeting.CommitAssistedSlice(_owner, _sliceTarget, default, double.PositiveInfinity, default);
             CancelAssistedSlice((result.Success ? "Slice complete: " : "Slice failed: ") + result.Message);
+        }
+    }
+
+    private void HandleSlicePointer()
+    {
+        _sliceHover = null;
+        if (!_selectingSlice || _owner == null || !Program.DrawUI || Program.EditorFlag) return;
+        var io = ImGui.GetIO();
+        if (io.WantCaptureMouse || io.WantTextInput || !CursorTarget.IsHitTestViewport(Program.MainViewport)) return;
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Right)) { Queue(Command.CancelSlice); return; }
+        var ray = Cursor.GetEgoRay(Program.MainViewport);
+        ray.Direction = ray.Direction.NormalizeOrZero(); // Match the native picker's distance units.
+        var picker = Program.MainViewport.PartPicker;
+        string reason = "Point at a vessel part and click to slice.";
+        // Reuse the game's current-frame hover hit. No fleet-wide scan on each mouse move.
+        if (picker.Part is { } hovered && double.IsFinite(picker.Distance))
+            _targeting.TryPointTarget(_owner, hovered, ray.Origin + ray.Direction * picker.Distance, SliceReach, out _sliceHover, out reason);
+        _sliceStatus = _sliceHover is { } hit ? "Click to slice " + hit.Part.DisplayName + "." : reason;
+        if (!ImGui.IsMouseClicked(ImGuiMouseButton.Left)) return;
+        if (picker.Part != null && _sliceHover == null) return;
+        if (_commands.Count < 16)
+        {
+            _commands.Enqueue(new(_owner, Command.CutPicked, PartTarget: _sliceHover, PickRay: ray));
+            _selectingSlice = false;
         }
     }
 
     private void DrawAssistedSliceUi(bool hasKitten)
     {
         var owner = Program.ControlledVehicle as KittenEva;
-        ImGui.BeginDisabled(!_ready || !hasKitten || _fault != null || _sliceSequence.Active);
-        try
-        {
-            if (ImGui.BeginCombo("Vessel target", owner?.Target?.Id ?? "Nearest nearby vessel"))
-            {
-                try
-                {
-                    if (ImGui.Selectable("Nearest nearby vessel", owner?.Target == null)) QueueTarget(null);
-                    if (Universe.CurrentSystem is { } system)
-                        foreach (var item in system.All.AsSpan())
-                            if (item is Vehicle vessel && vessel is not KittenEva && !vessel.IsDisposed && !vessel.IsEditedVehicle
-                                && ImGui.Selectable(vessel.Id + "##SliceTarget" + vessel.Hash, ReferenceEquals(owner?.Target, vessel)))
-                                QueueTarget(vessel);
-                }
-                finally { ImGui.EndCombo(); }
-            }
-        }
-        finally { ImGui.EndDisabled(); }
         ImGui.BeginDisabled(!_ready || !hasKitten || _fault != null);
         try
         {
-            if (_sliceSequence.Active)
+            if (ImGui.BeginCombo("Vessel target", owner?.Target?.Id ?? "None"))
+            {
+                try
+                {
+                    if (ImGui.Selectable("None", owner?.Target == null)) QueueTarget(null);
+                    if (Universe.CurrentSystem is { } system)
+                        foreach (var item in system.All.AsSpan())
+                            if (item is Vehicle vessel && vessel is not KittenEva && !vessel.IsDisposed && !vessel.IsEditedVehicle
+                                && ImGui.Selectable(vessel.Id + "##SliceTarget" + vessel.Hash, ReferenceEquals(owner?.Target, vessel))) QueueTarget(vessel);
+                }
+                finally { ImGui.EndCombo(); }
+            }
+            if (_sliceSequence.Active || _selectingSlice)
             {
                 if (ImGui.Button("Cancel slice")) Queue(Command.CancelSlice);
-                ImGui.ProgressBar((float)_sliceSequence.Progress, new float2(-1, 0), "Saber slice");
+                if (_sliceSequence.Active && !_sliceSequence.EndPresented)
+                    ImGui.ProgressBar((float)_sliceSequence.Progress, new float2(-1, 0), "Saber swing");
             }
-            else if (ImGui.Button("Slice nearby part", new float2(-1, 32))) Queue(Command.SliceNearby);
+            else if (ImGui.Button("Select part to slice", new float2(-1, 32))) Queue(Command.SelectSlice);
         }
         finally { ImGui.EndDisabled(); }
-        ImGui.TextWrapped(Program.ControlledVehicle?.Target is Vehicle currentTarget
-            ? "Slice target: " + currentTarget.Id + " (nearest part)" : "Slice target: nearest nearby vessel part");
-        ImGui.TextWrapped("One click: equip, ignite, swing, then split the nearest part into pieces. Touching a part makes sparks only; the slice button cuts it.");
-        ImGui.TextWrapped("Slices within 3 m or your blade's reach. Tank contents are emptied; occupied vessels are protected.");
+        ImGui.TextWrapped("Select part to slice, then point and click on the vessel. The saber swings immediately; the pieces separate when ready.");
+        ImGui.TextWrapped($"Reach: {SliceReach:F1} m. Swing makes a normal saber swipe; contact makes sparks. Tank contents are emptied; occupied vessels are protected.");
         if (_sliceStatus.Length > 0) ImGui.TextWrapped(_sliceStatus);
     }
 }

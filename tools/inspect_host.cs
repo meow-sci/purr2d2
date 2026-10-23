@@ -39,7 +39,7 @@ static class HostInspection
             [
                 new("KSA.Program", "PrepareFrame", "KSA.Program+OnFrameResult", false, MethodAttributes.Private, "System.Double", "System.Double"),
                 new("KSA.Program", "OnFrameEditor", "System.Void", false, MethodAttributes.Private, "System.Double"),
-                new("KSA.Program", "OnFrameViewports", "System.Void", false, MethodAttributes.Private, "System.Double"),
+                new("KSA.Program", "OnDrawUiThreadSafe", "System.Void", false, MethodAttributes.Private, "System.Double"),
                 new("KSA.Program", "OnGameLoaded", "System.Void", true, MethodAttributes.Public),
                 new("KSA.Universe", "DeserializeSave", "System.Void", true, MethodAttributes.Public, "KSA.UniverseData"),
                 new("KSA.Program", "Dispose", "System.Void", false, MethodAttributes.Public),
