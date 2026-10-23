@@ -30,7 +30,7 @@ public sealed class Mod
             _runtime = new SaberRuntime(_directory);
             _runtime.Initialize(_harmony);
             SliceJitWarmup.Start(); // Patches are installed; compile the cold native path off-thread.
-            Console.WriteLine("[purr2d2] Ready. F7 controls; Ctrl+F7 equip; Shift+F7 ignite; Alt+F7 swing.");
+            Console.WriteLine("[purr2d2] Ready. Enable from the Purr2D2 game menu to show the overlay.");
         }
         catch (Exception ex)
         {

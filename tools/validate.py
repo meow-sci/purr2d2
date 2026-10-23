@@ -546,6 +546,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SaberOverlayDrag.cs",
         source / "src/Core/SaberOverlayLayout.cs",
         source / "tests/OverlayDragChecks.cs",
+        source / "src/Runtime/SaberRuntime.Activation.cs",
+        source / "tests/ActivationChecks.cs",
         source / "src/Core/ForceOverlayDrag.cs",
         source / "src/Core/ForceOverlayLayout.cs",
         source / "tests/force/ForceOverlayChecks.cs",
@@ -593,7 +595,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",

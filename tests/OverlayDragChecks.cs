@@ -119,13 +119,13 @@ internal static class OverlayDragChecks
                 && layout.SwingCenter.X - layout.SwingRadius >= origin.X
                 && layout.SwingCenter.Y - layout.SwingRadius >= origin.Y
                 && layout.SwingCenter.Y + layout.SwingRadius <= origin.Y + size.Y
-                && layout.SwingCenter.X + layout.SwingRadius < layout.SliceCenter.X - layout.SliceRadius
                 && layout.SliceCenter.X + layout.SliceRadius <= origin.X + size.X,
                 $"overlay anchors and nonoverlapping controls fit {size.X} x {size.Y}");
             Check(MathF.Abs(layout.SwingRadius - 132 * layout.Scale) < 1e-4f
                 && MathF.Abs(layout.SliceRadius - 27 * layout.Scale) < 1e-4f
-                && MathF.Abs(origin.X + size.X - layout.SliceCenter.X - layout.SliceRadius - 80 * layout.Scale) < 1e-3f,
-                "larger swing and smaller slice circles retain the requested left shift and gap");
+                && layout.SliceCenter.X < layout.SwingCenter.X
+                && layout.SliceCenter.Y > layout.SwingCenter.Y + layout.SwingRadius,
+                "large swing circle has a smaller slice control below-left");
             Check(layout.Hit(layout.SwingCenter) == SaberOverlayHit.Swing
                 && layout.Hit(layout.SwingCenter + new float2(layout.SwingRadius * .9f)) == SaberOverlayHit.None
                 && layout.Hit(layout.SliceCenter) == SaberOverlayHit.Slice,
@@ -152,8 +152,27 @@ internal static class OverlayDragChecks
             }
             Check(contained && separate && exactHits && layout.SomersaultRadius == layout.SliceRadius
                 && layout.IgniteRadius == layout.SliceRadius && layout.IgniteCenter.X < layout.SwingCenter.X
-                && layout.IgniteCenter.Y < layout.SwingCenter.Y && layout.IgniteCenter.X + layout.IgniteRadius < layout.ListMin.X,
-                "seven separate circular hit regions fit; ignite sits above-left of swing and matches slice size");
+                && layout.IgniteCenter.Y > layout.SwingCenter.Y
+                && layout.IgniteCenter.X < layout.SliceCenter.X && layout.IgniteCenter.Y < layout.SliceCenter.Y,
+                "seven separate circular hit regions fit; ignite and slice form a pair below-left of swing");
+            Check(layout.Hit((layout.SettingsMin + layout.SettingsMax) * .5f) == SaberOverlayHit.Settings
+                && layout.SettingsMin.Y > layout.ListBodyTop + layout.ListBodyHeight
+                && layout.SettingsMax.Y < layout.ListMax.Y && layout.SettingsMin.X > layout.ListMin.X
+                && layout.SettingsMax.X < layout.ListMax.X,
+                "the settings button has its own hit region below the scrollable kitten rows");
+            foreach (var direction in new[] { new float2(1, 0), new float2(0, 1), new float2(-1, 0), new float2(0, -1),
+                SaberOverlayDrag.ClampDisk(new(1, 1)) })
+            {
+                var indicator = layout.SwingIndicator(direction);
+                var edgeDrag = new SaberOverlayDrag();
+                edgeDrag.Begin(layout.SwingCenter, layout.SwingTravelRadius, float3.Zero, float3.UnitZ);
+                edgeDrag.Move(indicator);
+                for (int i = 0; i < 8; i++) edgeDrag.Advance(.1, out _, out _);
+                Check(MathF.Abs((indicator - layout.SwingCenter).Length() + layout.SwingMarkerRadius - layout.SwingRadius) < 1e-3f
+                    && (layout.SwingIndicator(edgeDrag.Offset) - indicator).Length() < 1e-3f
+                    && layout.Hit(indicator) == SaberOverlayHit.Swing,
+                    "swing input and indicator share the full travel radius up to the visible edge");
+            }
             Check(layout.ForwardCenter.X == layout.BackwardCenter.X
                 && layout.LeftCenter.Y == layout.RightCenter.Y
                 && layout.ForwardCenter.Y < layout.LeftCenter.Y && layout.LeftCenter.Y < layout.BackwardCenter.Y

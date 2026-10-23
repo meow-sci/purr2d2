@@ -12,8 +12,8 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime : IDisposable
 {
-    private enum Command { Equip, Ignite, Swing, SelectSlice, CutPicked, CancelSlice, SetTarget }
-    private readonly record struct Request(KittenEva Owner, Command Value, Vehicle? Target = null, SliceTarget? PartTarget = null, Ray? PickRay = null);
+    private enum Command { SelectSlice, CutPicked, CancelSlice }
+    private readonly record struct Request(KittenEva Owner, Command Value, SliceTarget? PartTarget = null, Ray? PickRay = null);
     private readonly Queue<Request> _commands = new();
     // These aliases always belong to the controlled kitten. Other partials use them
     // for explicit slicing; the records keep every equipped kitten alive on switches.
@@ -30,7 +30,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private object? _system;
     private UniverseTime _consumedTime;
     private bool _hasConsumedTime, _disposed, _ready;
-    private bool _windowVisible = true;
+    private bool _windowVisible;
     private double _playerTime;
     private double3 _previousTipBody;
     private double _previousTipTime;
@@ -68,6 +68,7 @@ internal sealed partial class SaberRuntime : IDisposable
         if (!_ready || _disposed) return;
         try
         {
+            if (!ApplyActivation()) { _slicer.PumpRetired(); return; }
             double playerDt = double.IsFinite(dtPlayer) ? Math.Clamp(dtPlayer, 0, .1) : 0;
             _playerTime += playerDt;
             var selected = !Program.EditorFlag ? Program.ControlledVehicle as KittenEva : null;
@@ -87,26 +88,11 @@ internal sealed partial class SaberRuntime : IDisposable
             while (_commands.TryDequeue(out var item))
             {
                 if ((_fault != null && item.Value != Command.CancelSlice) || !ReferenceEquals(item.Owner, _owner) || _owner == null) continue;
-                if ((_sliceSequence.Active || _selectingSlice) && item.Value is Command.Equip or Command.Ignite)
-                    CancelAssistedSlice("Slice cancelled by manual control.");
-                if ((item.Value is Command.Equip or Command.Ignite) && _activeSaber is { } manualSaber)
-                    manualSaber.TogglePhase = SaberTogglePhase.None;
                 switch (item.Value)
                 {
                     case Command.SelectSlice: SelectPartToSlice(); break;
                     case Command.CutPicked: BeginAssistedSlice(item.PartTarget, item.PickRay); break;
-                    case Command.Swing: if (!SomersaultActive && (!_sliceSequence.Active || _sliceSequence.EndPresented)) _pose.Swing(); break;
                     case Command.CancelSlice: CancelAssistedSlice("Slice cancelled."); break;
-                    case Command.Equip:
-                        _blade.Equip(!_blade.Equipped);
-                        if (_blade.Equipped) _pose.Bind(_owner);
-                        else { _pose.Unbind(); _audio.Stop(); }
-                        break;
-                    case Command.Ignite: _blade.SetIgnited(!_blade.TargetOn); break;
-                    case Command.SetTarget:
-                        if (item.Target is { IsDisposed: true } || item.Target is KittenEva || item.Target?.IsEditedVehicle == true) break;
-                        _owner.SetTarget(item.Target);
-                        break;
                 }
             }
             SimStep applied = Universe.GetLastSimStep();
@@ -151,7 +137,7 @@ internal sealed partial class SaberRuntime : IDisposable
 
     internal void Frame(double dtPlayer)
     {
-        if (!_ready || _disposed) return;
+        if (!_enabled || !_ready || _disposed) return;
         try
         {
             if (!OverlayVisible) DismissKittenColorPicker();
@@ -159,14 +145,6 @@ internal sealed partial class SaberRuntime : IDisposable
             _renderer.ConfigureVfx(_settings);
             _renderer.Prepare();
             var io = ImGui.GetIO();
-            if (!io.WantTextInput && !io.WantCaptureKeyboard && ImGui.IsKeyPressed(ImGuiKey.F7, false))
-            {
-                if (io.KeyCtrl && io.KeyAlt) Queue(Command.SelectSlice);
-                else if (io.KeyCtrl) Queue(Command.Equip);
-                else if (io.KeyShift) Queue(Command.Ignite);
-                else if (io.KeyAlt) Queue(Command.Swing);
-                else _windowVisible = !_windowVisible;
-            }
             if ((_sliceSequence.Active || _selectingSlice) && !io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Escape, false)) Queue(Command.CancelSlice);
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
@@ -180,7 +158,7 @@ internal sealed partial class SaberRuntime : IDisposable
 
     private void DrawSaber(KittenEva owner, IViewport viewport, float4x4 emitterToEgo)
     {
-        if (_disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped) return;
+        if (!_enabled || _disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped) return;
         float length = saber.Blade.Deployment * _settings.BladeLength;
         _renderer.DrawSaber(owner, viewport, emitterToEgo, length, saber.Color, saber.Type);
         if (ReferenceEquals(viewport, Program.MainViewport) && saber.Pose.TryGetBladeSegment(length, out var emitter, out var tip))
@@ -204,11 +182,7 @@ internal sealed partial class SaberRuntime : IDisposable
 
     private void Queue(Command command)
     {
-        if (_commands.Count < 16 && Program.ControlledVehicle is KittenEva kitten) _commands.Enqueue(new(kitten, command));
-    }
-    private void QueueTarget(Vehicle? target)
-    {
-        if (_commands.Count < 16 && Program.ControlledVehicle is KittenEva kitten) _commands.Enqueue(new(kitten, Command.SetTarget, target));
+        if (_enabled && _commands.Count < 16 && Program.ControlledVehicle is KittenEva kitten) _commands.Enqueue(new(kitten, command));
     }
     private void EnsureBlade()
     {

@@ -47,8 +47,17 @@ internal static class ForceOverlayChecks
             Check(force.Hit(force.ForceCenter) == ForceOverlayHit.Force
                 && force.Hit(force.AngryCenter) == ForceOverlayHit.AngryForce
                 && force.Hit(force.MoveCenter) == ForceOverlayHit.Move
-                && force.Hit(force.MoveCenter + new float2(force.MoveRadius * .9f)) == ForceOverlayHit.None,
+                && force.Hit(force.MoveCenter - new float2(force.MoveRadius * .9f)) == ForceOverlayHit.None,
                 "drawing and Force hit-testing share exact circles with click-through corners");
+            Check(force.ForceCenter.X > force.AngryCenter.X && force.ForceCenter.Y < force.AngryCenter.Y
+                && force.ForceCenter.Y > force.MoveCenter.Y
+                && force.AngryCenter.Y > force.MoveCenter.Y + force.MoveRadius
+                && (force.ForceCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
+                && (force.AngryCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
+                && (force.AngryCenter - force.ForceCenter).Length() > force.ButtonRadius * 2
+                && force.StatusMin.Y > force.AngryCenter.Y + force.ButtonRadius
+                && force.StatusMax.Y <= origin.Y + size.Y,
+                "Force and Angry Force sit below-right of Move with separate hit regions and status space");
         }
         Check(!ForceOverlayLayout.Create(default, float2.Zero, new(100, 100)).Valid,
             "invalid overlay geometry cannot retain invisible Force controls");

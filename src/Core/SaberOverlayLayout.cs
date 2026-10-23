@@ -2,7 +2,7 @@ using Brutal.Numerics;
 
 namespace Purr2D2.Core;
 
-public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite }
+public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite, Settings }
 
 /// <summary>Viewport-relative geometry shared by drawing and exact pointer hit testing.</summary>
 public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax, float ListBodyTop,
@@ -13,9 +13,14 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
 {
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
     public float IgniteRadius => SliceRadius;
-    // Align the left edges so the extra control fits even the narrowest layout.
-    public float2 IgniteCenter => SwingCenter - new float2(SwingRadius - IgniteRadius, SwingRadius + 18 * Scale);
+    public float2 IgniteCenter => SwingCenter + new float2(-130, 110) * Scale;
+    public float SwingMarkerRadius => 5 * Scale;
+    public float SwingTravelRadius => SwingRadius - SwingMarkerRadius;
+    public float2 SwingIndicator(float2 offset) => SwingCenter + SaberOverlayDrag.ClampDisk(offset) * SwingTravelRadius;
     public float SomersaultRadius => SliceRadius;
+    public float SettingsFooterHeight => 50 * Scale;
+    public float2 SettingsMax => ListMax - new float2(Padding);
+    public float2 SettingsMin => new(ListMin.X + Padding, SettingsMax.Y - 30 * Scale);
     public float ColorSwatchSize => RowHeight * .62f;
     public float2 ColorSwatchMin(int row, float scroll) => new(ListMax.X - Padding - ColorSwatchSize,
         ListBodyTop + row * RowHeight - scroll + RowHeight * .18f);
@@ -30,6 +35,8 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public SaberOverlayHit Hit(float2 point)
     {
         if (!Valid) return SaberOverlayHit.None;
+        if (point.X >= SettingsMin.X && point.X <= SettingsMax.X && point.Y >= SettingsMin.Y && point.Y <= SettingsMax.Y)
+            return SaberOverlayHit.Settings;
         if (point.X >= ListMin.X && point.X <= ListMax.X && point.Y >= ListMin.Y && point.Y <= ListMax.Y)
             return SaberOverlayHit.Kittens;
         if (SaberOverlayDrag.ContainsCircle(point, SwingCenter, SwingRadius)) return SaberOverlayHit.Swing;
@@ -58,19 +65,19 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         float pad = 12 * scale, margin = 20 * scale, row = 28 * scale;
         float radius = 132 * scale, smallRadius = 27 * scale;
         float listTop = origin.Y + Math.Max(margin, topInset);
-        float minimumSwingY = listTop + (100 + 16) * scale + radius;
+        float minimumSwingY = listTop + (154 + 16) * scale + radius;
         float maximumSwingY = origin.Y + size.Y - (132 + 16 + 186 + 12 + 48 + 20) * scale;
         if (minimumSwingY > maximumSwingY) return default;
         float swingY = Math.Clamp(origin.Y + size.Y * .5f, minimumSwingY, maximumSwingY);
-        var slice = new float2(origin.X + size.X - margin - smallRadius - 60 * scale, swingY);
-        var swing = slice - new float2(radius + smallRadius + 18 * scale, 0);
+        var swing = new float2(origin.X + size.X - 284 * scale, swingY);
+        var slice = swing + new float2(-65, 166) * scale;
         var min = new float2(origin.X + size.X - margin - 296 * scale, listTop);
         float header = 38 * scale;
         float maximumHeight = Math.Min(size.Y * .34f, swing.Y - radius - min.Y - 16 * scale);
-        float desiredHeight = header + Math.Max(1, kittenCount) * row + pad;
+        float desiredHeight = header + Math.Max(1, kittenCount) * row + 50 * scale;
         bool scroll = desiredHeight > maximumHeight;
-        float footer = scroll ? 22 * scale : 0;
-        float height = Math.Max(header + row + footer + pad, Math.Min(desiredHeight, maximumHeight));
+        float footer = (50 + (scroll ? 22 : 0)) * scale;
+        float height = Math.Max(header + row + footer, Math.Min(desiredHeight, maximumHeight));
         float step = smallRadius * 2 + 12 * scale;
         var forward = new float2(swing.X, swing.Y + radius + 16 * scale + smallRadius);
         var backward = forward + new float2(0, step * 2);

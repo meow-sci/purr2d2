@@ -20,6 +20,8 @@ internal static class GameHooks
     internal static void Install(Harmony harmony)
     {
         _flushDirtyResources = Require(typeof(PartTree), "FlushDirtyResourceManagers").CreateDelegate<Action>();
+        harmony.Patch(Require(typeof(Program), nameof(Program.DrawProgramMenusHook)),
+            postfix: new HarmonyMethod(typeof(GameHooks), nameof(Menu)));
         harmony.Patch(Require(typeof(Program), "PrepareFrame", typeof(double), typeof(double)),
             transpiler: new HarmonyMethod(typeof(GameHooks), nameof(InsertSettledUpdate)));
         harmony.Patch(Require(typeof(Program), "OnFrameEditor", typeof(double)),
@@ -172,6 +174,7 @@ internal static class GameHooks
         try { Universe.ExecuteNextVehicleSolvers(dtPlayer, simStep); }
         finally { SliceFrameDiagnostics.EndSegment(SliceFrameSegment.VehiclePreparationAndDispatch, start); }
     }
+    private static void Menu() => Runtime?.DrawMenu();
     private static void Overlay() { if (Program.DrawUI) Runtime?.DrawSliceOverlay(); }
     // Main-window game callbacks precede the backend's independent subscription.
     // Consume owned input in both routes so neither camera nor covered ImGui widgets react.

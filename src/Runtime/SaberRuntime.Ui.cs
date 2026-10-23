@@ -9,12 +9,39 @@ internal sealed partial class SaberRuntime
 {
     private double _preferencesSavedUntil;
     private string? _preferencesSaveError;
+    private bool _settingsWindowBoundsAvailable;
+    private float2 _settingsWindowMin, _settingsWindowMax;
+
+    private bool SettingsContainsPointer(float2 pointer) => _enabled && _windowVisible && Program.DrawUI
+        && _settingsWindowBoundsAvailable && pointer.X >= _settingsWindowMin.X && pointer.X <= _settingsWindowMax.X
+        && pointer.Y >= _settingsWindowMin.Y && pointer.Y <= _settingsWindowMax.Y;
+
+    internal void DrawMenu()
+    {
+        if (_disposed || !ImGui.BeginMenu("Purr2D2")) return;
+        try
+        {
+            ((IGameViewportLifecycle)Program.HoveredViewport).SetMenuBarInUse(true);
+            if (ImGui.MenuItem("Enabled", default(ImString), _enabled, _ready)) SetEnabled(!_enabled);
+        }
+        finally { ImGui.EndMenu(); }
+    }
+
+    private void ToggleSettingsWindow()
+    {
+        _windowVisible = !_windowVisible;
+        _settingsWindowBoundsAvailable = false;
+        if (!_windowVisible) return;
+        ResetOverlaySwing();
+        ResetForceGestures();
+        DismissKittenColorPicker();
+    }
 
     internal void SetInitializationFault(string message)
     {
         _fault = "Initialization failed: " + message;
         _ready = false;
-        _windowVisible = true;
+        _windowVisible = _enabled;
         // The caller removes our Harmony hooks after this, so release partial ownership now.
         Cleanup(ResetWorld, "World");
         Cleanup(DisposeForce, "Force capture");
@@ -28,44 +55,27 @@ internal sealed partial class SaberRuntime
 
     internal void DrawUi()
     {
-        if (!_windowVisible || _disposed) return;
+        _settingsWindowBoundsAvailable = false;
+        if (!_enabled || !_windowVisible || _disposed || !Program.DrawUI) return;
         try
         {
-            ImGui.SetNextWindowSize(new float2(480, 540), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSizeConstraints(new float2(390, 320), new float2(float.MaxValue));
-            bool draw = ImGui.Begin("Purr2D2 | Saber controls", ref _windowVisible);
+            ImGui.SetNextWindowViewport(ImGui.GetMainViewport().ID);
+            ImGui.SetNextWindowSize(new float2(480, 440), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(new float2(390, 260), new float2(float.MaxValue));
+            bool draw = ImGui.Begin("Purr2D2 | Settings", ref _windowVisible);
             try
             {
+                _settingsWindowMin = ImGui.GetWindowPos();
+                _settingsWindowMax = _settingsWindowMin + ImGui.GetWindowSize();
+                _settingsWindowBoundsAvailable = _windowVisible;
                 if (!draw) return;
-                bool hasKitten = Program.ControlledVehicle is KittenEva kitten && !kitten.IsDisposed && !Program.EditorFlag;
-                DrawSaberControls(hasKitten);
-                if (ImGui.Button(_showSaberOverlay ? "Hide saber overlay" : "Show saber overlay", new float2(-1, 0)))
-                    SetSaberOverlayVisible(!_showSaberOverlay);
-
-                if (_fault != null)
-                {
-                    ImGui.TextWrapped(_fault);
-                    if (_ready && ImGui.Button("Reset saber")) { ResetWorld(); _fault = null; }
-                }
-                else if (!_ready) ImGui.TextDisabled("Saber is starting...");
-                else if (!hasKitten) ImGui.TextWrapped("Control an EVA kitten to use the saber.");
-                else if (_blade.Equipped)
-                {
-                    ImGui.TextDisabled($"{_blade.Phase}  |  {Length:F2} m");
-                    if (!_pose.Eligible) ImGui.TextWrapped(_pose.Status);
-                    if (Universe.IsPaused()) ImGui.TextWrapped("Paused: saber suspended.");
-                    else if (Universe.GetSimulationSpeed() > SaberLimits.MaximumSimulationSpeed)
-                        ImGui.TextWrapped("Saber suspended above 5x timewarp.");
-                }
+                if (_fault != null) ImGui.TextWrapped(_fault);
                 if (_renderer.LastError != null) ImGui.TextWrapped(_renderer.LastError);
                 if (_audio.LastError != null) ImGui.TextWrapped(_audio.LastError);
 
-                ImGui.SeparatorText("Slice");
-                DrawAssistedSliceUi(hasKitten);
-
-                ImGui.SeparatorText("Saber settings");
+                ImGui.SeparatorText("Shared saber settings");
                 DrawSaberAppearanceSettings();
-                ImGui.TextWrapped("Open a kitten's saber menu in the overlay for color, type and effects.");
+                ImGui.TextWrapped("Use the overlay to control kittens. Each kitten's saber menu contains its color, type and shared effects.");
                 if (ImGui.CollapsingHeader("Character & grip")) DrawSaberCharacterSettings();
 
                 ImGui.Separator();
@@ -81,40 +91,7 @@ internal sealed partial class SaberRuntime
             }
             finally { ImGui.End(); }
         }
-        catch (Exception ex) { Report("Saber panel failed", ex); }
-    }
-
-    private void DrawSaberControls(bool hasKitten)
-    {
-        ImGui.BeginDisabled(!_ready || !hasKitten || _fault != null);
-        try
-        {
-            if (!ImGui.BeginTable("##SaberActions", 3, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.NoPadOuterX)) return;
-            try
-            {
-                ImGui.TableNextColumn();
-                if (ImGui.Button(_blade.Equipped ? "Unequip" : "Equip saber", new float2(-1, 0))) Queue(Command.Equip);
-                ShowSaberControlTip("Ctrl+F7");
-                ImGui.TableNextColumn();
-                ImGui.BeginDisabled(!_blade.Equipped);
-                try
-                {
-                    if (ImGui.Button(_blade.TargetOn ? "Retract" : "Ignite", new float2(-1, 0))) Queue(Command.Ignite);
-                    ShowSaberControlTip("Shift+F7");
-                    ImGui.TableNextColumn();
-                    ImGui.BeginDisabled(_sliceSequence.Active && !_sliceSequence.EndPresented);
-                    try
-                    {
-                        if (ImGui.Button("Swing", new float2(-1, 0))) Queue(Command.Swing);
-                        ShowSaberControlTip("Normal saber swipe. Alt+F7.");
-                    }
-                    finally { ImGui.EndDisabled(); }
-                }
-                finally { ImGui.EndDisabled(); }
-            }
-            finally { ImGui.EndTable(); }
-        }
-        finally { ImGui.EndDisabled(); }
+        catch (Exception ex) { Report("Settings window failed", ex); }
     }
 
     private void DrawSaberAppearanceSettings()

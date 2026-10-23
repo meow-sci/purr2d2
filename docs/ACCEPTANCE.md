@@ -1,5 +1,15 @@
 # Acceptance record
 
+## Overlay activation and refined layout (2026-10-23)
+
+Purr2D2 starts disabled each session, independently of saved preferences. The native game menu adds **Purr2D2 → Enabled**, which activates the overlay. Disabling hides its UI immediately and releases sabers, Force captures, pending cuts and somersault state at the next settled update. A rapid off/on pair still performs that cleanup before restarting. Persisted fragment registration remains available while disabled.
+
+Settings now opens from a dedicated button below the top-right kitten rows. Its window contains shared blade length, volume, character/grip preferences, saving and diagnostics. Per-kitten controls and appearance stay in the overlay; the F7 action shortcuts and old control-panel actions are removed. Native settings gestures retain their releases and backend input, and foreground controls clip around both Settings and the kitten popup. Ignite/Slice sit below-left of Swing, Force/Angry Force below-right of Move, and the somersault diamond remains below Swing. The white swing indicator and drag normalization share the full circle radius minus the marker radius, replacing the old 62% drawing limit.
+
+Release builds with zero warnings/errors. The full managed regression suite and source/staged asset validation pass, including new production activation checks and circle-edge/layout checks across compact, scaled and offset viewports. Actual KSA frame/worker hook and fragment XML checks pass. All 26 ZIP files match staging and the SHA-256 verifies. Logs: `artifacts/checks/overlay-layout-build.log`, `overlay-layout-checks.log` and `overlay-layout-host-checks.log` in the same directory.
+
+Native acceptance remains pending: launch with existing preferences and confirm no UI or F7 actions until enabling through the menu. Exercise every overlay control, the shared Settings window and per-kitten popups. Move Settings across the circles and test sliders, scrolling, dragging out of the window and native camera gestures. Drag Swing to every edge, release and re-grab. Disable during an active saber, Force capture, picker, cut and somersault; verify resources stop and physics resumes. Test rapid off/on, pause/resume, HUD/focus changes, boarding, loading and viewport resizing.
+
 ## Local ground clutter Force support (2026-10-23)
 
 Force can select resident physical clutter with a native collider raycast, including static instances and previously displaced or sleeping rocks. Static capture invokes KSA's own displacement routine and queues its normal rendering exclusion/placement update. The game retains ownership of the collider, shape and displaced object. Held clutter becomes kinematic, with zero solver velocity and scoped contact suppression; release restores its original inertia and inherited motion, and Throw adds the existing outward 25 m/s.

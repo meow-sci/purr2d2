@@ -195,35 +195,4 @@ internal sealed partial class SaberRuntime
         }
     }
 
-    private void DrawAssistedSliceUi(bool hasKitten)
-    {
-        var owner = Program.ControlledVehicle as KittenEva;
-        ImGui.BeginDisabled(!_ready || !hasKitten || _fault != null);
-        try
-        {
-            ImGui.Text("Vessel target");
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.BeginCombo("##VesselTarget", owner?.Target?.Id ?? "None"))
-            {
-                try
-                {
-                    if (ImGui.Selectable("None", owner?.Target == null)) QueueTarget(null);
-                    if (Universe.CurrentSystem is { } system)
-                        foreach (var item in system.All.AsSpan())
-                            if (item is Vehicle vessel && vessel is not KittenEva && !vessel.IsDisposed && !vessel.IsEditedVehicle
-                                && ImGui.Selectable(vessel.Id + "##SliceTarget" + vessel.Hash, ReferenceEquals(owner?.Target, vessel))) QueueTarget(vessel);
-                }
-                finally { ImGui.EndCombo(); }
-            }
-            if (_sliceSequence.Active || _selectingSlice)
-            {
-                if (ImGui.Button(_selectingSlice ? "Cancel" : "Cancel slice")) Queue(Command.CancelSlice);
-                if (_sliceSequence.Active && !_sliceSequence.EndPresented)
-                    ImGui.ProgressBar((float)_sliceSequence.Progress, new float2(-1, 0), "Saber swing");
-            }
-            else if (ImGui.Button("Select part to slice", new float2(-1, 32))) Queue(Command.SelectSlice);
-        }
-        finally { ImGui.EndDisabled(); }
-        if (SliceStatusVisible) ImGui.TextWrapped(_sliceStatus);
-    }
 }

@@ -18,6 +18,7 @@ internal sealed partial class SaberRuntime
     private int _sliceCancellations;
     private enum Command { CancelSlice }
     private void Queue(Command command) => _sliceCancellations++;
+    private bool SettingsContainsPointer(float2 pointer) => false;
     private static void Report(string operation, Exception error) { }
     private static void CenterOverlayText(ImDrawListPtr draw, float2 center, ImColor8 color, string text,
         float maxWidth = float.MaxValue, float fontSize = 0) { }

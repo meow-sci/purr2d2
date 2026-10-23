@@ -325,7 +325,8 @@ internal sealed partial class SaberRuntime
         draw.PushClipRect(layout.StatusMin, layout.StatusMax, true);
         try { draw.AddText(ImGui.GetFont(), font, layout.StatusMin, color, status, layout.StatusMax.X - layout.StatusMin.X); }
         finally { draw.PopClipRect(); }
-        if (!KittenColorPickerVisible && layout.Hit(ImGui.GetIO().MousePos) == ForceOverlayHit.Move)
+        if (!KittenColorPickerVisible && !SettingsContainsPointer(ImGui.GetIO().MousePos)
+            && layout.Hit(ImGui.GetIO().MousePos) == ForceOverlayHit.Move)
             ImGui.SetTooltip("Hold and drag to move in the camera plane. Wheel up brings objects closer; down moves them away. Release keeps their position. Re-grab to move farther.");
         if (_forceHover != null && ForcePicking && Program.GetMainCamera() is { } camera
             && ForceTargeting.TryHitEgo(_forceHover, camera, out var hit) && double3.Dot(hit, camera.GetForwardEcl()) > .001)

@@ -22,14 +22,14 @@ internal sealed partial class SaberRuntime
     private KittenEva? _kittenColorPickerOwner;
     private bool _kittenColorPickerRequested, _kittenColorPickerOpen, _kittenColorPickerBoundsAvailable;
     private float2 _kittenColorPickerAnchor, _kittenColorPickerMin, _kittenColorPickerMax;
-    private int _kittenColorPickerButtons;
+    private int _overlayUiButtons;
     private ImGuiID _kittenColorPickerId;
-    private ulong _kittenColorPickerEventFrame = ulong.MaxValue;
+    private ulong _overlayUiEventFrame = ulong.MaxValue;
 
     private bool KittenColorPickerVisible => OverlayVisible && (_kittenColorPickerRequested || _kittenColorPickerOpen)
         && _kittenColorPickerOwner is { IsDisposed: false } kitten && _currentKittens.Contains(kitten);
 
-    private bool OverlayVisible => _showSaberOverlay && _ready && !_disposed && Program.DrawUI
+    private bool OverlayVisible => _enabled && _showSaberOverlay && _ready && !_disposed && Program.DrawUI
         && !Program.EditorFlag && Universe.CurrentSystem != null && Program.MainViewport.Visible;
     private bool OverlayCanSwing => _fault == null && _owner is { IsDisposed: false }
         && ReferenceEquals(_owner, Program.ControlledVehicle) && _blade.Equipped && _pose.Eligible
@@ -37,8 +37,8 @@ internal sealed partial class SaberRuntime
     private bool OverlayCanStartSwing => OverlayCanSwing && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed());
 
     // The picker runs after this overlay; retain consumption for quick press/release pairs too.
-    internal bool OverlayCapturesPointer => OverlayVisible && (ForcePicking || KittenColorPickerVisible || _kittenColorPickerButtons != 0
-        || _kittenColorPickerEventFrame == Program.FrameNumber || _overlayPointerCapture.AnyHeld
+    internal bool OverlayCapturesPointer => OverlayVisible && (ForcePicking || KittenColorPickerVisible || SettingsContainsPointer(ImGui.GetIO().MousePos) || _overlayUiButtons != 0
+        || _overlayUiEventFrame == Program.FrameNumber || _overlayPointerCapture.AnyHeld
         || _overlayPointerCapture.EventFrame == Program.FrameNumber
         || (_overlayLayoutAvailable && ImGui.GetIO().MouseHoveredViewport == ImGui.GetMainViewport().ID
             && (_overlayLayout.Hit(ImGui.GetIO().MousePos) != OverlayHit.None
@@ -142,8 +142,12 @@ internal sealed partial class SaberRuntime
                         }
                     }
                     finally { draw.PopClipRect(); }
-                    if (layout.ListFooterHeight > 0)
-                        draw.AddText(new(layout.ListMin.X + layout.Padding, layout.ListMax.Y - layout.ListFooterHeight), muted, "Scroll for more kittens");
+                    if (layout.ListFooterHeight > layout.SettingsFooterHeight)
+                        draw.AddText(new(layout.ListMin.X + layout.Padding, layout.ListBodyTop + layout.ListBodyHeight), muted, "Scroll for more kittens");
+                    draw.AddRectFilled(layout.SettingsMin, layout.SettingsMax, new ImColor8(45, 50, 60, 210));
+                    draw.AddRect(layout.SettingsMin, layout.SettingsMax, _windowVisible ? white : muted);
+                    CenterOverlayText(draw, (layout.SettingsMin + layout.SettingsMax) * .5f, white, "Settings",
+                        layout.SettingsMax.X - layout.SettingsMin.X - layout.Padding * 2, fontSize);
 
                     draw.AddCircleFilled(layout.SwingCenter, layout.SwingRadius, new ImColor8(0, 0, 0, 128), 64);
                     draw.AddCircleFilled(layout.SliceCenter, layout.SliceRadius, new ImColor8(224, 24, 24, 128), 48);
@@ -169,10 +173,10 @@ internal sealed partial class SaberRuntime
                     // The small reticle moves inside the fixed circle; the control itself never moves.
                     if (_overlayDrag.Active)
                     {
-                        var point = layout.SwingCenter + _overlayDrag.Offset * (layout.SwingRadius * .62f);
-                        draw.AddCircle(point, 5 * layout.Scale, white, 16, 1.5f);
+                        var point = layout.SwingIndicator(_overlayDrag.Offset);
+                        draw.AddCircle(point, layout.SwingMarkerRadius, white, 16, 1.5f);
                     }
-                    string status = SliceStatusVisible && !_windowVisible ? _sliceStatus
+                    string status = SliceStatusVisible ? _sliceStatus
                         : layout.ShowSomersaultButtons && !canSomersault ? somersaultReason : "";
                     if (!string.IsNullOrWhiteSpace(status))
                     {
@@ -199,20 +203,24 @@ internal sealed partial class SaberRuntime
                 finally { draw.PopClipRect(); }
             }
             var viewportMax = viewport.WorkPos + viewport.WorkSize;
-            if (_kittenColorPickerBoundsAvailable)
+            // Foreground controls must leave native windows and popups unobscured.
+            void DrawUncovered(float2 clipMin, float2 clipMax, int window)
             {
-                // Foreground draw lists are above native popups. Cut out the popup
-                // rectangle so even a small viewport keeps the saber menu unobscured.
-                var min = new float2(Math.Clamp(_kittenColorPickerMin.X, viewport.WorkPos.X, viewportMax.X),
-                    Math.Clamp(_kittenColorPickerMin.Y, viewport.WorkPos.Y, viewportMax.Y));
-                var max = new float2(Math.Clamp(_kittenColorPickerMax.X, viewport.WorkPos.X, viewportMax.X),
-                    Math.Clamp(_kittenColorPickerMax.Y, viewport.WorkPos.Y, viewportMax.Y));
-                DrawControls(viewport.WorkPos, new(viewportMax.X, min.Y));
-                DrawControls(new(viewport.WorkPos.X, max.Y), viewportMax);
-                DrawControls(new(viewport.WorkPos.X, min.Y), new(min.X, max.Y));
-                DrawControls(new(max.X, min.Y), new(viewportMax.X, max.Y));
+                if (clipMin.X >= clipMax.X || clipMin.Y >= clipMax.Y) return;
+                if (window == 2) { DrawControls(clipMin, clipMax); return; }
+                bool visible = window == 0 ? _kittenColorPickerBoundsAvailable : _settingsWindowBoundsAvailable && _windowVisible;
+                var min = window == 0 ? _kittenColorPickerMin : _settingsWindowMin;
+                var max = window == 0 ? _kittenColorPickerMax : _settingsWindowMax;
+                min = new(Math.Max(min.X, clipMin.X), Math.Max(min.Y, clipMin.Y));
+                max = new(Math.Min(max.X, clipMax.X), Math.Min(max.Y, clipMax.Y));
+                if (!visible || min.X >= max.X || min.Y >= max.Y)
+                { DrawUncovered(clipMin, clipMax, window + 1); return; }
+                DrawUncovered(clipMin, new(clipMax.X, min.Y), window + 1);
+                DrawUncovered(new(clipMin.X, max.Y), clipMax, window + 1);
+                DrawUncovered(new(clipMin.X, min.Y), new(min.X, max.Y), window + 1);
+                DrawUncovered(new(max.X, min.Y), new(clipMax.X, max.Y), window + 1);
             }
-            else DrawControls(viewport.WorkPos, viewportMax);
+            DrawUncovered(viewport.WorkPos, viewportMax, 0);
         }
         catch (Exception error)
         {
@@ -267,22 +275,23 @@ internal sealed partial class SaberRuntime
             if (button == GlfwMouseButton.Left) { _overlayDrag.Release(); _forceDrag.Release(); }
             return true;
         }
-        // Native picker gestures belong to ImGui. Consume only the game's route;
+        // Native settings/picker gestures belong to ImGui. Consume only the game's route;
         // the backend must receive the same presses, releases and motion normally.
         if ((uint)button < 32)
         {
             int bit = 1 << (int)button;
-            if (action == GlfwButtonAction.Release && (_kittenColorPickerButtons & bit) != 0)
+            if (action == GlfwButtonAction.Release && (_overlayUiButtons & bit) != 0)
             {
-                _kittenColorPickerButtons &= ~bit;
-                _kittenColorPickerEventFrame = Program.FrameNumber;
+                _overlayUiButtons &= ~bit;
+                _overlayUiEventFrame = Program.FrameNumber;
                 return true;
             }
-            if (action == GlfwButtonAction.Press && window == Program.GetWindow() && (KittenColorPickerVisible || _kittenColorPickerButtons != 0)
+            if (action == GlfwButtonAction.Press && !_overlayPointerCapture.AnyHeld && window == Program.GetWindow()
+                && (KittenColorPickerVisible || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)
                 && !Program.HasMouseInputLatch)
             {
-                _kittenColorPickerButtons |= bit;
-                _kittenColorPickerEventFrame = Program.FrameNumber;
+                _overlayUiButtons |= bit;
+                _overlayUiEventFrame = Program.FrameNumber;
                 return true;
             }
         }
@@ -306,6 +315,9 @@ internal sealed partial class SaberRuntime
 
         switch (hit)
         {
+            case OverlayHit.Settings:
+                ToggleSettingsWindow();
+                break;
             case OverlayHit.Kittens:
                 if (_fault != null || pointer.Y < _overlayLayout.ListBodyTop
                     || pointer.Y >= _overlayLayout.ListBodyTop + _overlayLayout.ListBodyHeight) break;
@@ -324,7 +336,7 @@ internal sealed partial class SaberRuntime
                 }
                 break;
             case OverlayHit.Swing:
-                if (OverlayCanStartSwing && _overlayDrag.Begin(pointer, _overlayLayout.SwingRadius,
+                if (OverlayCanStartSwing && _overlayDrag.Begin(pointer, _overlayLayout.SwingTravelRadius,
                     _pose.GripOffsetFromChestCm, _pose.BladeDirectionModel))
                 {
                     _overlayDragOwner = _owner;
@@ -358,9 +370,9 @@ internal sealed partial class SaberRuntime
     /// <summary>Keep held drags, including movement outside the circle, away from camera controllers.</summary>
     internal bool FilterOverlayCursor(GlfwWindow window)
     {
-        if (KittenColorPickerVisible || _kittenColorPickerButtons != 0) return true;
+        if (_overlayUiButtons != 0 || KittenColorPickerVisible) return true;
         if (ForcePicking) return true;
-        if (!_overlayPointerCapture.AnyHeld) return false;
+        if (!_overlayPointerCapture.AnyHeld) return !Program.HasMouseInputLatch && SettingsContainsPointer(OverlayPointer(window));
         if (_overlayDrag.Held) _overlayDrag.Move(OverlayPointer(window));
         if (_forceDrag.Held) MoveForcePointer(OverlayPointer(window));
         return true;
@@ -381,14 +393,15 @@ internal sealed partial class SaberRuntime
         ResetForceGestures();
         _forceEscapeHeld = false;
         _overlayPointerCapture.Reset();
-        _kittenColorPickerButtons = 0;
-        _kittenColorPickerEventFrame = ulong.MaxValue;
+        _overlayUiButtons = 0;
+        _overlayUiEventFrame = ulong.MaxValue;
         DismissKittenColorPicker();
     }
 
     internal bool FilterOverlayScroll(GlfwWindow window, double2 offset)
     {
-        if (window == Program.GetWindow() && (KittenColorPickerVisible || _kittenColorPickerButtons != 0)) return true;
+        if (window == Program.GetWindow() && !_overlayPointerCapture.AnyHeld
+            && (KittenColorPickerVisible || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return true;
         if (window == Program.GetWindow() && _forceDrag.Held && OverlayVisible && double.IsFinite(offset.Y))
         {
             _forceDrag.Scroll(offset.Y);
@@ -409,7 +422,8 @@ internal sealed partial class SaberRuntime
     private bool OverlayOwnsScroll(GlfwWindow window, out OverlayHit hit)
     {
         hit = OverlayHit.None;
-        if (KittenColorPickerVisible || _kittenColorPickerButtons != 0) return false;
+        if (!_overlayPointerCapture.AnyHeld
+            && (KittenColorPickerVisible || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return false;
         if (window != Program.GetWindow() || !OverlayVisible || !_overlayLayoutAvailable || Program.IsModalOpen()) return false;
         hit = _overlayLayout.Hit(OverlayPointer(window));
         return _overlayPointerCapture.OwnsScroll(ForcePicking || hit != OverlayHit.None

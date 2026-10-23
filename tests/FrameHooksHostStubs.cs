@@ -11,6 +11,7 @@ namespace Purr2D2.Runtime
         internal void BeforePhysics(double dt) { }
         internal void Frame(double dt) { }
         internal void DrawSliceOverlay() { }
+        internal void DrawMenu() { }
         internal bool FilterOverlayMouseButton(GlfwWindow w, GlfwMouseButton b, GlfwButtonAction a) => false;
         internal bool FilterOverlayCursor(GlfwWindow w) => false;
         internal bool FilterOverlayScroll(GlfwWindow w, double2 o) => false;

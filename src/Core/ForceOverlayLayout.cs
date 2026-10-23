@@ -23,10 +23,9 @@ public readonly record struct ForceOverlayLayout(float2 ForceCenter, float2 Angr
             || !float.IsFinite(size.X) || !float.IsFinite(size.Y) || size.X <= 0 || size.Y <= 0) return default;
         float scale = saber.Scale, radius = saber.SwingRadius, button = saber.SliceRadius;
         var move = new float2(origin.X + 20 * scale + radius, saber.SwingCenter.Y);
-        var buttons = move - new float2(0, radius + 18 * scale + button);
-        var status = new float2(move.X - radius, move.Y + radius + 12 * scale);
-        return new(buttons - new float2(button + 10 * scale, 0),
-            buttons + new float2(button + 10 * scale, 0), button, move, radius,
+        var status = new float2(move.X - radius, move.Y + 220 * scale);
+        return new(move + new float2(130, 110) * scale,
+            move + new float2(65, 166) * scale, button, move, radius,
             status, new(move.X + radius, origin.Y + size.Y - 20 * scale), scale);
     }
 }

@@ -8,7 +8,7 @@ internal sealed partial class SaberRuntime
 {
     internal void DrawSliceOverlay()
     {
-        if (!_ready || _disposed || Program.EditorFlag) return;
+        if (!_enabled || !_ready || _disposed || Program.EditorFlag) return;
         try
         {
             UpdateForceFrame();
