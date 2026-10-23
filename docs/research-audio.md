@@ -90,6 +90,10 @@ is deferred until resume. Rapid reversal cuts the earlier transition. Hum pitch 
 gain can respond slightly to relative swing speed. The optional sizzle is a separate
 native loop. It is silent unless the caller supplies contact intensity.
 
+Ordinary **Swing / Alt+F7** uses the original motion-driven hum pitch/gain swoosh.
+Only the explicit slicing stroke supplies sizzle intensity; ordinary swing state
+must not enable the cutting loop in either the frame or rendered-pose update.
+
 When an equipped kitten's main-view pose is temporarily stale or offscreen, call
 `Suspend()` instead of `Stop()`. It pauses held channels while preserving owner,
 target state and pending transitions. A fresh `Update()` resumes and relocates them;

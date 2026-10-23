@@ -38,7 +38,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private bool _freshPoseThisTick;
     private string? _fault;
     private float3 Color => new(_settings.ColorR, _settings.ColorG, _settings.ColorB);
-    private float Length => _blade.Deployment * (!_sliceSequence.EndPresented && _sliceBladeLength > 0 ? _sliceBladeLength : _settings.BladeLength);
+    private float Length => _blade.Deployment * _settings.BladeLength;
 
     internal SaberRuntime(string directory)
     {
@@ -160,7 +160,7 @@ internal sealed partial class SaberRuntime : IDisposable
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
                     !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.HasFreshBodyFrame,
-                    _settings.Volume, _swingSpeed, _sliceSequence.Swinging || _pose.Swinging ? 1 : 0);
+                    _settings.Volume, swingSpeed: _swingSpeed, contact: _sliceSequence.Swinging ? 1 : 0);
             else if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
         }
         catch (Exception ex) { Queue(Command.CancelSlice); _fault = ex.Message; Report("Frame update failed", ex); }
@@ -179,7 +179,7 @@ internal sealed partial class SaberRuntime : IDisposable
             _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
             _audio.Update(owner, emitter, _blade.Deployment, _blade.TargetOn,
                 !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.Eligible,
-                _settings.Volume, _swingSpeed, _sliceSequence.Swinging || _pose.Swinging ? 1 : 0);
+                _settings.Volume, swingSpeed: _swingSpeed, contact: _sliceSequence.Swinging ? 1 : 0);
         }
     }
 
