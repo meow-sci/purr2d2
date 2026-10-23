@@ -116,12 +116,18 @@ namespace Purr2D2.Audio
     public sealed class SaberAudio : IDisposable
     {
         public int Shutdowns, Disposals, Stops, Suspends;
+        public int Updates;
+        public bool LastTargetOn;
+        public float LastDeployment;
         public void Shutdown() { Shutdowns++; Stop(); }
         public void Dispose() => Disposals++;
         public void Stop() => Stops++;
         public void Reset() => Stop();
         public void Suspend() => Suspends++;
         public void Update(KSA.KittenEva owner, double3 position, float deployment, bool targetOn,
-            bool paused, float volume, float swingSpeed = 0) { }
+            bool paused, float volume, float swingSpeed = 0)
+        {
+            Updates++; LastTargetOn = targetOn; LastDeployment = deployment;
+        }
     }
 }

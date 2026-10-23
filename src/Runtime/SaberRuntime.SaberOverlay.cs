@@ -33,7 +33,7 @@ internal sealed partial class SaberRuntime
         && !Program.EditorFlag && Universe.CurrentSystem != null && Program.MainViewport.Visible;
     private bool OverlayCanSwing => _fault == null && _owner is { IsDisposed: false }
         && ReferenceEquals(_owner, Program.ControlledVehicle) && _blade.Equipped && _pose.Eligible
-        && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
+        && !SomersaultActive && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
     private bool OverlayCanStartSwing => OverlayCanSwing && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed());
 
     // The picker runs after this overlay; retain consumption for quick press/release pairs too.
@@ -72,10 +72,13 @@ internal sealed partial class SaberRuntime
 
             var viewport = ImGui.GetMainViewport();
             var kittens = OverlayKittens;
-            _overlayLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(), kittens.Count, OverlayMenuBarInset(viewport));
+            _overlayLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(), kittens.Count,
+                OverlayMenuBarInset(viewport), ShowSomersaultButtons);
             _overlayLayoutAvailable = _overlayLayout.Valid;
             if (!_overlayLayoutAvailable) return;
             var layout = _overlayLayout;
+            bool canSomersault = CanStartSomersault(out var somersaultReason);
+            float fontSize = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
             _overlayListScroll = Math.Clamp(_overlayListScroll, 0, Math.Max(0, kittens.Count * layout.RowHeight - layout.ListBodyHeight));
             DrawKittenColorPicker();
             var draw = ImGui.GetForegroundDrawList(viewport);
@@ -87,7 +90,7 @@ internal sealed partial class SaberRuntime
                 draw.PushClipRect(clipMin, clipMax);
                 try
                 {
-                    // Only these fills are surfaces: each uses exactly 50% alpha, with no window chrome.
+                    // List/swing/slice retain 50% alpha; blue action buttons use 25% below.
                     draw.AddRectFilled(layout.ListMin, layout.ListMax, new ImColor8(0, 0, 0, 128));
                     draw.AddText(layout.ListMin + new float2(layout.Padding, layout.Padding), white, "EVA lightsabers");
                     if (kittens.Count == 0)
@@ -130,30 +133,53 @@ internal sealed partial class SaberRuntime
 
                     draw.AddCircleFilled(layout.SwingCenter, layout.SwingRadius, new ImColor8(0, 0, 0, 128), 64);
                     draw.AddCircleFilled(layout.SliceCenter, layout.SliceRadius, new ImColor8(224, 24, 24, 128), 48);
+                    draw.AddCircleFilled(layout.IgniteCenter, layout.IgniteRadius, new ImColor8(0, 0, 255, 64), 48);
+                    var toggleKitten = AppearanceKitten;
+                    var toggleText = toggleKitten != null && _fault == null ? white : muted;
+                    draw.AddCircle(layout.IgniteCenter, layout.IgniteRadius, new ImColor8(100, 160, 255, 255), 48,
+                        Math.Max(.5f, layout.Scale));
+                    CenterOverlayText(draw, layout.IgniteCenter, toggleText,
+                        toggleKitten != null && SaberEnabledFor(toggleKitten) ? "RETRACT" : "IGNITE", layout.IgniteRadius * 1.6f);
                     var swingText = OverlayCanStartSwing ? white : muted;
-                    CenterOverlayText(draw, layout.SwingCenter - new float2(0, ImGui.GetFontSize() * .55f), swingText, "SWING");
-                    CenterOverlayText(draw, layout.SwingCenter + new float2(0, ImGui.GetFontSize() * .65f), swingText, "hold + drag");
-                    CenterOverlayText(draw, layout.SliceCenter, white, _selectingSlice ? "CANCEL" : "SLICE", layout.SliceRadius * 1.6f);
+                    CenterOverlayText(draw, layout.SwingCenter - new float2(0, fontSize * .55f), swingText, "SWING", layout.SwingRadius * 1.6f, fontSize);
+                    CenterOverlayText(draw, layout.SwingCenter + new float2(0, fontSize * .65f), swingText, "hold + drag", layout.SwingRadius * 1.6f, fontSize);
+                    CenterOverlayText(draw, layout.SliceCenter, SomersaultActive && !_selectingSlice ? muted : white,
+                        _selectingSlice ? "CANCEL" : "SLICE", layout.SliceRadius * 1.6f);
+                    if (layout.ShowSomersaultButtons)
+                    {
+                        DrawSomersaultButton(draw, layout.ForwardCenter, layout.SomersaultRadius, new(0, -1), "FWD", canSomersault);
+                        DrawSomersaultButton(draw, layout.LeftCenter, layout.SomersaultRadius, new(-1, 0), "LEFT", canSomersault);
+                        DrawSomersaultButton(draw, layout.RightCenter, layout.SomersaultRadius, new(1, 0), "RIGHT", canSomersault);
+                        DrawSomersaultButton(draw, layout.BackwardCenter, layout.SomersaultRadius, new(0, 1), "BACK", canSomersault);
+                    }
                     // The small reticle moves inside the fixed circle; the control itself never moves.
                     if (_overlayDrag.Active)
                     {
                         var point = layout.SwingCenter + _overlayDrag.Offset * (layout.SwingRadius * .62f);
                         draw.AddCircle(point, 5 * layout.Scale, white, 16, 1.5f);
                     }
-                    if (SliceStatusVisible && !_windowVisible)
+                    string status = SliceStatusVisible && !_windowVisible ? _sliceStatus
+                        : layout.ShowSomersaultButtons && !canSomersault ? somersaultReason : "";
+                    if (!string.IsNullOrWhiteSpace(status))
                     {
-                        float width = layout.ListMax.X - layout.ListMin.X;
-                        var position = new float2(layout.ListMax.X - width, layout.SwingCenter.Y + layout.SwingRadius + layout.Padding);
-                        float availableHeight = viewport.WorkPos.Y + viewport.WorkSize.Y - position.Y - layout.Padding;
-                        var measured = ImGui.CalcTextSize(_sliceStatus, false, width);
+                        float width = layout.StatusMax.X - layout.StatusMin.X;
+                        var position = layout.StatusMin;
+                        float availableHeight = layout.StatusMax.Y - position.Y;
+                        var measured = ImGui.CalcTextSize(status, false, width * ImGui.GetFontSize() / fontSize)
+                            * (fontSize / ImGui.GetFontSize());
                         // Long failure messages can widen to the left instead of disappearing below the screen.
                         if (availableHeight > 0 && measured.Y > availableHeight)
                         {
                             width = Math.Min(viewport.WorkSize.X - layout.Padding * 2, width * measured.Y / availableHeight);
-                            position.X = layout.ListMax.X - width;
+                            position.X = layout.StatusMax.X - width;
                         }
-                        draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), position + new float2(1), new ImColor8(0, 0, 0, 255), _sliceStatus, width);
-                        draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), position, white, _sliceStatus, width);
+                        draw.PushClipRect(new(viewport.WorkPos.X, layout.StatusMin.Y), layout.StatusMax, true);
+                        try
+                        {
+                            draw.AddText(ImGui.GetFont(), fontSize, position + new float2(layout.Scale), new ImColor8(0, 0, 0, 255), status, width);
+                            draw.AddText(ImGui.GetFont(), fontSize, position, white, status, width);
+                        }
+                        finally { draw.PopClipRect(); }
                     }
                 }
                 finally { draw.PopClipRect(); }
@@ -182,11 +208,31 @@ internal sealed partial class SaberRuntime
         }
     }
 
-    private static void CenterOverlayText(ImDrawListPtr draw, float2 center, ImColor8 color, string text, float maxWidth = float.MaxValue)
+    private static void CenterOverlayText(ImDrawListPtr draw, float2 center, ImColor8 color, string text,
+        float maxWidth = float.MaxValue, float fontSize = 0)
     {
         var size = ImGui.CalcTextSize(text);
-        float scale = size.X > 0 ? Math.Min(1, maxWidth / size.X) : 1;
+        float scale = fontSize > 0 ? Math.Min(1, fontSize / ImGui.GetFontSize()) : 1;
+        if (size.X > 0) scale = Math.Min(scale, maxWidth / size.X);
         draw.AddText(ImGui.GetFont(), ImGui.GetFontSize() * scale, center - size * (scale * .5f), color, text);
+    }
+
+    private static void DrawSomersaultButton(ImDrawListPtr draw, float2 center, float radius, float2 direction,
+        string label, bool available)
+    {
+        // Disabled controls retain the requested fill, and still own their visible circle's clicks.
+        draw.AddCircleFilled(center, radius, new ImColor8(0, 0, 255, 64), 48);
+        var color = available ? new ImColor8(210, 230, 255, 255) : new ImColor8(135, 145, 165, 255);
+        draw.AddCircle(center, radius, color, 48, Math.Max(.5f, radius / 27));
+        var arrow = center - new float2(0, radius * .24f);
+        var tip = arrow + direction * radius * .25f;
+        var tail = arrow - direction * radius * .25f;
+        var normal = new float2(-direction.Y, direction.X);
+        float thickness = Math.Max(.5f, radius / 18);
+        draw.AddLine(tail, tip, color, thickness);
+        draw.AddLine(tip, tip - direction * radius * .21f + normal * radius * .18f, color, thickness);
+        draw.AddLine(tip, tip - direction * radius * .21f - normal * radius * .18f, color, thickness);
+        CenterOverlayText(draw, center + new float2(0, radius * .35f), color, label, radius * 1.65f, radius * .48f);
     }
 
     private static float OverlayMenuBarInset(ImGuiViewportPtr viewport)
@@ -229,8 +275,9 @@ internal sealed partial class SaberRuntime
             || Program.IsModalOpen() || Program.HasMouseInputLatch) return false;
         var pointer = OverlayPointer(window);
         var hit = _overlayLayout.Hit(pointer);
-        if (!_overlayPointerCapture.Consume((int)button, true, hit != OverlayHit.None, Program.HasMouseInputLatch, Program.FrameNumber)) return false;
-        if (button != GlfwMouseButton.Left) return true;
+        if (!_overlayPointerCapture.Consume((int)button, true, hit != OverlayHit.None, Program.HasMouseInputLatch,
+            Program.FrameNumber, out bool firstPress)) return false;
+        if (button != GlfwMouseButton.Left || !firstPress) return true;
 
         switch (hit)
         {
@@ -261,11 +308,27 @@ internal sealed partial class SaberRuntime
                 break;
             case OverlayHit.Slice:
                 ResetOverlaySwing();
-                if (_fault == null && _owner is { IsDisposed: false } && ReferenceEquals(_owner, Program.ControlledVehicle))
+                if ((!SomersaultActive || _selectingSlice) && _fault == null && _owner is { IsDisposed: false }
+                    && ReferenceEquals(_owner, Program.ControlledVehicle))
                     Queue(Command.SelectSlice);
                 break;
+            case OverlayHit.Ignite:
+                QueueControlledSaberToggle();
+                break;
+            case OverlayHit.SomersaultForward: TryQueueOverlaySomersault(SomersaultDirection.Forward); break;
+            case OverlayHit.SomersaultBackward: TryQueueOverlaySomersault(SomersaultDirection.Backward); break;
+            case OverlayHit.SomersaultLeft: TryQueueOverlaySomersault(SomersaultDirection.Left); break;
+            case OverlayHit.SomersaultRight: TryQueueOverlaySomersault(SomersaultDirection.Right); break;
         }
         return true;
+    }
+
+    private void TryQueueOverlaySomersault(SomersaultDirection direction)
+    {
+        // Revalidate after drawing: controlled kitten/contact may have changed since that frame.
+        if (!ShowSomersaultButtons || !CanStartSomersault(out _)) return;
+        ResetOverlaySwing();
+        QueueSomersault(direction);
     }
 
     /// <summary>Keep held drags, including movement outside the circle, away from camera controllers.</summary>

@@ -548,6 +548,9 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "tests/CoreChecks.cs",
         source / "tests/PoseChecks.cs",
         source / "tests/SlicingPhysicsChecks.cs",
+        source / "src/Core/SomersaultMotion.cs",
+        source / "src/Core/SomersaultSequence.cs",
+        source / "tests/SomersaultMotionChecks.cs",
     ]
     target_sources = [
         source / "src/Cutting/PartSliceTargeting.cs",
@@ -561,7 +564,7 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
     ]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); OverlayDragChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",
@@ -599,6 +602,31 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         source / "src/Rendering/FragmentAssetWriter.cs",
         source / "tests/FragmentAssetChecks.cs",
     ]
+    somersault_runtime_sources = [
+        source / "src/Core/SomersaultMotion.cs",
+        source / "src/Core/AssistedSliceSequence.cs",
+        source / "src/Core/SaberSwing.cs",
+        source / "src/Runtime/SaberRuntime.Somersault.cs",
+        source / "tests/somersault/RuntimeHostStubs.cs",
+        source / "tests/somersault/RuntimeChecks.cs",
+    ]
+    somersault_worker_sources = [
+        source / "src/Core/SomersaultMotion.cs",
+        source / "src/Core/SomersaultSequence.cs",
+        source / "src/Runtime/SomersaultMotionController.cs",
+        source / "tests/motion/HostStubs.cs",
+        source / "tests/motion/SomersaultWorkerChecks.cs",
+    ]
+    somersault_pose_sources = [
+        source / "src/Core/SomersaultMotion.cs",
+        source / "src/Core/SaberSwing.cs",
+        source / "src/Pose/SaberPoseController.cs",
+        source / "src/Pose/SaberPoseMath.cs",
+        source / "src/Pose/SomersaultPoseController.cs",
+        source / "src/Pose/SomersaultPoseMath.cs",
+        source / "tests/somersault/PoseHostStubs.cs",
+        source / "tests/SomersaultPoseChecks.cs",
+    ]
     outputs = []
     result = 0
     for name, required, program in (
@@ -609,14 +637,19 @@ def run_managed_checks(source: Path) -> tuple[int, str]:
         ("IsolationChecks", isolation_sources, None),
         ("FragmentAssetChecks", fragment_asset_sources,
          "internal static class Program { static void Main() => FragmentAssetChecks.Run(); }"),
+        ("SomersaultRuntimeChecks", somersault_runtime_sources, None),
+        ("SomersaultWorkerChecks", somersault_worker_sources, None),
+        ("SomersaultPoseChecks", somersault_pose_sources, None),
     ):
-        code, output = _run_managed_project(source, name, required, program)
+        code, output = _run_managed_project(source, name, required, program,
+                                           harmony=name == "SomersaultWorkerChecks")
         outputs.append(output)
         result = result or code
     return result, "\n".join(outputs)
 
 
-def _run_managed_project(source: Path, name: str, required: list[Path], program: str | None) -> tuple[int, str]:
+def _run_managed_project(source: Path, name: str, required: list[Path], program: str | None,
+                         *, harmony: bool = False) -> tuple[int, str]:
     """Generate isolated projects so game stubs cannot leak into the core checks or mod."""
     numerics = (source.parent / "ksa-game-assemblies/current/dll/Brutal.Numerics.dll").resolve()
     missing = [path.relative_to(source).as_posix() for path in required if not path.is_file()]
@@ -638,6 +671,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
     )
     numerics_path = Path(os.path.relpath(numerics, check_dir)).as_posix()
     extra_references = "\n".join(f'<Reference Include="{name}"><HintPath>{Path(numerics_path).with_name(name + ".dll").as_posix()}</HintPath><Private>true</Private></Reference>' for name in ("BepuPhysics", "BepuUtilities"))
+    extra_packages = '<PackageReference Include="Lib.Harmony" Version="2.4.2" />' if harmony else ''
     project = textwrap.dedent(f"""\
         <Project Sdk="Microsoft.NET.Sdk">
           <PropertyGroup>
@@ -652,6 +686,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
           </ItemGroup>
           <ItemGroup>
             {extra_references}
+            {extra_packages}
             <Reference Include="Brutal.Numerics">
               <HintPath>{numerics_path}</HintPath>
               <Private>true</Private>

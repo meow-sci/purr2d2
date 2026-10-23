@@ -125,7 +125,12 @@ public sealed class SaberOverlayPointerCapture
     public bool OwnsScroll(bool overOverlay) => overOverlay || AnyHeld;
 
     public bool Consume(int button, bool pressed, bool overOverlay, bool gameOwnsGesture, ulong frame)
+        => Consume(button, pressed, overOverlay, gameOwnsGesture, frame, out _);
+
+    /// <summary>Own duplicate presses too, but authorize an action only on a new button gesture.</summary>
+    public bool Consume(int button, bool pressed, bool overOverlay, bool gameOwnsGesture, ulong frame, out bool firstPress)
     {
+        firstPress = false;
         if ((uint)button >= 32) return false;
         int bit = 1 << button;
         if (!pressed)
@@ -136,6 +141,7 @@ public sealed class SaberOverlayPointerCapture
         else
         {
             if (gameOwnsGesture || (!overOverlay && !AnyHeld)) return false;
+            firstPress = (_buttons & bit) == 0;
             _buttons |= bit;
             // Program and the ImGui backend are independent event subscribers. A game-side
             // release must not erase this decision before the backend receives the same event.

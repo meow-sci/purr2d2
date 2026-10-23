@@ -95,6 +95,7 @@ static class HostInspection
             CheckDeviceMeshFields(host);
             if (!prepare.IsNil) CheckFrameSeam(host, prepare);
             CheckRenderSeams(host);
+            CheckSomersaultSeams(host);
             CheckEntry(mod);
             CheckReferences(host, mod);
             Console.WriteLine(_failures == 0
@@ -272,6 +273,53 @@ static class HostInspection
             var problem = OrderedUnique(calls, stages);
             Check(problem == null, $"Program.{method} orders saber translucency after the scene and before post-processing",
                 problem ?? "Review SaberRenderer's translucency hook against the current host.");
+        }
+    }
+
+    private static void CheckSomersaultSeams(Image image)
+    {
+        Expected prepareWorkers = new("KSA.Universe", "PrepareVehicleWorkers", "System.Void", true,
+            MethodAttributes.Public, "KSA.SimStep");
+        Expected prepareVehicle = new("KSA.Vehicle", "PrepareWorker", "System.Void", false,
+            MethodAttributes.Public, "KSA.SimStep");
+        Expected prepareKitten = new("KSA.KittenEva", "PrepareWorker", "System.Void", false,
+            MethodAttributes.Public, "KSA.SimStep");
+        var workers = CheckMethod(image, prepareWorkers);
+        var vehicle = CheckMethod(image, prepareVehicle);
+        var kitten = CheckMethod(image, prepareKitten);
+        Expected[] snapshots =
+        [
+            new("KSA.VehicleUpdateState", "PrepareFromVehicle", "System.Void", false, MethodAttributes.Public,
+                "System.Boolean", "KSA.ManualControlInputs"),
+            new("KSA.VehicleUpdateState", "PrepareCharacterFromVehicle", "System.Void", false, MethodAttributes.Public,
+                "KSA.CharacterControlInputs&", "KSA.KittenLocomotionTuning&"),
+            new("KSA.VehicleUpdateState", "PrepareLadderFromVehicle", "System.Void", false, MethodAttributes.Public,
+                "KSA.LadderWorkerInputs&", "System.ReadOnlySpan`1<KSA.LadderNode>"),
+        ];
+        foreach (var method in snapshots) CheckMethod(image, method);
+        if (!vehicle.IsNil)
+        {
+            Check((image.Reader.GetMethodDefinition(vehicle).Attributes & MethodAttributes.Virtual) != 0,
+                "Vehicle.PrepareWorker remains virtual for EVA preparation",
+                "Review the somersault wrapper before using the changed worker handoff.");
+            Check(OrderedUnique(image.Calls(vehicle), [snapshots[0].Key]) == null,
+                "Vehicle.PrepareWorker has one native kinematic snapshot",
+                "The somersault handoff depends on a completed native worker snapshot.");
+        }
+        if (!workers.IsNil)
+        {
+            var problem = OrderedUnique(image.Calls(workers),
+                [prepareVehicle.Key, "KSA.Vehicle.TakeUpdateStateIfOrphaned():KSA.VehicleUpdateState"]);
+            Check(problem == null, "Somersault handoff follows the sole PrepareWorker call before orphan transfer",
+                problem ?? "Review SomersaultMotionController.InsertWorkerHandoff.");
+        }
+        if (!kitten.IsNil)
+        {
+            var problem = OrderedUnique(image.Calls(kitten),
+                [prepareVehicle.Key, "KSA.KittenEva.UpdateLadderDetection():System.Void",
+                    "KSA.Vehicle.PrepareCharacterWorkerState(KSA.CharacterControlInputs&,KSA.KittenLocomotionTuning&):System.Void"]);
+            Check(problem == null, "EVA worker preparation completes base, ladder and character snapshots in order",
+                problem ?? "Move owned input overrides after every native input copy.");
         }
     }
 

@@ -13,6 +13,17 @@ namespace Purr2D2.Pose;
 /// </summary>
 public sealed class SaberPoseController : IDisposable
 {
+    // The equipment-independent acrobatics layer uses this main-thread notification
+    // to keep tuck -> hand solve -> root rotation explicit even when equip changes.
+    internal static event Action<KittenEva>? ProcessorsChanged;
+    internal static bool IsProcessorFor(IAnimProcessor processor, KittenEva kitten) =>
+        processor is PoseProcessor pose && ReferenceEquals(pose._owner.Kitten, kitten);
+    internal static bool IsActiveProcessor(IAnimProcessor processor) => processor is PoseProcessor pose && pose._owner.Active;
+    internal static void SetVisualRootTransform(IAnimProcessor processor, float4x4 transform)
+    {
+        if (processor is PoseProcessor pose) pose._owner._visualRootTransform = transform;
+    }
+
     private static readonly FieldInfo? AvatarField = typeof(KittenRenderable).GetField(
         "_characterAvatar", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -27,6 +38,7 @@ public sealed class SaberPoseController : IDisposable
     private string? _failure;
     private float3? _sliceDirection;
     private float _sliceAngle;
+    private float4x4 _visualRootTransform = float4x4.Identity;
     private double _swingTime = SaberSwing.Duration;
     internal bool Swinging => _swingTime < SaberSwing.Duration;
     private float SwingAngle => _sliceDirection.HasValue ? _sliceAngle : SaberSwing.Angle(_swingTime / SaberSwing.Duration);
@@ -86,6 +98,7 @@ public sealed class SaberPoseController : IDisposable
                 return Fail("The kitten rig is missing Shoulder_R, Elbow_R or Wrist_R.");
             _mmuWasEnabled = avatar.Attachments.Mmu.Enabled;
             avatar.Core.CharacterModel.AnimProcessors.Add(_processor);
+            ProcessorsChanged?.Invoke(kitten);
             return true;
         }
         catch (Exception error)
@@ -108,10 +121,10 @@ public sealed class SaberPoseController : IDisposable
         float target = equipped && Eligible ? 1f : 0f;
         Blend = MoveTowards(Blend, target, dt / 0.18f);
         _swingTime = Math.Min(SaberSwing.Duration, _swingTime + dt);
-        if (!equipped || !Eligible) _hasBodyFrame = false;
+        if ((!equipped && Blend == 0) || !Eligible) _hasBodyFrame = false;
         if (_avatar is not null)
         {
-            bool hide = HideMmuWhenEquipped && equipped && Eligible;
+            bool hide = HideMmuWhenEquipped && (equipped || Blend > 0) && Eligible;
             if (hide && !_changedMmu && _avatar.Attachments.Mmu.Enabled)
             {
                 _mmuWasEnabled = true;
@@ -178,6 +191,7 @@ public sealed class SaberPoseController : IDisposable
         Blend = 0f;
         _swingTime = SaberSwing.Duration;
         ClearSliceSwing();
+        _visualRootTransform = float4x4.Identity;
         _hasBodyFrame = false;
         _failure = null;
         FrameNumber = ulong.MaxValue;
@@ -210,6 +224,7 @@ public sealed class SaberPoseController : IDisposable
 
     private float3 Direction => _sliceDirection ?? Unit(float3.Transform(BladeDirectionModel,
         floatQuat.CreateFromAxisAngle(float3.UnitY, SwingAngle)), float3.UnitY);
+    private float3 PublishedDirection => Unit(float3.TransformNormal(Direction, _visualRootTransform), Direction);
 
     private void Publish(float4x4 emitterInModelCm, float4x4 modelToEgo)
     {
@@ -241,7 +256,7 @@ public sealed class SaberPoseController : IDisposable
 
     private sealed class PoseProcessor : IAnimProcessor
     {
-        private readonly SaberPoseController _owner;
+        internal readonly SaberPoseController _owner;
         private readonly int _shoulder;
         private readonly int _elbow;
         private readonly int _wrist;
@@ -320,12 +335,14 @@ public sealed class SaberPoseController : IDisposable
             try
             {
                 Span<float4x4> world = skeleton.WorldTransforms;
-                float3 grip = Grip(world);
-                float3 direction = _owner.Direction;
+                float3 grip = Grip(world, final: true);
+                float3 direction = _owner.PublishedDirection;
                 if (_index >= 0 && _pinky >= 0)
                     direction = Unit(world[_index].Translation - world[_pinky].Translation, direction);
-                float3 across = Unit(float3.Cross(float3.UnitY, direction), float3.UnitX);
-                float3 up = Unit(float3.Cross(direction, across), float3.UnitY);
+                float3 modelUp = Unit(float3.TransformNormal(float3.UnitY, _owner._visualRootTransform), float3.UnitY);
+                float3 modelAcross = Unit(float3.TransformNormal(float3.UnitX, _owner._visualRootTransform), float3.UnitX);
+                float3 across = Unit(float3.Cross(modelUp, direction), modelAcross);
+                float3 up = Unit(float3.Cross(direction, across), modelUp);
                 float3 emitter = grip + direction * 12f;
                 var emitterInModel = new float4x4(
                     across.X, across.Y, across.Z, 0,
@@ -340,7 +357,7 @@ public sealed class SaberPoseController : IDisposable
             }
         }
 
-        private float3 Grip(ReadOnlySpan<float4x4> world)
+        private float3 Grip(ReadOnlySpan<float4x4> world, bool final = false)
         {
             if (_fingerRoots.Length > 0)
             {
@@ -349,7 +366,7 @@ public sealed class SaberPoseController : IDisposable
                 return sum / _fingerRoots.Length;
             }
             // Unknown hand rig: keep a conservative, configurable arm pose, attached to its real wrist.
-            return world[_wrist].Translation + _owner.Direction * 3f;
+            return world[_wrist].Translation + (final ? _owner.PublishedDirection : _owner.Direction) * 3f;
         }
 
         private void SolveArm(Skeleton skeleton, Span<TransformTRS> local, float3 shoulder, float3 elbow, float3 wrist, float3 target)

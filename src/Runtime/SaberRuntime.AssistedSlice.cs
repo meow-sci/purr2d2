@@ -34,6 +34,7 @@ internal sealed partial class SaberRuntime
 
     private void SelectPartToSlice()
     {
+        if (SomersaultActive && !_selectingSlice) return;
         if (_sliceSequence.Active) return;
         if (_selectingSlice) { CancelAssistedSlice("Slice selection cancelled."); return; }
         if (_owner == null) return;
@@ -45,7 +46,7 @@ internal sealed partial class SaberRuntime
 
     private void BeginAssistedSlice(SliceTarget? target, Ray? ray)
     {
-        if (_sliceSequence.Active || _owner == null || _slicer.Busy) return;
+        if (SomersaultActive || _sliceSequence.Active || _owner == null || _slicer.Busy) return;
         if (!TrySliceReach(out var baseBody, out var reach, out var reason)
             || (target != null && !_targeting.CheckSliceTarget(_owner, target, baseBody, reach, out reason)))
         { _selectingSlice = true; _sliceStatus = reason; return; }

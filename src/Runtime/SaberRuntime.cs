@@ -55,6 +55,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         GameHooks.Runtime = this;
         GameHooks.Install(harmony);
+        _somersaultMotion.Install(harmony);
         _renderer.Initialize(harmony);
         RuntimeFragmentAssets.Install(harmony);
         _audio.Initialize();
@@ -78,17 +79,20 @@ internal sealed partial class SaberRuntime : IDisposable
             if (selected != null && !_currentKittens.Contains(selected)) selected = null;
             if (!ReferenceEquals(_owner, selected)) SetControlledKitten(selected);
             ApplyKittenSaberRequests();
+            UpdateSomersault();
             _slicer.PumpRetired();
             while (_commands.TryDequeue(out var item))
             {
                 if ((_fault != null && item.Value != Command.CancelSlice) || !ReferenceEquals(item.Owner, _owner) || _owner == null) continue;
                 if ((_sliceSequence.Active || _selectingSlice) && item.Value is Command.Equip or Command.Ignite)
                     CancelAssistedSlice("Slice cancelled by manual control.");
+                if ((item.Value is Command.Equip or Command.Ignite) && _activeSaber is { } manualSaber)
+                    manualSaber.TogglePhase = SaberTogglePhase.None;
                 switch (item.Value)
                 {
                     case Command.SelectSlice: SelectPartToSlice(); break;
                     case Command.CutPicked: BeginAssistedSlice(item.PartTarget, item.PickRay); break;
-                    case Command.Swing: if (!_sliceSequence.Active || _sliceSequence.EndPresented) _pose.Swing(); break;
+                    case Command.Swing: if (!SomersaultActive && (!_sliceSequence.Active || _sliceSequence.EndPresented)) _pose.Swing(); break;
                     case Command.CancelSlice: CancelAssistedSlice("Slice cancelled."); break;
                     case Command.Equip:
                         _blade.Equip(!_blade.Equipped);
@@ -108,22 +112,13 @@ internal sealed partial class SaberRuntime : IDisposable
             double speed = Universe.GetSimulationSpeed();
             bool supportedSpeed = SaberLimits.SupportsSpeed(speed);
             double simulationDt = SaberLimits.AppliedDelta(newStep, speed, applied.DeltaTime);
-            _pose.GripOffsetFromChestCm = new(_settings.GripX, _settings.GripY, _settings.GripZ);
-            _pose.BladeDirectionModel = new(_settings.AimX, _settings.AimY, _settings.AimZ);
-            _pose.FingerCurlRadians = _settings.FingerCurl;
-            _pose.HideMmuWhenEquipped = _settings.HideMmu;
+            ConfigureSaberPose(_pose);
             ApplyOverlaySwing(playerDt);
-            _pose.Update(supportedSpeed ? playerDt : 0, _blade.Equipped);
-            _freshPoseThisTick = _pose.MainPoseGeneration != _consumedPoseGeneration && _pose.HasFreshBodyFrame;
-            _consumedPoseGeneration = _pose.MainPoseGeneration;
-            if (_activeSaber != null)
-            {
-                _activeSaber.ConsumedPoseGeneration = _consumedPoseGeneration;
-                _activeSaber.FreshPoseThisTick = _freshPoseThisTick;
-            }
-            if (!_pose.Eligible) _blade.SetIgnited(false);
             // Equip/ignition and swings are visual: use player time, even between solver steps.
-            _blade.Advance(supportedSpeed ? playerDt : 0);
+            var activeSaber = _activeSaber ?? _idleSaber;
+            AdvanceKittenSaber(activeSaber, supportedSpeed ? playerDt : 0);
+            _freshPoseThisTick = activeSaber.FreshPoseThisTick;
+            _consumedPoseGeneration = activeSaber.ConsumedPoseGeneration;
             // Structural work happens only for the explicit swing. Contact is visual only.
             if (_sliceSequence.Active) UpdateAssistedSlice(playerDt);
             if ((!_sliceSequence.Active || _sliceSequence.EndPresented)
@@ -212,12 +207,15 @@ internal sealed partial class SaberRuntime : IDisposable
     }
     private void EnsureBlade()
     {
-        if (_owner == null || _blade.Equipped) return;
+        if (_owner == null) return;
+        if (_activeSaber is { } saber) saber.TogglePhase = SaberTogglePhase.None;
+        if (_blade.Equipped) return;
         _blade.Equip(true); _pose.Bind(_owner);
     }
 
     internal void ResetWorld()
     {
+        ResetSomersault();
         CancelAssistedSlice(""); ResetOverlaySwing(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
         _renderer.ClearEffects(); _contactProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
         _renderer.ClearEmitters();
@@ -228,6 +226,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         if (_disposed) return;
         _disposed = true; _ready = false;
+        Cleanup(_somersaultMotion.Dispose, "Somersault motion"); Cleanup(_somersaultPose.Dispose, "Somersault pose");
         Cleanup(ResetWorld, "World"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
     }
     private static void Cleanup(Action action, string component)

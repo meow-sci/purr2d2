@@ -1,0 +1,116 @@
+using KSA;
+using Purr2D2.Core;
+using Purr2D2.Pose;
+
+namespace Purr2D2.Runtime;
+
+// Compiles the production request/availability/lifetime partial. Only the game,
+// motion and pose boundaries are fakes; their own fixtures test those adapters.
+internal sealed partial class SaberRuntime
+{
+    private bool _ready = true, _disposed = false;
+    private string? _fault = null;
+    private KittenEva? _owner;
+    private readonly SaberPoseController _pose = new();
+    private readonly AssistedSliceSequence _sliceSequence = new();
+    private bool _selectingSlice;
+    private int _cancelledSlices, _resetDrags;
+    private void CancelAssistedSlice(string reason)
+    { _selectingSlice = false; _sliceSequence.Cancel(); _cancelledSlices++; }
+    private void ResetOverlaySwing() => _resetDrags++;
+
+    public static void Main()
+    {
+        var runtime = new SaberRuntime();
+        KittenEva first = new(), second = new();
+        runtime._owner = first; Program.ControlledVehicle = first;
+        runtime.UpdateSomersault();
+        Check(runtime._somersaultPose.Eligible && runtime.CanStartSomersault(out _)
+            && runtime.ShowSomersaultButtons, "controlled landed kitten binds an independent movement pose");
+        foreach (var direction in Enum.GetValues<SomersaultDirection>())
+        {
+            runtime.QueueSomersault(direction);
+            runtime.QueueSomersault(SomersaultDirection.Right);
+            Check(runtime.SomersaultActive && runtime._somersaultMotion.Launches == (int)direction,
+                "queued clicks do not mutate physics and busy clicks cannot replace the pending direction");
+            runtime.UpdateSomersault();
+            Check(runtime._somersaultMotion.Direction == direction
+                && runtime._somersaultMotion.Launches == (int)direction + 1,
+                "each accepted direction is dispatched exactly once");
+            runtime.UpdateSomersault();
+            runtime.QueueSomersault(direction);
+            Check(runtime._somersaultMotion.Launches == (int)direction + 1
+                && !runtime._somersaultRequest.HasValue, "active flight never queues a second jump");
+            runtime._somersaultMotion.Reset();
+        }
+
+        first.LocomotionState.Mode = LocomotionMode.Airborne;
+        first.Situation = Situation.Freefall;
+        Check(!runtime.ShowSomersaultButtons, "airborne controls are hidden");
+        foreach (var mode in new[] { LocomotionMode.Mmu, LocomotionMode.Ladder, LocomotionMode.Swimming, LocomotionMode.Tumbling })
+        {
+            first.LocomotionState.Mode = mode; first.Situation = Situation.Landed;
+            Check(!runtime.ShowSomersaultButtons, "terrain proximity alone cannot show controls in another locomotion mode");
+        }
+        first.LocomotionState.Mode = LocomotionMode.Grounded;
+        first.Situation = Situation.Rolling;
+        Check(runtime.ShowSomersaultButtons, "walking on terrain shows the controls");
+
+        int launches = runtime._somersaultMotion.Launches;
+        runtime.QueueSomersault(SomersaultDirection.Forward);
+        Program.ControlledVehicle = second;
+        runtime.UpdateSomersault();
+        Check(runtime._somersaultMotion.Launches == launches && !runtime._somersaultRequest.HasValue
+            && !runtime.ShowSomersaultButtons, "changed controlled vehicle invalidates stale queued ownership");
+        runtime._owner = second;
+        runtime.UpdateSomersault();
+        Check(runtime._somersaultPose.Owner == second && !runtime.SomersaultActive,
+            "owner switch releases the old pose and binds the new owner");
+
+        runtime._sliceSequence.Start();
+        runtime.QueueSomersault(SomersaultDirection.Forward);
+        Check(!runtime._somersaultRequest.HasValue && !runtime.CanStartSomersault(out _),
+            "an unfinished slice stroke blocks movement");
+        runtime._sliceSequence.Advance(.1, true, true, false);
+        for (int i = 0; i < 100; i++) runtime._sliceSequence.Advance(.1, true, true, false);
+        runtime._sliceSequence.NotifyRendered();
+        Check(runtime._sliceSequence.EndPresented, "fixture has a completed stroke with pending cut work");
+        runtime.QueueSomersault(SomersaultDirection.Left);
+        runtime.UpdateSomersault();
+        Check(runtime._somersaultMotion.Active && runtime._sliceSequence.Active && runtime._cancelledSlices == 0,
+            "moving after a displayed stroke preserves pending cut work");
+        runtime._somersaultMotion.Reset(); runtime._sliceSequence.Cancel();
+
+        runtime._selectingSlice = true;
+        runtime.QueueSomersault(SomersaultDirection.Backward);
+        runtime.UpdateSomersault();
+        Check(!runtime._selectingSlice && runtime._cancelledSlices == 1 && runtime._resetDrags > 0,
+            "accepted movement releases uncommitted slice selection and temporary drag pose");
+        runtime._somersaultMotion.Reset();
+
+        runtime._pose.Swinging = true;
+        Check(!runtime.CanStartSomersault(out _), "ordinary swing finishes before a flip acquires the pose");
+        runtime._pose.Swinging = false;
+        runtime.QueueSomersault(SomersaultDirection.Forward);
+        runtime._somersaultMotion.Available = false;
+        launches = runtime._somersaultMotion.Launches;
+        runtime.UpdateSomersault();
+        Check(runtime._somersaultMotion.Launches == launches && !runtime._somersaultRequest.HasValue,
+            "availability is rechecked at handoff and a rejected request is not deferred");
+        runtime._somersaultMotion.Available = true;
+
+        runtime.QueueSomersault(SomersaultDirection.Forward); runtime.UpdateSomersault();
+        runtime._somersaultPose.Eligible = false;
+        runtime.UpdateSomersault();
+        Check(!runtime._somersaultMotion.Active, "lost visual rig releases owned movement without a second launch");
+        runtime.ResetSomersault(); runtime.ResetSomersault();
+        Check(!runtime.SomersaultActive && runtime._somersaultPose.Owner == null,
+            "world/unload cleanup is idempotent");
+        runtime._disposed = true;
+        Check(!runtime.CanStartSomersault(out _), "disposed runtime rejects new commands");
+        Console.WriteLine("Somersault runtime arbitration checks passed.");
+    }
+
+    private static void Check(bool value, string message)
+    { if (!value) throw new InvalidOperationException(message); }
+}

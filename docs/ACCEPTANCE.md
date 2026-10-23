@@ -1,5 +1,15 @@
 # Acceptance record
 
+## Sequenced saber toggles and ignite control (2026-10-22)
+
+EVA checkboxes now raise the equipped hilt before ignition. Disabling keeps the blade, hand pose and audio alive while retracting, then lowers the arm before removing the hilt and restoring the MMU cosmetics. Switching direction preserves the current blade length and arm blend. Pause holds every stage; control changes preserve each kitten's pending sequence. Boarding/world changes retain immediate resource cleanup.
+
+A blue IGNITE/RETRACT circle above-left of SWING uses the same queued request for the currently controlled EVA kitten. Its radius matches SLICE and its fill alpha is 64/255 (25%). Label and checkbox reflect the latest queued intent. Circular hit testing consumes paired presses/releases without a surrounding square, and the new control stays separate from the list, swing, slice and somersault controls across the tested viewport sizes.
+
+Release build passes with zero warnings/errors against the shared checkout, including the concurrent somersault additions. Production per-kitten runtime/pose checks cover stage order, sound-path retention, pause, interrupted equip, reversed retraction, control switching, button targeting, queued double-clicks and cleanup. Overlay checks cover circle geometry and pointer capture from 240×220 through 3840×2160. Logs: `artifacts/checkbox-build.log`, `artifacts/checkbox-kitten-checks.log`, `artifacts/checkbox-overlay-checks.log`.
+
+Native retest: enable/disable with each checkbox and the new circle; confirm full raise/ignite and retract/lower/stow with spatial sound. Reverse during every stage, pause/resume, switch control between two EVA kittens, board during a transition, and exercise the controls beside the new jump animations. In-game appearance and audio acceptance remain unverified.
+
 ## Material grouping and staged native isolation (2026-10-22)
 
 New fragment assets merge render surfaces by durable material ID and glass flag into one visual SubPart, while preserving separate cap surfaces and full picking geometry. Original closed-solid grouping must survive export/reload for repeat cuts: flattening adjacent closed cubes into one authored group was shown to reinterpret volume 2 as 0.048 of backed panels. The merged format therefore preserves topology provenance independently of render-module membership. Existing generated assets remain valid and are not rewritten.

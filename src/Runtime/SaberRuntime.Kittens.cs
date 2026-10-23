@@ -25,6 +25,7 @@ internal sealed partial class SaberRuntime
     ];
 
     private readonly record struct KittenSaberRequest(KittenEva Kitten, bool Enabled);
+    private enum SaberTogglePhase { None, Equipping, Retracting, Unequipping }
 
     private sealed class KittenSaber
     {
@@ -37,6 +38,7 @@ internal sealed partial class SaberRuntime
         internal double PreviousTipTime;
         internal float SwingSpeed;
         internal float3 Color = new(.12f, .75f, 1);
+        internal SaberTogglePhase TogglePhase;
 
         internal KittenSaber(Action<KittenEva, IViewport, float4x4>? draw = null) => Pose = new(draw);
 
@@ -46,6 +48,7 @@ internal sealed partial class SaberRuntime
             Cleanup(Audio.Dispose, "Kitten audio");
             Cleanup(Pose.Dispose, "Kitten pose");
             Blade.Reset();
+            TogglePhase = SaberTogglePhase.None;
         }
     }
 
@@ -82,7 +85,9 @@ internal sealed partial class SaberRuntime
 
     private bool SaberEnabledFor(KittenEva kitten)
     {
-        bool enabled = _kittenSabers.TryGetValue(kitten, out var saber) && saber.Blade.Equipped && saber.Blade.TargetOn;
+        bool enabled = _kittenSabers.TryGetValue(kitten, out var saber)
+            && (saber.TogglePhase == SaberTogglePhase.Equipping
+                || saber.TogglePhase == SaberTogglePhase.None && saber.Blade.Equipped && saber.Blade.TargetOn);
         // Reflect the latest click while waiting for the next settled handoff.
         foreach (var request in _kittenSaberRequests)
             if (ReferenceEquals(request.Kitten, kitten)) enabled = request.Enabled;
@@ -94,6 +99,11 @@ internal sealed partial class SaberRuntime
         if (_ready && !_disposed && _fault == null && !Program.EditorFlag
             && !kitten.IsDisposed && _currentKittens.Contains(kitten) && _kittenSaberRequests.Count < 128)
             _kittenSaberRequests.Enqueue(new(kitten, enabled));
+    }
+
+    private void QueueControlledSaberToggle()
+    {
+        if (AppearanceKitten is { } kitten) QueueKittenSaber(kitten, !SaberEnabledFor(kitten));
     }
 
     private static string KittenLabel(KittenEva kitten) => kitten.Id;
@@ -167,14 +177,64 @@ internal sealed partial class SaberRuntime
                 || !_kittenSabers.TryGetValue(request.Kitten, out var saber)) continue;
             if (ReferenceEquals(saber, _activeSaber) && (_sliceSequence.Active || _selectingSlice))
                 CancelAssistedSlice("Slice cancelled by manual control.");
-            saber.Blade.Equip(request.Enabled);
-            saber.Blade.SetIgnited(request.Enabled);
-            if (request.Enabled) saber.Pose.Bind(request.Kitten);
+            if (request.Enabled)
+            {
+                saber.Blade.Equip(true);
+                saber.Pose.Bind(request.Kitten);
+                saber.TogglePhase = SaberTogglePhase.Equipping;
+            }
             else
             {
-                saber.Pose.Unbind(); saber.Audio.Stop(); _renderer.RemoveEmitter(request.Kitten);
-                saber.FreshPoseThisTick = saber.HasPreviousTip = false; saber.SwingSpeed = 0;
+                // Keep the hilt, pose and channels alive through retraction and
+                // arm lowering. A later enable reverses from the current pose/length.
+                saber.Blade.SetIgnited(false);
+                if (saber.TogglePhase != SaberTogglePhase.Unequipping)
+                    saber.TogglePhase = saber.Blade.Equipped ? SaberTogglePhase.Retracting : SaberTogglePhase.None;
+                if (ReferenceEquals(saber, _activeSaber)) ResetOverlaySwing();
             }
+        }
+    }
+
+    private void ConfigureSaberPose(SaberPoseController pose)
+    {
+        pose.GripOffsetFromChestCm = new(_settings.GripX, _settings.GripY, _settings.GripZ);
+        pose.BladeDirectionModel = new(_settings.AimX, _settings.AimY, _settings.AimZ);
+        pose.FingerCurlRadians = _settings.FingerCurl;
+        pose.HideMmuWhenEquipped = _settings.HideMmu;
+    }
+
+    // Shared by controlled and background kittens. Each completed stage is
+    // presented for a frame before the next stage starts; pause advances none.
+    private void AdvanceKittenSaber(KittenSaber saber, double playerDt)
+    {
+        var pose = saber.Pose;
+        bool advancing = double.IsFinite(playerDt) && playerDt > 0;
+        if (advancing)
+        {
+            if (saber.TogglePhase == SaberTogglePhase.Equipping && pose.Eligible && pose.Blend == 1)
+            {
+                saber.Blade.SetIgnited(true);
+                saber.TogglePhase = SaberTogglePhase.None;
+            }
+            else if (saber.TogglePhase == SaberTogglePhase.Retracting && saber.Blade.Deployment == 0)
+                saber.TogglePhase = SaberTogglePhase.Unequipping;
+        }
+        pose.Update(playerDt, saber.Blade.Equipped && saber.TogglePhase != SaberTogglePhase.Unequipping);
+        saber.FreshPoseThisTick = pose.MainPoseGeneration != saber.ConsumedPoseGeneration && pose.HasFreshBodyFrame;
+        saber.ConsumedPoseGeneration = pose.MainPoseGeneration;
+        if (!pose.Eligible)
+        {
+            saber.Blade.SetIgnited(false);
+            if (saber.TogglePhase == SaberTogglePhase.Equipping) saber.TogglePhase = SaberTogglePhase.Retracting;
+        }
+        saber.Blade.Advance(playerDt);
+        if (advancing && saber.TogglePhase == SaberTogglePhase.Unequipping && pose.Blend == 0)
+        {
+            saber.Blade.Equip(false);
+            if (pose.Kitten is { } kitten) _renderer.RemoveEmitter(kitten);
+            pose.Unbind(); saber.Audio.Stop();
+            saber.TogglePhase = SaberTogglePhase.None;
+            saber.FreshPoseThisTick = saber.HasPreviousTip = false; saber.SwingSpeed = 0;
         }
     }
 
@@ -184,16 +244,9 @@ internal sealed partial class SaberRuntime
         {
             var saber = pair.Value;
             if (ReferenceEquals(saber, _activeSaber)) continue;
+            ConfigureSaberPose(saber.Pose);
+            AdvanceKittenSaber(saber, playerDt);
             var pose = saber.Pose;
-            pose.GripOffsetFromChestCm = new(_settings.GripX, _settings.GripY, _settings.GripZ);
-            pose.BladeDirectionModel = new(_settings.AimX, _settings.AimY, _settings.AimZ);
-            pose.FingerCurlRadians = _settings.FingerCurl;
-            pose.HideMmuWhenEquipped = _settings.HideMmu;
-            pose.Update(playerDt, saber.Blade.Equipped);
-            saber.FreshPoseThisTick = pose.MainPoseGeneration != saber.ConsumedPoseGeneration && pose.HasFreshBodyFrame;
-            saber.ConsumedPoseGeneration = pose.MainPoseGeneration;
-            if (!pose.Eligible) saber.Blade.SetIgnited(false);
-            saber.Blade.Advance(playerDt);
             if (saber.Blade.Equipped && saber.FreshPoseThisTick && pose.TryGetBodyFrame(out var emitter))
                 _renderer.SetEmitter(pair.Key, emitter, saber.Blade.Deployment * _settings.BladeLength, saber.Color);
             else if (saber.Blade.Equipped) saber.Audio.Suspend();
