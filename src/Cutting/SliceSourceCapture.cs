@@ -10,6 +10,8 @@ namespace Purr2D2.Cutting;
 /// <summary>Copies native buffers in small main-thread chunks. The worker receives no live references.</summary>
 internal sealed class SliceSourceCapture : IDisposable
 {
+    private static int _cutSequence = Environment.TickCount;
+    private readonly uint _seed = unchecked((uint)Interlocked.Increment(ref _cutSequence));
     private sealed record Node(Part Part, double4x4 Transform, MeshReference?[] Meshes, SliceMaterialData[] Materials);
     private readonly Part _full;
     private readonly Vehicle _vehicle;
@@ -98,7 +100,7 @@ internal sealed class SliceSourceCapture : IDisposable
         if (groups.Count == 0) throw new InvalidDataException("No supported native part-model surfaces found.");
         if (!double4x4.Invert(_full.MatrixAsmb2VehicleAsmb, out var inv)) throw new InvalidDataException("Part transform is unavailable.");
         CutPoint[] axes = [new(inv.M11, inv.M21, inv.M31), new(inv.M12, inv.M22, inv.M32), new(inv.M13, inv.M23, inv.M33)];
-        Input = new(groups.ToArray(), axes, materials, _mass);
+        Input = new(groups.ToArray(), axes, materials, _mass, _seed);
         if (!IsCurrent(_full)) throw new InvalidOperationException("Source changed during capture; try again.");
     }
     private static List<(MeshReference? Mesh, PbrMaterialReference? Material, bool Glass)> Models(Part part)

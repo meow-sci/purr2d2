@@ -11,6 +11,9 @@ internal static class PlaneSliceChecks
         Near(boxProperties.Inertia.XX, 1.0 / 6, "box exact inertia");
         var cut = Slice(box, new(new(0, 0, 1), .5), "box divided at arbitrary plane");
         Check(cut.Pieces.Length == 2 && cut.ContourCount == 1 && cut.HoleCount == 0, "box produces two watertight solids");
+        Check(box.Where(f => new[] { f.A.Position.Z, f.B.Position.Z, f.C.Position.Z }.All(z => z < .5)
+                || new[] { f.A.Position.Z, f.B.Position.Z, f.C.Position.Z }.All(z => z > .5))
+            .All(f => cut.Pieces.Any(p => p.Faces.Contains(f))), "uncut triangles retain their original tessellation across repeated slicing");
         foreach (var piece in cut.Pieces)
         {
             Near(piece.Volume, .5, "half box volume");
@@ -63,6 +66,7 @@ internal static class PlaneSliceChecks
         Check(uCut.Pieces.Length == 3, "connected component extraction handles asymmetric fragment counts");
         Slice(cut.Pieces[0].Faces, new(new(1, 0, 0), .25), "generated fragment can be sliced again");
         var tube = Tube(32, 1, .8);
+        FacetedChecks(box, tube);
         var tubeCut = Slice(tube, new(new(0, 0, 1), .37), "curved hollow tube with smooth normals");
         Check(tubeCut.HoleCount == 1 && tubeCut.Pieces.Length == 2, "curved cap retains the tube bore");
         foreach (var piece in tubeCut.Pieces) Near(CapArea(piece), 16 * Math.Sin(Math.PI / 16) * .36, "curved tube cap polygon area");
@@ -109,6 +113,46 @@ internal static class PlaneSliceChecks
         Check(!PlaneSlicer.TrySlice(reversed, new(new(0, 0, 1), .5), out _, out _, 99), "inconsistent surface winding rejected");
         Check(!PlaneSlicer.TrySlice(box, new(new(0, 0, 1), 2), out _, out _, 99), "nonintersecting plane produces no replacement");
         Console.WriteLine("PASS: arbitrary plane slicing, holes, components, winding, attributes, volume and inertia");
+    }
+
+    private static void FacetedChecks(SliceFace[] box, SliceFace[] tube)
+    {
+        var varied = new HashSet<SlicePlane>();
+        for (uint seed = 0; seed < 12; seed++)
+        {
+            var plane = AssistedSliceGeometry.Candidates([box], [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], seed).First();
+            varied.Add(plane);
+            Check(FacetedSliceGeometry.TrySlice([box], plane, seed, out var cut, out string reason), "coarse faceted box cut succeeds: " + reason);
+            Near(cut!.Pieces.Sum(p => p.Volume), 1, "faceted complementary halves conserve original volume");
+            double[] areas = new double[2];
+            for (int side = 0; side < cut.Pieces.Length; side++)
+            {
+                var piece = cut.Pieces[side];
+                Check(PlaneSlicer.TryAuditCompound(piece.ClosedSolids!, out _, out _), "faceted halves are closed oriented solids");
+                var cap = piece.Faces.Where(f => f.Material == -1).ToArray();
+                var normals = cap.Select(f => CutPoint.Cross(f.B.Position - f.A.Position, f.C.Position - f.A.Position).Normalized).ToArray();
+                Check(normals.Any(a => normals.Any(b => CutPoint.Dot(a, b) < .98)), "section contains several real noncoplanar facets");
+                Check(cap.All(f => CutPoint.Dot(CutPoint.Cross(f.B.Position - f.A.Position, f.C.Position - f.A.Position).Normalized, f.A.Normal) > .99999), "facet cap normals match their actual outward geometry");
+                areas[side] = cap.Sum(f => CutPoint.Cross(f.B.Position - f.A.Position, f.C.Position - f.A.Position).Length * .5);
+                foreach (var face in piece.Faces.Where(f => f.Material != -1))
+                    foreach (var vertex in new[] { face.A, face.B, face.C })
+                    {
+                        Near(vertex.U, vertex.Position.X, "faceted cut preserves source U interpolation");
+                        Near(vertex.V, vertex.Position.Y, "faceted cut preserves source V interpolation");
+                    }
+            }
+            Near(areas[0], areas[1], "complementary faceted seams have equal area");
+            Check(FacetedSliceGeometry.TrySlice([box], plane, seed, out var repeat, out _)
+                && repeat!.Pieces[0].Faces.SequenceEqual(cut.Pieces[0].Faces), "same cut seed exactly reproduces its facets");
+        }
+        Check(varied.Count == 12, "different cut seeds produce distinct oblique off-center planes");
+        Check(FacetedSliceGeometry.TrySlice([tube], new(new(0, 0, 1), .37), 17, out var hollow, out var failure)
+            && hollow!.HoleCount == 1 && hollow.Pieces.All(p => PlaneSlicer.TryAudit(p.Faces, out _)), "coarse facets preserve a hollow curved tank bore: " + failure);
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        bool cancelled = false;
+        try { FacetedSliceGeometry.TrySlice([box], new(new(1, 0, 0), .5), 0, out _, out _, cancellation.Token); }
+        catch (OperationCanceledException) { cancelled = true; }
+        Check(cancelled, "coarse facet work honors cancellation before subdivision");
     }
 
     internal static SliceFace[] Voxels(IEnumerable<(int X, int Y, int Z)> cells)

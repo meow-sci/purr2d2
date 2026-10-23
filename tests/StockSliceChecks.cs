@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Xml.Linq;
 using Brutal.Numerics;
 using Purr2D2.Cutting;
 using Purr2D2.Slicing;
@@ -43,7 +44,12 @@ internal static class StockSliceChecks
                 hull.Dispose(pool);
                 Console.WriteLine($"  Worker fragment: {asset.Uploads.Length} render surfaces; {hullPoints} collision vertices; native hull cook {System.Diagnostics.Stopwatch.GetElapsedTime(cooking).TotalMilliseconds:F2} ms");
             }
-            Console.WriteLine($"PASS: {fixture.Name} worker pipeline; plan {planMs:F1} ms, complete {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
+            Console.WriteLine($"PASS: {fixture.Name} worker pipeline; faceted={cpu.Faceted}, attempts={cpu.Attempts}, fallback={cpu.FacetFallback}; plan {planMs:F1} ms, complete {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
+            if (fixture.Name.Contains("FuelTank"))
+            {
+                RepeatedTankSlices(input, fixture.Name);
+                FreshTankSeeds(input, fixture.Name);
+            }
             if (!SliceShellBuilder.TryPrepare(groups, out var solids, out var reason))
                 throw new Exception(fixture.Name + " shell preparation: " + reason);
             Console.WriteLine($"{fixture.Name}: {groups.Sum(g => g.Length)} authored triangles -> {solids.Length} solids / {solids.Sum(g => g.Length)} triangles");
@@ -93,6 +99,135 @@ internal static class StockSliceChecks
                 }
                 Console.WriteLine($"PASS: {fixture.Name} cut {plane}, {result.Pieces.Length} fragments, {result.ContourCount} cut contours");
             }
+        }
+    }
+    private static void RepeatedTankSlices(SliceInput original, string name)
+    {
+        var inputs = new List<SliceInput> { original };
+        double originalVolume = 0;
+        int faceted = 0, fallbacks = 0;
+        for (int generation = 0; generation < 3; generation++)
+        {
+            var next = new List<SliceInput>();
+            for (int branch = 0; branch < inputs.Count; branch++)
+            {
+                var input = inputs[branch] with { Seed = (uint)(0x128ab + generation * 101 + branch * 977) };
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                var cpu = SliceGeometryWork.Calculate(input, CancellationToken.None, _ => { });
+                if (cpu.Fragments.Length != 2) throw new Exception("Repeated tank cut did not split into two rigid pieces");
+                if (cpu.Faceted) faceted++; else fallbacks++;
+                foreach (var asset in cpu.Fragments)
+                {
+                    var reload = Reload(asset);
+                    if (!SliceShellBuilder.TryPrepare(reload.Groups, out var solids, out string reason)
+                        || !PlaneSlicer.TryAuditCompound(solids, out _, out reason))
+                        throw new Exception("Generated tank asset is not resliceable after XML/GLB reload: " + reason);
+                    next.Add(reload);
+                }
+                int triangles = next.TakeLast(cpu.Fragments.Length).Sum(i => i.Groups.Sum(g => g.Length));
+                Console.WriteLine($"  Reloaded tank cut generation {generation + 1}, branch {branch}: {input.Groups.Sum(g => g.Length)} -> {triangles} triangles; {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms; faceted={cpu.Faceted}, attempts={cpu.Attempts}, fallback={cpu.FacetFallback}");
+            }
+            double volume = next.Sum(i => i.Groups.Sum(s => PlaneSlicer.Properties(s).Volume));
+            if (generation == 0) originalVolume = volume;
+            if (Math.Abs(volume - originalVolume) > originalVolume * .0006 || Math.Abs(next.Sum(i => i.MassKg) - original.MassKg) > .001)
+                throw new Exception("Repeated stock tank slicing failed mass/volume conservation");
+            if (next.Count != 1 << (generation + 1)) throw new Exception("Repeated tank did not reach expected fragment count");
+            inputs = next;
+        }
+        if (faceted == 0) throw new Exception("Stock tank never completed a true faceted cut");
+        Console.WriteLine($"PASS: {name} generated XML/GLB reload -> halves -> quarters -> eighths; {faceted} faceted cuts, {fallbacks} plane fallbacks; final volume={originalVolume:R}");
+    }
+
+    private static void FreshTankSeeds(SliceInput original, string name)
+    {
+        var ids = new HashSet<string>(); int faceted = 0;
+        for (uint seed = 0; seed < 8; seed++)
+        {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            var slice = SliceGeometryWork.Calculate(original with { Seed = seed }, CancellationToken.None, _ => { });
+            if (slice.Fragments.Length != 2 || Math.Abs(slice.Fragments.Sum(a => a.MassKg) - original.MassKg) > .001)
+                throw new Exception("Varied fresh tank cut failed fragment/mass conservation");
+            if (!ids.Add(string.Join("|", slice.Fragments.Select(a => a.Id)))) throw new Exception("Different tank seeds repeated identical cut geometry");
+            if (slice.Faceted) faceted++;
+            foreach (var asset in slice.Fragments) Reload(asset);
+            Console.WriteLine($"  Fresh tank seed {seed}: {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms, faceted={slice.Faceted}, attempts={slice.Attempts}, fallback={slice.FacetFallback}");
+        }
+        Console.WriteLine($"PASS: {name} 8 fresh deterministic varied cut seeds; {faceted} faceted cuts, {8 - faceted} plane fallbacks");
+    }
+
+    // Read the actual persisted identity subparts and material-bearing meshes, as source
+    // capture does on the next swing. Do not feed internal pre-export geometry back in.
+    private static SliceInput Reload(CpuFragmentAsset asset)
+    {
+        var xml = XDocument.Parse(System.Text.Encoding.UTF8.GetString(asset.Xml));
+        var root = xml.Root!; var part = root.Elements("Part").Single();
+        var definitions = root.Elements("SubPart").ToDictionary(e => (string)e.Attribute("Id")!);
+        if (part.Element("MeshView") != null) throw new Exception("Picking mesh was placed on the unraycastable part root");
+        var first = definitions[(string)part.Elements("SubPart").First().Attribute("InstanceOf")!];
+        if ((string?)first.Element("MeshView")?.Element("Mesh")?.Attribute("Id") != asset.Id + "_hull" || first.Element("Transform") != null)
+            throw new Exception("Complete picking mesh must be on the first identity visual subpart");
+        using var document = JsonDocument.Parse(asset.Glb.AsMemory(20, BitConverter.ToInt32(asset.Glb, 12)));
+        var gltf = document.RootElement;
+        int binary = 28 + BitConverter.ToInt32(asset.Glb, 12);
+        var meshes = gltf.GetProperty("meshes").EnumerateArray().ToDictionary(m => m.GetProperty("name").GetString()!);
+        var materials = new Dictionary<int, SliceMaterialData>();
+        var materialIds = new Dictionary<string, int>();
+        var groups = new List<SliceFace[]>();
+        foreach (var reference in part.Elements("SubPart"))
+        {
+            var definition = definitions[(string)reference.Attribute("InstanceOf")!];
+            var faces = new List<SliceFace>();
+            foreach (var model in definition.Elements().Where(e => e.Name.LocalName is "PartModel" or "PartModelGlass"))
+            {
+                string material = (string)model.Element("Material")!.Attribute("Id")!;
+                bool glass = model.Name.LocalName == "PartModelGlass";
+                string key = material + ":" + glass;
+                if (!materialIds.TryGetValue(key, out int materialId))
+                { materialId = materialIds.Count; materialIds.Add(key, materialId); materials.Add(materialId, new(material, glass)); }
+                var mesh = meshes[(string)model.Element("Mesh")!.Attribute("Id")!];
+                foreach (var primitive in mesh.GetProperty("primitives").EnumerateArray())
+                {
+                    var attributes = primitive.GetProperty("attributes");
+                    var positions = Read(attributes.GetProperty("POSITION").GetInt32(), 3);
+                    var normals = Read(attributes.GetProperty("NORMAL").GetInt32(), 3);
+                    var uvs = Read(attributes.GetProperty("TEXCOORD_0").GetInt32(), 2);
+                    var indexAccessor = gltf.GetProperty("accessors")[primitive.GetProperty("indices").GetInt32()];
+                    int indexOffset = Offset(indexAccessor);
+                    for (int i = 0; i < indexAccessor.GetProperty("count").GetInt32(); i += 3)
+                    {
+                        SliceVertex V(int index)
+                        {
+                            int vertex = BitConverter.ToInt32(asset.Glb, indexOffset + index * 4);
+                            return new(new(positions[vertex * 3], positions[vertex * 3 + 1], positions[vertex * 3 + 2]),
+                                new(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]), uvs[vertex * 2], uvs[vertex * 2 + 1]);
+                        }
+                        faces.Add(new(V(i), V(i + 1), V(i + 2), materialId));
+                    }
+                }
+            }
+            if (faces.Count > 0) groups.Add(faces.ToArray());
+        }
+        var collisionPrimitive = meshes[asset.Id + "_collision"].GetProperty("primitives")[0];
+        var collisionPoints = Read(collisionPrimitive.GetProperty("attributes").GetProperty("POSITION").GetInt32(), 3);
+        var hullPoints = Enumerable.Range(0, collisionPoints.Length / 3).Select(i => new Vector3((float)collisionPoints[i * 3], (float)collisionPoints[i * 3 + 1], (float)collisionPoints[i * 3 + 2])).ToArray();
+        using (var pool = new BufferPool())
+        {
+            if (!ConvexHullHelper.CreateShape(hullPoints, pool, out var center, out var hull) || !float.IsFinite(center.LengthSquared()))
+                throw new Exception("Reloaded generated tank collider cannot be cooked by the native hull implementation");
+            hull.Dispose(pool);
+        }
+        return new(groups.ToArray(), [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, asset.MassKg);
+        int Offset(JsonElement accessor)
+        {
+            var view = gltf.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+            return binary + (view.TryGetProperty("byteOffset", out var vo) ? vo.GetInt32() : 0)
+                + (accessor.TryGetProperty("byteOffset", out var ao) ? ao.GetInt32() : 0);
+        }
+        double[] Read(int index, int width)
+        {
+            var accessor = gltf.GetProperty("accessors")[index];
+            int offset = Offset(accessor), count = accessor.GetProperty("count").GetInt32() * width;
+            return Enumerable.Range(0, count).Select(i => (double)BitConverter.ToSingle(asset.Glb, offset + i * 4)).ToArray();
         }
     }
     private static SliceVertex Vertex(double[] v) => new(new(v[0], v[1], v[2]), new(v[3], v[4], v[5]), v[6], v[7]);

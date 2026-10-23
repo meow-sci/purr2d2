@@ -5,7 +5,7 @@ internal enum SliceCue { None, BeginSwing, Commit }
 /// <summary>The final pose must be submitted by the main view before a ready result can commit.</summary>
 internal sealed class AssistedSliceSequence
 {
-    internal const double SwingSeconds = SaberSwing.Duration;
+    internal const double SwingSeconds = SaberSwing.Duration * 2;
     internal bool Active { get; private set; }
     internal bool Swinging { get; private set; }
     internal double Progress { get; private set; }

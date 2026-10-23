@@ -49,6 +49,7 @@ internal sealed partial class PartSliceTargeting
             || !ToPoint(rayOrigin).Finite || !ToPoint(rayDirection).Finite || rayDirection.LengthSquared() < .5
             || !ToPoint(baseBody).Finite || !double.IsFinite(reach) || reach <= 0) yield break;
         var origin = baseBody.Transform(wielder.Body2Ego) + camera.GetPositionEgo(wielder);
+        double selectionReach = SelectionReach(reach);
         double best = double.PositiveInfinity;
         int tests = 0, nodes = 0;
         var meshes = new List<MeshReference>();
@@ -57,7 +58,7 @@ internal sealed partial class PartSliceTargeting
         {
             if (item is not Vehicle vehicle || vehicle == wielder || vehicle is KittenEva || vehicle.IsDisposed || vehicle.IsEditedVehicle
                 || !ReferenceEquals(vehicle.Parent, wielder.Parent)) continue;
-            if ((camera.GetPositionEgo(vehicle) - origin).Length() > vehicle.BoundingSphereRadiusBody + reach) continue;
+            if ((camera.GetPositionEgo(vehicle) - origin).Length() > vehicle.BoundingSphereRadiusBody + selectionReach) continue;
             foreach (var full in vehicle.Parts.Parts.ToArray())
             {
                 if (full.IsAttachedInternal) continue;
@@ -74,7 +75,7 @@ internal sealed partial class PartSliceTargeting
                         if (mesh.PositionsCompare is not { } primitives) continue;
                         // Conservative world-space sphere avoids reading distant triangles.
                         double scale = Math.Max(Math.Abs(part.ScaleTotal.X), Math.Max(Math.Abs(part.ScaleTotal.Y), Math.Abs(part.ScaleTotal.Z)));
-                        if ((origin - double3.Zero.Transform(matrix)).Length() > mesh.BoundingSphereRadius * scale + reach) continue;
+                        if ((origin - double3.Zero.Transform(matrix)).Length() > mesh.BoundingSphereRadius * scale + selectionReach) continue;
                         foreach (var vertices in primitives)
                         {
                             if (vertices == null) continue;
@@ -144,8 +145,9 @@ internal sealed partial class PartSliceTargeting
         var origin = baseBody.Transform(double4x4.CreateFromQuaternion(wielder.Body2Ego)) + camera.GetPositionEgo(wielder);
         var hit = target.HitAssembly.Transform(target.Vehicle.GetMatrixAsmb2Ego(camera));
         double distance = (hit - origin).Length();
-        if (!double.IsFinite(distance) || double.IsNaN(reach) || reach <= 0 || distance > reach)
-        { reason = $"Selected point is {distance:F2} m from the hilt; blade reach is {reach:F2} m. Move closer or increase blade length."; return false; }
+        double selectionReach = SelectionReach(reach);
+        if (!double.IsFinite(distance) || double.IsNaN(reach) || reach <= 0 || distance > selectionReach)
+        { reason = $"Selected point is {distance:F2} m from the hilt; slice reach is {selectionReach:F2} m (twice the visible blade length). Move closer or increase blade length."; return false; }
         return CanCut(target.Part, out reason);
     }
 

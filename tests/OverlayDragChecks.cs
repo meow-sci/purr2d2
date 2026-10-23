@@ -114,14 +114,32 @@ internal static class OverlayDragChecks
             var layout = SaberOverlayLayout.Create(origin, size, font, 100);
             Check(layout.Valid && layout.ListMin.X >= origin.X && layout.ListMin.Y >= origin.Y
                 && layout.ListMax.X <= origin.X + size.X && layout.ListMax.Y < layout.SwingCenter.Y - layout.SwingRadius
+                && layout.SwingCenter.X - layout.SwingRadius >= origin.X
+                && layout.SwingCenter.Y - layout.SwingRadius >= origin.Y
+                && layout.SwingCenter.Y + layout.SwingRadius <= origin.Y + size.Y
                 && layout.SwingCenter.X + layout.SwingRadius < layout.SliceCenter.X - layout.SliceRadius
                 && layout.SliceCenter.X + layout.SliceRadius <= origin.X + size.X
                 && MathF.Abs(layout.SwingCenter.Y - (origin.Y + size.Y * .5f)) < 1e-4f,
                 $"overlay anchors and nonoverlapping controls fit {size.X} x {size.Y}");
+            Check(MathF.Abs(layout.SwingRadius - 132 * layout.Scale) < 1e-4f
+                && MathF.Abs(layout.SliceRadius - 27 * layout.Scale) < 1e-4f
+                && MathF.Abs(origin.X + size.X - layout.SliceCenter.X - layout.SliceRadius - 80 * layout.Scale) < 1e-3f,
+                "larger swing and smaller slice circles retain the requested left shift and gap");
             Check(layout.Hit(layout.SwingCenter) == SaberOverlayHit.Swing
                 && layout.Hit(layout.SwingCenter + new float2(layout.SwingRadius * .9f)) == SaberOverlayHit.None
                 && layout.Hit(layout.SliceCenter) == SaberOverlayHit.Slice,
                 "drawing geometry and pointer geometry agree without square corner capture");
+            var swatch = layout.ColorSwatchMin(0, 0);
+            Check(swatch.X > layout.ListMin.X + layout.Padding + layout.ColorSwatchSize
+                && swatch.X + layout.ColorSwatchSize < layout.ListMax.X
+                && layout.IsColorSwatch(swatch + new float2(layout.ColorSwatchSize * .5f), 0, 0)
+                && !layout.IsColorSwatch(new(layout.ListMin.X + layout.Padding, swatch.Y), 0, 0),
+                "row swatches have independent square bounds away from the checkbox");
+            var scrolled = layout.ColorSwatchMin(4, layout.RowHeight * 4);
+            Check((scrolled - swatch).Length() < 1e-4f && layout.IsColorSwatch(scrolled, 4, layout.RowHeight * 4)
+                && !layout.IsColorSwatch(layout.ColorSwatchMin(0, layout.RowHeight), 0, layout.RowHeight)
+                && !layout.IsColorSwatch(new(float.NaN, 0), 0, 0),
+                "swatch hit testing follows scroll and rejects clipped rows or invalid pointers");
         }
         Check(!SaberOverlayLayout.Create(float2.Zero, new(100, 100), 16, 2).Valid
             && SaberOverlayLayout.Create(float2.Zero, new(100, 100), 16, 2).Hit(float2.Zero) == SaberOverlayHit.None,

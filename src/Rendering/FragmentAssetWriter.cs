@@ -43,7 +43,7 @@ internal static class FragmentAssetWriter
         hash.AppendData(Encoding.UTF8.GetBytes(string.Join("|", surfaces.Select(s => s.Material == -1 ? CapMaterial : materials[s.Material].Id + ":glass=" + materials[s.Material].Glass))));
         var inertia = fragment.Frame.PrincipalSpecificInertia;
         // New collider/export layout gets new immutable IDs; old saved fragments remain untouched.
-        hash.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"|async-v1|{fragment.MassKg:R}|{inertia.X:R}|{inertia.Y:R}|{inertia.Z:R}")));
+        hash.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"|faceted-pick-v2|{fragment.MassKg:R}|{inertia.X:R}|{inertia.Y:R}|{inertia.Z:R}")));
         string id = Prefix + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
         var groups = surfaces.Select(s => new FragmentGlbWriter.Group($"{id}_s{s.Solid}" + (s.Material == -1 ? "_cap" : "_m" + s.Material), s.Material, s.Faces)).ToList();
         // Full visual picking mesh, plus a compact collider with exactly the same enclosing hull.
@@ -90,13 +90,16 @@ internal static class FragmentAssetWriter
         IReadOnlyList<SurfaceGroup> surfaces, IReadOnlyDictionary<int, SliceMaterialData> materials, float mass, double3 inertia)
     {
         var part = new XElement("Part", new XAttribute("Id", id), new XAttribute("DisplayName", "Sliced metal fragment"));
-        part.Add(new XElement("MeshView", new XAttribute("Id", id + "_pick"),
-            new XElement("Mesh", new XAttribute("Id", id + "_hull"))));
         var subparts = new List<XElement>();
         foreach (int solid in surfaces.Select(s => s.Solid).Distinct())
         {
             string subpartId = id + "_solid" + solid;
             var subpart = new XElement("SubPart", new XAttribute("Id", subpartId));
+            // Host part raycasts visit visual subparts. This identity-transform child
+            // owns the complete picking hull so every visible solid is targetable.
+            if (subparts.Count == 0)
+                subpart.Add(new XElement("MeshView", new XAttribute("Id", id + "_pick"),
+                    new XElement("Mesh", new XAttribute("Id", id + "_hull"))));
             for (int i = 0; i < surfaces.Count; i++)
             {
                 if (surfaces[i].Solid != solid) continue;

@@ -36,8 +36,6 @@ internal static class NativeSlicePhysics
         if (SetBodyRates is null) { reason = "The native angular-rate synchronization seam is unavailable."; return false; }
         if (AdoptSeparated is null || WorkerState?.FieldType != typeof(VehicleUpdateState))
         { reason = "The native prepared-fragment adoption seam is unavailable."; return false; }
-        foreach (var seat in owner.Crew)
-            if (seat.AssignedKittenHash != KeyHash.Zero) { reason = "Crewed vessels cannot be sliced."; return false; }
         var sources = SourceParts(full);
         float mass = SourceMass(full);
         if (!float.IsFinite(mass) || mass <= .001f) { reason = "The part has no finite positive inert mass."; return false; }
@@ -64,7 +62,7 @@ internal static class NativeSlicePhysics
             }
             // Modules are intentionally destroyed with the original part. The
             // replacement is wreckage, so tanks, controls, batteries, engines and
-            // empty seats do not need functional equivalents in the fragments.
+            // seats do not need functional equivalents in the fragments.
             if (module is Parachute chute && chute.State is ChuteState.LineStretch or ChuteState.Reefed or ChuteState.Disreefing or ChuteState.Full)
             { reason = "Retract or cut away the deployed parachute before slicing its housing."; return false; }
         }
@@ -288,7 +286,9 @@ internal static class NativeSlicePhysics
             }
             // This is the only deletion. Both complete fragments exist with native collision and durable IDs.
             timings.Next(SliceCommitPhase.SourceRemoval);
-            Universe.DestroyVehicle(owner);
+            // Native destruction clears the isolated shell's crew roster state. Crew
+            // in neighboring branches moved with those branches during native Split.
+            Universe.DestroyVehicle(owner, CrewDisposition.Kill);
             created = spawned.ToArray();
             reason = $"Sliced into {spawned.Count} separating fragments."
                 + (emptiedMass > .001 ? $" Released {emptiedMass:F1} kg of stored propellant." : "");
@@ -348,7 +348,14 @@ internal static class NativeSlicePhysics
             if (edge.OtherPart(full).FullPart == neighbor.FullPart) { crossing = edge; break; }
         if (crossing is null || full.Tree?.OwningVehicle is not { } owner) return false;
         var endpoint = crossing.Connectors[0].ConnectionPart.FullPart == full ? crossing.Connectors[0] : crossing.Connectors[1];
-        return owner.Split(crossing, endpoint, 0, out _) is not null;
+        if (owner.Split(crossing, endpoint, 0, out _) is not { } separated) return false;
+        // Native Split moves the existing seats but leaves their roster vessel ID
+        // unchanged. Keep surviving crew assigned to the actual new vessel while
+        // preserving mission time, mission count and the seats themselves.
+        foreach (var seat in separated.Crew)
+            if (seat.AssignedKittenHash != KeyHash.Zero)
+                Universe.KittenRoster.Find(seat.AssignedKittenHash)?.TransferToVehicle(separated.Id);
+        return true;
     }
     // A capsule and its attached IVA belong to one structural shell. Native
     // internal attachments have no separable connector and must travel with it.

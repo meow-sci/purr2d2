@@ -31,8 +31,13 @@ internal static class FragmentTemplateLoader
         var bundle = serializer.Deserialize(stream) as AssetBundle ?? throw new InvalidDataException("Fragment XML could not be decoded.");
         var parts = bundle.Assets.OfType<PartTemplate>().ToArray();
         var full = parts.SingleOrDefault(p => p.Id == id) ?? throw new InvalidDataException("Fragment template is missing.");
+        // Native hover raycasts visit visual subparts. Older durable templates put
+        // this mesh on the root; their instances are repaired before tree creation.
+        var children = full.SubPartInstances.Select(p => p.InstanceOf).ToHashSet(StringComparer.Ordinal);
+        bool hasPicking = full.Components.OfType<MeshViewModule.Template>().Any()
+            || parts.Any(p => children.Contains(p.Id) && p.Components.OfType<MeshViewModule.Template>().Any());
         if (!full.Components.OfType<ColliderModule.Template>().Any(c => c.Colliders.Count > 0)
-            || !full.Components.OfType<MeshViewModule.Template>().Any()
+            || !hasPicking
             || full.InertMasses.Count == 0
             || parts.Sum(p => p.Components.Count(c => c is PartModelModule.Template or PartModelGlassModule.Template)) != surfaceCount)
             throw new InvalidDataException("Fragment XML lost its render, collision or mass components.");

@@ -17,7 +17,8 @@ The authority for this build is the supplied `ksa-game-assemblies/current` snaps
 | Safe mutation | Private `Program.PrepareFrame(double,double)` IL, after `InputEvents.ApplyInputEvents()` | Requires unique ordered applied-solver/input/dispatch calls; refuses incompatible layout |
 | Input/preparation | `Program.OnFrameEditor(double)` postfix | Inside ImGui frame, runs while HUD hidden |
 | EVA target selection | `Vehicle.Target`, `Vehicle.SetTarget(IOrbiter)` | Mod dropdown queues changes through the settled handoff; scopes the explicit slice without requiring stock EVA flight-computer buttons |
-| Slice marker | Private `Program.OnFrameViewports(double)` postfix; main camera `EgoToScreen` | HUD-visible marker identifies the locked part during the swing |
+| Slice marker | Private `Program.OnDrawUiThreadSafe(double)` postfix; main camera `EgoToScreen` | Uses the current frame's native pick for hover and locked-part markers |
+| Saved fragment hover | `Part(string, PartTemplate, PartInstance, Part)` constructor postfix | Adds legacy root picking meshes to identity visual children before tree ownership; new exports use native subpart picking directly |
 | World reset | `Universe.DeserializeSave(UniverseData)` prefix and `Program.OnGameLoaded()` postfix | Discards queued commands, old owners, channels, slice requests and sparks |
 | Shutdown | `Program.Dispose()` prefix | Releases owned resources before FMOD/Vulkan teardown; StarMap unload is idempotent |
 | Avatar access | `KittenEva.Renderable`, private `KittenRenderable._characterAvatar` | Cached reflection; missing field/rig disables equip with status |
@@ -42,9 +43,9 @@ Simulation commands are applied after the preceding worker results and game inpu
 
 The blade consumes each applied simulation timestamp once, suspends when paused or above 5x, and rejects large step gaps. The explicit swing advances in player time only with a fresh visible pose and a valid applied simulation step. Pose snapshots are captured from the main game view, in the kitten's body frame. Camera-relative floats are used only at final rendering submission. Audio uses the same body-space emitter plus the engine camera's spatial transform.
 
-Only the explicit swing can prepare or commit a structural cut. Its locked target must remain in reach, retain its ownership/transform, and pass the crew and native physics checks at commit. The cosmetic contact probe is independent and cannot initiate a cut. Autopilot and flight-control overrides have been removed.
+Only the explicit swing can prepare or commit a structural cut. The hovered ray hit must be within twice the visible blade length of the live hilt at selection and stroke start. After the stroke, ownership/transform and native physics checks still apply; range is not imposed again. Crew aboard does not block slicing. The cosmetic contact probe is independent and cannot initiate a cut. Autopilot and flight-control overrides have been removed.
 
-KSA owns the resulting split vessels and their native saves. The mod owns its current controlled-kitten equip state, transient sparks and cap heat, channels and GPU pipelines. Equip is reset on a target/world change; no object pointers or GPU handles are serialized. User preferences use a bounded, validated JSON file and atomic replacement. Arbitrary slicing additionally persists immutable native GLB/XML definitions under `Generated/Slices`; those files are dependencies of saves that reference their generated IDs. Cache budgets refuse new work instead of evicting assets needed by older saves.
+KSA owns the resulting split vessels and their native saves. The mod owns per-kitten equipment and colors, transient sparks and cap heat, channels and GPU pipelines. Switching control preserves equipment and colors; world changes clear them. No object pointers or GPU handles are serialized. User preferences use a bounded, validated JSON file and atomic replacement. Arbitrary slicing additionally persists immutable native GLB/XML definitions under `Generated/Slices`; those files are dependencies of saves that reference their generated IDs. Cache budgets refuse new work instead of evicting assets needed by older saves.
 
 ## Updating the game
 

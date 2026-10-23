@@ -62,6 +62,10 @@ internal static class CoreChecks
 
     private static void SettingsValidationAndPersistence()
     {
+        var defaults = new SaberSettings();
+        Check(defaults.BladeLength == 1.4f && defaults.GripX == -24.5f && defaults.GripY == -14.7f && defaults.GripZ == 16
+            && defaults.AimX == .22f && defaults.AimY == .45f && defaults.AimZ == .6f && defaults.FingerCurl == .12f,
+            "new preferences use the chosen blade reach and measured kitten grip");
         Check(SaberLimits.AppliedDelta(true, 5, .2) == .2, "5x consumes all applied simulation time without clipping to 0.1 seconds");
         Check(SaberLimits.AppliedDelta(false, 5, .2) == 0 && SaberLimits.AppliedDelta(true, 0, .2) == 0
             && SaberLimits.AppliedDelta(true, 10, .1) == 0 && SaberLimits.AppliedDelta(true, 5, .3) == 0,
@@ -82,6 +86,13 @@ internal static class CoreChecks
         string path = Path.Combine(directory, "settings.json");
         try
         {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(path, "{\"BladeLength\":0.85,\"GripX\":-13,\"GripY\":-8,\"GripZ\":18,\"AimX\":0.05,\"AimY\":0.8,\"AimZ\":0.6,\"FingerCurl\":0.2}");
+            var explicitPreferences = SaberSettings.Load(path);
+            Check(explicitPreferences.BladeLength == .85f && explicitPreferences.GripX == -13 && explicitPreferences.GripY == -8
+                && explicitPreferences.GripZ == 18 && explicitPreferences.AimX == .05f && explicitPreferences.AimY == .8f
+                && explicitPreferences.AimZ == .6f && explicitPreferences.FingerCurl == .2f,
+                "existing explicit preferences survive the new defaults unchanged");
             settings.Save(path);
             var loaded = SaberSettings.Load(path);
             Check(loaded.BladeLength == 12f && loaded.ColorR == 0 && loaded.ColorG == .75f && loaded.ColorB == 1 && loaded.Volume == 0,

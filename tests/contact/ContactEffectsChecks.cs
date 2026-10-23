@@ -35,7 +35,7 @@ internal static class ContactEffectsChecks
             "budgeted search resumes into later primitives instead of starving them");
         Check(probe.TrySample(owner, new(0, -1, 0), new(0, 1, 0), .12, out _) && probe.TestedTriangles == 1,
             "sustained contact rechecks one cached triangle");
-        // Crew restriction applies to destruction, never to cosmetic contact.
+        // Occupied vessels also support cosmetic contact.
         vessel.Crew = [new() { AssignedKittenHash = new(1) }];
         Check(probe.TrySample(owner, new(0, -1, 0), new(0, 1, 0), .18, out _), "crew aboard still allows visual sparks");
         part.PositionParentAsmb = new(10, 0, 0);

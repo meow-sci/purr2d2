@@ -67,6 +67,8 @@ static class HostInspection
                     "KSA.CelestialSystem", "Brutal.Numerics.doubleQuat", "Brutal.Numerics.double3", "KSA.IParentBody", "System.String", "KSA.Part", "KSA.Orbit"),
                 new("KSA.Vehicle", "GenerateSplitId", "System.Span`1<System.Char>", false, MethodAttributes.Public, "System.Span`1<System.Char>"),
                 new("KSA.PartTree", "CreateFromNewPartTree", "KSA.PartTree", true, MethodAttributes.Public, "KSA.Part"),
+                new("KSA.Part", ".ctor", "System.Void", false, MethodAttributes.Public,
+                    "System.String", "KSA.PartTemplate", "KSA.PartInstance", "KSA.Part"),
                 new("KSA.LookupCollection`1", "Deregister", "System.Void", false, MethodAttributes.Public, "!0"),
                 new("KSA.Part", "get_StructuralPart", "KSA.Part", false, MethodAttributes.Public),
             ];

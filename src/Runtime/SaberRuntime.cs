@@ -39,7 +39,6 @@ internal sealed partial class SaberRuntime : IDisposable
     private ulong _consumedPoseGeneration;
     private bool _freshPoseThisTick;
     private string? _fault;
-    private float3 Color => new(_settings.ColorR, _settings.ColorG, _settings.ColorB);
     private float Length => _blade.Deployment * _settings.BladeLength;
 
     internal SaberRuntime(string directory)
@@ -157,6 +156,7 @@ internal sealed partial class SaberRuntime : IDisposable
         if (!_ready || _disposed) return;
         try
         {
+            if (!OverlayVisible) DismissKittenColorPicker();
             _renderer.Prepare();
             var io = ImGui.GetIO();
             if (!io.WantTextInput && !io.WantCaptureKeyboard && ImGui.IsKeyPressed(ImGuiKey.F7, false))
@@ -182,7 +182,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         if (_disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped) return;
         float length = saber.Blade.Deployment * _settings.BladeLength;
-        _renderer.DrawSaber(owner, viewport, emitterToEgo, length, Color);
+        _renderer.DrawSaber(owner, viewport, emitterToEgo, length, saber.Color);
         if (ReferenceEquals(viewport, Program.MainViewport) && saber.Pose.TryGetBladeSegment(length, out var emitter, out var tip))
         {
             double elapsed = _playerTime - saber.PreviousTipTime;

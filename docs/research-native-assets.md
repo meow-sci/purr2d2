@@ -42,6 +42,8 @@ temporary scripts and full machine results stay in ignored `artifacts/native-geo
 
 ## Native candidate findings
 
+These are the original inert-only baseline findings. Current production slicing adds panel backing, functional-part support, occupied-vessel support and repeated generated-fragment cuts; see [current slicing behavior](research-slicing.md) and [acceptance](ACCEPTANCE.md). The eligibility recommendations below describe that earlier baseline.
+
 The important distinction is between a closed individual subpart mesh and an assembled
 game Part. Passing one decorative subpart does not establish that the complete Part is
 a single suitable solid or that it has supported modules and positive inert mass.

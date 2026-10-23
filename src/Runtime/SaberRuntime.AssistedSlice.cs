@@ -21,11 +21,11 @@ internal sealed partial class SaberRuntime
     private string _sliceStatus = "";
     private bool SliceStatusVisible => _sliceStatus.Length > 0
         && (_selectingSlice || _sliceSequence.Active || _playerTime < _sliceMessageUntil);
-    // Use the rendered blade length and live hilt position, never a kitten-centred allowance.
+    // Targeting applies its 2x allowance to this visible length and the live hilt position.
     private bool TrySliceReach(out double3 baseBody, out double reach, out string reason)
     {
         baseBody = default; reach = Length;
-        reason = "Keep the lit saber visible to select a part within blade reach.";
+        reason = "Keep the lit saber visible to select a surface within twice its blade length.";
         if (!_blade.Equipped || !_blade.TargetOn || !double.IsFinite(reach) || reach <= 0
             || !_pose.TryGetBladeSegment(reach, out baseBody, out _)) return false;
         reason = "";
@@ -34,7 +34,9 @@ internal sealed partial class SaberRuntime
 
     private void SelectPartToSlice()
     {
-        if (_sliceSequence.Active || _owner == null) return;
+        if (_sliceSequence.Active) return;
+        if (_selectingSlice) { CancelAssistedSlice("Slice selection cancelled."); return; }
+        if (_owner == null) return;
         if (_slicer.Busy) { _sliceStatus = "Finishing the previous slice; try again shortly."; _sliceMessageUntil = _playerTime + 5; return; }
         EnsureBlade(); _blade.SetIgnited(true);
         _selectingSlice = true;
@@ -198,7 +200,7 @@ internal sealed partial class SaberRuntime
             }
             if (_sliceSequence.Active || _selectingSlice)
             {
-                if (ImGui.Button("Cancel slice")) Queue(Command.CancelSlice);
+                if (ImGui.Button(_selectingSlice ? "Cancel" : "Cancel slice")) Queue(Command.CancelSlice);
                 if (_sliceSequence.Active && !_sliceSequence.EndPresented)
                     ImGui.ProgressBar((float)_sliceSequence.Progress, new float2(-1, 0), "Saber swing");
             }

@@ -4,6 +4,7 @@ using Brutal.GlfwApi;
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
+using Purr2D2.Cutting;
 
 namespace Purr2D2.Runtime;
 
@@ -34,6 +35,10 @@ internal static class GameHooks
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiMouseButton)));
         harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnScroll", typeof(GlfwWindow), typeof(double2)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiScroll)));
+        harmony.Patch(AccessTools.Constructor(typeof(Part),
+                [typeof(string), typeof(PartTemplate), typeof(PartInstance), typeof(Part)])
+            ?? throw new MissingMethodException(typeof(Part).FullName, ".ctor(string, PartTemplate, PartInstance, Part)"),
+            postfix: new HarmonyMethod(typeof(GameHooks), nameof(RepairFragmentPicker)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnGameLoaded)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(WorldChanged)));
         harmony.Patch(Require(typeof(Universe), nameof(Universe.DeserializeSave), typeof(UniverseData)),
@@ -95,6 +100,11 @@ internal static class GameHooks
     private static bool OverlayImGuiMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action) =>
         !(Runtime?.SuppressOverlayImGuiMouseButton(window, button, action) ?? false);
     private static bool OverlayImGuiScroll(GlfwWindow __0) => !(Runtime?.SuppressOverlayImGuiScroll(__0) ?? false);
+    private static void RepairFragmentPicker(Part __instance)
+    {
+        try { PartSliceTargeting.RepairLegacyFragmentPicker(__instance); }
+        catch (Exception ex) { SaberRuntime.Report("Legacy fragment picker repair failed", ex); }
+    }
     private static void WorldChanged()
     {
         try { Runtime?.ResetWorld(); }

@@ -22,8 +22,9 @@ internal sealed partial class SaberRuntime
     private string? _fault;
     private float _swingSpeed;
     private ulong _consumedPoseGeneration;
-    private float3 Color => new(.1f, .8f, 1);
     private KittenEva? _resetGestureOwner;
+    private KittenEva? _kittenColorPickerOwner;
+    private void DismissKittenColorPicker() => _kittenColorPickerOwner = null;
 
     private SaberRuntime()
     {
@@ -43,8 +44,13 @@ internal sealed partial class SaberRuntime
     private sealed class FakeRenderer
     {
         internal readonly HashSet<KittenEva> Emitters = [];
+        internal readonly Dictionary<KittenEva, float3> Colors = [];
         internal void RemoveEmitter(KittenEva owner) => Emitters.Remove(owner);
-        internal void SetEmitter(KittenEva owner, double4x4 frame, float length, float3 color) => Emitters.Add(owner);
+        internal void SetEmitter(KittenEva owner, double4x4 frame, float length, float3 color)
+        {
+            Emitters.Add(owner);
+            Colors[owner] = color;
+        }
     }
 
     public static void Main()
@@ -54,11 +60,40 @@ internal sealed partial class SaberRuntime
         var system = new CelestialSystem();
         system.All.Items = [first, second]; Universe.CurrentSystem = system;
         runtime.RefreshOverlayKittens();
-        Check(runtime.OverlayKittens.Count == 2 && runtime._kittenSabers.Count == 0,
-            "settled fleet snapshot lists all EVA kittens without attaching poses");
+        Check(runtime.OverlayKittens.Count == 2 && runtime._kittenSabers.Count == 2
+            && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
+            && second.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0,
+            "settled fleet snapshot seeds EVA color records without attaching poses");
+        var firstPalette = new float3(143 / 255f, 16 / 255f, 16 / 255f);
+        var secondPalette = new float3(13 / 255f, 81 / 255f, 1 / 255f);
+        Check(runtime.SaberColorFor(first) == firstPalette && runtime.SaberColorFor(second) == secondPalette,
+            "first and second EVA kittens receive exact normalized red and green palette entries");
+        runtime.SetKittenSaberColor(first, new(1, 0, .2f));
+        Check(runtime.SaberColorFor(first) == new float3(1, 0, .2f) && runtime.SaberColorFor(second) == secondPalette
+            && !runtime.SaberEnabledFor(first) && runtime._kittenSaberRequests.Count == 0
+            && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0,
+            "changing one row color neither changes another kitten nor equips, ignites or binds its saber");
+        Program.ControlledVehicle = second;
+        runtime.SetAppearanceColor(new(.4f, 1, .3f));
+        Check(runtime.AppearanceColor == new float3(.4f, 1, .3f) && runtime.SaberColorFor(second) == runtime.DefaultSaberColor
+            && runtime.SaberColorFor(first) == new float3(1, 0, .2f),
+            "the panel changes its controlled kitten and saved color preference without recoloring existing peers");
+        KittenEva third = new("Third"), fourth = new("Fourth"), fifth = new("Fifth");
+        system.All.Items = [first, second, third, fourth, fifth]; runtime.RefreshOverlayKittens();
+        Check(runtime.SaberColorFor(third) == new float3(49 / 255f, 49 / 255f, 5 / 255f)
+            && runtime.SaberColorFor(fourth) == new float3(98 / 255f, 9 / 255f, 96 / 255f)
+            && runtime.SaberColorFor(fifth) == firstPalette,
+            "new EVA colors cycle yellow, purple and red independently of the saved preference");
+        runtime.RefreshOverlayKittens();
+        Check(runtime.SaberColorFor(first) == new float3(1, 0, .2f)
+            && runtime.SaberColorFor(second) == new float3(.4f, 1, .3f) && runtime._nextKittenColor == 1,
+            "repeated snapshots preserve manual colors and do not advance the palette");
+        runtime.SetKittenSaberColor(third, new(float.NaN, 12, -2));
+        Check(runtime.SaberColorFor(third) == new float3(.12f, 1, 0), "session colors reject nonfinite values and clamp every channel");
+        system.All.Items = [first, second]; runtime.RefreshOverlayKittens();
 
         runtime.QueueKittenSaber(first, true);
-        Check(runtime._kittenSabers.Count == 0 && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
+        Check(first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
             && runtime.SaberEnabledFor(first), "checkbox reflects its queued state without mutating the avatar");
         runtime.ApplyKittenSaberRequests();
         var firstSaber = runtime._kittenSabers[first];
@@ -73,11 +108,14 @@ internal sealed partial class SaberRuntime
 
         runtime.QueueKittenSaber(second, true); runtime.ApplyKittenSaberRequests();
         var secondSaber = runtime._kittenSabers[second];
+        runtime._kittenColorPickerOwner = first;
         runtime.SetControlledKitten(first); runtime.SetControlledKitten(second);
         Check(ReferenceEquals(runtime._blade, secondSaber.Blade) && ReferenceEquals(runtime._pose, secondSaber.Pose)
             && ReferenceEquals(runtime._audio, secondSaber.Audio) && ReferenceEquals(runtime._owner, second)
             && firstSaber.Blade.TargetOn && secondSaber.Blade.TargetOn
             && !runtime._freshPoseThisTick && !runtime._hasPreviousTip && runtime._swingSpeed == 0
+            && runtime.Color == secondSaber.Color && runtime.Color != firstSaber.Color
+            && runtime._kittenColorPickerOwner == null
             && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 1,
             "switching control changes active aliases and preserves both equipped sabers");
         Check(ReferenceEquals(runtime._resetGestureOwner, first),
@@ -90,6 +128,9 @@ internal sealed partial class SaberRuntime
         firstModel.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, firstModel.Skeleton, 0);
         Check(firstSaber.Pose.HasFreshBodyFrame && firstSaber.Pose.MainPoseGeneration == 1,
             "actual pose publication accepts a visible EVA kitten that is not controlled");
+        runtime.UpdateOtherSabers(0);
+        Check(runtime._renderer.Colors.TryGetValue(first, out var renderedColor) && renderedColor == firstSaber.Color
+            && renderedColor != secondSaber.Color, "an uncontrolled kitten's point light receives its own color");
         Program.RenderedViewport = new Viewport(ViewportType.Secondary);
         Program.FrameNumber = 8;
         firstModel.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, firstModel.Skeleton, 0);
@@ -107,17 +148,21 @@ internal sealed partial class SaberRuntime
         Check(firstModel.AnimProcessors.Count == 1 && !first.Renderable.Avatar.Attachments.Mmu.Enabled,
             "reenabling binds one fresh processor and hides the MMU again");
 
+        runtime._kittenColorPickerOwner = first;
         runtime._renderer.Emitters.Add(first); first.IsDisposed = true;
         system.All.Items = [second]; runtime.RefreshOverlayKittens();
         Check(!runtime._kittenSabers.ContainsKey(first) && firstModel.AnimProcessors.Count == 0
             && first.Renderable.Avatar.Attachments.Mmu.Enabled && firstSaber.Audio.Shutdowns == 1
             && firstSaber.Audio.Disposals == 1 && !runtime._renderer.Emitters.Contains(first)
-            && secondSaber.Blade.TargetOn, "boarding or disposing an uncontrolled EVA releases only that kitten's owned resources");
+            && secondSaber.Blade.TargetOn && runtime._kittenColorPickerOwner == null,
+            "boarding or disposing an uncontrolled EVA releases its owned resources and closes its color picker");
         runtime.RefreshOverlayKittens();
         Check(firstSaber.Audio.Disposals == 1, "repeated fleet refresh cannot dispose a removed kitten twice");
 
         runtime.QueueKittenSaber(first, true);
-        Check(runtime._kittenSaberRequests.Count == 0, "stale removed kittens cannot enqueue a new saber");
+        runtime.SetKittenSaberColor(first, float3.Zero);
+        Check(runtime._kittenSaberRequests.Count == 0 && !runtime._kittenSabers.ContainsKey(first),
+            "stale removed kittens cannot enqueue a saber or recreate a color record");
         runtime.QueueKittenSaber(second, false); runtime.ResetKittenSabers();
         Check(runtime._kittenSabers.Count == 0 && runtime._kittenSaberRequests.Count == 0
             && runtime.OverlayKittens.Count == 0 && runtime._activeSaber == null
@@ -125,6 +170,10 @@ internal sealed partial class SaberRuntime
             && second.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
             && secondSaber.Audio.Shutdowns == 1 && secondSaber.Audio.Disposals == 1,
             "world reset disposes every remaining kitten, clears queued UI work and restores idle aliases");
+        KittenEva afterReset = new("After reset");
+        system.All.Items = [afterReset]; runtime.RefreshOverlayKittens();
+        Check(runtime.SaberColorFor(afterReset) == firstPalette, "world reset restarts palette assignment at red");
+        runtime.ResetKittenSabers();
     }
 
     private static void Check(bool condition, string message)

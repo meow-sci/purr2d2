@@ -15,6 +15,14 @@ internal sealed partial class SaberRuntime
     private readonly List<KittenEva> _removedKittens = new();
     private readonly Queue<KittenSaberRequest> _kittenSaberRequests = new();
     private KittenSaber? _activeSaber;
+    private int _nextKittenColor;
+    private static readonly float3[] KittenColorPalette =
+    [
+        new(143 / 255f, 16 / 255f, 16 / 255f),
+        new(13 / 255f, 81 / 255f, 1 / 255f),
+        new(49 / 255f, 49 / 255f, 5 / 255f),
+        new(98 / 255f, 9 / 255f, 96 / 255f),
+    ];
 
     private readonly record struct KittenSaberRequest(KittenEva Kitten, bool Enabled);
 
@@ -28,6 +36,7 @@ internal sealed partial class SaberRuntime
         internal double3 PreviousTipBody;
         internal double PreviousTipTime;
         internal float SwingSpeed;
+        internal float3 Color = new(.12f, .75f, 1);
 
         internal KittenSaber(Action<KittenEva, IViewport, float4x4>? draw = null) => Pose = new(draw);
 
@@ -43,6 +52,33 @@ internal sealed partial class SaberRuntime
     // The UI reads this settled snapshot and enqueues requests. It never scans the
     // live system or changes avatar/audio state while the solver is in flight.
     private IReadOnlyList<KittenEva> OverlayKittens => _overlayKittens;
+
+    private float3 DefaultSaberColor => ClampSaberColor(new(_settings.ColorR, _settings.ColorG, _settings.ColorB));
+    private float3 Color => _activeSaber?.Color ?? DefaultSaberColor;
+    private float3 SaberColorFor(KittenEva kitten) => _kittenSabers.TryGetValue(kitten, out var saber) ? saber.Color : DefaultSaberColor;
+    private KittenEva? AppearanceKitten => !Program.EditorFlag && Program.ControlledVehicle is KittenEva { IsDisposed: false } kitten
+        && _currentKittens.Contains(kitten) ? kitten : null;
+    private float3 AppearanceColor => AppearanceKitten is { } kitten ? SaberColorFor(kitten) : DefaultSaberColor;
+
+    private void SetKittenSaberColor(KittenEva kitten, float3 color)
+    {
+        if (!kitten.IsDisposed && _currentKittens.Contains(kitten) && _kittenSabers.TryGetValue(kitten, out var saber))
+            saber.Color = ClampSaberColor(color);
+    }
+
+    // The panel edits its selected kitten and the saved color preference. Row
+    // pickers only edit their own session record. New kittens use the palette.
+    private void SetAppearanceColor(float3 color)
+    {
+        color = ClampSaberColor(color);
+        _settings.ColorR = color.X; _settings.ColorG = color.Y; _settings.ColorB = color.Z;
+        if (AppearanceKitten is { } kitten) SetKittenSaberColor(kitten, color);
+    }
+
+    private static float3 ClampSaberColor(float3 color) => new(
+        float.IsFinite(color.X) ? Math.Clamp(color.X, 0, 1) : .12f,
+        float.IsFinite(color.Y) ? Math.Clamp(color.Y, 0, 1) : .75f,
+        float.IsFinite(color.Z) ? Math.Clamp(color.Z, 0, 1) : 1);
 
     private bool SaberEnabledFor(KittenEva kitten)
     {
@@ -72,6 +108,8 @@ internal sealed partial class SaberRuntime
                 {
                     _overlayKittens.Add(kitten);
                     _currentKittens.Add(kitten);
+                    // Seed color at first sight, without equipping or binding a pose.
+                    GetKittenSaber(kitten);
                 }
 
         _removedKittens.Clear();
@@ -82,6 +120,7 @@ internal sealed partial class SaberRuntime
             // Boarding destroys/deregisters the EVA object. Release its processor,
             // MMU override and owned channels even if it was not being controlled.
             var saber = _kittenSabers[kitten];
+            if (ReferenceEquals(kitten, _kittenColorPickerOwner)) DismissKittenColorPicker();
             if (ReferenceEquals(saber, _activeSaber)) SetControlledKitten(null);
             saber.Dispose();
             _kittenSabers.Remove(kitten);
@@ -94,7 +133,8 @@ internal sealed partial class SaberRuntime
     {
         if (!_kittenSabers.TryGetValue(kitten, out var saber))
         {
-            saber = new(DrawSaber);
+            saber = new(DrawSaber) { Color = KittenColorPalette[_nextKittenColor] };
+            _nextKittenColor = (_nextKittenColor + 1) % KittenColorPalette.Length;
             _kittenSabers.Add(kitten, saber);
         }
         return saber;
@@ -102,11 +142,12 @@ internal sealed partial class SaberRuntime
 
     private void SetControlledKitten(KittenEva? kitten)
     {
+        DismissKittenColorPicker();
         CancelAssistedSlice(_sliceSequence.Active || _selectingSlice ? "Slice cancelled: controlled kitten changed." : "");
         ResetOverlaySwing();
         _targeting.Reset(); _contactProbe.Reset();
         _owner = kitten;
-        _activeSaber = kitten != null ? GetKittenSaber(kitten) : null;
+        _activeSaber = kitten != null && _kittenSabers.TryGetValue(kitten, out var selectedSaber) ? selectedSaber : null;
         var saber = _activeSaber ?? _idleSaber;
         _blade = saber.Blade; _pose = saber.Pose; _audio = saber.Audio;
         // A new controlled owner needs a newly rendered main-view pose before it
@@ -122,8 +163,8 @@ internal sealed partial class SaberRuntime
     {
         while (_kittenSaberRequests.TryDequeue(out var request))
         {
-            if (_fault != null || !_currentKittens.Contains(request.Kitten) || request.Kitten.IsDisposed) continue;
-            var saber = GetKittenSaber(request.Kitten);
+            if (_fault != null || !_currentKittens.Contains(request.Kitten) || request.Kitten.IsDisposed
+                || !_kittenSabers.TryGetValue(request.Kitten, out var saber)) continue;
             if (ReferenceEquals(saber, _activeSaber) && (_sliceSequence.Active || _selectingSlice))
                 CancelAssistedSlice("Slice cancelled by manual control.");
             saber.Blade.Equip(request.Enabled);
@@ -154,7 +195,7 @@ internal sealed partial class SaberRuntime
             if (!pose.Eligible) saber.Blade.SetIgnited(false);
             saber.Blade.Advance(playerDt);
             if (saber.Blade.Equipped && saber.FreshPoseThisTick && pose.TryGetBodyFrame(out var emitter))
-                _renderer.SetEmitter(pair.Key, emitter, saber.Blade.Deployment * _settings.BladeLength, Color);
+                _renderer.SetEmitter(pair.Key, emitter, saber.Blade.Deployment * _settings.BladeLength, saber.Color);
             else if (saber.Blade.Equipped) saber.Audio.Suspend();
             else saber.Audio.Stop();
         }
@@ -178,9 +219,11 @@ internal sealed partial class SaberRuntime
 
     private void ResetKittenSabers()
     {
+        DismissKittenColorPicker();
         foreach (var saber in _kittenSabers.Values) saber.Dispose();
         _kittenSabers.Clear(); _kittenSaberRequests.Clear(); _overlayKittens.Clear();
         _currentKittens.Clear(); _removedKittens.Clear(); _activeSaber = null;
+        _nextKittenColor = 0;
         _blade = _idleSaber.Blade; _pose = _idleSaber.Pose; _audio = _idleSaber.Audio;
         _blade.Reset(); _pose.Unbind(); _audio.Reset();
     }

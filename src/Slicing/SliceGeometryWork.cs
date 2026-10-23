@@ -7,10 +7,15 @@ namespace Purr2D2.Slicing;
 // Worker inputs contain copied values only: never Part, Vehicle, MeshReference or a native material.
 internal sealed record SliceMaterialData(string Id, bool Glass);
 internal sealed record SliceInput(SliceFace[][] Groups, CutPoint[] Axes,
-    IReadOnlyDictionary<int, SliceMaterialData> Materials, float MassKg);
+    IReadOnlyDictionary<int, SliceMaterialData> Materials, float MassKg, uint Seed = 0);
 internal sealed record SlicePlan(SlicePlane Plane);
 internal sealed record CpuFragment(SlicePiece Piece, PrincipalFragment Frame, SliceFace[][] Solids, double3 Extents, float MassKg);
-internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments);
+internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments)
+{
+    internal bool Faceted { get; init; }
+    internal int Attempts { get; init; }
+    internal string FacetFallback { get; init; } = "";
+}
 
 internal static class SliceGeometryWork
 {
@@ -19,10 +24,19 @@ internal static class SliceGeometryWork
         cancel.ThrowIfCancellationRequested();
         if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel)) throw new InvalidDataException(reason);
         string failure = "No broad section could be found.";
-        foreach (var candidate in AssistedSliceGeometry.Candidates(source, input.Axes))
+        var candidates = AssistedSliceGeometry.Candidates(source, input.Axes, input.Seed).ToArray();
+        string facetFailure = ""; int attempts = 0;
+        // Three coarse facet attempts, then the bounded oblique/axis plane fallbacks.
+        foreach (var attempt in candidates.Take(3).Select((plane, i) => (Plane: plane, Faceted: true, Index: i))
+            .Concat(candidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i))))
         {
+            var candidate = attempt.Plane; attempts++;
             cancel.ThrowIfCancellationRequested();
-            if (!PlaneSlicer.TrySliceCompound(source, candidate, out var result, out failure, cancellation: cancel)) continue;
+            PlaneSliceResult? result;
+            bool sliced = attempt.Faceted
+                ? FacetedSliceGeometry.TrySlice(source, candidate, input.Seed + (uint)attempt.Index * 0x9e3779b9u, out result, out failure, cancel)
+                : PlaneSlicer.TrySliceCompound(source, candidate, out result, out failure, cancellation: cancel);
+            if (!sliced) { if (attempt.Faceted) facetFailure = failure; continue; }
             var prepared = new List<CpuFragment>();
             double volume = result!.Pieces.Sum(p => p.Volume);
             if (result.Pieces.Length is < 2 or > 8 || !double.IsFinite(volume) || volume <= 0) continue;
@@ -43,17 +57,26 @@ internal static class SliceGeometryWork
                 if (!float.IsFinite(mass) || mass <= .0001f) { failure = "Slice fragment mass is invalid."; break; }
                 prepared.Add(new(piece, frame, solids, extents, mass));
             }
-            if (prepared.Count != result.Pieces.Length) continue;
-            // Start the visible stroke as soon as its exact plane is known. Hulls, serialization
-            // and file I/O continue on this worker while the main view animates the saber.
-            publish(new(candidate));
+            if (prepared.Count != result.Pieces.Length) { if (attempt.Faceted) facetFailure = failure; continue; }
             var assets = new CpuFragmentAsset[prepared.Count];
-            for (int i = 0; i < assets.Length; i++)
+            try
             {
-                cancel.ThrowIfCancellationRequested();
-                assets[i] = FragmentAssetWriter.Build(prepared[i], input.Materials, cancel);
+                for (int i = 0; i < assets.Length; i++)
+                {
+                    cancel.ThrowIfCancellationRequested();
+                    assets[i] = FragmentAssetWriter.Build(prepared[i], input.Materials, cancel);
+                }
             }
-            return new(result.EffectivePlane, assets);
+            catch (InvalidDataException error)
+            {
+                failure = "Fragment export/collider: " + error.Message;
+                if (attempt.Faceted) facetFailure = failure;
+                continue;
+            }
+            // Publish only a fully exportable section. The visible swing starts
+            // independently, while hull cooking and serialization stay on this worker.
+            publish(new(result.EffectivePlane));
+            return new(result.EffectivePlane, assets) { Faceted = attempt.Faceted, Attempts = attempts, FacetFallback = attempt.Faceted ? "" : facetFailure };
         }
         throw new InvalidDataException("This part could not be sliced: " + failure);
     }

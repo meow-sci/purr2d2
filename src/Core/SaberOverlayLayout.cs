@@ -10,6 +10,17 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     float2 SwingCenter, float SwingRadius, float2 SliceCenter, float SliceRadius, float Scale)
 {
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
+    public float ColorSwatchSize => RowHeight * .62f;
+    public float2 ColorSwatchMin(int row, float scroll) => new(ListMax.X - Padding - ColorSwatchSize,
+        ListBodyTop + row * RowHeight - scroll + RowHeight * .18f);
+    public bool IsColorSwatch(float2 point, int row, float scroll)
+    {
+        if (!Valid || row < 0 || !float.IsFinite(scroll) || !float.IsFinite(point.X) || !float.IsFinite(point.Y)
+            || point.Y < ListBodyTop || point.Y >= ListBodyTop + ListBodyHeight) return false;
+        var min = ColorSwatchMin(row, scroll);
+        return point.X >= min.X && point.X <= min.X + ColorSwatchSize
+            && point.Y >= min.Y && point.Y <= min.Y + ColorSwatchSize;
+    }
     public SaberOverlayHit Hit(float2 point)
     {
         if (!Valid) return SaberOverlayHit.None;
@@ -23,10 +34,10 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     {
         if (!float.IsFinite(origin.X) || !float.IsFinite(origin.Y) || !float.IsFinite(fontSize)
             || !float.IsFinite(size.X) || !float.IsFinite(size.Y) || size.X < 240 || size.Y < 220) return default;
-        float scale = Math.Min(Math.Clamp(fontSize / 16f, .75f, 2), Math.Max(.5f, Math.Min(size.X / 420, size.Y / 560)));
+        float scale = Math.Min(Math.Clamp(fontSize / 16f, .75f, 2), Math.Min(size.X / 420, size.Y / 560));
         float pad = 12 * scale, margin = 20 * scale, row = 28 * scale;
-        float radius = 88 * scale, smallRadius = 36 * scale;
-        var slice = new float2(origin.X + size.X - margin - smallRadius, origin.Y + size.Y * .5f);
+        float radius = 132 * scale, smallRadius = 27 * scale;
+        var slice = new float2(origin.X + size.X - margin - smallRadius - 60 * scale, origin.Y + size.Y * .5f);
         var swing = slice - new float2(radius + smallRadius + 18 * scale, 0);
         var min = new float2(origin.X + size.X - margin - 296 * scale, origin.Y + Math.Max(margin, topInset));
         float header = 38 * scale;

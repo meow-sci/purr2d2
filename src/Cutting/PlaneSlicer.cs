@@ -186,6 +186,17 @@ internal static class PlaneSlicer
         catch (SliceRejected error) { failure = error.Message; return false; }
     }
 
+    /// <summary>Give accepted epsilon-welded seams one exact position before further subdivision.</summary>
+    internal static SliceFace[] CanonicalPositions(IReadOnlyList<SliceFace> faces)
+    {
+        var points = faces.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
+        var min = points.Aggregate(CutPoint.Min); var max = points.Aggregate(CutPoint.Max);
+        var positions = new List<CutPoint>();
+        var weld = new PositionWeld(Math.Max(1e-9, (max - min).Length * 1e-8), positions);
+        SliceVertex Convert(SliceVertex vertex) => vertex with { Position = positions[weld.Add(vertex.Position)] };
+        return faces.Select(f => new SliceFace(Convert(f.A), Convert(f.B), Convert(f.C), f.Material)).ToArray();
+    }
+
     private sealed class SliceRejected(string message) : Exception(message);
     private static void Require(bool condition, string message) { if (!condition) throw new SliceRejected(message); }
     private readonly record struct Edge(int A, int B)
@@ -252,7 +263,8 @@ internal static class PlaneSlicer
                 _source.Add(new(canonical, a, b, c));
             }
             var canonicalFaces = _source.Select(x => x.Face).ToArray();
-            Audit(canonicalFaces, _epsilon, out _);
+            try { Audit(canonicalFaces, _epsilon, out _); }
+            catch (SliceRejected error) { throw new SliceRejected("Canonical source: " + error.Message); }
             var sourceProperties = Properties(canonicalFaces);
             Require(sourceProperties.Volume > _epsilon * _epsilon * _epsilon * 100, "Source has nonpositive signed solid volume; check winding.");
             ChoosePlane();
@@ -266,8 +278,9 @@ internal static class PlaneSlicer
             var negativeFaces = EmitSides(_negative);
             AddCaps(positiveFaces, negativeFaces);
             Require(positiveFaces.Count + negativeFaces.Count <= MaximumOutputFaces, "Sliced geometry exceeds the output budget.");
-            Audit(positiveFaces, _epsilon, out var positiveComponents);
-            Audit(negativeFaces, _epsilon, out var negativeComponents);
+            List<List<int>> positiveComponents, negativeComponents;
+            try { Audit(positiveFaces, _epsilon, out positiveComponents); Audit(negativeFaces, _epsilon, out negativeComponents); }
+            catch (SliceRejected error) { throw new SliceRejected("Clipped output: " + error.Message); }
             var pieces = new List<SlicePiece>();
             AddPieces(positiveFaces, positiveComponents, true);
             AddPieces(negativeFaces, negativeComponents, false);
@@ -558,6 +571,14 @@ internal static class PlaneSlicer
 
         private void Fan(List<SliceVertex> polygon, int material, List<SliceFace> destination)
         {
+            // Most source triangles do not intersect this cut. Reusing them avoids
+            // tripling every untouched surface at each generation of wreckage slicing.
+            if (polygon.Count == 3)
+            {
+                if (CutPoint.Cross(polygon[1].Position - polygon[0].Position, polygon[2].Position - polygon[0].Position).Length > _epsilon * _epsilon)
+                    destination.Add(new(polygon[0], polygon[1], polygon[2], material));
+                return;
+            }
             var position = default(CutPoint); var normal = default(CutPoint); double u = 0, v = 0;
             foreach (var point in polygon) { position += point.Position; normal += point.Normal; u += point.U; v += point.V; }
             var center = new SliceVertex(position / polygon.Count, normal.Normalized, u / polygon.Count, v / polygon.Count);

@@ -123,13 +123,15 @@ internal sealed partial class SaberRuntime
     private void DrawSaberAppearanceSettings()
     {
         if (!BeginSaberSettingsTable("##SaberAppearance")) return;
-        bool changed = false;
+        bool changed = false, colorChanged = false;
         float length = _settings.BladeLength, volume = _settings.Volume;
-        float3 color = Color;
+        float3 color = AppearanceColor;
         try
         {
-            SaberSettingsRow("Color");
-            changed |= ImGui.ColorEdit3("##BladeColor", ref color);
+            SaberSettingsRow(AppearanceKitten != null ? "Kitten color" : "Color preference");
+            colorChanged = ImGui.ColorEdit3("##BladeColor", ref color, ImGuiColorEditFlags.NoInputs);
+            changed |= colorChanged;
+            ShowSaberControlTip("Per-kitten colors last for this session. New EVA kittens cycle red, green, yellow and purple.");
             SaberSettingsRow("Blade length");
             changed |= ImGui.SliderFloat("##BladeLength", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m");
             SaberSettingsRow("Sound volume");
@@ -138,7 +140,7 @@ internal sealed partial class SaberRuntime
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.BladeLength = length;
-        _settings.ColorR = color.X; _settings.ColorG = color.Y; _settings.ColorB = color.Z;
+        if (colorChanged) SetAppearanceColor(color);
         _settings.Volume = volume;
         _settings.Validate();
         _preferencesSavedUntil = 0;
@@ -176,7 +178,8 @@ internal sealed partial class SaberRuntime
     private static bool BeginSaberSettingsTable(string id)
     {
         if (!ImGui.BeginTable(id, 2, ImGuiTableFlags.NoPadOuterX)) return false;
-        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("Blade direction").X);
+        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed,
+            Math.Max(ImGui.CalcTextSize("Blade direction").X, ImGui.CalcTextSize("Color preference").X));
         ImGui.TableSetupColumn("Control", ImGuiTableColumnFlags.WidthStretch);
         return true;
     }

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Xml.Serialization;
+using System.Xml.Linq;
 using KSA;
 using Purr2D2.Rendering;
 
@@ -12,11 +13,11 @@ internal static class FragmentTemplateChecks
             <Assets>
               <MeshAtlas Id="fragment_atlas" Path="fixture.glb"/>
               <SubPart Id="fragment_solid">
+                <MeshView Id="pick"><Mesh Id="pick_mesh"/></MeshView>
                 <PartModel Id="skin"><Mesh Id="skin_mesh"/><Material Id="metal"/><ShadowCaster>true</ShadowCaster></PartModel>
                 <PartModelGlass Id="window"><Mesh Id="window_mesh"/><Material Id="glass"/></PartModelGlass>
               </SubPart>
               <Part Id="fragment">
-                <MeshView Id="pick"><Mesh Id="pick_mesh"/></MeshView>
                 <SubPart InstanceOf="fragment_solid"/>
                 <Collider Id="collider"><ConvexHull Id="hull"><Mesh Id="collision_mesh"/></ConvexHull></Collider>
                 <CustomMass><Mass Kg="42"/><MassSpecificInertia Ixx="1" Iyy="2" Izz="3"/></CustomMass>
@@ -30,6 +31,10 @@ internal static class FragmentTemplateChecks
         var serializer = FragmentTemplateLoader.CreateSerializer();
         var bundle = FragmentTemplateLoader.Read(serializer, xml, "fragment", 2);
         var root = bundle.Assets.OfType<PartTemplate>().Single(p => p.Id == "fragment");
+        var visual = bundle.Assets.OfType<PartTemplate>().Single(p => p.Id == "fragment_solid");
+        if (root.Components.OfType<MeshViewModule.Template>().Any()
+            || visual.Components.OfType<MeshViewModule.Template>().Single().MeshView.Id != "pick_mesh")
+            throw new Exception("Picking must stay on the visual subpart for native hover raycasts.");
         var hull = root.Components.OfType<ColliderModule.Template>().Single().Colliders.OfType<ConvexHullColliderTemplate>().Single();
         if (hull.Mesh.Id != "collision_mesh" || root.SubPartInstances.Count != 1
             || root.InertMasses.Single() is not CustomMassTemplate mass || mass.Mass.Kg != 42)
@@ -38,6 +43,23 @@ internal static class FragmentTemplateChecks
         if (bundle.Assets.OfType<MeshAtlasFileReference>().Any()) throw new Exception("CPU-loaded atlas must not be registered again.");
         // Repeat to catch serializer state leaking across cuts; no global cache is involved.
         FragmentTemplateLoader.Read(serializer, xml, "fragment", 2);
-        Console.WriteLine("PASS: actual KSA XML mappings retain render/glass/picking/collider modules and mass; plain serializer regression rejected");
+        var document = XDocument.Parse(Encoding.UTF8.GetString(xml));
+        var picker = document.Root!.Element("SubPart")!.Element("MeshView")!;
+        picker.Remove();
+        Reject(document, "Missing picking geometry must be rejected.");
+        document.Root.Element("Part")!.Add(picker);
+        FragmentTemplateLoader.Read(serializer, Encode(document), "fragment", 2);
+        picker.Remove();
+        document.Root.Add(new XElement("SubPart", new XAttribute("Id", "orphan"), picker));
+        Reject(document, "An unattached template cannot supply the picking geometry.");
+        Console.WriteLine("PASS: actual KSA XML retains visual-subpart picking, legacy picking, render/glass/collider modules and mass; missing/unattached picking and plain serializer rejected");
+
+        void Reject(XDocument input, string message)
+        {
+            try { FragmentTemplateLoader.Read(serializer, Encode(input), "fragment", 2); }
+            catch (InvalidDataException) { return; }
+            throw new Exception(message);
+        }
+        static byte[] Encode(XDocument input) => Encoding.UTF8.GetBytes(input.ToString());
     }
 }

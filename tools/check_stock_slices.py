@@ -2,8 +2,10 @@
 """Exercise the production shell/plane slicer against a user's installed stock GLBs.
 
 Usage: python3 tools/check_stock_slices.py /path/to/Content/Core
+   or: python3 tools/check_stock_slices.py --fixture artifacts/checks/stock-slices.json
 Game assets remain local and are never included in the mod or repository.
 """
+import argparse
 import json
 import math
 from pathlib import Path
@@ -97,10 +99,26 @@ def fixtures(content):
 
 
 if __name__ == '__main__':
-    content = Path(sys.argv[1]).resolve()
-    output = DEFAULT_SOURCE / 'artifacts/checks/stock-slices.json'
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(list(fixtures(content))))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('content', nargs='?', type=Path, help='installed Content/Core directory, including Meshes')
+    parser.add_argument('--fixture', type=Path, help='reuse an existing local stock fixture without reading game GLBs')
+    args = parser.parse_args()
+    if (args.content is None) == (args.fixture is None):
+        parser.error('provide either Content/Core or --fixture')
+    if args.fixture is not None:
+        output = args.fixture.resolve()
+        if not output.is_file():
+            parser.error(f'fixture does not exist: {output}')
+    else:
+        output = DEFAULT_SOURCE / 'artifacts/checks/stock-slices.json'
+        # Read every required asset before replacing a usable cache. Generated game
+        # fixtures stay in ignored artifacts/ and are never bundled with the mod.
+        try:
+            data = json.dumps(list(fixtures(args.content.resolve())))
+        except (OSError, KeyError, ET.ParseError) as error:
+            parser.error(f'could not read installed stock assets (cached fixture preserved): {error}')
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(data)
     required = [DEFAULT_SOURCE / p for p in ('src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs',
                 'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentAssetWriter.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/SliceColliderGeometry.cs', 'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'tests/StockSliceChecks.cs')]
     code, log = _run_managed_project(DEFAULT_SOURCE, 'StockSliceChecks', required,

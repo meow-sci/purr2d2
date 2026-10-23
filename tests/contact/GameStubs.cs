@@ -90,8 +90,10 @@ namespace KSA
         public PartTree? Tree;
         public readonly List<Part> TreeChildren = [], SubParts = [];
         public readonly List<Connection> Connections = [];
-        public readonly ModuleCollection Modules = new();
-        public readonly object Template = new();
+        public readonly ModuleCollection Modules = new(), SubtreeModules = new();
+        public readonly PartTemplate Template = new();
+        public int BoundsUpdates;
+        public void UpdateBounds() => BoundsUpdates++;
         public bool IsAttachedInternal;
         public bool IsSubPart => PartParent != null;
         public Part FullPart => PartParent ?? this;
@@ -121,6 +123,8 @@ namespace KSA
         }
     }
 
+    public sealed class PartTemplate { public string Id = "fixture template"; }
+
     public sealed class ModuleCollection
     {
         private readonly List<object> _items = [];
@@ -146,6 +150,8 @@ namespace KSA
     public sealed class MeshViewModule(MeshReference mesh)
     {
         public MeshReference MeshView = mesh;
+        public Part? Parent;
+        public MeshViewModule(string id, MeshReference mesh) : this(mesh) { }
     }
 
     public sealed class PartModelModule
