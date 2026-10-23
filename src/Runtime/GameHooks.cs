@@ -50,6 +50,7 @@ internal static class GameHooks
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(WorldChanged)));
         harmony.Patch(Require(typeof(Program), nameof(Program.Dispose)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(Shutdown)));
+        SliceWorkerHooks.Install(harmony);
     }
 
     private static MethodInfo Require(Type type, string name, params Type[] parameters) =>
@@ -143,7 +144,12 @@ internal static class GameHooks
     private static void WaitVehicleSolver(JobScheduler scheduler)
     {
         var start = SliceFrameDiagnostics.StartSegment();
-        try { scheduler.Wait(); }
+        long waitStart = SliceWorkerDiagnostics.HasPending ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        try
+        {
+            scheduler.Wait();
+            if (waitStart != 0) SliceFrameDiagnostics.WorkerJoined(waitStart, System.Diagnostics.Stopwatch.GetTimestamp());
+        }
         finally { SliceFrameDiagnostics.EndSegment(SliceFrameSegment.VehicleWait, start); }
     }
     private static void FlushDirtyDerived()

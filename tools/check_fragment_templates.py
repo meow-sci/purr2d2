@@ -63,8 +63,10 @@ for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/Fragmen
                'src/Slicing/SliceColliderGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',
                'src/Slicing/SliceMeshPrecision.cs', 'src/Core/SaberLimits.cs',
                'src/Slicing/SliceDiagnosticCounters.cs', 'src/Slicing/SliceFrameDiagnostics.cs',
+               'src/Slicing/SliceWorkerDiagnostics.cs', 'src/Runtime/SliceWorkerHooks.cs',
                'src/Slicing/SliceCommitTimings.cs', 'src/Runtime/GameHooks.cs',
                'tests/SliceDiagnosticsChecks.cs', 'tests/FrameHooksChecks.cs', 'tests/FrameHooksHostStubs.cs',
+               'tests/SliceWorkerDiagnosticsChecks.cs', 'tests/SliceWorkerHooksChecks.cs',
                'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs']:
     ET.SubElement(items, 'Compile', Include=str(root / source))
 for dll in host.glob('*.dll'):

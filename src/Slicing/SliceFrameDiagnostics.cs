@@ -6,7 +6,8 @@ internal enum SliceFrameSegment { VehicleWait, DirtyDerived, ResourceFlush, Vehi
 
 internal readonly record struct SliceFrameSample(SliceCounterDelta Interval, SliceCounterDelta HookTail,
     bool HasHookTail, SliceCounterDelta VehicleWait, SliceCounterDelta DirtyDerived,
-    SliceCounterDelta ResourceFlush, SliceCounterDelta VehiclePreparationAndDispatch);
+    SliceCounterDelta ResourceFlush, SliceCounterDelta VehiclePreparationAndDispatch,
+    SliceWorkerSample? Worker = null);
 
 /// <summary>A separately bounded ring of primitive snapshots. Never retains a vehicle, part,
 /// tree, profiler frame or uploaded asset. Main-thread use only.</summary>
@@ -35,6 +36,7 @@ internal sealed class SliceDiagnosticRing
     internal int Dropped { get; private set; }
     internal bool HasActive => _activeCount != 0;
     internal int PendingCount => _pendingCount;
+    internal long CurrentFrame => _frame;
 
     internal void EnterFrame(in SliceCounterSnapshot snapshot, bool partial = false)
     {
@@ -103,6 +105,19 @@ internal sealed class SliceDiagnosticRing
         }
     }
 
+    internal void RecordWorker(SliceWorkerSample sample)
+    {
+        // Dispatch belongs to its originating interval. Its existing native wait happens
+        // AFTER next EnterFrame has closed that interval, including the final interval.
+        foreach (var window in _windows)
+        {
+            if (window.Kind == null) continue;
+            long index = sample.Frame - window.FirstFrame;
+            if (index >= 0 && index < window.Count)
+                window.Frames[index] = window.Frames[index] with { Worker = sample };
+        }
+    }
+
     internal string? TakeCompleted()
     {
         // Do not let isolation's delayed formatting contaminate the overlapping swap window.
@@ -130,9 +145,13 @@ internal sealed class SliceDiagnosticRing
                     .Append("; dirty derived: ").Append(FormatSegment(sample.DirtyDerived))
                     .Append("; resource flush: ").Append(FormatSegment(sample.ResourceFlush))
                     .Append("; vehicle preparation + ground clutter + dispatch: ").Append(FormatSegment(sample.VehiclePreparationAndDispatch));
+                text.Append("\n    physics worker dispatched in this interval: ")
+                    .Append(sample.Worker?.Format() ?? (SliceWorkerDiagnostics.Supported
+                        ? "unavailable (no joined instrumented dispatch)" : "unavailable (worker hooks unsupported)"));
             }
             if (Dropped != 0) text.Append("\n  diagnostic ring full: ").Append(Dropped).Append(" operations dropped");
             window.Kind = window.Template = null;
+            Array.Clear(window.Frames);
             _pendingCount--;
             return text.ToString();
         }
@@ -144,7 +163,8 @@ internal sealed class SliceDiagnosticRing
     internal void ForgetFrame() { _hasEntry = _hasHookReturn = false; CurrentOperation = 0; }
     internal void Reset()
     {
-        foreach (var window in _windows) { window.Kind = window.Template = null; window.Active = false; }
+        foreach (var window in _windows)
+        { window.Kind = window.Template = null; window.Active = false; Array.Clear(window.Frames); }
         _activeCount = _pendingCount = Dropped = 0; ForgetFrame();
     }
 }
@@ -163,7 +183,7 @@ internal static class SliceFrameDiagnostics
         _armed = true;
     }
     internal static void Disarm() { _armed = false; if (!Ring.HasActive) Ring.ForgetFrame(); }
-    internal static void Reset() { _armed = false; Ring.Reset(); }
+    internal static void Reset() { _armed = false; Ring.Reset(); SliceWorkerDiagnostics.Reset(); }
     internal static void BeginOperation(string kind, string sourceTemplateId, int ownerPartCount,
         int sourcePartCount = -1, int boundaryConnections = -1)
     {
@@ -185,6 +205,21 @@ internal static class SliceFrameDiagnostics
     {
         if (!Sampling) return;
         try { Ring.HookReturned(SliceCounterSnapshot.Capture()); }
+        catch { Reset(); }
+    }
+    internal static void DispatchWorker()
+    {
+        if (Ring.HasActive && SliceWorkerDiagnostics.Supported) SliceWorkerDiagnostics.Dispatch(Ring.CurrentFrame);
+    }
+    internal static void WorkerJoined(long waitStart, long waitEnd)
+    {
+        // Do not gate on Sampling: EnterFrame may just have closed the fourth interval.
+        if (!SliceWorkerDiagnostics.HasPending) return;
+        try
+        {
+            var sample = SliceWorkerDiagnostics.Joined(waitStart, waitEnd);
+            if (sample != null) Ring.RecordWorker(sample);
+        }
         catch { Reset(); }
     }
     internal static SliceCounterSnapshot StartSegment() => Sampling ? SliceCounterSnapshot.Capture() : default;

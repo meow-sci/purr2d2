@@ -53,6 +53,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     root = Path(__file__).resolve().parents[1]
     parser.add_argument("--host-dll-dir", type=Path, default=Path(os.environ.get("KSA_DLL_DIR", str(root.parent / "ksa-game-assemblies/current/dll"))))
+    parser.add_argument("--dependency-dir", type=Path, action="append", default=[],
+                        help="Additional managed host dependency directory; repeat for dependencies omitted from the reference snapshot.")
     parser.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
     args = parser.parse_args()
     host = args.host_dll_dir.resolve()
@@ -77,7 +79,9 @@ def main() -> int:
     print(f"Copied {len(originals)} host DLLs; adapted {adapted} pure-IL PE machine fields in test copies only.", flush=True)
 
     # Resolve compile-only dependencies from this build's restored package paths.
-    dependencies = []
+    dependencies = [str(path.resolve()) for path in args.dependency_dir]
+    if any(not path.is_dir() for path in args.dependency_dir):
+        parser.error("Every --dependency-dir must name an existing managed dependency directory.")
     assets_path = root / "obj/project.assets.json"
     if assets_path.is_file():
         assets = json.loads(assets_path.read_text())
@@ -95,19 +99,23 @@ def main() -> int:
         '</ItemGroup></Project>\n'
     )
     try:
-        for baseline in (True, False):
+        warmed_stdout = ""
+        for mode in ("--cold-baseline", "--warm", "--cancel-before", "--cancel-running"):
             command = ["dotnet", "run", "--project", str(output / "SliceWarmupProbe.csproj"), "-c", "Release"]
-            if not baseline:
+            if mode != "--cold-baseline":
                 command.append("--no-build")
             command.append("--")
-            if baseline:
-                command.append("--cold-baseline")
+            if mode != "--warm":
+                command.append(mode)
             process = subprocess.run([*command, str(mod), str(copies), *sorted(set(dependencies))],
-                                     cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                                     cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
             print(process.stdout, end="")
             if process.returncode:
                 return process.returncode
-        if not re.search(r"Slice JIT warmup: prepared \d+ methods; skipped \d+ open/abstract/bodyless methods; failed 0", process.stdout):
+            if mode == "--warm":
+                warmed_stdout = process.stdout
+        summaries = re.findall(r"Slice JIT warmup: prepared (\d+) methods; skipped \d+ open/abstract/bodyless methods; failed 0; targeted graph (\d+) bodies/\d+ IL bytes, depth \d+, boundaries \d+; within budget", warmed_stdout)
+        if len(summaries) != 1 or summaries[0][0] != summaries[0][1]:
             print("FAIL: production warmup did not publish a complete successful summary.", file=sys.stderr)
             return 1
         return 0

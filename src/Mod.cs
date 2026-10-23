@@ -36,6 +36,7 @@ public sealed class Mod
         {
             SaberRuntime.Report("Initialization failed", ex);
             _runtime?.SetInitializationFault(ex.Message);
+            SliceWorkerHooks.Uninstall();
             _harmony?.UnpatchAll(_harmony.Id);
         }
     }
@@ -53,6 +54,7 @@ public sealed class Mod
         finally
         {
             GameHooks.Runtime = null;
+            SliceWorkerHooks.Uninstall();
             _harmony?.UnpatchAll(_harmony.Id);
             _runtime = null;
             _harmony = null;
