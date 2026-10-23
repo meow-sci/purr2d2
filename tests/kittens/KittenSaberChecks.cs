@@ -56,6 +56,7 @@ internal sealed partial class SaberRuntime
 
     public static void Main()
     {
+        CheckLocomotionTransitions();
         var runtime = new SaberRuntime();
         KittenEva first = new("First"), second = new("Second");
         var system = new CelestialSystem();
@@ -306,6 +307,64 @@ internal sealed partial class SaberRuntime
         Program.EditorFlag = false;
         Check(runtime._kittenSaberRequests.Count == 0, "ignite button cannot enqueue in the editor");
         Program.ControlledVehicle = second;
+    }
+
+    private static void CheckLocomotionTransitions()
+    {
+        var runtime = new SaberRuntime();
+        var kitten = new KittenEva("Moon runner");
+        var system = new CelestialSystem();
+        system.All.Items = [kitten]; Universe.CurrentSystem = system;
+        Program.ControlledVehicle = kitten;
+        runtime.RefreshOverlayKittens(); runtime.SetControlledKitten(kitten);
+        runtime.QueueKittenSaber(kitten, true); runtime.ApplyKittenSaberRequests();
+        var saber = runtime._kittenSabers[kitten];
+        for (int i = 0; i < 6; i++) runtime.AdvanceKittenSaber(saber, .1);
+        var model = kitten.Renderable.Avatar.Core.CharacterModel;
+        Program.RenderedViewport = Program.MainViewport;
+        for (int hop = 0; hop < 3; hop++)
+        foreach (var mode in new[] { LocomotionMode.Grounded, LocomotionMode.Airborne, LocomotionMode.Tumbling,
+            LocomotionMode.Rightening, LocomotionMode.Grounded, LocomotionMode.Mmu })
+        {
+            kitten.LocomotionState.Mode = mode;
+            runtime.AdvanceKittenSaber(saber, .1);
+            Program.FrameNumber++;
+            model.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, model.Skeleton, 0);
+            Check(saber.Blade.Equipped && saber.Blade.TargetOn && saber.Blade.Deployment == 1
+                && saber.Pose.Blend == 1 && saber.Pose.HasFreshBodyFrame && runtime.SaberEnabledFor(kitten),
+                "running, hopping, stumbling and rightening retain a lit saber and fresh hand pose");
+        }
+        foreach (var mode in new[] { LocomotionMode.Ladder, LocomotionMode.Swimming })
+        {
+            kitten.LocomotionState.Mode = mode;
+            runtime.AdvanceKittenSaber(saber, .1); runtime.AdvanceKittenSaber(saber, .1);
+            Check(!saber.Pose.Eligible && !saber.Pose.HasFreshBodyFrame && saber.Blade.TargetOn
+                && saber.Blade.Deployment == 1 && runtime.SaberEnabledFor(kitten),
+                "unsupported hand poses suspend presentation without clearing ignition intent");
+            kitten.LocomotionState.Mode = LocomotionMode.Grounded;
+            runtime.AdvanceKittenSaber(saber, .1); runtime.AdvanceKittenSaber(saber, .1);
+            Check(saber.Pose.Blend == 1 && saber.Blade.TargetOn && saber.Blade.Deployment == 1,
+                "returning to walking restores the still-lit saber without a new toggle");
+        }
+        kitten.LocomotionState.Mode = LocomotionMode.Ladder;
+        runtime.QueueKittenSaber(kitten, false); runtime.ApplyKittenSaberRequests();
+        for (int i = 0; i < 6; i++) runtime.AdvanceKittenSaber(saber, .1);
+        kitten.LocomotionState.Mode = LocomotionMode.Grounded;
+        runtime.AdvanceKittenSaber(saber, .1);
+        Check(!saber.Blade.Equipped && !runtime.SaberEnabledFor(kitten),
+            "an explicit disable during suspension remains off when ground movement resumes");
+        runtime.QueueKittenSaber(kitten, true); runtime.ApplyKittenSaberRequests();
+        runtime.AdvanceKittenSaber(saber, .05);
+        kitten.LocomotionState.Mode = LocomotionMode.Ladder;
+        for (int i = 0; i < 4; i++) runtime.AdvanceKittenSaber(saber, .1);
+        Check(runtime.SaberEnabledFor(kitten) && saber.TogglePhase == SaberTogglePhase.Equipping && !saber.Blade.TargetOn,
+            "a temporary pose loss during equip retains the queued ignition");
+        kitten.LocomotionState.Mode = LocomotionMode.Airborne;
+        for (int i = 0; i < 6; i++) runtime.AdvanceKittenSaber(saber, .1);
+        Check(saber.Blade.TargetOn && saber.Blade.Deployment == 1,
+            "interrupted equip completes automatically once a supported pose returns");
+        runtime.ResetKittenSabers();
+        Program.FrameNumber = 0;
     }
 
     private static void Check(bool condition, string message)

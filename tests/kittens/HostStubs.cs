@@ -28,7 +28,7 @@ namespace KSA
         public object[] Items = [];
         public ReadOnlySpan<object> AsSpan() => Items;
     }
-    public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder }
+    public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder, Tumbling, Rightening, Swimming }
     public sealed class LocomotionState { public LocomotionMode Mode = LocomotionMode.Grounded; }
     public sealed class KittenEva(string id)
     {

@@ -15,9 +15,10 @@ internal sealed partial class SaberRuntime
     // acquire the pose between that press and the next physics preparation.
     private bool SomersaultActive => _somersaultRequest.HasValue || _somersaultMotion.Active;
 
+    // Visibility belongs to the controlled EVA, not its momentary contact state.
+    // CanStartSomersault still validates real ground contact before every launch.
     private bool ShowSomersaultButtons => !Program.EditorFlag
-        && _owner is { IsDisposed: false } kitten && ReferenceEquals(Program.ControlledVehicle, kitten)
-        && kitten.LocomotionState.Mode == LocomotionMode.Grounded && kitten.Situation.HasTerrainContact();
+        && _owner is { IsDisposed: false } kitten && ReferenceEquals(Program.ControlledVehicle, kitten);
 
     private bool CanStartSomersault(out string reason)
     {

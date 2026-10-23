@@ -13,7 +13,7 @@ namespace KSA
         public static IViewport MainViewport = new Viewport(ViewportType.Main);
         public static IViewport RenderedViewport = MainViewport;
     }
-    public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder }
+    public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder, Tumbling, Rightening, Swimming }
     public sealed class LocomotionState { public LocomotionMode Mode = LocomotionMode.Grounded; }
     public sealed class KittenEva
     {

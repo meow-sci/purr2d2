@@ -46,7 +46,8 @@ namespace Purr2D2.Runtime
         internal float RotationRadians => 0;
         internal float Tuck => 0;
         internal bool CanStart(KSA.KittenEva? owner, out string reason)
-        { reason = "Unavailable."; return Available && !Active && owner is { IsDisposed: false }; }
+        { reason = "Unavailable."; return Available && !Active && owner is { IsDisposed: false }
+            && owner.LocomotionState.Mode == KSA.LocomotionMode.Grounded && KSA.SituationEx.HasTerrainContact(owner.Situation); }
         internal bool Request(KSA.KittenEva owner, SomersaultDirection direction)
         { if (!CanStart(owner, out _)) return false; Direction = direction; Active = true; Launches++; return true; }
         internal void Update(KSA.KittenEva? owner) { }

@@ -222,11 +222,9 @@ internal sealed partial class SaberRuntime
         pose.Update(playerDt, saber.Blade.Equipped && saber.TogglePhase != SaberTogglePhase.Unequipping);
         saber.FreshPoseThisTick = pose.MainPoseGeneration != saber.ConsumedPoseGeneration && pose.HasFreshBodyFrame;
         saber.ConsumedPoseGeneration = pose.MainPoseGeneration;
-        if (!pose.Eligible)
-        {
-            saber.Blade.SetIgnited(false);
-            if (saber.TogglePhase == SaberTogglePhase.Equipping) saber.TogglePhase = SaberTogglePhase.Retracting;
-        }
+        // Pose availability can change while moving or grabbing a ladder. It
+        // suspends presentation, never the player's ignition/equipment intent.
+        // Pending equip resumes when the hand pose is available again.
         saber.Blade.Advance(playerDt);
         if (advancing && saber.TogglePhase == SaberTogglePhase.Unequipping && pose.Blend == 0)
         {

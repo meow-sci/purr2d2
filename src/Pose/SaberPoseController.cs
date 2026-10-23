@@ -220,7 +220,7 @@ public sealed class SaberPoseController : IDisposable
     }
 
     private static bool Supported(LocomotionMode mode) => mode is LocomotionMode.Grounded
-        or LocomotionMode.Airborne or LocomotionMode.Mmu;
+        or LocomotionMode.Airborne or LocomotionMode.Mmu or LocomotionMode.Tumbling or LocomotionMode.Rightening;
 
     private float3 Direction => _sliceDirection ?? Unit(float3.Transform(BladeDirectionModel,
         floatQuat.CreateFromAxisAngle(float3.UnitY, SwingAngle)), float3.UnitY);

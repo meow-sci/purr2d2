@@ -46,11 +46,25 @@ internal sealed partial class SaberRuntime
 
         first.LocomotionState.Mode = LocomotionMode.Airborne;
         first.Situation = Situation.Freefall;
-        Check(!runtime.ShowSomersaultButtons, "airborne controls are hidden");
+        Check(runtime.ShowSomersaultButtons && !runtime.CanStartSomersault(out _),
+            "airborne controls remain visible without permitting an airborne launch");
+        for (int i = 0; i < 10; i++)
+        {
+            first.LocomotionState.Mode = LocomotionMode.Grounded;
+            first.Situation = Situation.Rolling;
+            Check(runtime.ShowSomersaultButtons && runtime.CanStartSomersault(out _), "surface contact enables the stable controls");
+            first.Situation = Situation.Freefall;
+            Check(runtime.ShowSomersaultButtons && !runtime.CanStartSomersault(out _), "a contact gap cannot hide the controls or authorize a jump");
+            runtime.QueueSomersault(SomersaultDirection.Forward);
+            Check(!runtime._somersaultRequest.HasValue, "clicking during a contact gap cannot queue a deferred or midair jump");
+            first.LocomotionState.Mode = LocomotionMode.Airborne;
+            Check(runtime.ShowSomersaultButtons, "repeated low-gravity hops preserve control visibility");
+        }
         foreach (var mode in new[] { LocomotionMode.Mmu, LocomotionMode.Ladder, LocomotionMode.Swimming, LocomotionMode.Tumbling })
         {
             first.LocomotionState.Mode = mode; first.Situation = Situation.Landed;
-            Check(!runtime.ShowSomersaultButtons, "terrain proximity alone cannot show controls in another locomotion mode");
+            Check(runtime.ShowSomersaultButtons && !runtime.CanStartSomersault(out _),
+                "other movement modes retain the controls without enabling a jump");
         }
         first.LocomotionState.Mode = LocomotionMode.Grounded;
         first.Situation = Situation.Rolling;
@@ -108,6 +122,10 @@ internal sealed partial class SaberRuntime
             "world/unload cleanup is idempotent");
         runtime._disposed = true;
         Check(!runtime.CanStartSomersault(out _), "disposed runtime rejects new commands");
+        Program.EditorFlag = true;
+        Check(!runtime.ShowSomersaultButtons, "editor entry hides movement controls");
+        Program.EditorFlag = false; second.IsDisposed = true;
+        Check(!runtime.ShowSomersaultButtons, "a disposed EVA cannot retain movement controls");
         Console.WriteLine("Somersault runtime arbitration checks passed.");
     }
 
