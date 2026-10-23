@@ -65,7 +65,6 @@ internal sealed partial class SaberRuntime
             // Selection has not modified a vessel. A completed stroke's
             // background cut is intentionally allowed to finish while moving.
             if (_selectingSlice) CancelAssistedSlice("Slice selection cancelled by somersault.");
-            ResetOverlaySwing();
         }
 
         _somersaultPose.SetMotion(_somersaultMotion.Direction,

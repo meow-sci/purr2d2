@@ -8,7 +8,7 @@ internal readonly record struct SomersaultProfile(double Gravity, double Height,
     double UpSpeed, double TravelSpeed, double FlightSeconds)
 {
     internal static bool TryCreate(double gravity, out SomersaultProfile profile,
-        double height = 1, double distance = 1.5)
+        double height = 1.3, double distance = 1.5)
     {
         profile = default;
         if (!double.IsFinite(gravity) || gravity < .1 || gravity > 100

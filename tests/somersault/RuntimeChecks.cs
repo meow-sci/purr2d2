@@ -84,8 +84,8 @@ internal sealed partial class SaberRuntime
         runtime._selectingSlice = true;
         runtime.QueueSomersault(SomersaultDirection.Backward);
         runtime.UpdateSomersault();
-        Check(!runtime._selectingSlice && runtime._cancelledSlices == 1 && runtime._resetDrags > 0,
-            "accepted movement releases uncommitted slice selection and temporary drag pose");
+        Check(!runtime._selectingSlice && runtime._cancelledSlices == 1 && runtime._resetDrags == 0,
+            "accepted movement releases uncommitted slice selection without resetting the drag pose");
         runtime._somersaultMotion.Reset();
 
         runtime._pose.Swinging = true;

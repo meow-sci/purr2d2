@@ -16,7 +16,7 @@ internal static class SomersaultMotionChecks
         foreach (double gravity in new[] { 9.81, 3.71, 1.62 })
         {
             Check(SomersaultProfile.TryCreate(gravity, out var p), "Earth/Mars/Luna gravity is supported");
-            Near(p.UpSpeed * p.UpSpeed / (2 * gravity), 1, "gravity-derived launch reaches chosen height");
+            Near(p.UpSpeed * p.UpSpeed / (2 * gravity), 1.3, "gravity-derived launch reaches the 30% higher apex");
             Near(p.UpSpeed * p.FlightSeconds - .5 * gravity * p.FlightSeconds * p.FlightSeconds, 0,
                 "estimated airtime is the ballistic return time");
             Near(p.TravelSpeed * p.FlightSeconds, 1.5, "chosen travel is independent of local gravity");

@@ -33,7 +33,7 @@ internal sealed partial class SaberRuntime
         && !Program.EditorFlag && Universe.CurrentSystem != null && Program.MainViewport.Visible;
     private bool OverlayCanSwing => _fault == null && _owner is { IsDisposed: false }
         && ReferenceEquals(_owner, Program.ControlledVehicle) && _blade.Equipped && _pose.Eligible
-        && !SomersaultActive && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
+        && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
     private bool OverlayCanStartSwing => OverlayCanSwing && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed());
 
     // The picker runs after this overlay; retain consumption for quick press/release pairs too.
@@ -327,7 +327,6 @@ internal sealed partial class SaberRuntime
     {
         // Revalidate after drawing: controlled kitten/contact may have changed since that frame.
         if (!ShowSomersaultButtons || !CanStartSomersault(out _)) return;
-        ResetOverlaySwing();
         QueueSomersault(direction);
     }
 
