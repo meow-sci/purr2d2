@@ -15,9 +15,9 @@ internal static class ForceMath
     internal const double ThrowSpeed = 25;
     internal const double MaximumThrowSpeed = 200;
     internal const double MaximumOffset = 25;
-    internal const double DefaultGroupSpread = 1;
-    internal const double MinimumGroupSpread = .05;
-    internal const double MaximumGroupSpread = ForceSpreadLimits.Maximum;
+    internal const double DefaultGroupSpread = ForceSpreadLimits.DefaultGroupSpread;
+    internal const double MinimumGroupSpread = ForceSpreadLimits.MinimumGroupSpread;
+    internal const double MaximumGroupSpread = ForceSpreadLimits.MaximumGroupSpread;
     internal const double GroupSpreadWheelFactor = .9;
 
     internal static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);

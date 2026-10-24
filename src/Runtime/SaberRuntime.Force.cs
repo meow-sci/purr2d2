@@ -14,6 +14,7 @@ internal sealed partial class SaberRuntime
     private readonly ForceController _force = new();
     private readonly ForceOverlayDrag _forceDrag = new();
     private readonly ForceOffsetSmoother _forceOffsetSmoother = new();
+    private readonly ForceSpreadSmoother _forceSpreadSmoother = new();
     private readonly ForceCaptureLift _forceCaptureLift = new();
     private readonly ForceOverlaySliderDrag _forceSettingDrag = new();
     private readonly ForceThrowDrag _forceThrowDrag = new();
@@ -165,6 +166,7 @@ internal sealed partial class SaberRuntime
             ResetForceGestures();
             try { _force.Reset(); }
             catch (Exception cleanup) { Report("Force cleanup failed", cleanup); }
+            ResetForceSpreadSmoother();
             try { ResetForceBreakupAudio(); }
             catch (Exception cleanup) { Report("Force breakup audio cleanup failed", cleanup); }
             Report("Force handoff failed", error);
@@ -536,14 +538,16 @@ internal sealed partial class SaberRuntime
         double maximumSpread = ForceSpreadLimits.ValidateMaximum(_settings.ForceMaximumSpread);
         _forceSpreadTarget = ForceMath.ClampGroupSpread(_forceSpreadTarget, maximumSpread);
         double current = _force.GroupSpread;
-        if (current == _forceSpreadTarget || !double.IsFinite(dtPlayer) || dtPlayer <= 0) return;
-        double elapsed = Math.Clamp(dtPlayer, 0, .1);
-        double blend = 1 - Math.Exp(-ForceOffsetSmoother.NaturalFrequency * elapsed);
-        double currentLog = Math.Log(current);
-        double targetLog = Math.Log(_forceSpreadTarget);
-        double displayed = Math.Exp(currentLog + (targetLog - currentLog) * blend);
-        if (Math.Abs(targetLog - Math.Log(displayed)) < 1e-5) displayed = _forceSpreadTarget;
-        _force.SetSpread(displayed);
+        if (current != _forceSpreadSmoother.Spread)
+        {
+            // Other controller work can seed a displayed factor directly. Rebase position
+            // while retaining the latest published target below.
+            _forceSpreadSmoother.Reset(ForceMath.ClampGroupSpread(current));
+        }
+        _forceSpreadSmoother.SetTarget(_forceSpreadTarget);
+        if (!double.IsFinite(dtPlayer) || dtPlayer <= 0) return;
+        double displayed = _forceSpreadSmoother.Advance(Math.Min(dtPlayer, .1));
+        if (displayed != current) _force.SetSpread(displayed);
     }
 
     // GLFW input only updates the pending body-frame target. The settled handoff
@@ -636,7 +640,7 @@ internal sealed partial class SaberRuntime
         _forceCaptureLiftOwner = null;
         _forceDrag.Reset();
         _forceOffsetSmoother.Reset();
-        _forceSpreadTarget = ForceMath.DefaultGroupSpread;
+        ResetForceSpreadSmoother();
         _forceBreakupScrollPixels.Clear();
         _forceBreakupSequence.Reset();
         if (_force.BreakupActive) _force.CancelBreakup();
@@ -646,6 +650,13 @@ internal sealed partial class SaberRuntime
         _forceMoveOffset = double3.Zero;
         _forceMovePending = false;
         _forceMoveOwner = null;
+    }
+
+    private void ResetForceSpreadSmoother()
+    {
+        _forceSpreadTarget = ForceMath.DefaultGroupSpread;
+        _forceSpreadSmoother.Reset(_force.GroupSpread);
+        _forceSpreadSmoother.SetTarget(_forceSpreadTarget);
     }
 
     private void StartForceCaptureLift(KittenEva owner)

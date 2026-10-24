@@ -92,7 +92,10 @@ internal sealed partial class SaberRuntime
         runtime.UpdateForceFrame();
         runtime.UpdateForceBeforePhysics(.016);
         Check(runtime.ForceHolding && runtime._force.CaptureCalls == 1 && ForceTargeting.Picks == 1
-            && ForceTargeting.LastRay.Origin == new double3(80, 60, 7) && runtime._force.CapturedRadius == 14,
+            && ForceTargeting.LastRay.Origin == new double3(80, 60, 7) && runtime._force.CapturedRadius == 14
+            && runtime._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Velocity == 0,
             "the original click ray is queried and captured once at the settled handoff");
         Check(ForceTargeting.LastTolerance == .375,
             "the immutable click query keeps its tolerance if settings change before resolution");
@@ -120,10 +123,12 @@ internal sealed partial class SaberRuntime
             "idle wheel depth settles at the accumulated requested distance after smoothing");
 
         var depthBeforeSpread = runtime._forceMoveOffset;
+        double displayedSpreadBeforeInput = runtime._force.GroupSpread;
         Check(runtime.ScrollForcePointer(2, shift: true) && runtime.ScrollForcePointer(1, shift: true)
             && Math.Abs(runtime._forceSpreadTarget - Math.Pow(.9, 3)) < 1e-12
+            && runtime._force.GroupSpread == displayedSpreadBeforeInput
             && runtime._forceMoveOffset == depthBeforeSpread && !runtime._forceMovePending,
-            "Shift+wheel ticks accumulate a multiplicative spread target without changing pending camera depth");
+            "Shift+wheel ticks queue a multiplicative spread target without changing the displayed factor or pending camera depth");
         runtime.UpdateForceBeforePhysics(.016);
         Check(runtime._force.GroupSpread < 1 && runtime._force.GroupSpread > runtime._forceSpreadTarget
             && runtime._force.GroupOffsetBody.Z > 2.49,
@@ -139,6 +144,7 @@ internal sealed partial class SaberRuntime
             "Shift+wheel during an active drag changes spread without resetting the translation gesture");
         Check(runtime.ScrollForcePointer(2) && runtime._forceMoveOffset == new double3(8, 0, 1),
             "releasing Shift mid-drag restores ordinary wheel depth while preserving the camera-plane offset");
+        double throwSpreadTarget = runtime._forceSpreadTarget;
         runtime.QueueForceAction(ForceAction.Throw);
         Check(runtime.ForceHolding, "throw clicks queue work and retain ownership until the safe handoff");
         runtime.UpdateForceBeforePhysics(.016);
@@ -146,9 +152,13 @@ internal sealed partial class SaberRuntime
             && runtime._force.ReleasedOffset != new double3(8, 0, 1)
             && runtime._force.ReleasedOffset.X > 0 && runtime._force.ReleasedOffset.X < 8
             && runtime._force.ReleasedSpread >= ForceMath.MinimumGroupSpread && runtime._force.ReleasedSpread < 1
+            && runtime._force.ReleasedSpread > throwSpreadTarget
             && runtime._force.GroupSpread == ForceMath.DefaultGroupSpread && runtime._forceSpreadTarget == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Velocity == 0
             && runtime._force.Events.SequenceEqual(new[] { "Offset", "Spread", "Update", "Throw" }),
-            "throw uses displayed translation and spread, then resets both spread factors for the next capture");
+            "throw snapshots the eased displayed spread rather than its pending target, then resets spread for the next capture");
 
         runtime = new(); runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
         runtime._forceMoveOwner = runtime._owner;
@@ -223,7 +233,10 @@ internal sealed partial class SaberRuntime
         Check(!runtime.ForceHolding && runtime._forceOffsetSmoother.Offset == double3.Zero
             && runtime._forceOffsetSmoother.Target == double3.Zero && runtime._forceOffsetSmoother.Velocity == double3.Zero
             && runtime._force.GroupSpread == ForceMath.DefaultGroupSpread
-            && runtime._forceSpreadTarget == ForceMath.DefaultGroupSpread,
+            && runtime._forceSpreadTarget == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Velocity == 0,
             "an owner switch releases the old capture and clears translation and spread before another kitten can use Force");
 
         runtime = new(); runtime.BeginForcePicker(false);
@@ -254,12 +267,18 @@ internal sealed partial class SaberRuntime
             && runtime._forceOffsetSmoother.Offset == double3.Zero && runtime._forceOffsetSmoother.Target == double3.Zero
             && runtime._forceOffsetSmoother.Velocity == double3.Zero
             && runtime._force.GroupSpread == ForceMath.DefaultGroupSpread
-            && runtime._forceSpreadTarget == ForceMath.DefaultGroupSpread,
+            && runtime._forceSpreadTarget == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Velocity == 0,
             "Force handoff failures release locally and clear translation and spread without escaping into global saber reset");
         runtime._forceOffsetSmoother.SetTarget(new(5, 0, 0)); runtime._forceOffsetSmoother.Advance(.016);
         runtime.DisposeForce(); runtime.ResetForce();
         Check(runtime._force.Disposed && runtime._forceOffsetSmoother.Offset == double3.Zero
-            && runtime._forceOffsetSmoother.Target == double3.Zero && runtime._forceOffsetSmoother.Velocity == double3.Zero,
+            && runtime._forceOffsetSmoother.Target == double3.Zero && runtime._forceOffsetSmoother.Velocity == double3.Zero
+            && runtime._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Velocity == 0,
             "shutdown clears spring state and a subsequent world reset remains safe and idempotent");
         runtime = new(); runtime.BeginForcePicker(false); ForceTargeting.FailPick = true;
         runtime.UpdateForceFrame(); runtime.UpdateForceBeforePhysics(.016);
@@ -269,6 +288,7 @@ internal sealed partial class SaberRuntime
         FreshCaptureShiftSpread();
         CaptureLiftRuntime();
         ConfigurableSpreadRuntime();
+        ForceSpreadRuntimeSmoothing();
         ExpansionBreakupRequests();
         BreakupGestureResetAndAudioLifecycle();
         Console.WriteLine("Force UI runtime checks passed (picker button states, deferred clicks, native UI priority, settled commands, stale owners/targets, final move/throw, cleanup).");
@@ -306,25 +326,41 @@ internal sealed partial class SaberRuntime
         Check(angry._force.CapturedCount == 4 && angry._forceCaptureLift.IsActive,
             "a successful multi-object Angry Force capture starts the same shared group lift");
         angry.UpdateForceBeforePhysics(.05);
+        Check(angry.ScrollForcePointer(.1, shift: true), "fractional spread input can start during capture lift");
+        angry.UpdateForceBeforePhysics(.016);
         double liftBeforeShift = angry._forceCaptureLift.Progress;
-        Check(angry.ScrollForcePointer(1, shift: true) && angry._forceCaptureLift.IsActive,
-            "Shift+scroll changes spread without cancelling the capture lift");
+        double spreadBeforeShift = angry._forceSpreadSmoother.Spread;
+        double velocityBeforeShift = angry._forceSpreadSmoother.Velocity;
+        Check(angry.ScrollForcePointer(1, shift: true) && angry._forceCaptureLift.IsActive
+            && angry._forceSpreadSmoother.Spread == spreadBeforeShift
+            && angry._forceSpreadSmoother.Velocity == velocityBeforeShift,
+            "Shift+scroll changes the target without cancelling the capture lift or restarting spread motion");
         for (int i = 0; i < 4; i++)
-            Check(angry.ScrollForcePointer(-.125, shift: true), "fractional breakup input is accepted during the lift");
+            Check(angry.ScrollForcePointer(-.125, shift: true)
+                && angry._forceSpreadSmoother.Spread == spreadBeforeShift
+                && angry._forceSpreadSmoother.Velocity == velocityBeforeShift,
+                "fractional breakup input is accepted during the lift without restarting spread motion");
         angry.UpdateForceBeforePhysics(.016);
         Check(angry._forceBreakupSequence.StageOneActive && angry._force.BreakupActive
             && angry._force.BreakupCalls == 1 && angry._force.CaptureCalls == 1
-            && angry._forceCaptureLift.IsActive && angry._forceCaptureLift.Progress > liftBeforeShift,
+            && angry._forceCaptureLift.IsActive && angry._forceCaptureLift.Progress > liftBeforeShift
+            && angry._forceSpreadSmoother.Velocity < 0,
             "early breakup preparation continues under the same lift without restarting capture feedback");
 
         var depth = CapturedForLift(false);
         depth.UpdateForceBeforePhysics(.05);
+        depth.ScrollForcePointer(.1, shift: true);
+        depth.UpdateForceBeforePhysics(.016);
+        double spreadBeforeDepth = depth._forceSpreadSmoother.Spread;
+        double spreadVelocityBeforeDepth = depth._forceSpreadSmoother.Velocity;
         double3 beforeDepth = depth._force.GroupOffsetBody;
         Check(depth.ScrollForcePointer(1) && !depth._forceCaptureLift.IsActive
             && depth._force.GroupOffsetBody == beforeDepth
             && depth._forceOffsetSmoother.Offset == beforeDepth
-            && depth._forceOffsetSmoother.Target == beforeDepth,
-            "accepted ordinary depth input cancels the unfinished cue at the visible pose without a snap");
+            && depth._forceOffsetSmoother.Target == beforeDepth
+            && depth._forceSpreadSmoother.Spread == spreadBeforeDepth
+            && depth._forceSpreadSmoother.Velocity == spreadVelocityBeforeDepth,
+            "ordinary depth input takes over translation without restarting the independent spread spring");
         double3 depthTarget = depth._forceMoveOffset;
         depth.UpdateForceBeforePhysics(.016);
         Check(depth._force.GroupOffsetBody.Z > beforeDepth.Z && depth._force.GroupOffsetBody.Z < depthTarget.Z,
@@ -332,13 +368,19 @@ internal sealed partial class SaberRuntime
 
         var drag = CapturedForLift(false);
         drag.UpdateForceBeforePhysics(.05);
+        drag.ScrollForcePointer(.1, shift: true);
+        drag.UpdateForceBeforePhysics(.016);
+        double spreadBeforeDrag = drag._forceSpreadSmoother.Spread;
+        double spreadVelocityBeforeDrag = drag._forceSpreadSmoother.Velocity;
         double3 beforeDrag = drag._force.GroupOffsetBody;
         drag._forceLayout = ForceOverlayLayout.Create(
             SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080));
         Check(drag.HandleForceOverlayPress(ForceOverlayHit.Move, drag._forceLayout.MoveCenter)
             && !drag._forceCaptureLift.IsActive && drag._force.GroupOffsetBody == beforeDrag
-            && drag._forceOffsetSmoother.Offset == beforeDrag && drag._forceOffsetSmoother.Target == beforeDrag,
-            "accepted Move drag input takes over the lift at the displayed group position");
+            && drag._forceOffsetSmoother.Offset == beforeDrag && drag._forceOffsetSmoother.Target == beforeDrag
+            && drag._forceSpreadSmoother.Spread == spreadBeforeDrag
+            && drag._forceSpreadSmoother.Velocity == spreadVelocityBeforeDrag,
+            "accepted Move drag input takes over translation at the displayed pose without restarting spread motion");
         drag.MoveForcePointer(drag._forceLayout.MoveCenter + new float2(20, 0));
         drag.UpdateForceBeforePhysics(.016);
         Check(drag._force.GroupOffsetBody.X > beforeDrag.X && drag._forceCaptureLift.Progress == 0,
@@ -435,8 +477,10 @@ internal sealed partial class SaberRuntime
         lowered._forceOffsetSmoother.Reset(lowered._force.GroupOffsetBody);
         lowered.UpdateForceBeforePhysics(.016);
         Check(lowered._forceSpreadTarget == 2 && lowered._force.GroupSpread < 10
-            && lowered._force.GroupSpread > 2,
-            "lowering the spread ceiling clamps the target and eases the held group down without teleporting");
+            && lowered._force.GroupSpread > 2
+            && lowered._forceSpreadSmoother.Spread == lowered._force.GroupSpread
+            && lowered._forceSpreadSmoother.Target == 2,
+            "lowering the spread ceiling resynchronizes an externally seeded factor and eases it toward the clamped target");
 
         var raised = new SaberRuntime();
         raised._force.HasCapture = true; raised._force.Owner = raised._owner;
@@ -448,6 +492,77 @@ internal sealed partial class SaberRuntime
         for (int i = 0; i < 180; i++) raised.UpdateForceBeforePhysics(1.0 / 60);
         Check(Math.Abs(raised._force.GroupSpread - raised._forceSpreadTarget) < 1e-5,
             "a raised spread ceiling remains reachable after its normal smooth handoff");
+    }
+
+    private static void ForceSpreadRuntimeSmoothing()
+    {
+        var runtime = new SaberRuntime();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        double initial = runtime._force.GroupSpread;
+        Check(runtime.ScrollForcePointer(1, shift: true) && runtime._force.GroupSpread == initial,
+            "Shift+wheel queues spread input without changing the displayed controller factor");
+        double target = runtime._forceSpreadTarget;
+        runtime.UpdateForceBeforePhysics(.016);
+        double first = runtime._force.GroupSpread;
+        double onePoleFirstStep = Math.Abs(Math.Log(target))
+            * (1 - Math.Exp(-ForceOffsetSmoother.NaturalFrequency * .016));
+        Check(first < initial && first > target
+            && Math.Abs(Math.Log(first / initial)) < onePoleFirstStep,
+            "the runtime begins spread motion with a gentler first increment than the previous one-pole curve");
+
+        double previous = first;
+        for (int i = 0; i < 600 && runtime._force.GroupSpread != target; i++)
+        {
+            runtime.UpdateForceBeforePhysics(.016);
+            Check(runtime._force.GroupSpread <= previous && runtime._force.GroupSpread >= target,
+                "spread settles monotonically after wheel input stops");
+            previous = runtime._force.GroupSpread;
+        }
+        Check(runtime._force.GroupSpread == target && runtime._forceSpreadSmoother.Velocity == 0,
+            "the settled runtime spread reaches the exact target with zero velocity");
+        int settledWrites = runtime._force.Events.Count(item => item == "Spread");
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.Events.Count(item => item == "Spread") == settledWrites,
+            "a stationary spread does not issue redundant controller writes");
+        runtime.ResetForce();
+        Check(runtime._force.GroupSpread == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
+            && runtime._forceSpreadSmoother.Velocity == 0,
+            "world reset seeds the spread spring from the controller's restored default factor");
+
+        var reversal = new SaberRuntime();
+        reversal._force.HasCapture = true; reversal._force.Owner = reversal._owner;
+        reversal.ScrollForcePointer(1, shift: true);
+        for (int i = 0; i < 5; i++) reversal.UpdateForceBeforePhysics(.016);
+        double beforeReverse = reversal._force.GroupSpread;
+        double velocityBeforeReverse = reversal._forceSpreadSmoother.Velocity;
+        Check(velocityBeforeReverse < 0 && reversal.ScrollForcePointer(-2, shift: true)
+            && reversal._force.GroupSpread == beforeReverse
+            && reversal._forceSpreadSmoother.Velocity == velocityBeforeReverse
+            && reversal._forceSpreadTarget > 1,
+            "a rapid reversal queues the new target while preserving current display and spring velocity");
+        reversal.UpdateForceBeforePhysics(.008);
+        Check(reversal._force.GroupSpread < beforeReverse && reversal._forceSpreadSmoother.Velocity < 0,
+            "the settled handoff carries a finite amount of existing motion through a reversal");
+        double reverseTarget = reversal._forceSpreadTarget;
+        for (int i = 0; i < 600 && reversal._force.GroupSpread != reverseTarget; i++)
+            reversal.UpdateForceBeforePhysics(.016);
+        Check(reversal._force.GroupSpread == reverseTarget && reversal._forceSpreadSmoother.Velocity == 0,
+            "the reversed runtime target settles without ringing or overshoot");
+
+        var release = new SaberRuntime();
+        release._force.HasCapture = true; release._force.Owner = release._owner;
+        release.ScrollForcePointer(1, shift: true);
+        double releaseTarget = release._forceSpreadTarget;
+        release.QueueForceAction(ForceAction.Release);
+        release.UpdateForceBeforePhysics(.016);
+        Check(release._force.ReleasedSpread > releaseTarget && release._force.ReleasedSpread < 1
+            && release._force.GroupSpread == ForceMath.DefaultGroupSpread
+            && release._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
+            && release._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
+            && release._forceSpreadSmoother.Velocity == 0,
+            "release snapshots the eased displayed factor, then clears spread state for the next capture");
     }
 
     private static void FreshCaptureShiftSpread()
