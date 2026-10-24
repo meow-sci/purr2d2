@@ -33,6 +33,8 @@ internal static class ForcePhysicsPatches
     internal static void Publish(Vehicle[] sources) => Volatile.Write(ref _captured, sources);
     internal static void Clear() => Volatile.Write(ref _captured, Empty);
 
+    internal static VehicleUpdateState Worker(Vehicle source) => _worker!(source);
+
     internal static void Detach(Vehicle source)
     {
         var worker = _worker!(source);

@@ -262,6 +262,7 @@ internal sealed partial class SaberRuntime
             && runtime._forceStatus.StartsWith("Force picker failed:"),
             "settled picker exceptions cancel locally without skipping the surrounding saber overlay or mutating physics");
         FreshCaptureShiftSpread();
+        ExpansionBreakupRequests();
         Console.WriteLine("Force UI runtime checks passed (picker button states, deferred clicks, native UI priority, settled commands, stale owners/targets, final move/throw, cleanup).");
     }
 
@@ -288,6 +289,39 @@ internal sealed partial class SaberRuntime
         window.LeftShift = GlfwKeyAction.Release; window.RightShift = GlfwKeyAction.Press;
         Check(SaberRuntime.ForceShiftHeld(window), "right Shift is sampled directly from GLFW at scroll-event time");
         window.RightShift = GlfwKeyAction.Release;
+    }
+
+    private static void ExpansionBreakupRequests()
+    {
+        var runtime = new SaberRuntime();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime.ScrollForcePointer(-1);
+        runtime.ScrollForcePointer(1, shift: true);
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.BreakupCalls == 0, "depth scrolling and Shift compression never request breakup");
+        runtime.ScrollForcePointer(-1, shift: true);
+        runtime.ScrollForcePointer(2, shift: true);
+        Check(runtime._force.BreakupCalls == 0 && runtime._forceBreakupPending,
+            "expanding only queues breakup in the input callback, even if a subsequent tick compresses");
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.BreakupCalls == 1 && !runtime._forceBreakupPending,
+            "the joined handoff consumes one explicit expansion request");
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.BreakupCalls == 1, "spread smoothing cannot repeat a breakup request");
+        runtime._force.GroupSpread = runtime._forceSpreadTarget = ForceMath.MaximumGroupSpread;
+        runtime.ScrollForcePointer(-1, shift: true);
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.BreakupCalls == 2, "an expansion request still breaks an intact vehicle at maximum spread");
+        runtime.ScrollForcePointer(-1, shift: true);
+        runtime.ResetForceMovement();
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.BreakupCalls == 2 && !runtime._forceBreakupPending,
+            "movement reset clears stale expansion requests before another capture");
+        runtime.ScrollForcePointer(-1, shift: true);
+        runtime._owner = new KittenEva(); Program.ControlledVehicle = runtime._owner;
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.BreakupCalls == 2 && !runtime._forceBreakupPending,
+            "an owner switch releases the old hold without applying its queued breakup");
     }
 
     private static void ForcePickerButtons()

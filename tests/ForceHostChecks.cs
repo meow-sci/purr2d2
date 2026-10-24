@@ -18,6 +18,7 @@ internal static class ForceHostChecks
         ClutterHostContracts();
         NativeBridgeDelegates();
         ForceClutterBepuChecks.Run();
+        ForceBreakupHostChecks.Run();
         Console.WriteLine("Force host checks passed (actual KSA handoff/patch composition and native clutter promotion, identity, frames and contact contracts).");
     }
 

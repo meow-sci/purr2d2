@@ -22,6 +22,7 @@ internal sealed partial class SaberRuntime
     private ForcePick? _forceHover;
     private double3 _forceMoveOffset;
     private double _forceSpreadTarget = ForceMath.DefaultGroupSpread;
+    private bool _forceBreakupPending;
     private bool _forceMovePending;
     private bool _forceClickPending;
     private float2 _forceClickPointer;
@@ -82,7 +83,16 @@ internal sealed partial class SaberRuntime
             }
             else if (!_force.HasCapture) ResetForceMovement();
             if (ForceCanUse && _force.HasCapture && ReferenceEquals(_force.Owner, _owner))
+            {
+                // Remember the input direction, even at the spacing ceiling or when
+                // a later compress tick reverses the target before this handoff.
+                if (_forceBreakupPending)
+                {
+                    _forceBreakupPending = false;
+                    _force.BreakApart(_owner!);
+                }
                 AdvanceForceSpread(dtPlayer);
+            }
 
             bool wasHolding = _force.HasCapture;
             _force.Update(_owner);
@@ -386,6 +396,7 @@ internal sealed partial class SaberRuntime
         if (!double.IsFinite(ticks) || ticks == 0) return false;
         if (shift)
         {
+            if (ticks < 0) _forceBreakupPending = true;
             _forceSpreadTarget = ForceMath.ScaleGroupSpread(_forceSpreadTarget, ticks);
             return true;
         }
@@ -462,6 +473,7 @@ internal sealed partial class SaberRuntime
         _forceDrag.Reset();
         _forceOffsetSmoother.Reset();
         _forceSpreadTarget = ForceMath.DefaultGroupSpread;
+        _forceBreakupPending = false;
         _forceMoveOffset = double3.Zero;
         _forceMovePending = false;
         _forceMoveOwner = null;
@@ -578,7 +590,7 @@ internal sealed partial class SaberRuntime
         {
             var overlayHit = layout.Hit(overlayPointer);
             if (overlayHit == ForceOverlayHit.Move)
-                ShowSaberTooltip("Drag to move held objects in the camera plane.\n\nScroll to change depth; Shift+scroll compresses or expands the group.");
+                ShowSaberTooltip("Drag to move held objects in the camera plane.\n\nScroll to change depth; Shift+scroll compresses or expands the group. Expanding breaks captured vehicles into inert parts and subparts, emptying their tanks.");
             else if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
                 ShowSaberTooltip("Drag up to choose a throw speed from 25 to 200 m/s; release to throw.");
             else if (overlayHit == ForceOverlayHit.CaptureLimit)

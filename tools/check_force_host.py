@@ -62,7 +62,8 @@ ET.SubElement(items, "PackageReference", Include="Samboy063.Tomlet", Version="6.
 ET.SubElement(items, "PackageReference", Include="Lib.Harmony", Version="2.4.2")
 for source in ["src/Core/SaberLimits.cs", "src/Core/ForceCaptureLimits.cs", "src/Core/SomersaultMotion.cs", "src/Core/SomersaultSequence.cs",
                "src/Runtime/SomersaultMotionController.cs", "src/Cutting/CutGeometry.cs",
-               "tests/ForceHostChecks.cs", "tests/ForceClutterBepuChecks.cs",
+               "src/Rendering/AuthoredDebrisAssets.cs", "src/Rendering/FragmentTemplateLoader.cs",
+               "tests/ForceHostChecks.cs", "tests/ForceClutterBepuChecks.cs", "tests/ForceBreakupHostChecks.cs",
                *(str(path.relative_to(root)) for path in sorted((root / "src/Force").glob("*.cs")))]:
     ET.SubElement(items, "Compile", Include=str(root / source))
 for dll in host.glob("*.dll"):

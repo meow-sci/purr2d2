@@ -124,6 +124,9 @@ namespace KSA
         internal bool HasPhysicsBubble => _threadWorkerUpdateState.Bubble != null;
         internal int PlanWrites;
         internal int FailPlanWrite;
+        internal double3[] BreakupOffsets = [];
+        internal bool FailBreakupPreparation, FailBreakupCommit, Drained;
+        internal int BreakupCommits;
         internal Vehicle(CelestialSystem system, IParentBody parent, string id, double3 position, double3 velocity)
         {
             System = system; Parent = parent; Id = id;
@@ -170,6 +173,27 @@ namespace KSA
 namespace Purr2D2.Force
 {
     using KSA;
+    // The controller runs unchanged; native mesh/template construction is checked
+    // separately against real KSA. This boundary models irreversible replacement.
+    internal sealed class ForceVehicleBreakup(Vehicle source) : IDisposable
+    {
+        internal static bool NeedsBreakup(Vehicle vehicle) => vehicle.BreakupOffsets.Length > 1;
+        internal int Count => source.BreakupOffsets.Length;
+        internal void Prepare()
+        { if (source.FailBreakupPreparation) throw new InvalidOperationException("fixture breakup preparation failed"); }
+        internal Vehicle[] Commit()
+        {
+            if (source.FailBreakupCommit) throw new InvalidOperationException("fixture breakup commit failed");
+            source.BreakupCommits++;
+            var pieces = source.BreakupOffsets.Select((offset, i) => new Vehicle(source.System, source.Parent,
+                source.Id + "_piece" + i, source.GetPositionCci() + offset.Transform(source.GetBody2Cci()), source.GetVelocityCci())
+                { Body2Cce = source.GetBody2Cci(), BodyRates = source.BodyRates }).ToArray();
+            source.Drained = source.IsDisposed = true;
+            source.System.All.Items.Remove(source);
+            return pieces;
+        }
+        public void Dispose() { }
+    }
     internal sealed record ForcePick(Vehicle? Vehicle, Part? Part, ClutterForceTarget? Clutter,
         IParentBody Parent, CelestialSystem System, double3 HitBody, double3 HitCci)
     {

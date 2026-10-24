@@ -138,7 +138,7 @@ namespace Purr2D2.Force
     internal sealed class ForceController : IDisposable
     {
         internal bool HasCapture, Disposed, FailUpdate;
-        internal int CaptureCalls;
+        internal int CaptureCalls, BreakupCalls;
         internal int CapturedLimit;
         internal double CapturedRadius;
         internal double GroupSpread = ForceMath.DefaultGroupSpread;
@@ -166,6 +166,7 @@ namespace Purr2D2.Force
         }
         internal void SetOffset(double3 offset) { Events.Add("Offset"); GroupOffsetBody = offset; }
         internal void SetSpread(double spread) { Events.Add("Spread"); GroupSpread = ForceMath.ClampGroupSpread(spread); }
+        internal void BreakApart(KSA.KittenEva owner) { Events.Add("Breakup"); BreakupCalls++; }
         internal void Release(bool thrown, double throwSpeed = ForceMath.ThrowSpeed)
         { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; }
         internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; }

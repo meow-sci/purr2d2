@@ -15,6 +15,8 @@ internal static class ForceControllerChecks
         InvalidOwnerAndJoinFailure();
         MixedAngryEitherPrimary();
         GroupSpreadAroundCentroid();
+        BreakupKeepsMixedHold();
+        BreakupPreflightAndPartialFailure();
         ConfigurableAngryRadius();
         CombinedLimitPreflight();
         InvalidCaptureLimits();
@@ -44,6 +46,77 @@ internal static class ForceControllerChecks
     }
 
     private static ForcePick Pick(Vehicle target) => new(target, target.Parts.Items[0], target.Parent, target.System, double3.Zero);
+
+    private static void BreakupKeepsMixedHold()
+    {
+        var (controller, owner, target) = Setup("breakup-mixed");
+        using (controller)
+        {
+            target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
+            var neighbor = new Vehicle(owner.System, owner.Parent, "neighbor", new(6, 0, 0), double3.Zero);
+            var clutter = new ClutterForceTarget(owner, "breakup-clutter", new(4, 0, 0), double3.Zero);
+            ClutterForceTargets.Candidates = [clutter];
+            Check(controller.Capture(owner, Pick(target), true, 10), "mixed breakup group captures");
+            controller.SetOffset(new(1, 2, 0)); controller.SetSpread(.5); controller.Update(owner);
+            var originalCenter = target.GetPositionCci(); var neighborPosition = neighbor.GetPositionCci();
+            var clutterPosition = clutter.State.Position;
+            controller.TryGetPoseTargetBody(owner, out var aim);
+            Check(target.BreakupCommits == 0, "changing displayed spread alone does not break a captured vehicle");
+            controller.BreakApart(owner);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece")).OrderBy(v => v.Id).ToArray();
+            Check(target.Drained && target.IsDisposed && target.BreakupCommits == 1 && pieces.Length == 2
+                && controller.CapturedCount == 4, "breakup replaces only the intact vehicle and retains all resulting debris");
+            Equal(pieces[0].GetPositionCci(), originalCenter + new double3(-.5, 0, 0), "first piece starts on the displayed compressed source");
+            Equal(pieces[1].GetPositionCci(), originalCenter + new double3(.5, 0, 0), "second piece starts on the displayed compressed source");
+            Equal(neighbor.GetPositionCci(), neighborPosition, "breakup cannot move an unchanged captured neighbor");
+            Equal(clutter.State.Position, clutterPosition, "breakup cannot move or release held clutter");
+            controller.TryGetPoseTargetBody(owner, out var newAim); Equal(newAim, aim, "primary pose target does not jump during replacement");
+            Check(pieces.All(p => !p.HasPhysicsBubble && ForcePhysicsPatches.FilterCapturedWorker(p.TakeUpdateStateIfOrphaned()) == null),
+                "every replacement is detached and published to the ordinary held-worker filter");
+            controller.SetSpread(1); controller.Update(owner);
+            Equal(pieces[1].GetPositionCci() - pieces[0].GetPositionCci(), new(2, 0, 0),
+                "subsequent spread scales the new pieces around their existing hold frame");
+            var before = pieces.Select(p => p.GetPositionCci()).ToArray();
+            controller.BreakApart(owner);
+            Check(controller.CapturedCount == 4 && target.BreakupCommits == 1, "ordinary debris does not recursively break up");
+            controller.SetOffset(new(2, 2, 0)); controller.Update(owner);
+            for (int i = 0; i < pieces.Length; i++) Equal(pieces[i].GetPositionCci(), before[i] + double3.UnitX,
+                "existing translation moves replacement debris normally");
+            controller.Release(true);
+            Check(!controller.HasCapture && !clutter.Captured && pieces.All(p => ForcePhysicsPatches.FilterCapturedWorker(p.TakeUpdateStateIfOrphaned()) != null),
+                "throw releases every replacement and the original mixed peers into ordinary physics");
+        }
+    }
+
+    private static void BreakupPreflightAndPartialFailure()
+    {
+        var (controller, owner, target) = Setup("breakup-failures");
+        using (controller)
+        {
+            target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
+            var second = new Vehicle(owner.System, owner.Parent, "second", new(6, 0, 0), double3.Zero)
+                { BreakupOffsets = [new(0, -.5, 0), new(0, .5, 0)], FailBreakupPreparation = true };
+            Check(controller.Capture(owner, Pick(target), true, 10), "two intact vehicles capture before breakup failure");
+            controller.BreakApart(owner);
+            Check(!target.Drained && !second.Drained && target.BreakupCommits == 0 && controller.CapturedCount == 2
+                && controller.StatusSeverity == ForceStatusSeverity.Warning,
+                "all sources remain intact when any peer fails native preparation");
+            second.FailBreakupPreparation = false;
+            target.BreakupOffsets = new double3[ForceCaptureLimits.Maximum + 1];
+            controller.BreakApart(owner);
+            Check(!target.Drained && !second.Drained && controller.Status.Contains("exceed"),
+                "the complete replacement count is bounded before any irreversible operation");
+            target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
+            second.FailBreakupCommit = true;
+            controller.BreakApart(owner);
+            Check(target.Drained && !second.Drained && controller.CapturedCount == 3,
+                "a later commit failure retains both already committed debris and the surviving source");
+            controller.SetOffset(new(0, 1, 0)); controller.Update(owner);
+            Check(controller.HasCapture && controller.CapturedCount == 3 && controller.StatusSeverity == ForceStatusSeverity.Warning,
+                "partial native breakup remains a valid ordinary hold for movement and release");
+            controller.Release(false);
+        }
+    }
 
     private static void RigidHoldAndRelease()
     {

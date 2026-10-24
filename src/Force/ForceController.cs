@@ -182,7 +182,7 @@ internal sealed partial class ForceController : IDisposable
             finally { Clear(); SetStatus("Force ended: " + ex.Message, ForceStatusSeverity.Error); }
             Console.WriteLine($"[purr2d2] {Status}");
         }
-        if (HasCapture && StatusSeverity != ForceStatusSeverity.None)
+        if (HasCapture && StatusSeverity != ForceStatusSeverity.None && !_breakupRefused)
             SetStatus($"Holding {CapturedCount} object{(CapturedCount == 1 ? "" : "s")}.", ForceStatusSeverity.None);
     }
 
@@ -271,6 +271,7 @@ internal sealed partial class ForceController : IDisposable
         GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
         _anchorBody = _groupCenterBody = _primaryCenteredOffsetBody = double3.Zero;
         _hasFrame = false; _offsetDirty = _spreadDirty = false;
+        _breakupRefused = false;
     }
 
     private void SetStatus(string status, ForceStatusSeverity severity)
