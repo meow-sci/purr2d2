@@ -12,10 +12,10 @@ internal sealed partial class ForceController : IDisposable
 {
     private readonly List<Held> _held = new(ForceCaptureLimits.Default);
     private Harmony? _harmony;
-    private bool _available, _disposed, _hasFrame, _offsetDirty;
+    private bool _available, _disposed, _hasFrame, _offsetDirty, _spreadDirty;
     private CelestialSystem? _system;
     private IParentBody? _parent;
-    private double3 _anchorBody;
+    private double3 _anchorBody, _groupCenterBody, _primaryCenteredOffsetBody;
     private UniverseTime _lastTime;
     private double3 _lastOwnerPosition, _lastOwnerVelocity, _lastOwnerRates;
     private doubleQuat _lastOwnerRotation;
@@ -32,6 +32,7 @@ internal sealed partial class ForceController : IDisposable
     internal bool HasCapture => _held.Count != 0;
     internal KittenEva? Owner { get; private set; }
     internal double3 GroupOffsetBody { get; private set; }
+    internal double GroupSpread { get; private set; } = ForceMath.DefaultGroupSpread;
     internal string Status { get; private set; } = "";
     internal ForceStatusSeverity StatusSeverity { get; private set; }
 
@@ -101,8 +102,28 @@ internal sealed partial class ForceController : IDisposable
                     (position - ownerPosition).Transform(ownerRotation.Inverse()),
                     doubleQuat.Concatenate(rotation, ownerRotation.Inverse()), original));
             }
+            // Store each object's initial offset from the captured group's centroid. A spread
+            // change can then scale the offsets uniformly while leaving that centroid fixed.
+            var groupCenterBody = _held[0].PositionBody;
+            for (int i = 1; i < _held.Count; i++)
+            {
+                var delta = _held[i].PositionBody - groupCenterBody;
+                if (!ForceMath.Finite(delta)) throw new InvalidOperationException("The Force group frame is invalid.");
+                groupCenterBody += delta / (i + 1d);
+                if (!ForceMath.Finite(groupCenterBody)) throw new InvalidOperationException("The Force group frame is invalid.");
+            }
+            for (int i = 0; i < _held.Count; i++)
+            {
+                var centered = _held[i].PositionBody - groupCenterBody;
+                if (!ForceMath.Finite(centered)) throw new InvalidOperationException("The Force group frame is invalid.");
+                _held[i] = _held[i] with { PositionBody = centered };
+            }
+            _primaryCenteredOffsetBody = _held[0].PositionBody;
             Owner = owner; _system = owner.System; _parent = owner.Parent;
             GroupOffsetBody = double3.Zero;
+            GroupSpread = ForceMath.DefaultGroupSpread;
+            _groupCenterBody = groupCenterBody;
+            _spreadDirty = false;
             _anchorBody = (target.HitCci - ownerPosition).Transform(ownerRotation.Inverse());
             foreach (var held in _held)
                 if (held.Target.Clutter is { } clutter)
@@ -175,13 +196,24 @@ internal sealed partial class ForceController : IDisposable
         _offsetDirty = true;
     }
 
+    internal void SetSpread(double spread)
+    {
+        if (!HasCapture || !double.IsFinite(spread)) return;
+        spread = ForceMath.ClampGroupSpread(spread);
+        if (GroupSpread == spread) return;
+        GroupSpread = spread;
+        _spreadDirty = true;
+    }
+
     internal bool TryGetPoseTargetBody(KittenEva owner, out double3 targetBody)
     {
-        targetBody = _anchorBody + GroupOffsetBody;
+        // Move the selected hit point with the primary object's center, preserving its
+        // unscaled local hit offset because spread changes positions, never object size.
+        targetBody = _anchorBody + _primaryCenteredOffsetBody * (GroupSpread - 1) + GroupOffsetBody;
         return HasCapture && ReferenceEquals(owner, Owner) && ForceMath.Finite(targetBody);
     }
 
-    internal void Release(bool throwObjects)
+    internal void Release(bool throwObjects, double throwSpeed = ForceMath.ThrowSpeed)
     {
         if (!HasCapture) return;
         int count = CapturedCount;
@@ -200,7 +232,8 @@ internal sealed partial class ForceController : IDisposable
                         && ReferenceEquals(_system, Universe.CurrentSystem) && Valid(held);
                     ForceRigidState? state = follows ? FollowState(held) : ReadState(held);
                     if (throwObjects && follows)
-                        state = state!.Value with { Velocity = ForceMath.ThrowVelocity(state.Value, Owner!.GetPositionCci(), Owner.GetBody2Cci()) };
+                        state = state!.Value with { Velocity = ForceMath.ThrowVelocity(state.Value,
+                            Owner!.GetPositionCci(), Owner.GetBody2Cci(), throwSpeed) };
                     if (held.Source is { } vehicle && state.HasValue) WriteState(vehicle, state.Value, time);
                     else if (held.ClutterHold is { } hold && !hold.Release(state))
                         throw new InvalidOperationException("The physical ground object left the local physics bubble.");
@@ -235,7 +268,9 @@ internal sealed partial class ForceController : IDisposable
             try { held.ClutterHold?.Dispose(); }
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter release cleanup failed: {cleanup}"); }
         _held.Clear(); Owner = null; _system = null; _parent = null;
-        GroupOffsetBody = double3.Zero; _anchorBody = double3.Zero; _hasFrame = false; _offsetDirty = false;
+        GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
+        _anchorBody = _groupCenterBody = _primaryCenteredOffsetBody = double3.Zero;
+        _hasFrame = false; _offsetDirty = _spreadDirty = false;
     }
 
     private void SetStatus(string status, ForceStatusSeverity severity)

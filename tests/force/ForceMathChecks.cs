@@ -7,6 +7,7 @@ internal static class ForceMathChecks
     {
         RigidVelocityAndFrames();
         ThrowAndBounds();
+        GroupSpreadArithmetic();
         ActualSurfaceDistance();
         InvalidFrames();
         Console.WriteLine("Force math checks passed (rigid position/spin, inertial tangential velocity, 25m/s throws, bounded movement and exact surface proximity).");
@@ -37,12 +38,39 @@ internal static class ForceMathChecks
         var state = new ForceRigidState(new(3, 4, 0), new(10, -2, 7), doubleQuat.Identity, double3.Zero);
         var thrown = ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity);
         Equal(thrown, new(25, 18, 7), "throw adds 25m/s outward, retaining inherited velocity");
+        Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity, 200), new(130, 158, 7),
+            "a chosen 200m/s throw speed adds the requested outward velocity");
+        Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity, double.PositiveInfinity), thrown,
+            "nonfinite throw speed falls back to the safe 25m/s default");
+        Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity, 500), new(130, 158, 7),
+            "throw speed is clamped to the 200m/s control maximum");
         state = state with { Position = double3.Zero };
         Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity), new(35, -2, 7), "coincident object throws along kitten forward");
         Check(ForceMath.ValidOffset(new(15, 20, 0)), "25m diagonal is legal");
         Check(ForceMath.ValidOffset(new(25.000001, 0, 0)), "floating point widget boundary is tolerated");
         Check(!ForceMath.ValidOffset(new(25.001, 0, 0)), "real offset excess rejected");
         Check(!ForceMath.ValidOffset(new(double.NaN, 0, 0)), "nonfinite offset rejected");
+    }
+
+    private static void GroupSpreadArithmetic()
+    {
+        Check(ForceMath.ScaleGroupSpread(1, 1) == .9,
+            "one positive wheel tick compresses spacing by ten percent");
+        Check(Math.Abs(ForceMath.ScaleGroupSpread(.9, -1) - 1) < 1e-12,
+            "one negative tick reverses one compress tick multiplicatively");
+        Check(ForceMath.ScaleGroupSpread(1, 1000) == ForceMath.MinimumGroupSpread
+            && ForceMath.ScaleGroupSpread(1, -1000) == ForceMath.MaximumGroupSpread
+            && double.IsFinite(ForceMath.ScaleGroupSpread(double.PositiveInfinity, -1000)),
+            "extreme wheel input remains finite and bounded to the positive .05 to 4 range");
+        Check(ForceMath.ScaleGroupSpread(2, double.NaN) == 2,
+            "invalid wheel input cannot alter the current group spread");
+        Check(ForceMath.TryFollow(new(10, 0, 0), double3.Zero, doubleQuat.Identity, double3.Zero,
+            new(4, 0, 0), new(-2, 0, 0), doubleQuat.Identity, new(0, 1, 0), .5, out var state),
+            "a bounded group scale produces a rigid follow state");
+        Equal(state.Position, new(13, 1, 0), "spread scales centered offsets while preserving centroid and translation");
+        Check(!ForceMath.TryFollow(double3.Zero, double3.Zero, doubleQuat.Identity, double3.Zero,
+            new(4, 0, 0), new(-2, 0, 0), doubleQuat.Identity, double3.Zero,
+            ForceMath.MinimumGroupSpread / 2, out _), "out-of-range spread cannot corrupt a held object's state");
     }
 
     private static void ActualSurfaceDistance()

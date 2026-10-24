@@ -64,8 +64,9 @@ internal sealed partial class SaberRuntime
         _sliceStatus = "Slicing the selected part...";
     }
 
-    private void CancelAssistedSlice(string reason)
+    private void CancelAssistedSlice(string reason, bool manualAttemptCompleted = false)
     {
+        bool finishManualAttempt = manualAttemptCompleted || _manualGesture.InFlight;
         if (_slicer.Isolation is { Owner.IsDisposed: false } && reason.Length > 0)
             reason += _slicer.Isolation.ContentsReleased
                 ? " Detached parts remain separated; the selected source remains empty and its engines are off."
@@ -73,7 +74,7 @@ internal sealed partial class SaberRuntime
         _selectingSlice = false; _sliceHover = null;
         _sliceSequence.Cancel();
         _manualSliceActive = _manualIsolated = false;
-        _manualGesture.Finish(); _manualProbe.Reset(); _manualPoseAvailable = false;
+        FinishManualContactAttempt(finishManualAttempt);
         _sliceSelection?.Dispose(); _sliceSelection = null;
         _slicer.Cancel();
         _sliceTarget = null; _sliceStarted = false; _sliceError = null;

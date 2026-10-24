@@ -699,14 +699,21 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     ]
     force_math_sources = [source / "src/Force/ForceMath.cs", source / "src/Cutting/CutGeometry.cs",
                           source / "tests/force/ForceMathChecks.cs"]
+    force_throw_drag_sources = [source / "src/Core/ForceThrowDrag.cs", source / "src/Core/ForceOverlayLayout.cs",
+        source / "src/Core/SaberOverlayDrag.cs", source / "src/Core/SaberOverlayLayout.cs",
+        source / "tests/force/ForceThrowDragChecks.cs"]
     overlay_text_sources = [source / "src/Core/OverlayStatusTextLayout.cs",
         source / "tests/OverlayTextChecks.cs"]
-    force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs",
+    slice_overlay_sources = [source / "src/Core/OverlayStatusTextLayout.cs",
+        source / "src/Core/SliceOverlayLayout.cs", source / "tests/SliceOverlayLayoutChecks.cs"]
+    force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs", source / "src/Force/ForceMath.cs",
+        source / "src/Cutting/CutGeometry.cs",
         source / "src/Runtime/SaberRuntime.OverlayText.cs", source / "src/Core/OverlayStatusTextLayout.cs",
-        source / "src/Core/ForceOverlayDrag.cs", source / "src/Core/ForceOverlayLayout.cs",
+        source / "src/Core/ForceOverlayDrag.cs", source / "src/Core/ForceOverlayLayout.cs", source / "src/Core/ForceThrowDrag.cs",
         source / "src/Core/ForceOverlaySliderDrag.cs", source / "src/Core/ForceOffsetSmoother.cs",
         source / "src/Core/SaberOverlayDrag.cs", source / "src/Core/SaberOverlayLayout.cs",
         source / "tests/force/ForceUiChecks.cs", source / "tests/force/ForceUiHostStubs.cs",
+        source / "tests/force/ForceThrowDragChecks.cs",
         source / "tests/force/ForceOverlayChecks.cs"]
     force_controller_sources = [source / "src/Force/ForceController.cs", source / "src/Force/ForceController.Follow.cs",
         source / "src/Force/ForceTarget.cs", source / "src/Force/ForceTargeting.Proximity.cs",
@@ -740,8 +747,12 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("SomersaultPoseChecks", somersault_pose_sources, None),
         ("ForcePoseChecks", force_pose_sources, None),
         ("ForceMathChecks", force_math_sources, None),
+        ("ForceThrowDragChecks", force_throw_drag_sources,
+         "internal static class Program { static void Main() { ForceThrowDragChecks.Run(); } }"),
         ("OverlayTextChecks", overlay_text_sources,
          "internal static class Program { static void Main() { OverlayTextChecks.Run(); } }"),
+        ("SliceOverlayLayoutChecks", slice_overlay_sources,
+         "internal static class Program { static void Main() { SliceOverlayLayoutChecks.Run(); } }"),
         ("ForceUiChecks", force_ui_sources, None),
         ("ForceControllerChecks", force_controller_sources, None),
         ("ForceTargetingChecks", force_targeting_sources, None),

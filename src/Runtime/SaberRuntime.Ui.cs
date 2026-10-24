@@ -137,7 +137,7 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Slice grace / reach");
             changed |= ImGui.SliderFloat("##SliceReachMultiplier", ref sliceReach,
                 SaberLimits.MinimumSliceReachMultiplier, SaberLimits.MaximumSliceReachMultiplier, "%.2fx");
-            ShowSaberControlTip("Select parts within visible blade length × this value.\n\nApplies before an assisted slice starts.");
+            ShowSaberControlTip("The blade length multiplier fudge factor for how far away a part slice is detected");
             double visibleLength = _blade.Deployment * length;
             ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(length, sliceReach):F2} m fully extended.");
             SaberSettingsRow("Sound volume");

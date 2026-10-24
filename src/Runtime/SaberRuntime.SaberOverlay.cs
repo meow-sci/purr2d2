@@ -89,7 +89,8 @@ internal sealed partial class SaberRuntime
             _overlayLayoutAvailable = _overlayLayout.Valid;
             if (!_overlayLayoutAvailable) { DismissKittenColorPicker(); ResetForceGestures(); return; }
             var layout = _overlayLayout;
-            _forceLayout = ForceOverlayLayout.Create(baseLayout, viewport.WorkPos, viewport.WorkSize)
+            _forceLayout = ForceOverlayLayout.Create(baseLayout, viewport.WorkPos, viewport.WorkSize,
+                ImGui.GetFontSize(), ImGui.CalcTextSize("200 m/s").X)
                 .WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
                     new(_settings.ForceControlsOffsetX, _settings.ForceControlsOffsetY), menuInset);
             _forceLayoutAvailable = _forceLayout.Valid;
@@ -265,7 +266,10 @@ internal sealed partial class SaberRuntime
             && _overlayPointerCapture.Consume((int)button, false, false, false, Program.FrameNumber))
         {
             if (button == GlfwMouseButton.Left)
-            { ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag(); }
+            {
+                ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag();
+                CompleteForceThrowSlider(OverlayPointer(window));
+            }
             return true;
         }
         // Native settings/picker gestures belong to ImGui. Consume only the game's route;
@@ -301,6 +305,8 @@ internal sealed partial class SaberRuntime
             hit != OverlayHit.None || forceHit != ForceOverlayHit.None || forcePick, Program.HasMouseInputLatch,
             Program.FrameNumber, out bool firstPress)) return false;
         if (!firstPress) return true;
+        if (_forceThrowDrag.Held && button == GlfwMouseButton.Right)
+        { CancelForceThrowDrag(); return true; }
         if (ForcePicking && button == GlfwMouseButton.Right)
         { HandleForcePickerPress(button, pointer); return true; }
         if (forcePick) { HandleForcePickerPress(button, pointer); return true; }
@@ -371,6 +377,14 @@ internal sealed partial class SaberRuntime
     /// <summary>Keep held drags, including movement outside the circle, away from camera controllers.</summary>
     internal bool FilterOverlayCursor(GlfwWindow window)
     {
+        if (_forceThrowDrag.Held)
+        {
+            if (!OverlayVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
+                || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner))
+                CancelForceThrowDrag();
+            else MoveForcePointer(OverlayPointer(window));
+            return true;
+        }
         if (_forceSettingDrag.Held)
         {
             if (Program.IsModalOpen()) ReleaseForceSettingDrag();
@@ -391,7 +405,10 @@ internal sealed partial class SaberRuntime
     {
         if (!_overlayPointerCapture.SuppressImGuiButton((int)button, action == GlfwButtonAction.Press, Program.FrameNumber)) return false;
         if (button == GlfwMouseButton.Left && action == GlfwButtonAction.Release)
-        { ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag(); }
+        {
+            ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag();
+            CompleteForceThrowSlider(OverlayPointer(window));
+        }
         return true;
     }
 
@@ -408,6 +425,13 @@ internal sealed partial class SaberRuntime
 
     internal bool FilterOverlayScroll(GlfwWindow window, double2 offset)
     {
+        if (window == Program.GetWindow() && _forceThrowDrag.Held)
+        {
+            if (!OverlayVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
+                || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner))
+                CancelForceThrowDrag();
+            return true;
+        }
         if (Program.HasMouseInputLatch) return false;
         if (window == Program.GetWindow() && !_overlayPointerCapture.AnyHeld
             && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return true;
@@ -417,7 +441,7 @@ internal sealed partial class SaberRuntime
                 && _overlayLayout.Hit(OverlayPointer(window)) == OverlayHit.None
                 && _forceLayout.Hit(OverlayPointer(window)) == ForceOverlayHit.Move)))
         {
-            ScrollForcePointer(offset.Y);
+            ScrollForcePointer(offset.Y, ForceShiftHeld(window));
             return true;
         }
         if (!OverlayOwnsScroll(window, out var hit)) return false;
@@ -433,6 +457,7 @@ internal sealed partial class SaberRuntime
     private bool OverlayOwnsScroll(GlfwWindow window, out OverlayHit hit)
     {
         hit = OverlayHit.None;
+        if (window == Program.GetWindow() && _forceThrowDrag.Held) return true;
         if (Program.HasMouseInputLatch) return false;
         if (!_overlayPointerCapture.AnyHeld
             && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return false;

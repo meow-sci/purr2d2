@@ -3,9 +3,14 @@ using Brutal.Numerics;
 namespace HarmonyLib { public sealed class Harmony { } }
 namespace Brutal.GlfwApi
 {
-    public sealed class GlfwWindow { }
+    public sealed class GlfwWindow
+    {
+        public GlfwKeyAction LeftShift, RightShift;
+        public GlfwKeyAction GetKey(GlfwKey key) => key switch
+        { GlfwKey.LeftShift => LeftShift, GlfwKey.RightShift => RightShift, _ => GlfwKeyAction.Release };
+    }
     public enum GlfwMouseButton { Left, Right, Middle }
-    public enum GlfwKey { Escape }
+    public enum GlfwKey { Escape, LeftShift, RightShift }
     public enum GlfwKeyAction { Release, Press, Repeat }
 }
 namespace Brutal.ImGuiApi
@@ -98,7 +103,7 @@ namespace KSA
     public static class Program
     {
         public static object? ControlledVehicle;
-        public static bool EditorFlag, Modal;
+        public static bool EditorFlag, Modal, HasMouseInputLatch;
         public static readonly Brutal.GlfwApi.GlfwWindow Window = new();
         public static TestViewport MainViewport = new();
         public static Brutal.GlfwApi.GlfwWindow GetWindow() => Window;
@@ -136,9 +141,12 @@ namespace Purr2D2.Force
         internal int CaptureCalls;
         internal int CapturedLimit;
         internal double CapturedRadius;
+        internal double GroupSpread = ForceMath.DefaultGroupSpread;
         internal int CapturedCount => HasCapture ? 1 : 0;
         internal KSA.KittenEva? Owner;
         internal double3 GroupOffsetBody, ReleasedOffset;
+        internal double ReleasedSpread = ForceMath.DefaultGroupSpread;
+        internal double ReleasedThrowSpeed = ForceMath.ThrowSpeed;
         internal string Status = "";
         internal ForceStatusSeverity StatusSeverity;
         internal readonly List<string> Events = [];
@@ -148,7 +156,7 @@ namespace Purr2D2.Force
         {
             CaptureCalls++; CapturedRadius = angryRadius; CapturedLimit = captureLimit; Events.Add("Capture");
             if (!pick.Live) { Status = "Stale target"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
-            HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
+            HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
         }
         internal void Update(KSA.KittenEva? owner)
         {
@@ -157,9 +165,10 @@ namespace Purr2D2.Force
             if (HasCapture && !ReferenceEquals(owner, Owner)) { Release(false); Status = "Owner changed"; StatusSeverity = ForceStatusSeverity.Warning; }
         }
         internal void SetOffset(double3 offset) { Events.Add("Offset"); GroupOffsetBody = offset; }
-        internal void Release(bool thrown)
-        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; HasCapture = false; Owner = null; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; }
-        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; Status = ""; StatusSeverity = ForceStatusSeverity.None; }
+        internal void SetSpread(double spread) { Events.Add("Spread"); GroupSpread = ForceMath.ClampGroupSpread(spread); }
+        internal void Release(bool thrown, double throwSpeed = ForceMath.ThrowSpeed)
+        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; }
+        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; }
         public void Dispose() => Disposed = true;
     }
 }

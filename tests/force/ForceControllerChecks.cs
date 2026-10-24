@@ -14,6 +14,7 @@ internal static class ForceControllerChecks
         RollbackContinuesAfterFailure();
         InvalidOwnerAndJoinFailure();
         MixedAngryEitherPrimary();
+        GroupSpreadAroundCentroid();
         ConfigurableAngryRadius();
         CombinedLimitPreflight();
         InvalidCaptureLimits();
@@ -92,6 +93,11 @@ internal static class ForceControllerChecks
             var thrown = target.GetVelocityCci(); controller.Release(true);
             Equal(target.GetVelocityCci(), thrown, "second release never throws twice");
             Check(controller.Capture(owner, Pick(target), false), "recapture after throw");
+            inherited = target.GetVelocityCci();
+            controller.Release(true, 200);
+            Equal(target.GetVelocityCci() - inherited, new(200, 0, 0),
+                "release snapshots and applies a selected maximum throw speed");
+            Check(controller.Capture(owner, Pick(target), false), "recapture after a selected-speed throw");
             target.Parts.Items.Add(new() { Tree = target.Parts });
             controller.Update(owner);
             Check(!controller.HasCapture && ForcePhysicsPatches.FilterCapturedWorker(target.TakeUpdateStateIfOrphaned()) != null,
@@ -186,6 +192,70 @@ internal static class ForceControllerChecks
                     && controller.CapturedCount == 1, "ordinary Force captures only the selected type");
                 controller.Release(false);
             }
+        }
+    }
+
+    private static void GroupSpreadAroundCentroid()
+    {
+        var (controller, owner, first) = Setup("spread-centroid");
+        using (controller)
+        {
+            double half = Math.Sqrt(.5);
+            var second = new Vehicle(owner.System, owner.Parent, "spread-second", new(4, 0, 0), new(20, 0, 0));
+            second.SetNativeState(new(4, 0, 0), new(20, 0, 0), new(0, 0, half, half), new(0, 0, 0));
+            var clutter = new ClutterForceTarget(owner, "spread-rock", new(6, 0, 0), new(30, 0, 0));
+            ClutterForceTargets.Candidates = [clutter];
+            var primaryPick = new ForcePick(first, first.Parts.Items[0], first.Parent, first.System, new(0, .5, 0));
+            Check(controller.Capture(owner, primaryPick, true, angryRadius: 10) && controller.CapturedCount == 3,
+                "a mixed three-object group captures before spread changes");
+            Check(controller.GroupSpread == 1, "every new capture starts at unit spread");
+            Check(controller.TryGetPoseTargetBody(owner, out var initialAim), "the selected Force hit point remains available as a pose anchor");
+            Equal(initialAim, new(2, .5, 0), "the primary hit point retains its local offset before spreading");
+            var secondRotation = second.GetBody2Cci();
+
+            controller.SetSpread(.5);
+            controller.Update(owner); // Universe.Time is unchanged: spread dirtiness must defeat the early-out.
+            Equal(first.GetPositionCci(), new(3, 0, 0), "compressed primary stays centered around the group centroid");
+            Equal(second.GetPositionCci(), new(4, 0, 0), "the group centroid object stays at the same point");
+            Equal(clutter.State.Position, new(5, 0, 0), "mixed physical clutter compresses with captured vessels");
+            Equal((first.GetPositionCci() + second.GetPositionCci() + clutter.State.Position) / 3,
+                new(4, 0, 0), "uniform compression preserves the original group centroid");
+            Check(Math.Abs(doubleQuat.Dot(second.GetBody2Cci(), secondRotation)) > 1 - 1e-12,
+                "spread changes preserve each object's captured orientation");
+            Check(controller.TryGetPoseTargetBody(owner, out var compressedAim), "a compressed group keeps an available pose target");
+            Equal(compressedAim, new(3, .5, 0), "the selected hit point follows its primary object while preserving the unscaled local surface offset");
+
+            controller.SetOffset(new(0, 1, 0)); controller.Update(owner);
+            Equal((first.GetPositionCci() + second.GetPositionCci() + clutter.State.Position) / 3,
+                new(4, 1, 0), "group translation moves the centroid while retaining compressed spacing");
+            Check(controller.TryGetPoseTargetBody(owner, out var translatedAim), "translated spread retains its pose target");
+            Equal(translatedAim, new(3, 1.5, 0), "pose target follows the compressed primary plus group translation");
+            controller.Release(false);
+            Check(!controller.HasCapture && controller.GroupSpread == 1,
+                "release uses displayed spacing and clears spread ownership for the next capture");
+            Equal(first.GetPositionCci(), new(3, 1, 0), "released primary keeps the compressed displayed pose");
+            Equal(second.GetPositionCci(), new(4, 1, 0), "released vessel keeps its compressed displayed pose");
+            Equal(clutter.State.Position, new(5, 1, 0), "released clutter keeps the same compressed displayed pose");
+        }
+
+        var (singleController, singleOwner, singleTarget) = Setup("single-spread");
+        using (singleController)
+        {
+            var singlePick = new ForcePick(singleTarget, singleTarget.Parts.Items[0], singleTarget.Parent,
+                singleTarget.System, new(0, .75, 0));
+            Check(singleController.Capture(singleOwner, singlePick, false), "single-object spread capture starts normally");
+            Check(singleController.TryGetPoseTargetBody(singleOwner, out var singleAim), "single capture exposes its selected hit point");
+            Equal(singleAim, new(2, .75, 0), "single-capture hit point begins at its primary surface");
+            singleController.SetSpread(ForceMath.MinimumGroupSpread);
+            singleController.Update(singleOwner);
+            Check(singleController.TryGetPoseTargetBody(singleOwner, out var compressedSingleAim), "compressed single capture retains its pose target");
+            Equal(compressedSingleAim, singleAim, "compressing one object leaves its selected hit point stationary");
+            singleController.SetSpread(ForceMath.MaximumGroupSpread);
+            singleController.Update(singleOwner);
+            Equal(singleTarget.GetPositionCci(), new(2, 0, 0), "spreading a single capture cannot translate its centroid");
+            Check(singleController.TryGetPoseTargetBody(singleOwner, out var expandedSingleAim), "expanded single capture retains its pose target");
+            Equal(expandedSingleAim, singleAim, "expanding one object also leaves its selected hit point stationary");
+            Check(singleController.GroupOffsetBody == double3.Zero, "spread has no effect on single-capture translation state");
         }
     }
 

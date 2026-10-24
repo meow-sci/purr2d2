@@ -35,11 +35,18 @@ internal static class ManualContactChecks
     private static void Gestures()
     {
         var state = new ManualContactGesture(); state.Begin(); ulong first = state.Id;
-        Check(state.Consume(first) && !state.Consume(first), "gesture accepts exactly one transaction");
+        Check(state.Consume(first, 0) && !state.Consume(first, 0), "gesture accepts exactly one transaction");
         state.Release(); state.Begin();
         Check(state.Id > first && !state.CanDetect, "regrab during return has a new ID while one transaction stays in flight");
-        state.Finish(); Check(state.CanDetect && state.Consume(state.Id), "new deliberate gesture can cut after the previous transaction finishes");
+        ulong regrabbed = state.Id;
+        state.FinishAttempt(1);
+        Check(state.Id == regrabbed && state.Held && !state.CanDetectAt(1.249)
+            && state.CanDetectAt(1.25), "regrab keeps its identity and observes the exact 250 ms completion cooldown");
+        Check(state.Consume(state.Id, 1.25), "held gesture rearms at the cooldown boundary");
+        state.FinishAttempt(1.25);
         state.Cancel(); Check(!state.CanDetect && !state.InFlight, "cancellation cannot silently rearm a held gesture");
+        state.Begin();
+        Check(!state.CanDetectAt(1.499) && state.CanDetectAt(1.5), "a new press cannot bypass an active cooldown");
     }
     private static (KittenEva Owner, Vehicle Vehicle, Part Part, MeshReference Mesh) Scene(int misses = 0)
     {

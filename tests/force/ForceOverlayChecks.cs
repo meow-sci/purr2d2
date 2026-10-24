@@ -140,6 +140,9 @@ internal static class ForceOverlayChecks
                 && MathF.Abs((force.StatusMin.X + force.StatusMax.X) * .5f - force.MoveCenter.X) < 1e-3f
                 && force.SliderEnvelope(ForceOverlayHit.CaptureLimit).Max.Y <= force.ControlsMax.Y
                 && force.SliderEnvelope(ForceOverlayHit.AngryRadius).Max.Y <= force.ControlsMax.Y
+                && force.SliderEnvelope(ForceOverlayHit.AngryForce).Min.Y >= force.ControlsMin.Y
+                && force.SliderEnvelope(ForceOverlayHit.AngryForce).Max.Y <= force.ControlsMax.Y
+                && force.SliderValueLabelMaxX <= force.ControlsMax.X
                 && force.StatusMax.Y < force.MoveCenter.Y - force.MoveRadius
                 && force.StatusMin.X >= origin.X && force.StatusMax.X <= origin.X + size.X,
                 "Count, Dist, Force and Angry follow a separated rising arc with the centered status above Move");
@@ -196,6 +199,14 @@ internal static class ForceOverlayChecks
         }
         var baseSaber = SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2);
         var baseForce = ForceOverlayLayout.Create(baseSaber, float2.Zero, new(1920, 1080));
+        var largeFontForce = ForceOverlayLayout.Create(baseSaber, float2.Zero, new(1920, 1080), 32, 112);
+        Check(largeFontForce.Valid && largeFontForce.SliderValueLabelWidth >= 112
+            && largeFontForce.SliderValueLabelMaxX <= largeFontForce.ControlsMax.X,
+            "layout reserves the actual unscaled 32 px throw-value label width without wrapping it");
+        Check(!baseForce.SliderEnvelope(ForceOverlayHit.AngryForce).Min.Equals(float2.Zero)
+            && baseForce.SliderEnvelope(ForceOverlayHit.AngryForce).Min.Y < baseForce.AngryCenter.Y
+            && baseForce.SliderEnvelope(ForceOverlayHit.AngryForce).Max.Y == baseForce.AngryCenter.Y + baseForce.ButtonRadius,
+            "the throw-slider envelope opens up from Angry Force while retaining its button radius");
         var customForce = baseForce.WithControlsOffset(float2.Zero, new(1920, 1080), new(.04f, -.04f));
         Check((customForce.MoveCenter - baseForce.MoveCenter - new float2(76.8f, -43.2f)).Length() < 1e-3f
             && baseForce.WithControlsOffset(float2.Zero, new(1920, 1080), new(float.NegativeInfinity, float.NaN)) == baseForce,

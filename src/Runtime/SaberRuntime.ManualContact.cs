@@ -17,27 +17,44 @@ internal sealed partial class SaberRuntime
     private void BeginManualSwing()
     {
         _manualGesture.Begin();
-        _manualPoseAvailable = false; _manualResetPending = true;
+        ClearManualPose(); _manualResetPending = true;
     }
     private void ReleaseManualSwing()
     {
         _overlayDrag.Release(); _manualGesture.Release();
-        _manualPoseAvailable = false; _manualResetPending = true;
+        ClearManualPose(); _manualResetPending = true;
+    }
+
+    private void ClearManualPose()
+    {
+        _manualPose = default;
+        _manualPoseAvailable = false;
+    }
+
+    // Shared with the assisted-slice coordinator so terminal manual outcomes use
+    // the same timestamp gate in production and the focused runtime harness.
+    private void FinishManualContactAttempt(bool attempted)
+    {
+        if (attempted) _manualGesture.FinishAttempt(_playerTime);
+        else _manualGesture.Finish();
+        _manualProbe.Reset();
+        ClearManualPose();
     }
 
     // Render only publishes the pose and gesture identity. All discovery, reads of
     // target transforms, capture and native mutation occur in BeforePhysics.
     private void PublishManualPose(double3 emitter, double3 tip)
     {
-        _manualPoseAvailable = _overlayDrag.Held && _manualGesture.CanDetect;
+        _manualPoseAvailable = _overlayDrag.Held && _manualGesture.CanDetectAt(_playerTime);
         if (_manualPoseAvailable)
             _manualPose = new(_manualGesture.Id, _playerTime, emitter, tip, _overlayDrag.Offset);
+        else ClearManualPose();
     }
 
     // UI callbacks cannot cancel uploads/native isolation while physics is running.
     private void InvalidateManualContact()
     {
-        _manualPoseAvailable = false;
+        ClearManualPose();
         _manualResetPending = true;
         _manualCancelPending |= _manualSliceActive;
         _manualGesture.Cancel();
@@ -57,11 +74,20 @@ internal sealed partial class SaberRuntime
             && !SomersaultActive && !ForceHolding && !ForcePicking;
         if (_manualSliceActive)
         {
-            if (!eligible) { CancelAssistedSlice("Contact slice cancelled: saber pose or controls unavailable."); return; }
+            if (!eligible)
+            {
+                // A lifecycle/control invalidation cancels this held gesture outright;
+                // only a normal manual-attempt outcome receives the timed rearm.
+                _manualGesture.Cancel();
+                ClearManualPose();
+                CancelAssistedSlice("Contact slice cancelled: saber pose or controls unavailable.");
+                return;
+            }
             UpdateManualSlice(simulationAdvancing && _freshPoseThisTick); return;
         }
-        if (!eligible || !_manualGesture.CanDetect || !_overlayDrag.Held || !_manualPoseAvailable
+        if (!eligible || !_manualGesture.CanDetectAt(_playerTime) || !_overlayDrag.Held || !_manualPoseAvailable
             || _manualPose.Gesture != _manualGesture.Id || _playerTime < _manualPose.Time
+            || _manualPose.Time < _manualGesture.CooldownUntil
             || _playerTime - _manualPose.Time > ManualContactProbe.MaximumAge
             || _selectingSlice || _sliceSequence.Active || _slicer.Busy)
         { _manualProbe.Reset(); return; }
@@ -69,14 +95,14 @@ internal sealed partial class SaberRuntime
         // preserve the frozen query/cursor; age and lifecycle checks above bound it.
         if (!simulationAdvancing || !_freshPoseThisTick) return;
         if (!_manualProbe.Advance(_owner!, _manualPose, out var contact)) return;
-        // Consume before checking cut policy too: a refused surface gets one message
-        // per deliberate press, never a per-frame rejection/preparation flood.
-        if (!_manualGesture.Consume(_manualPose.Gesture)) return;
-        _manualProbe.Reset(); _manualPoseAvailable = false;
+        // Consume before checking cut policy too: a refused surface gets one attempt
+        // until the .25-second cooldown expires and fresh motion arrives, never a per-frame flood.
+        if (!_manualGesture.Consume(_manualPose.Gesture, _playerTime)) return;
+        _manualProbe.Reset(); ClearManualPose();
         _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
         if (!_targeting.TryContactTarget(_owner!, contact.Part, contact.PointLocal, contact.DistanceMeters,
             contact.BladeLength, contact.SourceTransform, contact.PartTransform, out var target, out var reason))
-        { _manualGesture.Finish(); _sliceStatus = reason; _sliceMessageUntil = _playerTime + 5; return; }
+        { CancelAssistedSlice(reason, manualAttemptCompleted: true); return; }
         _manualSliceActive = true; _manualIsolated = false;
         _sliceTarget = target; _sliceStarted = true; _sliceError = null;
         try { _slicer.Begin(target!.Part); }
@@ -89,18 +115,19 @@ internal sealed partial class SaberRuntime
         _slicer.Advance();
         _sliceError ??= _slicer.Error;
         if (!_targeting.CheckPendingSliceTarget(_owner!, _sliceTarget!, out var reason)) _sliceError ??= reason;
-        if (_sliceError != null) { CancelAssistedSlice("Cannot contact slice: " + _sliceError); return; }
+        if (_sliceError != null) { CancelAssistedSlice("Cannot contact slice: " + _sliceError, manualAttemptCompleted: true); return; }
         _sliceStatus = _slicer.Phase;
         if (!_slicer.Ready || !permitNative) return;
         if (!_manualIsolated)
         {
             var result = IsolateSliceTarget();
-            if (!result.Success) { CancelAssistedSlice("Contact slice failed: " + result.Message); return; }
+            if (!result.Success) { CancelAssistedSlice("Contact slice failed: " + result.Message, manualAttemptCompleted: true); return; }
             _manualIsolated = true;
             return; // Native swap must wait for a separate settled update.
         }
         var commit = _targeting.CommitAcceptedSlice(_owner!, _sliceTarget!, default);
-        CancelAssistedSlice((commit.Success ? "Contact slice complete: " : "Contact slice failed: ") + commit.Message);
+        CancelAssistedSlice((commit.Success ? "Contact slice complete: " : "Contact slice failed: ") + commit.Message,
+            manualAttemptCompleted: true);
     }
 
     // Shared isolation/rebase coordinator for both triggers. Only our successful

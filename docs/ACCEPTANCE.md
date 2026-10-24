@@ -1,5 +1,22 @@
 # Acceptance record
 
+## Repeated manual cuts and Force group spacing (2026-10-24)
+
+An active manual cut uses a green square made from corner brackets. White “slicing...” sits above the white part name, both centered above the marker. Projection, owner/source validity and viewport clipping still apply. The Slice grace / reach tooltip uses the requested blade-length multiplier description.
+
+A held Swing gesture can accept another rendered-surface contact after the active transaction finishes and a 0.25-second player-time cooldown passes. Detection stays paused during the transaction and cooldown, then restarts from a fresh pose/probe. Refusals and failures also throttle retries. Release and return do not create new cuts; accepted work can finish after release. Lifecycle invalidation retains the existing settled cancellation path.
+
+Move Force reads Shift at wheel-event time. Shift-wheel up compresses captured object positions around the capture-time group centroid; Shift-wheel down expands them. The operation preserves object geometry/orientation and the group's translation, works across vessels and native clutter, and smooths toward a bounded target in the settled update. Plain wheel input retains depth control. Release and Throw use the displayed spacing; capture/lifecycle resets restore the initial spacing.
+
+THROW is a transient upward slider: every press begins at 25 m/s, dragging upward selects up to 200 m/s, and the matching mouse release snapshots and queues one throw. A click-and-release preserves the original 25 m/s behavior. The chosen speed appears beside the nub and never persists between gestures. Hiding/focus loss, modal/control/lifecycle changes and Escape cancel the gesture rather than throwing.
+
+Focused checks pass for manual-contact gesture/runtime and targeting, manual marker layout, Force arithmetic/controller/UI and the transient throw drag. They cover .249/.250 cooldown boundaries and fresh poses, sequential held cuts without overlap, explicit cancel/release paths, initial-idle Shift-wheel, centroid-preserving mixed spread, default/max throw speeds, one-shot release snapshots, cancelled gestures and active-pill rendering.
+
+The final Release build has zero warnings/errors. Source/stage validation passes; all 29 archive files match staging and the archive SHA-256 verifies. Build and package logs: `artifacts/checks/slice-force-release.log` and `artifacts/checks/slice-force-stage.log`. The package is `artifacts/dist/purr2d2-controls-0.2.0.zip`.
+
+Native acceptance remains pending: inspect marker labels near viewport edges and on long part names; keep Swing held across multiple accepted/refused cuts, release while a cut prepares, and confirm the cooldown; compress and expand mixed Force captures while dragging and changing Shift, then release/throw and switch owner; click-release THROW at 25 m/s, drag to 200 m/s, release outside the pill, and cancel through each lifecycle path.
+
+
 ## Mockup overlay refinement (2026-10-24)
 
 Force warning/error text is centered above Move Force with a 25-scaled-pixel gap; ordinary picking, capture, holding and release chatter stays hidden. Saber text is centered 25 scaled pixels below the lowest jump button, in a wrap area 50% wider than before. Both areas center each measured line independently and keep explicit paragraph breaks. Force settings show rounded current values when closed and beside the active nub, with no numeric wrapping. Display rounding preserves the actual distance setting. Count and Distance have the requested short tooltips.
