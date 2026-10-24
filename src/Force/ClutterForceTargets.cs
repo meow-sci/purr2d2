@@ -3,11 +3,14 @@ using BepuPhysics.Collidables;
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
+using Purr2D2.Core;
 
 namespace Purr2D2.Force;
 
 internal readonly record struct ClutterForceIdentity(BubbleClutterStatics Native, int Generation,
     BubbleClutterStatics.ClutterInstanceKey Key);
+
+internal readonly record struct ClutterForceCandidate(ClutterForceTarget Target, double DistanceSquared);
 
 /// <summary>One resident native object, identified independently of recycled Bepu handles.</summary>
 internal sealed class ClutterForceTarget
@@ -23,6 +26,8 @@ internal sealed class ClutterForceTarget
     internal IParentBody Parent { get; }
     internal CelestialSystem System { get; }
     internal ClutterForceIdentity StableKey => new(Native, _generation, Key);
+    internal string StableOrder => $"{Key.CelestialHash.Code:D10}:{Key.EcotypeIndex:D10}:{Key.Cell.FaceId:D2}:"
+        + $"{Key.Cell.X:D10}:{Key.Cell.Y:D10}:{Key.SubCellId:D10}:{_generation:D10}";
     internal string DisplayName { get; }
     internal bool IsValid => TryResolve(out _, out _, out _, out _);
 
@@ -89,7 +94,7 @@ internal sealed class ClutterForceTarget
     internal bool TryCapture(out ClutterForceHold? hold, out string reason) => ClutterForceHold.TryCapture(this, out hold, out reason);
 }
 
-/// <summary>Settled-thread native queries. Limits reject incomplete picks and groups, never truncate them.</summary>
+/// <summary>Settled-thread native queries. Safety limits reject incomplete queries; capture limits keep nearest overlaps.</summary>
 internal static partial class ClutterForceTargets
 {
     internal const int MaximumCandidates = 32768;
@@ -176,29 +181,43 @@ internal static partial class ClutterForceTargets
     }
 
     internal static bool GatherNear(KittenEva owner, double3 centerCci, double radius,
-        List<ClutterForceTarget> destination, int maximum, out string reason)
+        List<ClutterForceCandidate> destination, int maximum, out string reason)
     {
         destination.Clear();
         if (!TryContext(owner, out var bubble, out reason)) return reason.Length == 0;
-        if (!ForceMath.Finite(centerCci) || !ForceMath.ValidAngryRadius(radius) || maximum < 0)
+        if (!ForceMath.Finite(centerCci) || !ForceMath.ValidAngryRadius(radius)
+            || maximum < 0 || maximum > ForceCaptureLimits.Maximum)
         { reason = "The ground-object proximity query is invalid."; return false; }
+        if (maximum == 0) { reason = ""; return true; }
         var cci2Ccf = bubble!.Parent.GetCci2Ccf(bubble.Origin.Time);
         var center = centerCci.Transform(cci2Ccf) - ClutterForceNative.Origin(bubble.GroundClutterStatics);
         if (center.LengthSquared() > 4096.0 * 4096)
         { reason = "Ground objects must remain near the current physics bubble."; return false; }
-        var query = new NearQuery(bubble, owner.System, destination, maximum);
+        var hits = new List<ProximityHit>(maximum);
+        var query = new NearQuery<NativeClutterPickFilter>(bubble.ConstraintSim!.Simulation,
+            new(bubble.GroundClutterStatics), center.ToBepu(), hits, MaximumCandidates);
         var pose = new RigidPose(center.ToBepu()); var velocity = default(BodyVelocity);
         // Zero motion and zero horizon perform exact native sphere overlap, including compounds.
         // Explicit convergence settings avoid the convenience overload's division by zero for zero speed.
         bubble.ConstraintSim!.Simulation.Sweep(new Sphere((float)radius), in pose, in velocity, 0,
             bubble.ConstraintSim.BufferPool, ref query, .0001f, .00001f, 32);
-        if (query.Exceeded || query.CaptureLimitExceeded || query.Unsupported)
+        if (query.Exceeded || query.Unsupported)
         {
             destination.Clear(); reason = query.Unsupported ? "A nearby ground collider cannot be queried safely."
-                : query.CaptureLimitExceeded
-                    ? $"More than {maximum} nearby ground objects. Raise the Force capture limit in Settings or reduce the radius; nothing was captured."
-                    : "Nearby ground geometry exceeds the Force proximity query budget; nothing was captured.";
+                : "Nearby ground geometry exceeds the Force proximity query budget; nothing was captured.";
             return false;
+        }
+        SortNearest(hits);
+        var seen = new HashSet<ClutterForceIdentity>();
+        foreach (var hit in hits)
+        {
+            if (!TryTarget(bubble, owner.System, hit.Collidable, out var target) || target == null)
+            { destination.Clear(); reason = "A nearby ground object changed during the Force query."; return false; }
+            if (seen.Add(target.StableKey))
+            {
+                destination.Add(new(target, hit.DistanceSquared));
+                if (destination.Count == maximum) break;
+            }
         }
         reason = ""; return true;
     }

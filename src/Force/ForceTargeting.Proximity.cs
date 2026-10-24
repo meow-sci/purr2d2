@@ -7,10 +7,12 @@ namespace Purr2D2.Force;
 internal static partial class ForceTargeting
 {
     private const int MaximumProximityTriangles = 250_000;
+    private readonly record struct ProximityCandidate(ForceTarget Target, double DistanceSquared, string StableOrder);
 
     /// <summary>
     /// Settled-thread query around the primary hit: vessel render triangles and native physical clutter colliders.
-    /// Clutter uses collider surface distance, which can differ from its visible mesh. Nothing mutates until all queries pass.
+    /// Eligibility uses exact collider/triangle surface distance; overflow ranking cheaply compares reference origins to the hit.
+    /// Nothing mutates until all queries pass.
     /// </summary>
     internal static bool Gather(KittenEva owner, ForcePick pick, bool angry, List<ForceTarget> destination, out string reason,
         double angryRadius = ForceMath.DefaultAngryRadius, int captureLimit = ForceCaptureLimits.Default)
@@ -27,10 +29,13 @@ internal static partial class ForceTargeting
         if (pick.Vehicle is { } primaryVehicle) { destination.Add(new(primaryVehicle)); vesselIds.Add(primaryVehicle.Id); }
         else if (pick.Clutter is { } primaryClutter) { destination.Add(new(primaryClutter)); clutterIds.Add(primaryClutter.StableKey); }
         else return false;
-        if (!angry) return true;
+        // The selected object is always the primary capture. A one-object cap
+        // needs no proximity geometry or native overlap query at all.
+        if (!angry || captureLimit == 1) return true;
         var hit = pick.HitCci;
         int triangles = 0, parts = 0, vehicles = 0;
         var meshes = new List<MeshReference>();
+        var nearby = new List<ProximityCandidate>();
         foreach (var item in Universe.CurrentSystem!.All.AsSpan())
         {
             if (item is not Vehicle vehicle || vehicle is KittenEva || vesselIds.Contains(vehicle.Id)
@@ -52,10 +57,8 @@ internal static partial class ForceTargeting
             if (triangles > MaximumProximityTriangles || parts > MaximumParts)
             { reason = "Nearby geometry exceeds the Angry Force surface budget; nothing was captured."; return false; }
             if (!found) continue;
-            if (destination.Count >= captureLimit)
-            { reason = CaptureLimitReason(captureLimit, angryRadius); return false; }
-            destination.Add(new(vehicle));
             vesselIds.Add(vehicle.Id);
+            nearby.Add(new(new(vehicle), (origin - hit).LengthSquared(), "v:" + vehicle.Id));
 
             bool SurfaceNear(Part part)
             {
@@ -80,24 +83,32 @@ internal static partial class ForceTargeting
                 return false;
             }
         }
-        var clutterTargets = new List<ClutterForceTarget>();
+        // One extra native slot accounts for a selected clutter primary that the
+        // overlap query also sees. Any omitted clutter already has at least the
+        // full combined cap of closer clutter reference origins ahead of it.
+        var clutterTargets = new List<ClutterForceCandidate>();
         if (!ClutterForceTargets.GatherNear(owner, hit, angryRadius, clutterTargets,
             captureLimit, out reason)) return false;
-        foreach (var clutter in clutterTargets)
+        foreach (var candidate in clutterTargets)
         {
+            var clutter = candidate.Target;
             if (!clutter.IsValid || !clutter.IsLocalTo(owner) || !ReferenceEquals(clutter.Parent, pick.Parent)
                 || !ReferenceEquals(clutter.System, pick.System))
             { reason = "A nearby physical ground object changed; nothing was captured."; return false; }
             if (!clutterIds.Add(clutter.StableKey)) continue;
-            if (destination.Count >= captureLimit)
-            { reason = CaptureLimitReason(captureLimit, angryRadius); return false; }
-            destination.Add(new(clutter));
+            nearby.Add(new(new(clutter), candidate.DistanceSquared,
+                "c:" + clutter.DisplayName + ":" + clutter.StableOrder));
         }
+        nearby.Sort(static (left, right) =>
+        {
+            int distance = left.DistanceSquared.CompareTo(right.DistanceSquared);
+            return distance != 0 ? distance : StringComparer.Ordinal.Compare(left.StableOrder, right.StableOrder);
+        });
+        for (int i = 0, count = Math.Min(captureLimit - 1, nearby.Count); i < count; i++)
+            destination.Add(nearby[i].Target);
+        reason = "";
         return true;
     }
-
-    private static string CaptureLimitReason(int captureLimit, double radius) =>
-        $"More than {captureLimit} objects are within {radius:0.#} m. Raise the Force capture limit in Settings or reduce the radius; nothing was captured.";
 
     private static void Collect(Part part, List<MeshReference> meshes)
     {

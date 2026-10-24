@@ -56,6 +56,7 @@ internal static class ForceClutterBepuChecks
             TreeCapsulePicking(sim, pool);
             ForgivingSurfacePicking(sim, pool, sphere, box, convex, capsule);
             DistantCameraPicking(sim, pool, sphere);
+            NearestOverlapOverflow(sim, pool, sphere);
 
             var inertia = new Box(2, 3, 4).ComputeInertia(7);
             var bodyHandle = sim.Bodies.Add(BodyDescription.CreateDynamic(new RigidPose(new(1, 2, 3)),
@@ -216,6 +217,30 @@ internal static class ForceClutterBepuChecks
             var pose = new RigidPose(Vector3.Zero); var velocity = new BodyVelocity(Vector3.UnitX);
             sim.Sweep(new Sphere(.2f), in pose, in velocity, maximumDistance, pool, ref query, .0001f, .00001f, 32);
             return query;
+        }
+    }
+
+    private static void NearestOverlapOverflow(Simulation sim, BufferPool pool, TypedIndex sphere)
+    {
+        foreach (bool nearestFirst in new[] { false, true })
+        {
+            var placements = nearestFirst ? new[] { 2f, 5, 8 } : new[] { 8f, 5, 2 };
+            var handles = placements.Select(position =>
+                sim.Statics.Add(new StaticDescription(new Vector3(position, 0, 0), sphere))).ToArray();
+            var expected = handles.Zip(placements).OrderBy(pair => pair.Second).Take(2)
+                .Select(pair => pair.First).ToHashSet();
+            var hits = new List<ClutterForceTargets.ProximityHit>();
+            var query = new ClutterForceTargets.NearQuery<StaticPickFilter>(sim, new(null),
+                Vector3.Zero, hits, ClutterForceTargets.MaximumCandidates);
+            var pose = new RigidPose(Vector3.Zero); var velocity = default(BodyVelocity);
+            sim.Sweep(new Sphere(10), in pose, in velocity, 0, pool, ref query, .0001f, .00001f, 32);
+            ClutterForceTargets.SortNearest(hits);
+            Check(!query.Exceeded && !query.Unsupported && hits.Count == 3
+                && hits.Take(2).Select(hit => hit.Collidable.StaticHandle).ToHashSet().SetEquals(expected)
+                && Math.Abs(hits[0].DistanceSquared - 4) < .001f
+                && Math.Abs(hits[1].DistanceSquared - 25) < .001f,
+                "native overlap overflow keeps exactly the closest reference origins regardless of broad-phase insertion order");
+            foreach (var handle in handles) sim.Statics.Remove(handle);
         }
     }
 

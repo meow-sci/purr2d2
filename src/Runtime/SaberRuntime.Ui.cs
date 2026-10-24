@@ -197,7 +197,7 @@ internal sealed partial class SaberRuntime
             ShowSaberControlTip("Capture nearby objects within this distance of the selected surface point.");
             SaberSettingsRow("Force capture limit");
             changed |= ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
-            ShowSaberControlTip($"Maximum total vessels, debris and physical ground objects in one Angry Force capture (default {ForceCaptureLimits.Default}). Higher counts cost more physics work. Groups above the limit are refused without capturing any objects. Applies to the next capture.");
+            ShowSaberControlTip($"Maximum total vessels, debris and physical ground objects in one Angry Force capture (default {ForceCaptureLimits.Default}). Higher counts cost more physics work. The selected target is always included; nearby objects fill the remaining slots, closest first. Applies to the next capture.");
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
             ShowSaberControlTip("After exact picking misses, a small sphere of this radius catches near misses on physical clutter. Exact hits take priority; 0 uses exact hits only.");

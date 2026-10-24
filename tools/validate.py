@@ -560,6 +560,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/ActivationChecks.cs",
         source / "src/Core/ForceOverlayDrag.cs",
         source / "src/Core/ForceOverlayLayout.cs",
+        source / "src/Core/ForceOverlaySliderDrag.cs",
         source / "tests/force/ForceOverlayChecks.cs",
         source / "src/Core/BackgroundSliceWork.cs",
         source / "tests/BackgroundSliceChecks.cs",
@@ -698,6 +699,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
                           source / "tests/force/ForceMathChecks.cs"]
     force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs",
         source / "src/Core/ForceOverlayDrag.cs", source / "src/Core/ForceOverlayLayout.cs",
+        source / "src/Core/ForceOverlaySliderDrag.cs",
         source / "src/Core/SaberOverlayDrag.cs", source / "src/Core/SaberOverlayLayout.cs",
         source / "tests/force/ForceUiChecks.cs", source / "tests/force/ForceUiHostStubs.cs",
         source / "tests/force/ForceOverlayChecks.cs"]

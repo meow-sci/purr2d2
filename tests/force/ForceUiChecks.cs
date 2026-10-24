@@ -19,6 +19,7 @@ internal sealed partial class SaberRuntime
         internal int ForceCaptureLimit = ForceCaptureLimits.Default;
     }
     private readonly TestSettings _settings = new();
+    private double _preferencesSavedUntil;
     private double _playerTime = 0;
     private KittenEva? _owner;
     private int _sliceCancellations;
@@ -46,6 +47,7 @@ internal sealed partial class SaberRuntime
     {
         ForceOverlayChecks.Run();
         ForcePickerButtons();
+        ForceSettingSliders();
         var runtime = new SaberRuntime { _selectingSlice = true };
         runtime._settings.AngryForceRadius = 14;
         runtime._settings.ClutterPickTolerance = .375f;
@@ -246,6 +248,76 @@ internal sealed partial class SaberRuntime
         runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, angryCenter);
         Check(runtime._forceRequests.TryPeek(out var thrown) && thrown.Action == ForceAction.Throw,
             "the Angry Force button still queues throw while holding a group");
+    }
+
+    private static void ForceSettingSliders()
+    {
+        var runtime = new SaberRuntime();
+        runtime._forceLayout = ForceOverlayLayout.Create(
+            SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080));
+        var originalLayout = runtime._forceLayout;
+        runtime._forceLayoutAvailable = true;
+        var count = runtime._forceLayout.CaptureLimitCenter;
+        var distance = runtime._forceLayout.AngryRadiusCenter;
+        runtime._preferencesSavedUntil = 42;
+
+        Check(runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count)
+            && runtime._forceSettingDrag.Held && runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Default,
+            "pressing count opens its pill without changing the shared setting");
+        runtime.MoveForcePointer(count + new float2(10000, runtime._forceLayout.SliderTravel * .5f));
+        Check(runtime._settings.ForceCaptureLimit == 384 && runtime._preferencesSavedUntil == 0,
+            "count drag writes the rounded value directly to shared settings and marks preferences dirty");
+        runtime.MoveForcePointer(count + new float2(-10000, 10000));
+        Check(runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Maximum
+            && !runtime._forceMovePending && runtime._force.CaptureCalls == 0 && runtime._forceQuery == null,
+            "a held settings drag keeps updating outside its bounds without moving or targeting the world");
+
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear();
+        runtime.DrawForceOverlayCore(default);
+        var pill = ImDrawListPtr.Rects.Single();
+        uint blackHalf = new ImColor8(0, 0, 0, 128).Value;
+        Check(pill.Min == runtime._forceSettingDrag.PillMin && pill.Max == runtime._forceSettingDrag.PillMax
+            && pill.Color == blackHalf && pill.Rounding == runtime._forceLayout.ButtonRadius,
+            "the selected setting draws as a same-width downward rounded black pill");
+        runtime._forceLayout = originalLayout.WithControlsOffset(float2.Zero, new(1920, 1080), new(.02f, 0));
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear();
+        runtime.DrawForceOverlayCore(default);
+        Check(!runtime._forceSettingDrag.Held && ImDrawListPtr.Rects.Count == 0,
+            "a viewport or offset layout change collapses stale press-time pill geometry");
+        runtime._forceLayout = originalLayout;
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear();
+        runtime.DrawForceOverlayCore(default);
+        Check(ImDrawListPtr.Rects.Count == 0
+            && ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == count
+                && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf)
+            && ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == distance
+                && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf),
+            "release collapses both settings controls to circles matching Move's black fill and button radius");
+
+        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryRadius, distance);
+        runtime.MoveForcePointer(distance - new float2(0, 10000));
+        Check(runtime._settings.AngryForceRadius == 1 && runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Maximum,
+            "distance drag clamps its own shared setting without maintaining a separate value copy");
+        var replacement = new KittenEva(); runtime._owner = replacement; Program.ControlledVehicle = replacement;
+        runtime.UpdateForceVisibility();
+        Check(!runtime._forceSettingDrag.Held, "changing the controlled owner collapses an open settings pill");
+
+        runtime._forceLayoutAvailable = true;
+        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryRadius, distance);
+        Program.Modal = true; runtime.UpdateForceVisibility(); Program.Modal = false;
+        Check(!runtime._forceSettingDrag.Held, "opening a native modal collapses an open settings pill");
+
+        runtime._forceLayoutAvailable = true;
+        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryRadius, distance);
+        runtime.OverlayVisible = false; runtime.UpdateForceVisibility(); runtime.OverlayVisible = true;
+        Check(!runtime._forceSettingDrag.Held, "hiding the overlay collapses an open settings pill");
+
+        runtime._forceLayoutAvailable = true;
+        runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count);
+        Check(runtime.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Press)
+            && !runtime._forceSettingDrag.Held
+            && runtime.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Release),
+            "Escape cancels a settings drag and consumes its matching key release");
     }
 
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

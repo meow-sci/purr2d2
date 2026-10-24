@@ -10,6 +10,8 @@ internal static partial class ClutterForceTargets
 {
     internal interface IClutterPickFilter { bool Accept(CollidableReference collidable); }
 
+    internal readonly record struct ProximityHit(CollidableReference Collidable, float DistanceSquared);
+
     private readonly struct NativeClutterPickFilter(BubbleClutterStatics native) : IClutterPickFilter
     {
         public bool Accept(CollidableReference collidable) => collidable.Mobility == CollidableMobility.Static
@@ -101,30 +103,28 @@ internal static partial class ClutterForceTargets
         }
     }
 
-    private struct NearQuery(PhysicsBubble bubble, CelestialSystem system, List<ClutterForceTarget> destination, int maximum) : ISweepHitHandler
+    // Collect native overlaps up to the independent safety budget. Sorting once
+    // after the sweep avoids quadratic list insertion in a dense clutter scene.
+    internal struct NearQuery<TFilter>(Simulation simulation, TFilter filter, Vector3 center,
+        List<ProximityHit> destination, int maximum) : ISweepHitHandler where TFilter : struct, IClutterPickFilter
     {
-        internal bool Exceeded, CaptureLimitExceeded, Unsupported;
+        internal bool Exceeded, Unsupported;
         private int _candidates, _children;
-        private readonly HashSet<ClutterForceIdentity> _seen = [];
+        private readonly HashSet<CollidableReference> _seen = [];
         public bool AllowTest(CollidableReference collidable)
         {
-            if (Exceeded || CaptureLimitExceeded || Unsupported) return false;
-            var native = bubble.GroundClutterStatics;
-            bool clutter = collidable.Mobility == CollidableMobility.Static
-                ? native.IsClutterStatic(collidable.StaticHandle) : native.IsClutterBody(collidable.BodyHandle);
-            if (!clutter) return false;
+            if (Exceeded || Unsupported || !filter.Accept(collidable)) return false;
             if (++_candidates > MaximumCandidates) { Exceeded = true; return false; }
-            var sim = bubble.ConstraintSim!.Simulation;
-            var shape = collidable.Mobility == CollidableMobility.Static ? sim.Statics[collidable.StaticHandle].Shape
-                : sim.Bodies[collidable.BodyHandle].Collidable.Shape;
-            if (sim.NarrowPhase.SweepTaskRegistry.GetTask(Sphere.TypeId, shape.Type) == null)
+            var shape = collidable.Mobility == CollidableMobility.Static ? simulation.Statics[collidable.StaticHandle].Shape
+                : simulation.Bodies[collidable.BodyHandle].Collidable.Shape;
+            if (simulation.NarrowPhase.SweepTaskRegistry.GetTask(Sphere.TypeId, shape.Type) == null)
             { Unsupported = true; return false; }
             return true;
         }
         public bool AllowTest(CollidableReference collidable, int childIndex)
         {
             if (++_children > MaximumChildTests) Exceeded = true;
-            return !Exceeded && !CaptureLimitExceeded && !Unsupported;
+            return !Exceeded && !Unsupported;
         }
         public void OnHit(ref float maximumT, float t, Vector3 hitLocation, Vector3 hitNormal, CollidableReference collidable)
         {
@@ -133,11 +133,26 @@ internal static partial class ClutterForceTargets
         public void OnHitAtZeroT(ref float maximumT, CollidableReference collidable) => Offer(collidable);
         private void Offer(CollidableReference collidable)
         {
-            if (Exceeded || CaptureLimitExceeded || Unsupported) return;
-            if (!TryTarget(bubble, system, collidable, out var target)) { Unsupported = true; return; }
-            if (!_seen.Add(target!.StableKey)) return;
-            if (destination.Count >= maximum) { CaptureLimitExceeded = true; return; }
-            destination.Add(target);
+            if (Exceeded || Unsupported || !_seen.Add(collidable)) return;
+            var position = collidable.Mobility == CollidableMobility.Static
+                ? simulation.Statics[collidable.StaticHandle].Pose.Position
+                : simulation.Bodies[collidable.BodyHandle].Pose.Position;
+            float distanceSquared = Vector3.DistanceSquared(center, position);
+            if (!float.IsFinite(distanceSquared)) { Unsupported = true; return; }
+            if (destination.Count >= maximum) { Exceeded = true; return; }
+            destination.Add(new(collidable, distanceSquared));
+        }
+    }
+
+    internal static void SortNearest(List<ProximityHit> hits) => hits.Sort(ProximityHitComparer.Instance);
+
+    private sealed class ProximityHitComparer : IComparer<ProximityHit>
+    {
+        internal static readonly ProximityHitComparer Instance = new();
+        public int Compare(ProximityHit x, ProximityHit y)
+        {
+            int distance = x.DistanceSquared.CompareTo(y.DistanceSquared);
+            return distance != 0 ? distance : x.Collidable.Packed.CompareTo(y.Collidable.Packed);
         }
     }
 }

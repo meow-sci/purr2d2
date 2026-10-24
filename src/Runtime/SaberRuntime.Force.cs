@@ -12,10 +12,11 @@ internal sealed partial class SaberRuntime
 {
     private readonly ForceController _force = new();
     private readonly ForceOverlayDrag _forceDrag = new();
+    private readonly ForceOverlaySliderDrag _forceSettingDrag = new();
     private readonly Queue<ForceRequest> _forceRequests = new();
     private ForceOverlayLayout _forceLayout;
     private bool _forceLayoutAvailable, _selectingForce, _angryForce, _forceDisposed, _forceEscapeHeld;
-    private KittenEva? _forcePickOwner, _forceMoveOwner;
+    private KittenEva? _forcePickOwner, _forceMoveOwner, _forceSettingOwner;
     private ForcePick? _forceHover;
     private double3 _forceMoveOffset;
     private bool _forceMovePending;
@@ -124,9 +125,11 @@ internal sealed partial class SaberRuntime
     {
         if (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner))
             _forceStatus = "Force selection cancelled: the controlled kitten changed.";
-        if (!OverlayVisible || !ForceCanUse || (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner)))
+        if (!OverlayVisible || Program.IsModalOpen() || !ForceCanUse
+            || (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner)))
             ResetForceGestures();
         if (_forceDrag.Held && !ReferenceEquals(_forceMoveOwner, _owner)) _forceDrag.Release();
+        if (_forceSettingDrag.Held && !ReferenceEquals(_forceSettingOwner, _owner)) ReleaseForceSettingDrag();
     }
 
     // Snapshot the fresh camera ray; resolve it after workers join next frame.
@@ -209,6 +212,20 @@ internal sealed partial class SaberRuntime
     private bool HandleForceOverlayPress(ForceOverlayHit hit, float2 pointer)
     {
         if (hit == ForceOverlayHit.None) return false;
+        if (hit is ForceOverlayHit.CaptureLimit or ForceOverlayHit.AngryRadius)
+        {
+            CancelForcePicker();
+            _forceDrag.Release();
+            var center = hit == ForceOverlayHit.CaptureLimit
+                ? _forceLayout.CaptureLimitCenter : _forceLayout.AngryRadiusCenter;
+            double current = hit == ForceOverlayHit.CaptureLimit
+                ? _settings.ForceCaptureLimit : _settings.AngryForceRadius;
+            double maximum = hit == ForceOverlayHit.CaptureLimit ? ForceCaptureLimits.Maximum : 50;
+            if (_forceSettingDrag.Begin(hit, pointer, center, _forceLayout.ButtonRadius,
+                _forceLayout.SliderTravel, current, 1, maximum, hit == ForceOverlayHit.CaptureLimit))
+                _forceSettingOwner = _owner;
+            return true;
+        }
         if (!ForceCanUse) { _forceStatus = "Control an EVA kitten to use the Force."; return true; }
         switch (hit)
         {
@@ -238,6 +255,15 @@ internal sealed partial class SaberRuntime
 
     private void MoveForcePointer(float2 pointer)
     {
+        if (_forceSettingDrag.Move(pointer, out double setting))
+        {
+            if (_forceSettingDrag.Control == ForceOverlayHit.CaptureLimit)
+                _settings.ForceCaptureLimit = (int)setting;
+            else if (_forceSettingDrag.Control == ForceOverlayHit.AngryRadius)
+                _settings.AngryForceRadius = (float)setting;
+            _preferencesSavedUntil = 0;
+            return;
+        }
         if (!_forceDrag.Held) return;
         _forceDrag.Move(pointer);
         _forceMoveOffset = _forceDrag.Offset;
@@ -283,19 +309,31 @@ internal sealed partial class SaberRuntime
             return true;
         }
         var io = ImGui.GetIO();
-        if (!ForcePicking || KittenColorPickerContainsPointer(io.MousePos) || io.WantTextInput || io.WantCaptureKeyboard || Program.IsModalOpen()) return false;
-        if (action != GlfwKeyAction.Release) { _forceEscapeHeld = true; CancelForcePicker(); }
+        if ((!ForcePicking && !_forceSettingDrag.Held) || KittenColorPickerContainsPointer(io.MousePos)
+            || io.WantTextInput || io.WantCaptureKeyboard || Program.IsModalOpen()) return false;
+        if (action != GlfwKeyAction.Release)
+        {
+            _forceEscapeHeld = true;
+            CancelForcePicker();
+            ReleaseForceSettingDrag();
+        }
         return true;
+    }
+
+    private void ReleaseForceSettingDrag()
+    {
+        _forceSettingDrag.Release();
+        _forceSettingOwner = null;
     }
 
     private void ResetForceGestures()
     {
-        CancelForcePicker(); _forceDrag.Release(); _forceLayoutAvailable = false;
+        CancelForcePicker(); _forceDrag.Release(); ReleaseForceSettingDrag(); _forceLayoutAvailable = false;
     }
 
     private void ResetForce()
     {
-        ResetForceGestures(); _forceDrag.Reset(); _forceRequests.Clear();
+        ResetForceGestures(); _forceDrag.Reset(); _forceSettingDrag.Reset(); _forceRequests.Clear();
         _forceMovePending = false; _forceMoveOwner = null; _forceEscapeHeld = false; _forceStatus = "";
         if (!_forceDisposed) _force.Reset();
     }
@@ -315,6 +353,7 @@ internal sealed partial class SaberRuntime
         {
             _forceStatus = "Force overlay failed: " + error.Message;
             CancelForcePicker();
+            ReleaseForceSettingDrag();
             Report("Force overlay failed", error);
         }
     }
@@ -323,11 +362,19 @@ internal sealed partial class SaberRuntime
     {
         if (!_forceLayoutAvailable) return;
         var layout = _forceLayout;
+        // A resize, DPI change or custom offset invalidates press-time geometry.
+        // Collapse visually; the pointer capture still suppresses input until release.
+        if (_forceSettingDrag.Held && !_forceSettingDrag.Matches(layout)) ReleaseForceSettingDrag();
         var white = new ImColor8(255, 255, 255, 255);
         var muted = new ImColor8(195, 200, 210, 255);
         var color = ForceCanUse ? white : muted;
         bool forcePicking = !ForceHolding && ForcePicking && !_angryForce;
         bool angryPicking = !ForceHolding && ForcePicking && _angryForce;
+        var settingsFill = new ImColor8(0, 0, 0, 128);
+        DrawForceSettingControl(ForceOverlayHit.CaptureLimit, layout.CaptureLimitCenter,
+            _settings.ForceCaptureLimit, "COUNT", value => $"{(int)value}", "1", ForceCaptureLimits.Maximum.ToString());
+        DrawForceSettingControl(ForceOverlayHit.AngryRadius, layout.AngryRadiusCenter,
+            _settings.AngryForceRadius, "DIST", value => $"{value:0.#}m", "1m", "50m");
         draw.AddCircleFilled(layout.ForceCenter, layout.ButtonRadius,
             forcePicking ? new ImColor8(0, 0, 255, 128) : new ImColor8(0, 0, 255, 64), 48);
         draw.AddCircleFilled(layout.AngryCenter, layout.ButtonRadius,
@@ -360,9 +407,17 @@ internal sealed partial class SaberRuntime
         draw.PushClipRect(layout.StatusMin, layout.StatusMax, true);
         try { draw.AddText(ImGui.GetFont(), font, layout.StatusMin, color, status, layout.StatusMax.X - layout.StatusMin.X); }
         finally { draw.PopClipRect(); }
-        if (!KittenColorPickerContainsPointer(ImGui.GetIO().MousePos) && !SettingsContainsPointer(ImGui.GetIO().MousePos)
-            && layout.Hit(ImGui.GetIO().MousePos) == ForceOverlayHit.Move)
-            ImGui.SetTooltip("Hold and drag to move in the camera plane. Wheel up brings objects closer; down moves them away. Release keeps their position. Re-grab to move farther.");
+        var overlayPointer = ImGui.GetIO().MousePos;
+        if (!KittenColorPickerContainsPointer(overlayPointer) && !SettingsContainsPointer(overlayPointer))
+        {
+            var overlayHit = layout.Hit(overlayPointer);
+            if (overlayHit == ForceOverlayHit.Move)
+                ImGui.SetTooltip("Hold and drag to move in the camera plane. Wheel up brings objects closer; down moves them away. Release keeps their position. Re-grab to move farther.");
+            else if (overlayHit == ForceOverlayHit.CaptureLimit)
+                ImGui.SetTooltip("Hold and drag down for a larger Angry Force capture limit; up for a smaller limit.");
+            else if (overlayHit == ForceOverlayHit.AngryRadius)
+                ImGui.SetTooltip("Hold and drag down for a larger Angry Force distance; up for a smaller distance.");
+        }
         if (_forceHover != null && ForcePicking && Program.GetMainCamera() is { } camera
             && ForceTargeting.TryHitEgo(_forceHover, camera, out var hit) && double3.Dot(hit, camera.GetForwardEcl()) > .001)
         {
@@ -385,6 +440,34 @@ internal sealed partial class SaberRuntime
             draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), labelPosition + new float2(1),
                 new ImColor8(0, 0, 0, 255), label, wrap);
             draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), labelPosition, green, label, wrap);
+        }
+
+        void DrawForceSettingControl(ForceOverlayHit control, float2 center, double current, string caption,
+            Func<double, string> format, string minimum, string maximum)
+        {
+            float labelFont = Math.Min(ImGui.GetFontSize(), 11 * layout.Scale);
+            if (_forceSettingDrag.Held && _forceSettingDrag.Control == control)
+            {
+                draw.AddRectFilled(_forceSettingDrag.PillMin, _forceSettingDrag.PillMax,
+                    settingsFill, layout.ButtonRadius);
+                CenterOverlayText(draw, new(center.X, _forceSettingDrag.TrackTop), muted,
+                    minimum, layout.ButtonRadius * 1.65f, labelFont * .8f);
+                CenterOverlayText(draw, new(center.X, _forceSettingDrag.TrackBottom), muted,
+                    maximum, layout.ButtonRadius * 1.65f, labelFont * .8f);
+                var thumb = _forceSettingDrag.Thumb(current);
+                float thumbRadius = Math.Max(7 * layout.Scale, 2);
+                draw.AddCircleFilled(thumb, thumbRadius, new ImColor8(45, 105, 210, 230), 24);
+                draw.AddCircle(thumb, thumbRadius, white, 24, Math.Max(1, layout.Scale));
+                CenterOverlayText(draw, thumb, white, format(current), layout.ButtonRadius * 1.7f, labelFont);
+            }
+            else
+            {
+                draw.AddCircleFilled(center, layout.ButtonRadius, settingsFill, 48);
+                CenterOverlayText(draw, center - new float2(0, labelFont * .5f), color,
+                    caption, layout.ButtonRadius * 1.75f, labelFont);
+                CenterOverlayText(draw, center + new float2(0, labelFont * .55f), color,
+                    format(current), layout.ButtonRadius * 1.75f, labelFont);
+            }
         }
     }
 }

@@ -193,11 +193,13 @@ namespace Purr2D2.Force
                 : pick.Clutter?.IsValid == true);
     }
     internal readonly record struct ClutterForceIdentity(string Key);
+    internal readonly record struct ClutterForceCandidate(ClutterForceTarget Target, double DistanceSquared);
     internal sealed class ClutterForceTarget
     {
         internal readonly IParentBody Parent;
         internal readonly CelestialSystem System;
         internal readonly ClutterForceIdentity StableKey;
+        internal string StableOrder => StableKey.Key;
         internal string DisplayName => StableKey.Key;
         internal bool Live = true, Local = true, Captured, FailCapture;
         internal int Captures, Releases, Writes, FailWrite;
@@ -239,21 +241,31 @@ namespace Purr2D2.Force
     {
         internal static ClutterForceTarget[] Candidates = [];
         internal static bool QueryFails;
+        internal static int GatherCalls;
         internal static void Install(HarmonyLib.Harmony harmony) { }
         internal static void Remove(HarmonyLib.Harmony harmony) { }
         internal static bool GatherNear(KittenEva owner, double3 center, double radius,
-            List<ClutterForceTarget> destination, int maximum, out string reason)
+            List<ClutterForceCandidate> destination, int maximum, out string reason)
         {
-            destination.Clear(); reason = "fixture native query refused";
+            GatherCalls++; destination.Clear(); reason = "fixture native query refused";
             if (QueryFails) return false;
             var seen = new HashSet<ClutterForceIdentity>();
             foreach (var target in Candidates)
-                if ((target.State.Position - center).LengthSquared() <= radius * radius + 1e-9 && seen.Add(target.StableKey))
+            {
+                double distanceSquared = (target.State.Position - center).LengthSquared();
+                if (distanceSquared <= radius * radius + 1e-9 && seen.Add(target.StableKey))
                 {
-                    if (destination.Count >= maximum)
-                    { destination.Clear(); reason = $"More than {maximum} nearby ground objects; nothing was captured."; return false; }
-                    destination.Add(target);
+                    destination.Add(new(target, distanceSquared));
                 }
+            }
+            destination.Sort((left, right) =>
+            {
+                int distance = left.DistanceSquared.CompareTo(right.DistanceSquared);
+                return distance != 0 ? distance
+                    : StringComparer.Ordinal.Compare(left.Target.StableKey.Key, right.Target.StableKey.Key);
+            });
+            if (destination.Count > maximum) destination.RemoveRange(maximum, destination.Count - maximum);
+            reason = "";
             return true;
         }
     }

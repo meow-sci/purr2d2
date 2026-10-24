@@ -1,5 +1,42 @@
 # Acceptance record
 
+## Force overlay sliders and capped nearby capture (2026-10-24)
+
+Count and Distance join Angry Force and Force in an arc below the left movement
+circle. The new circles match the existing small-button radius and Move's black
+50% opacity. Holding opens a same-width downward pill; relative vertical dragging
+preserves the value on press, with the thumb's top representing the minimum and
+bottom representing the maximum. Releasing collapses the pill. The controls write
+directly to the existing 1–512 capture limit and 1–50 m radius preferences, shared
+with Settings and Save preferences. Expanded bounds and status space move together
+with the Force control offsets. Release, Escape, focus/HUD loss, modal dialogs,
+owner changes and layout changes end the slider gesture.
+
+Count overflow now succeeds quietly, superseding the refusal behavior recorded
+below. The selected target always occupies the first slot; the remaining slots
+take the closest eligible objects across vessels and native physical clutter.
+Priority uses squared distance from the selected surface hit to each object's
+reference origin, avoiding additional surface scans. Existing mesh/collider checks
+still determine radius eligibility. Native overlap collection is bounded and sorts
+once, with stable-identity deduplication before the cap. A limit of one skips the
+proximity search. Independent geometry/query budgets and transactional rollback
+remain in effect.
+
+Focused automated checks cover slider rendering, shared values, integer rounding,
+range clamps, out-of-bounds motion and cancellation; layout checks include compact,
+scaled and offset work areas. The mixed capture matrix covers caps 1, 32, 128 and
+512, either primary type, duplicate identities and reversed enumeration. Actual
+KSA/Bepu host checks exercise native overlap ordering and existing physics
+contracts. Native visual/gameplay acceptance remains pending: hold each slider
+at several values, drag past both ends and release outside it, resize or hide the
+HUD during a drag, compare Settings values, save/reload, and capture an oversized
+mixed group to confirm count, nearest selection, release/throw and frame times.
+
+The full managed/shader suite and source/stage validation pass
+(`artifacts/checks/force-controls-validation.log`). Release packaging passes with
+zero warnings/errors (`artifacts/checks/force-controls-release.log`); all 29 archive
+files match staging and the Release DLL, and the SHA-256 checksum verifies.
+
 ## Bounded runtime mesh growth (2026-10-23)
 
 An exhausted runtime mesh arena can now request growth at the settled pre-draw

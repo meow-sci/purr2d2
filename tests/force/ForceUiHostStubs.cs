@@ -26,11 +26,15 @@ namespace Brutal.ImGuiApi
     public readonly struct ImDrawListPtr
     {
         public readonly record struct Circle(float2 Center, float Radius, uint Color, float Thickness, bool Filled);
+        public readonly record struct Rect(float2 Min, float2 Max, uint Color, float Rounding);
         public static readonly List<Circle> Circles = [];
+        public static readonly List<Rect> Rects = [];
         public void AddCircleFilled(float2 point, float radius, ImColor8 color, int segments)
             => Circles.Add(new(point, radius, color.Value, 0, true));
         public void AddCircle(float2 point, float radius, ImColor8 color, int segments, float thickness)
             => Circles.Add(new(point, radius, color.Value, thickness, false));
+        public void AddRectFilled(float2 min, float2 max, ImColor8 color, float rounding = 0)
+            => Rects.Add(new(min, max, color.Value, rounding));
         public void PushClipRect(float2 a, float2 b, bool intersect) { }
         public void PopClipRect() { }
         public void AddText(int font, float size, float2 position, ImColor8 color, string text, float wrap) { }

@@ -44,37 +44,67 @@ internal static class ForceOverlayChecks
             && drag.Offset.Length() <= ForceOverlayDrag.MaximumOffsetMeters + 1e-8,
             "extreme idle wheel input remains finite and within the group movement budget");
 
+        var slider = new ForceOverlaySliderDrag();
+        Check(slider.Begin(ForceOverlayHit.AngryRadius, new(80, 100), new(80, 100), 27, 96,
+            10, 1, 50, false), "distance slider starts from a finite shared value");
+        Check(slider.PillMin == new float2(53, 73) && slider.PillMax == new float2(107, 223)
+            && slider.TrackTop == 100 && slider.TrackBottom == 196,
+            "the same-width rounded pill opens vertically downward from the collapsed circle");
+        Check(slider.Thumb(1).Y == slider.TrackTop && slider.Thumb(50).Y == slider.TrackBottom,
+            "minimum and maximum values draw at the top and bottom of the track");
+        Check(slider.Move(new(80, 100), out double value) && Math.Abs(value - 10) < 1e-9,
+            "pressing without movement preserves the current value");
+        Check(slider.Move(new(5000, -5000), out value) && value == 1
+            && slider.Move(new(-5000, 5000), out value) && value == 50,
+            "vertical motion clamps at both range ends and ignores horizontal distance");
+        slider.Release();
+        Check(!slider.Held && !slider.Move(float2.Zero, out _), "release collapses the settings pill");
+        Check(slider.Begin(ForceOverlayHit.CaptureLimit, new(20, 30), new(20, 30), 10, 100,
+            1, 1, 5, true) && slider.Move(new(20, 92.5f), out value) && value == 4,
+            "capture counts round midpoint values to an integer");
+        Check(slider.Move(new(20, float.PositiveInfinity), out _) == false,
+            "nonfinite slider motion cannot change a setting");
+        slider.Reset();
+
         foreach (var size in new float2[] { new(1920, 1080), new(800, 600), new(420, 820), new(240, 220), new(3840, 2160), new(600, 1080) })
         {
             float2 origin = new(-35, 17);
             var saber = SaberOverlayLayout.Create(origin, size, 16, 40, 30);
             var force = ForceOverlayLayout.Create(saber, origin, size);
             Check(force.Valid, "Force controls fit the supported viewport sizes");
+            CheckSliderLayouts(force, "base supported viewport");
             Check(force.MoveCenter.X - force.MoveRadius >= origin.X
-                && force.MoveCenter.X + force.MoveRadius < saber.SwingCenter.X - saber.SwingRadius
+                && force.ControlsMax.X < saber.SwingCenter.X - saber.SwingRadius
                 && force.MoveCenter.Y - force.MoveRadius >= origin.Y + 30
-                && force.MoveCenter.Y + force.MoveRadius <= origin.Y + size.Y,
-                "left Force and right saber circles remain separate and within the work area");
+                && force.ControlsMax.Y <= origin.Y + size.Y,
+                "the full left Force group and right saber controls remain separate and within the work area");
             Check(force.Hit(force.ForceCenter) == ForceOverlayHit.Force
                 && force.Hit(force.AngryCenter) == ForceOverlayHit.AngryForce
+                && force.Hit(force.AngryRadiusCenter) == ForceOverlayHit.AngryRadius
+                && force.Hit(force.CaptureLimitCenter) == ForceOverlayHit.CaptureLimit
                 && force.Hit(force.MoveCenter) == ForceOverlayHit.Move
                 && force.Hit(force.MoveCenter - new float2(force.MoveRadius * .9f)) == ForceOverlayHit.None,
-                "drawing and Force hit-testing share exact circles with click-through corners");
-            Check(force.ForceCenter.X > force.AngryCenter.X && force.ForceCenter.Y < force.AngryCenter.Y
-                && force.ForceCenter.Y > force.MoveCenter.Y
+                "drawing and all five Force hit targets share exact circles with click-through corners");
+            Check(force.CaptureLimitCenter.X < force.AngryRadiusCenter.X
+                && force.AngryRadiusCenter.X < force.AngryCenter.X && force.AngryCenter.X < force.ForceCenter.X
+                && force.CaptureLimitCenter.Y == force.ForceCenter.Y
+                && force.AngryRadiusCenter.Y == force.AngryCenter.Y
                 && force.AngryCenter.Y > force.MoveCenter.Y + force.MoveRadius
+                && (force.CaptureLimitCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
+                && (force.AngryRadiusCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
                 && (force.ForceCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
                 && (force.AngryCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
-                && (force.AngryCenter - force.ForceCenter).Length() > force.ButtonRadius * 2
-                && force.StatusMin.Y > force.AngryCenter.Y + force.ButtonRadius
+                && force.SliderEnvelope(ForceOverlayHit.CaptureLimit).Max.Y < force.StatusMin.Y
+                && force.SliderEnvelope(ForceOverlayHit.AngryRadius).Max.Y < force.StatusMin.Y
                 && force.StatusMax.Y <= origin.Y + size.Y,
-                "Force and Angry Force sit below-right of Move with separate hit regions and status space");
+                "count, distance, Angry Force and Force form a separated left-to-right arc with pill and status space");
             Check(force.WithControlsOffset(origin, size, float2.Zero, 30) == force,
                 "zero Force offsets preserve the existing left-side anchors");
             foreach (var offset in new float2[] { new(-1, -1), new(1, 1), new(-1, 1), new(1, -1), new(100, -100) })
             {
                 var moved = force.WithControlsOffset(origin, size, offset, 30);
                 var delta = moved.MoveCenter - force.MoveCenter;
+                CheckSliderLayouts(moved, "offset supported viewport");
                 Check(moved.Valid && moved.ControlsMin.X >= origin.X - 1e-3f
                     && moved.ControlsMin.Y >= origin.Y + 30 - 1e-3f
                     && moved.ControlsMax.X <= origin.X + size.X + 1e-3f
@@ -82,13 +112,17 @@ internal static class ForceOverlayChecks
                     "custom Force offsets keep the entire group below the menu and inside each supported work area");
                 Check((moved.ForceCenter - force.ForceCenter - delta).Length() < 1e-3f
                     && (moved.AngryCenter - force.AngryCenter - delta).Length() < 1e-3f
+                    && (moved.AngryRadiusCenter - force.AngryRadiusCenter - delta).Length() < 1e-3f
+                    && (moved.CaptureLimitCenter - force.CaptureLimitCenter - delta).Length() < 1e-3f
                     && (moved.StatusMin - force.StatusMin - delta).Length() < 1e-3f
                     && (moved.StatusMax - force.StatusMax - delta).Length() < 1e-3f
                     && moved.MoveRadius == force.MoveRadius && moved.ButtonRadius == force.ButtonRadius
                     && moved.Hit(moved.MoveCenter) == ForceOverlayHit.Move
                     && moved.Hit(moved.ForceCenter) == ForceOverlayHit.Force
-                    && moved.Hit(moved.AngryCenter) == ForceOverlayHit.AngryForce,
-                    "Force, Angry Force, Move and their status translate rigidly with matching hit targets");
+                    && moved.Hit(moved.AngryCenter) == ForceOverlayHit.AngryForce
+                    && moved.Hit(moved.AngryRadiusCenter) == ForceOverlayHit.AngryRadius
+                    && moved.Hit(moved.CaptureLimitCenter) == ForceOverlayHit.CaptureLimit,
+                    "all four arc controls, Move and their status translate rigidly with matching hit targets");
             }
         }
         var baseSaber = SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2);
@@ -111,10 +145,33 @@ internal static class ForceOverlayChecks
         Check(capture.Consume(0, true, true, false, 3) && capture.Consume(0, false, false, false, 3)
             && capture.SuppressImGuiButton(0, true, 3) && capture.SuppressImGuiButton(0, false, 3),
             "quick Force press/release pairs preserve suppression in the other callback order");
-        Console.WriteLine("Force overlay checks passed (persistent offsets, camera basis, bounds, compact layout, pointer ownership).");
+        Check(slider.Begin(ForceOverlayHit.AngryRadius, baseForce.AngryRadiusCenter,
+                baseForce.AngryRadiusCenter, baseForce.ButtonRadius, baseForce.SliderTravel, 10, 1, 50, false)
+            && capture.Consume(0, true, true, false, 4)
+            && capture.AnyHeld && capture.OwnsScroll(false)
+            && slider.Move(new(-100000, 100000), out value) && value == 50,
+            "a held settings control retains pointer and scroll ownership while dragging outside every overlay bound");
+        Check(capture.Consume(0, false, false, false, 5) && !capture.AnyHeld,
+            "the captured release completes an outside settings drag");
+        slider.Release();
+        Console.WriteLine("Force overlay checks passed (persistent offsets, slider ranges, arc bounds, held capture, pointer ownership).");
     }
 
     private static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
+    private static void CheckSliderLayouts(ForceOverlayLayout layout, string context)
+    {
+        foreach (var (control, center, current, maximum, integer) in new[]
+        {
+            (ForceOverlayHit.CaptureLimit, layout.CaptureLimitCenter, 128d, 512d, true),
+            (ForceOverlayHit.AngryRadius, layout.AngryRadiusCenter, 10d, 50d, false)
+        })
+        {
+            var slider = new ForceOverlaySliderDrag();
+            Check(slider.Begin(control, center, center, layout.ButtonRadius, layout.SliderTravel,
+                    current, 1, maximum, integer) && slider.Matches(layout),
+                $"{control} press geometry exactly matches its rebuilt {context} layout");
+        }
+    }
     private static void Near(double3 value, double3 expected, string message) => Check((value - expected).Length() < 1e-8, message);
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
 }

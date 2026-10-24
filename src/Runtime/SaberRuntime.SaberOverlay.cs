@@ -278,7 +278,8 @@ internal sealed partial class SaberRuntime
         if (action == GlfwButtonAction.Release
             && _overlayPointerCapture.Consume((int)button, false, false, false, Program.FrameNumber))
         {
-            if (button == GlfwMouseButton.Left) { ReleaseManualSwing(); _forceDrag.Release(); }
+            if (button == GlfwMouseButton.Left)
+            { ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag(); }
             return true;
         }
         // Native settings/picker gestures belong to ImGui. Consume only the game's route;
@@ -384,6 +385,12 @@ internal sealed partial class SaberRuntime
     /// <summary>Keep held drags, including movement outside the circle, away from camera controllers.</summary>
     internal bool FilterOverlayCursor(GlfwWindow window)
     {
+        if (_forceSettingDrag.Held)
+        {
+            if (Program.IsModalOpen()) ReleaseForceSettingDrag();
+            else MoveForcePointer(OverlayPointer(window));
+            return true;
+        }
         if (_overlayUiButtons != 0) return true;
         if (ForcePicking) return true;
         if (!_overlayPointerCapture.AnyHeld) return !Program.HasMouseInputLatch
@@ -398,7 +405,7 @@ internal sealed partial class SaberRuntime
     {
         if (!_overlayPointerCapture.SuppressImGuiButton((int)button, action == GlfwButtonAction.Press, Program.FrameNumber)) return false;
         if (button == GlfwMouseButton.Left && action == GlfwButtonAction.Release)
-        { ReleaseManualSwing(); _forceDrag.Release(); }
+        { ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag(); }
         return true;
     }
 
