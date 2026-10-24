@@ -96,6 +96,10 @@ internal sealed partial class SaberRuntime : IDisposable
                     case Command.CancelSlice: CancelAssistedSlice("Slice cancelled."); break;
                 }
             }
+            // The audited PrepareFrame handoff precedes all new draw recording.
+            // Retired uploads were pumped above; growth separately drains GPU use
+            // before replacing shared buffers and before the next slice upload.
+            RuntimeFragmentAssets.PumpGrowthAtFrameBoundary();
             SimStep applied = Universe.GetLastSimStep();
             bool newStep = !_hasConsumedTime || applied.NextTime != _consumedTime;
             _hasConsumedTime = true; _consumedTime = applied.NextTime;

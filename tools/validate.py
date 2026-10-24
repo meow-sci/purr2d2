@@ -721,6 +721,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
             source / "src/Core/SaberSettings.cs", source / "tests/resources/SliceResourceUiHostStubs.cs",
             source / "tests/resources/SliceResourceUiChecks.cs"], None),
         ("SliceMeshArenaChecks", [source / "src/Core/SliceMeshArena.cs", source / "tests/SliceMeshArenaChecks.cs"], None),
+        ("SliceMeshGrowthChecks", [source / "src/Core/SliceMeshArena.cs", source / "src/Core/SliceMeshGrowth.cs",
+            source / "tests/SliceMeshGrowthChecks.cs"], None),
         ("SaberVfxChecks", vfx_sources, None),
         ("SaberBlendChecks", [source / "src/Rendering/SaberBlendState.cs", source / "tests/SaberBlendChecks.cs"], None),
     ):

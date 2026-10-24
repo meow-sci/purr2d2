@@ -7,6 +7,7 @@ namespace Brutal.ImGuiApi
     {
         internal static readonly HashSet<string> Clicks = [];
         internal static readonly Dictionary<string, int> SliderChanges = [];
+        internal static readonly Dictionary<string, bool> CheckboxChanges = [];
         internal static readonly List<string> Text = [];
         private static readonly Stack<bool> Disabled = new();
         public static bool SliderInt(string label, ref int value, int min, int max, string format = "%d")
@@ -15,6 +16,11 @@ namespace Brutal.ImGuiApi
             value = Math.Clamp(changed, min, max); return true;
         }
         public static bool Button(string label) => Clicks.Remove(label) && !Disabled.Contains(true);
+        public static bool Checkbox(string label, ref bool value)
+        {
+            if (!CheckboxChanges.Remove(label, out var changed)) return false;
+            value = changed; return true;
+        }
         public static void TextWrapped(string text) => Text.Add(text);
         public static void TextDisabled(string text) => Text.Add(text);
         public static void BeginDisabled(bool disabled) => Disabled.Push(disabled);
@@ -22,7 +28,7 @@ namespace Brutal.ImGuiApi
         public static void EndTable() { }
         public static void SameLine() { }
         internal static void Reset()
-        { Clicks.Clear(); SliderChanges.Clear(); Text.Clear(); Disabled.Clear(); }
+        { Clicks.Clear(); SliderChanges.Clear(); CheckboxChanges.Clear(); Text.Clear(); Disabled.Clear(); }
         internal static bool Balanced => Disabled.Count == 0;
     }
 }
@@ -34,7 +40,10 @@ namespace Purr2D2.Rendering
         uint IndexBytesUsed, uint IndexBytesCapacity, int RuntimeTemplateCount, int PreparedCacheCount,
         int FailedPreparationCount, int HotCapCount, int ActiveUploadJobs, long DiskBytes, long DiskByteCapacity,
         int DiskEntries, int DiskEntryCapacity, uint ReclaimableVertexBytes, uint ReclaimableIndexBytes,
-        long ReclaimedVertexBytes, long ReclaimedIndexBytes);
+        long ReclaimedVertexBytes, long ReclaimedIndexBytes, bool GrowthEnabled = true,
+        uint VertexBytesMaximum = 0, uint IndexBytesMaximum = 0, ulong GlobalVertexBufferBytes = 0,
+        ulong GlobalIndexBufferBytes = 0, int GrowthCount = 0, bool GrowthPending = false,
+        string GrowthStatus = "Not initialized");
 }
 
 namespace Purr2D2.Runtime

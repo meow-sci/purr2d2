@@ -7,7 +7,10 @@ internal readonly record struct SliceResourceUsage(uint VertexBytesUsed, uint Ve
     uint IndexBytesUsed, uint IndexBytesCapacity, int RuntimeTemplateCount, int PreparedCacheCount,
     int FailedPreparationCount, int HotCapCount, int ActiveUploadJobs, long DiskBytes, long DiskByteCapacity,
     int DiskEntries, int DiskEntryCapacity, uint ReclaimableVertexBytes, uint ReclaimableIndexBytes,
-    long ReclaimedVertexBytes, long ReclaimedIndexBytes);
+    long ReclaimedVertexBytes, long ReclaimedIndexBytes,
+    bool GrowthEnabled = true, uint VertexBytesMaximum = 0, uint IndexBytesMaximum = 0,
+    ulong GlobalVertexBufferBytes = 0, ulong GlobalIndexBufferBytes = 0,
+    int GrowthCount = 0, bool GrowthPending = false, string GrowthStatus = "Not initialized");
 
 internal static partial class RuntimeFragmentAssets
 {
@@ -36,7 +39,9 @@ internal static partial class RuntimeFragmentAssets
         FailedPreparations.Count, HotCaps.Count, _activeUploadJobs, Volatile.Read(ref _diskBytes),
         Volatile.Read(ref _diskCapacity), Volatile.Read(ref _diskEntries), Volatile.Read(ref _entryCapacity),
         _arena?.ReclaimableVertexBytes ?? 0, _arena?.ReclaimableIndexBytes ?? 0,
-        _arena?.ReclaimedVertexBytes ?? 0, _arena?.ReclaimedIndexBytes ?? 0);
+        _arena?.ReclaimedVertexBytes ?? 0, _arena?.ReclaimedIndexBytes ?? 0,
+        _growthEnabled, _maximumVertexBytes, _maximumIndexBytes,
+        _globalVertexBytes, _globalIndexBytes, _growthCount, _growthPending, _growthStatus);
 
     /// <summary>Settled maintenance; registered meshes and all durable save assets remain pinned.</summary>
     internal static string ClearUnusedCaches()

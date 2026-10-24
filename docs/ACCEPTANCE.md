@@ -1,5 +1,50 @@
 # Acceptance record
 
+## Bounded runtime mesh growth (2026-10-23)
+
+An exhausted runtime mesh arena can now request growth at the settled pre-draw
+handoff. Automatic growth defaults to enabled, with 512/256 MiB vertex/index
+ceilings above the 128/64 MiB initial reservation. Settings exposes the toggle,
+live ceilings, actual shared-buffer sizes, operation count and status. Initial
+reservation changes still take effect after saving and restarting; lowering a
+ceiling does not shrink live allocations.
+
+Growth preserves existing offsets and appends owned ranges after all existing
+native assets. Only exhausted channels grow. Pending private uploads drain before
+replacement; the native queue locks and device-idle boundary exclude submissions
+during the copy and publication. Old allocation lengths are copied, with explicit
+memory barriers. The ray-tracing descriptor set and its cached rebuild inputs are
+updated together. Existing registered fragments remain pinned. Startup historical
+assets still load into the native buffers outside the runtime slice reservation;
+the UI distinguishes those global sizes from runtime ownership.
+
+Host adaptation is limited to the audited KSA/Vulkan assembly identities and
+private field contracts. Allocation and pre-publication failures retain the old
+buffers. Unknown copy completion or failed descriptor rollback retains both
+generations and disables growth instead of freeing potentially referenced memory.
+Canceled pending slices do not request a replacement. Published eviction, buffer
+shrinking and lazy historical loading are not part of this change.
+
+Targeted settings/UI checks cover defaults, opt-out, persistence, initial/maximum
+bounds and separate global-memory snapshots. Production allocator/transaction
+checks cover native gaps, independent channels, fragmentation, integer overflow,
+published-offset stability, cancellation, old-size copy contracts, allocation
+failure and publication rollback. Live Vulkan and native visual acceptance remain
+pending: force several growths with small initial arenas, both with and without
+ray tracing; inspect stock meshes, cut opaque/glass fragments, shadows, picking,
+thumbnails and secondary viewports. Cancel while growth waits, change ceilings,
+resize/rebuild the renderer after growth, save/reload generated fragments, and
+exercise allocation failures with Vulkan synchronization validation enabled.
+
+The full managed/shader suite passes (`artifacts/bounded-growth-checks.log`),
+including the capture-limit regressions. Final Release build passes with zero
+warnings/errors (`artifacts/bounded-growth-build.log`). Actual game-assembly and
+production-backend IL checks pass through `tools/check_mesh_growth_host.py`,
+including the five-module compatibility guard, frame/queue ordering, RT bindings,
+old-size copies, memory barriers and dedicated allocation cleanup. Source/stage
+validation passes; all 29 archive entries match staging, the release DLL and
+README match, and the archive checksum agrees. These checks do not execute Vulkan.
+
 ## Configurable Force capture count (2026-10-23)
 
 The combined Force capture limit now defaults to 128 vessels, debris and physical

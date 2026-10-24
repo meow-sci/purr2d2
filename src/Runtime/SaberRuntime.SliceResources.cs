@@ -21,6 +21,7 @@ internal sealed partial class SaberRuntime
     {
         _settings.Validate();
         RuntimeFragmentAssets.ConfigureStorageLimits(_settings.SliceAssetDiskMiB, _settings.SliceAssetEntryLimit);
+        RuntimeFragmentAssets.ConfigureGrowth(_settings.SliceAutoGrow, _settings.SliceVertexMaximumMiB, _settings.SliceIndexMaximumMiB);
         NativeSlicePhysics.ConfigureVehicleLimit(_settings.SlicePhysicsVehicleLimit);
         _preferencesSavedUntil = 0;
         _sliceResourceNextRefresh = 0;

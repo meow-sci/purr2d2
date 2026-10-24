@@ -85,6 +85,8 @@ internal static partial class RuntimeFragmentAssets
         private string? _registering;
         private DetachedSliceFragment? _nativePreparing;
         private SliceMeshArena.Allocation? _allocation;
+        private SliceMeshGrowthDemand? _growthDemand;
+        internal SliceMeshGrowthDemand? GrowthDemand => _growthDemand;
         private bool _cancelled, _disposed;
         internal readonly List<PreparedPhysicsFragment> Fragments = new();
         internal bool Done { get; private set; }
@@ -94,7 +96,7 @@ internal static partial class RuntimeFragmentAssets
         private string _step = "asset setup";
         internal UploadJob(LoadedSlice source)
         {
-            _source = source; _steps = Prepare().GetEnumerator(); _activeUploadJobs++;
+            _source = source; _steps = Prepare().GetEnumerator(); _activeUploadJobs++; UploadJobs.Add(this);
         }
         internal void Advance()
         {
@@ -102,6 +104,7 @@ internal static partial class RuntimeFragmentAssets
             long start = Stopwatch.GetTimestamp(); int units = 0;
             try
             {
+                if (_growthPending) { TryDrainForGrowth(); return; }
                 do
                 {
                     long stepStarted = Stopwatch.GetTimestamp();
@@ -117,6 +120,7 @@ internal static partial class RuntimeFragmentAssets
             catch (Exception error)
             {
                 Error = error.Message; Done = true;
+                _growthDemand?.Cancel();
                 if (_registering != null) FailedPreparations[_registering] = Error + " Asset registration was interrupted; restart to reload it.";
                 _steps.Dispose();
             }
@@ -138,9 +142,17 @@ internal static partial class RuntimeFragmentAssets
                 {
                     uint vertexBytes = checked((uint)data.Uploads.Sum(u => (long)u.VertexBytes));
                     uint indexBytes = checked((uint)data.Uploads.Sum(u => (long)u.IndexBytes));
-                    if (_arena == null || !_arena.TryAllocate(vertexBytes, indexBytes, out _allocation) || _allocation == null)
-                        throw new InvalidOperationException("Runtime slice mesh arena is full. Registered meshes remain reserved for save compatibility; increase the startup mesh limits in Settings and restart. Unpublished uploads can be reclaimed without a restart.");
-                    uint vertex = _vertexBase + _allocation.VertexOffset, index = _indexBase + _allocation.IndexOffset;
+                    if (_arena == null) throw new InvalidOperationException("The runtime slice mesh arena is unavailable.");
+                    while (!_arena.TryAllocate(vertexBytes, indexBytes, out _allocation) || _allocation == null)
+                    {
+                        _growthDemand ??= new(vertexBytes, indexBytes);
+                        if (!RequestGrowth(_growthDemand, out string reason)) throw new InvalidOperationException(reason);
+                        _step = "waiting for mesh growth";
+                        yield return 1;
+                        if (_cancelled) yield break;
+                    }
+                    _growthDemand?.Cancel(); _growthDemand = null;
+                    uint vertex = _allocation.VertexOffset, index = _allocation.IndexOffset;
                     var regions = new List<UploadRegion>();
                     for (int i = 0; i < loaded.Meshes.Length; i++)
                     {
@@ -167,8 +179,8 @@ internal static partial class RuntimeFragmentAssets
                         _step = "GPU upload";
                         _pending = SubmitBatch(regions, ref region, ref consumed);
                         yield return 0;
-                        while (!_pending.WaitFor(0)) yield return 0;
-                        _pending.Dispose(); _pending = null; // Fence already signalled; Dispose cannot stall.
+                        while (_pending != null && !_pending.WaitFor(0)) yield return 0;
+                        _pending?.Dispose(); _pending = null; // Fence already signalled; Dispose cannot stall.
                         if (_cancelled) yield break;
                     }
                     // Nothing becomes visible in the native registry before every upload completed.
@@ -231,13 +243,24 @@ internal static partial class RuntimeFragmentAssets
                 yield return 0;
             }
         }
-        internal void Cancel() => _cancelled = true;
+        internal void Cancel() { _cancelled = true; _growthDemand?.Cancel(); }
+        // A requested growth pauses iteration before another batch is recorded. Every
+        // extant private pool was submitted immediately; zero-timeout polling drains
+        // it without invoking Dispose's submit path on any unrecorded work.
+        internal bool TryDrainForGrowth()
+        {
+            if (_pending == null) return true;
+            if (!_pending.WaitFor(0)) return false;
+            _pending.Dispose(); _pending = null;
+            return true;
+        }
         // Called only at shutdown or after Done. Normal cancellation drains preparation in
         // the background of subsequent frames so partially registered IDs remain reusable.
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
+            _growthDemand?.Cancel();
             try
             {
                 _steps.Dispose();
@@ -248,7 +271,7 @@ internal static partial class RuntimeFragmentAssets
                 _nativePreparing?.Dispose(); _nativePreparing = null;
                 foreach (var fragment in Fragments) fragment.Native.Dispose();
             }
-            finally { _activeUploadJobs--; }
+            finally { _activeUploadJobs--; UploadJobs.Remove(this); }
         }
     }
 

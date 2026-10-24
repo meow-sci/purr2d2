@@ -17,7 +17,7 @@ namespace Purr2D2.Rendering;
 internal sealed record PreparedFragment(PartTemplate Template, string TemplateId,
     double4x4 SourceToFragment, double3 Extents, float MassKg, bool NativeReady = false);
 
-/// <summary>Immutable generated native assets, backed by a startup-reserved part mesh arena.</summary>
+/// <summary>Immutable generated native assets backed by pinned, append-only native mesh ranges.</summary>
 internal static partial class RuntimeFragmentAssets
 {
     private const string Prefix = "Purr2D2_Fragment_";
@@ -53,7 +53,8 @@ internal static partial class RuntimeFragmentAssets
             SliceResourceLimits.MaximumIndexArenaMiB) * SliceResourceLimits.BytesPerMiB));
         _vertexBase = Reserve(ref DeviceMeshInterleaved.Shared.RunningVertexBufferSize, vertexBytes, 32);
         _indexBase = Reserve(ref DeviceMeshInterleaved.Shared.RunningIndexBufferSize, indexBytes, 4);
-        _arena = new(vertexBytes, indexBytes);
+        _arena = new(vertexBytes, indexBytes, _vertexBase, _indexBase);
+        _initialVertexCapacity = vertexBytes; _initialIndexCapacity = indexBytes;
         ConfigureStorageLimits(diskMiB, entryLimit);
         _mod = mod;
         // Native loading resolves all source materials later, before any save can instantiate parts.

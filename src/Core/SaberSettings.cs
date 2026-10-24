@@ -81,6 +81,9 @@ public sealed class SaberSettings
     public float SaberControlsOffsetY { get; set; }
     public int SliceVertexArenaMiB { get; set; } = SliceResourceLimits.DefaultVertexArenaMiB;
     public int SliceIndexArenaMiB { get; set; } = SliceResourceLimits.DefaultIndexArenaMiB;
+    public bool SliceAutoGrow { get; set; } = true;
+    public int SliceVertexMaximumMiB { get; set; } = SliceResourceLimits.DefaultVertexMaximumMiB;
+    public int SliceIndexMaximumMiB { get; set; } = SliceResourceLimits.DefaultIndexMaximumMiB;
     public int SliceAssetDiskMiB { get; set; } = SliceResourceLimits.DefaultAssetDiskMiB;
     public int SliceAssetEntryLimit { get; set; } = SliceResourceLimits.DefaultAssetEntryLimit;
     public int SlicePhysicsVehicleLimit { get; set; } = SliceResourceLimits.DefaultPhysicsVehicleLimit;
@@ -115,6 +118,8 @@ public sealed class SaberSettings
         SaberControlsOffsetY = Clamp(SaberControlsOffsetY, -1, 1, 0);
         SliceVertexArenaMiB = Math.Clamp(SliceVertexArenaMiB, SliceResourceLimits.MinimumVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB);
         SliceIndexArenaMiB = Math.Clamp(SliceIndexArenaMiB, SliceResourceLimits.MinimumIndexArenaMiB, SliceResourceLimits.MaximumIndexArenaMiB);
+        SliceVertexMaximumMiB = Math.Clamp(SliceVertexMaximumMiB, SliceVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB);
+        SliceIndexMaximumMiB = Math.Clamp(SliceIndexMaximumMiB, SliceIndexArenaMiB, SliceResourceLimits.MaximumIndexArenaMiB);
         SliceAssetDiskMiB = Math.Clamp(SliceAssetDiskMiB, SliceResourceLimits.MinimumAssetDiskMiB, SliceResourceLimits.MaximumAssetDiskMiB);
         SliceAssetEntryLimit = Math.Clamp(SliceAssetEntryLimit, SliceResourceLimits.MinimumAssetEntryLimit, SliceResourceLimits.MaximumAssetEntryLimit);
         SlicePhysicsVehicleLimit = Math.Clamp(SlicePhysicsVehicleLimit, SliceResourceLimits.MinimumPhysicsVehicleLimit, SliceResourceLimits.MaximumPhysicsVehicleLimit);

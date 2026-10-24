@@ -267,6 +267,9 @@ internal static class CoreChecks
             settings.SliceIndexArenaMiB, settings.SliceAssetDiskMiB, settings.SliceAssetEntryLimit, settings.SlicePhysicsVehicleLimit);
         Check(Values(new()) == (128, 64, 2048, 8192, 128),
             "new slice preferences reserve larger graphics arenas, bounded storage and a larger physics vehicle limit");
+        var growthDefaults = new SaberSettings();
+        Check(growthDefaults.SliceAutoGrow && growthDefaults.SliceVertexMaximumMiB == 512 && growthDefaults.SliceIndexMaximumMiB == 256,
+            "automatic mesh growth defaults to bounded 512/256 MiB ceilings");
         foreach (var (value, expected) in new[]
         {
             (int.MinValue, (32, 16, 128, 128, 30)),
@@ -277,6 +280,13 @@ internal static class CoreChecks
                 SliceAssetDiskMiB = value, SliceAssetEntryLimit = value, SlicePhysicsVehicleLimit = value };
             settings.Validate();
             Check(Values(settings) == expected, "slice resource preferences clamp extreme integers to each supported limit");
+            settings.SliceVertexMaximumMiB = value; settings.SliceIndexMaximumMiB = value;
+            settings.Validate();
+            Check(settings.SliceVertexMaximumMiB >= settings.SliceVertexArenaMiB
+                && settings.SliceVertexMaximumMiB <= SliceResourceLimits.MaximumVertexArenaMiB
+                && settings.SliceIndexMaximumMiB >= settings.SliceIndexArenaMiB
+                && settings.SliceIndexMaximumMiB <= SliceResourceLimits.MaximumIndexArenaMiB,
+                "growth ceilings cannot exceed hard limits or fall below initial reservations");
         }
         string directory = Path.Combine(Path.GetTempPath(), "purr2d2-resource-settings-" + Guid.NewGuid().ToString("N"));
         string path = Path.Combine(directory, "settings.json");
@@ -289,12 +299,21 @@ internal static class CoreChecks
             var loaded = SaberSettings.Load(path);
             Check(Values(loaded) == (128, 64, 2048, 8192, 128) && loaded.BladeLength == 2.5f && loaded.AngryForceRadius == 18,
                 "legacy preferences acquire resource defaults while preserving existing saber and Force choices");
+            Check(loaded.SliceAutoGrow && loaded.SliceVertexMaximumMiB == 512 && loaded.SliceIndexMaximumMiB == 256,
+                "legacy preferences acquire automatic growth and its bounded ceilings");
             loaded.SliceVertexArenaMiB = 384; loaded.SliceIndexArenaMiB = 192;
             loaded.SliceAssetDiskMiB = 4096; loaded.SliceAssetEntryLimit = 20000; loaded.SlicePhysicsVehicleLimit = 256;
+            loaded.SliceAutoGrow = false; loaded.SliceVertexMaximumMiB = 768; loaded.SliceIndexMaximumMiB = 320;
             loaded.Save(path);
             var saved = SaberSettings.Load(path);
             Check(Values(saved) == (384, 192, 4096, 20000, 256) && saved.BladeLength == 2.5f && saved.AngryForceRadius == 18,
                 "all five resource limits survive saving and loading alongside existing preferences");
+            Check(!saved.SliceAutoGrow && saved.SliceVertexMaximumMiB == 768 && saved.SliceIndexMaximumMiB == 320,
+                "growth opt-out and custom ceilings survive saving and loading");
+            File.WriteAllText(path, "{\"SliceVertexArenaMiB\":768,\"SliceIndexArenaMiB\":384}");
+            var largeLegacy = SaberSettings.Load(path);
+            Check(largeLegacy.SliceVertexMaximumMiB == 768 && largeLegacy.SliceIndexMaximumMiB == 384,
+                "legacy large startup reservations raise growth ceilings instead of becoming invalid");
             File.WriteAllText(path, "{\"SliceVertexArenaMiB\":0,\"SliceIndexArenaMiB\":2147483647,\"SliceAssetDiskMiB\":-1,\"SliceAssetEntryLimit\":2147483647,\"SlicePhysicsVehicleLimit\":0}");
             Check(Values(SaberSettings.Load(path)) == (32, 512, 128, 65536, 30),
                 "loading edited resource preferences validates every limit before runtime allocation");
