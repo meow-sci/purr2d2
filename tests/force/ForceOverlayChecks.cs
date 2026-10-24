@@ -32,6 +32,17 @@ internal static class ForceOverlayChecks
         Check(drag.Offset == before && !drag.Begin(float2.Zero, 80, before, double3.UnitX, double3.UnitX, double3.UnitZ),
             "nonfinite input and a degenerate camera basis cannot corrupt Force offsets");
         drag.Reset(); Check(!drag.Held && drag.Offset == double3.Zero, "world reset clears gesture state");
+        Check(drag.Scroll(2, original, -double3.UnitZ) && !drag.Held,
+            "hovering wheel depth does not start a drag");
+        Near(drag.Offset, original + double3.UnitZ, "idle wheel uses the supplied current offset and camera forward");
+        Check(drag.Scroll(-2, drag.Offset, double3.UnitX), "idle wheel can use a newly rotated camera");
+        Near(drag.Offset, original + double3.UnitZ + double3.UnitX, "idle depth follows the current camera instead of a stale drag basis");
+        before = drag.Offset;
+        Check(!drag.Scroll(double.NaN, before, double3.UnitZ) && !drag.Scroll(1, before, double3.Zero)
+            && drag.Offset == before, "invalid idle depth input cannot corrupt a retained offset");
+        Check(drag.Scroll(double.MaxValue, before, double3.UnitZ) && Finite(drag.Offset)
+            && drag.Offset.Length() <= ForceOverlayDrag.MaximumOffsetMeters + 1e-8,
+            "extreme idle wheel input remains finite and within the group movement budget");
 
         foreach (var size in new float2[] { new(1920, 1080), new(800, 600), new(420, 820), new(240, 220), new(3840, 2160), new(600, 1080) })
         {
@@ -58,7 +69,36 @@ internal static class ForceOverlayChecks
                 && force.StatusMin.Y > force.AngryCenter.Y + force.ButtonRadius
                 && force.StatusMax.Y <= origin.Y + size.Y,
                 "Force and Angry Force sit below-right of Move with separate hit regions and status space");
+            Check(force.WithControlsOffset(origin, size, float2.Zero, 30) == force,
+                "zero Force offsets preserve the existing left-side anchors");
+            foreach (var offset in new float2[] { new(-1, -1), new(1, 1), new(-1, 1), new(1, -1), new(100, -100) })
+            {
+                var moved = force.WithControlsOffset(origin, size, offset, 30);
+                var delta = moved.MoveCenter - force.MoveCenter;
+                Check(moved.Valid && moved.ControlsMin.X >= origin.X - 1e-3f
+                    && moved.ControlsMin.Y >= origin.Y + 30 - 1e-3f
+                    && moved.ControlsMax.X <= origin.X + size.X + 1e-3f
+                    && moved.ControlsMax.Y <= origin.Y + size.Y + 1e-3f,
+                    "custom Force offsets keep the entire group below the menu and inside each supported work area");
+                Check((moved.ForceCenter - force.ForceCenter - delta).Length() < 1e-3f
+                    && (moved.AngryCenter - force.AngryCenter - delta).Length() < 1e-3f
+                    && (moved.StatusMin - force.StatusMin - delta).Length() < 1e-3f
+                    && (moved.StatusMax - force.StatusMax - delta).Length() < 1e-3f
+                    && moved.MoveRadius == force.MoveRadius && moved.ButtonRadius == force.ButtonRadius
+                    && moved.Hit(moved.MoveCenter) == ForceOverlayHit.Move
+                    && moved.Hit(moved.ForceCenter) == ForceOverlayHit.Force
+                    && moved.Hit(moved.AngryCenter) == ForceOverlayHit.AngryForce,
+                    "Force, Angry Force, Move and their status translate rigidly with matching hit targets");
+            }
         }
+        var baseSaber = SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2);
+        var baseForce = ForceOverlayLayout.Create(baseSaber, float2.Zero, new(1920, 1080));
+        var customForce = baseForce.WithControlsOffset(float2.Zero, new(1920, 1080), new(.04f, -.04f));
+        Check((customForce.MoveCenter - baseForce.MoveCenter - new float2(76.8f, -43.2f)).Length() < 1e-3f
+            && baseForce.WithControlsOffset(float2.Zero, new(1920, 1080), new(float.NegativeInfinity, float.NaN)) == baseForce,
+            "Force custom positions use independent viewport fractions and ignore nonfinite offset values");
+        Check(!baseForce.WithControlsOffset(float2.Zero, new(100, 100), float2.Zero).Valid,
+            "an undersized work area cannot leave partly invisible Force targets");
         Check(!ForceOverlayLayout.Create(default, float2.Zero, new(100, 100)).Valid,
             "invalid overlay geometry cannot retain invisible Force controls");
         var capture = new SaberOverlayPointerCapture();

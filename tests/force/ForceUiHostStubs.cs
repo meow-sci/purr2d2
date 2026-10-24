@@ -10,7 +10,7 @@ namespace Brutal.GlfwApi
 }
 namespace Brutal.ImGuiApi
 {
-    public readonly struct ImColor8(byte r, byte g, byte b, byte a) { public uint Value => (uint)(r + g + b + a); }
+    public readonly struct ImColor8(byte r, byte g, byte b, byte a) { public uint Value => (uint)(r | g << 8 | b << 16 | a << 24); }
     public sealed class TestIo { public bool WantCaptureMouse, WantCaptureKeyboard, WantTextInput, AppFocusLost; public float2 MousePos; }
     public sealed class TestViewport { public float2 Pos = float2.Zero, Size = new(640, 480); }
     public static class ImGui
@@ -25,8 +25,12 @@ namespace Brutal.ImGuiApi
     }
     public readonly struct ImDrawListPtr
     {
-        public void AddCircleFilled(float2 point, float radius, ImColor8 color, int segments) { }
-        public void AddCircle(float2 point, float radius, ImColor8 color, int segments, float thickness) { }
+        public readonly record struct Circle(float2 Center, float Radius, uint Color, float Thickness, bool Filled);
+        public static readonly List<Circle> Circles = [];
+        public void AddCircleFilled(float2 point, float radius, ImColor8 color, int segments)
+            => Circles.Add(new(point, radius, color.Value, 0, true));
+        public void AddCircle(float2 point, float radius, ImColor8 color, int segments, float thickness)
+            => Circles.Add(new(point, radius, color.Value, thickness, false));
         public void PushClipRect(float2 a, float2 b, bool intersect) { }
         public void PopClipRect() { }
         public void AddText(int font, float size, float2 position, ImColor8 color, string text, float wrap) { }
@@ -76,14 +80,17 @@ namespace Purr2D2.Force
     {
         internal static int Picks;
         internal static KSA.Ray LastRay;
+        internal static double LastTolerance;
         internal static ForcePick? Next;
         internal static bool FailPick;
         internal static bool TrySnapshotRay(KSA.KittenEva owner, KSA.Ray ray, out ForcePickRay snapshot)
         { snapshot = new(ray); return true; }
-        internal static bool TryPick(KSA.KittenEva owner, ForcePickRay ray, out ForcePick? pick, out string reason)
+        internal static bool TryPick(KSA.KittenEva owner, ForcePickRay ray, out ForcePick? pick, out string reason,
+            double clutterTolerance = .2)
         {
             if (FailPick) throw new InvalidOperationException("Test picker read failure");
-            Picks++; LastRay = ray.Cci; pick = Next; reason = "No target"; return pick != null;
+            Picks++; LastRay = ray.Cci; LastTolerance = clutterTolerance;
+            pick = Next; reason = "No target"; return pick != null;
         }
         internal static bool TryHitEgo(ForcePick pick, KSA.Camera camera, out double3 point) { point = new(0, 0, -5); return true; }
     }
@@ -91,15 +98,16 @@ namespace Purr2D2.Force
     {
         internal bool HasCapture, Disposed, FailUpdate;
         internal int CaptureCalls;
+        internal double CapturedRadius;
         internal int CapturedCount => HasCapture ? 1 : 0;
         internal KSA.KittenEva? Owner;
         internal double3 GroupOffsetBody, ReleasedOffset;
         internal string Status = "";
         internal readonly List<string> Events = [];
         internal void Install(HarmonyLib.Harmony harmony) { }
-        internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry)
+        internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry, double angryRadius = 10)
         {
-            CaptureCalls++; Events.Add("Capture");
+            CaptureCalls++; CapturedRadius = angryRadius; Events.Add("Capture");
             if (!pick.Live) { Status = "Stale target"; return false; }
             HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; Status = "Holding"; return true;
         }

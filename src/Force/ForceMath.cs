@@ -8,13 +8,18 @@ internal readonly record struct ForceRigidState(double3 Position, double3 Veloci
 /// <summary>Rigid-follow arithmetic in an inertial parent frame, independent of native objects.</summary>
 internal static class ForceMath
 {
-    internal const double AngryRadius = 2;
+    internal const double DefaultAngryRadius = 10;
+    internal const double MinimumAngryRadius = 1;
+    internal const double MaximumAngryRadius = 50;
     internal const double ThrowSpeed = 25;
     internal const double MaximumOffset = 25;
 
     internal static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
     internal static bool Finite(doubleQuat value) => double.IsFinite(value.X) && double.IsFinite(value.Y)
         && double.IsFinite(value.Z) && double.IsFinite(value.W);
+
+    internal static bool ValidAngryRadius(double radius) => double.IsFinite(radius)
+        && radius >= MinimumAngryRadius && radius <= MaximumAngryRadius;
 
     internal static bool TryFollow(double3 ownerPosition, double3 ownerVelocity, doubleQuat ownerBody2Cci,
         double3 ownerBodyRates, double3 initialPositionBody, doubleQuat sourceToOwner, double3 groupOffsetBody,

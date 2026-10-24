@@ -13,15 +13,19 @@ internal sealed partial class SaberRuntime
     private bool _ready = true, _disposed = false, _selectingSlice = false;
     private bool OverlayVisible = true, KittenColorPickerVisible = false, _overlayLayoutAvailable = false;
     private SaberOverlayLayout _overlayLayout = default;
+    private sealed class TestSettings { internal float AngryForceRadius = 10, ClutterPickTolerance = .2f; }
+    private readonly TestSettings _settings = new();
     private double _playerTime = 0;
     private KittenEva? _owner;
     private int _sliceCancellations;
     private enum Command { CancelSlice }
     private void Queue(Command command) => _sliceCancellations++;
     private bool SettingsContainsPointer(float2 pointer) => false;
+    private bool KittenColorPickerContainsPointer(float2 pointer) => KittenColorPickerVisible && pointer.X < 200;
     private static void Report(string operation, Exception error) { }
+    private static readonly List<(float2 Center, string Text)> DrawnLabels = [];
     private static void CenterOverlayText(ImDrawListPtr draw, float2 center, ImColor8 color, string text,
-        float maxWidth = float.MaxValue, float fontSize = 0) { }
+        float maxWidth = float.MaxValue, float fontSize = 0) => DrawnLabels.Add((center, text));
     private SaberRuntime()
     {
         _forceLayout = default;
@@ -37,8 +41,12 @@ internal sealed partial class SaberRuntime
     public static void Main()
     {
         ForceOverlayChecks.Run();
+        ForcePickerButtons();
         var runtime = new SaberRuntime { _selectingSlice = true };
+        runtime._settings.AngryForceRadius = 14;
+        runtime._settings.ClutterPickTolerance = .375f;
         runtime.BeginForcePicker(true);
+        Check(runtime._forceStatus.Contains("14 m"), "the Angry Force instruction displays the configured radius");
         Check(runtime._sliceCancellations == 1 && runtime._selectingSlice,
             "Force selection queues slice-picker cancellation without mutating the settled saber state");
         runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(100, 90));
@@ -49,31 +57,62 @@ internal sealed partial class SaberRuntime
         Check(ForceTargeting.Picks == 0 && runtime._forceQuery is { Capture: true }
             && runtime._forceRequests.Count == 0 && !runtime.ForceHolding,
             "the fresh frame camera snapshots the click without reading live physics bodies");
+        runtime._settings.AngryForceRadius = 25;
+        runtime._settings.ClutterPickTolerance = 0;
         Program.MainViewport.Camera.Generation = 8;
         runtime.UpdateForceFrame();
         runtime.UpdateForceBeforePhysics(.016);
         Check(runtime.ForceHolding && runtime._force.CaptureCalls == 1 && ForceTargeting.Picks == 1
-            && ForceTargeting.LastRay.Origin == new double3(80, 60, 7),
+            && ForceTargeting.LastRay.Origin == new double3(80, 60, 7) && runtime._force.CapturedRadius == 14,
             "the original click ray is queried and captured once at the settled handoff");
+        Check(ForceTargeting.LastTolerance == .375,
+            "the immutable click query keeps its tolerance if settings change before resolution");
+
+        Check(!runtime._forceDrag.Held && runtime.ScrollForcePointer(1) && runtime.ScrollForcePointer(2),
+            "wheel depth works without pressing the move circle and accepts consecutive events");
+        Check(runtime._forceMovePending && runtime._forceMoveOffset == new double3(0, 0, 1.5)
+            && runtime._force.GroupOffsetBody == double3.Zero,
+            "hover wheel events accumulate in the pending offset without mutating captured physics");
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.GroupOffsetBody == new double3(0, 0, 1.5) && !runtime._forceMovePending,
+            "settled handoff applies the accumulated hover depth once");
 
         runtime._force.Events.Clear();
         runtime._forceMoveOwner = runtime._owner;
         Check(runtime._forceDrag.Begin(float2.Zero, 80, double3.Zero, double3.UnitX, double3.UnitY, -double3.UnitZ), "held movement starts");
         runtime.MoveForcePointer(new(80, 0));
+        Check(runtime.ScrollForcePointer(2) && runtime._forceMoveOffset == new double3(8, 0, 1),
+            "wheel depth during a held drag preserves the camera-plane offset");
         runtime.QueueForceAction(ForceAction.Throw);
         Check(runtime.ForceHolding, "throw clicks queue work and retain ownership until the safe handoff");
         runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.ReleasedOffset == new double3(8, 0, 0)
+        Check(runtime._force.ReleasedOffset == new double3(8, 0, 1)
             && runtime._force.Events.SequenceEqual(new[] { "Offset", "Update", "Throw" }),
             "the final drag offset is applied before updating and throwing the held group");
+
+        runtime = new(); runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._forceMoveOwner = runtime._owner;
+        runtime._forceDrag.Begin(float2.Zero, 80, double3.Zero, double3.UnitX, double3.UnitY, -double3.UnitZ);
+        runtime.MoveForcePointer(new(80, 0));
+        var finalDragOffset = runtime._forceMoveOffset;
+        runtime._forceDrag.Release();
+        Check(runtime.ScrollForcePointer(-2) && runtime._forceMoveOffset == finalDragOffset - double3.UnitZ,
+            "hover wheel after releasing a drag preserves the pending camera-plane movement");
+        runtime.QueueForceAction(ForceAction.Release); runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._force.ReleasedOffset == finalDragOffset - double3.UnitZ && !runtime.ScrollForcePointer(1),
+            "release commits the final hover depth and later wheel input cannot move an unowned group");
 
         runtime = new(); runtime.BeginForcePicker(false);
         ImGui.Io.WantCaptureMouse = true;
         runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(100, 90));
         Check(!runtime._forceClickPending && ForceTargeting.Picks == 0, "native ImGui mouse ownership blocks Force picking");
         ImGui.Io.WantCaptureMouse = false; runtime.KittenColorPickerVisible = true;
+        ImGui.Io.MousePos = new(100, 90);
         runtime.UpdateForceFrame();
-        Check(ForceTargeting.Picks == 0, "the saber popup has priority over Force hover work");
+        Check(ForceTargeting.Picks == 0 && runtime._forceQuery is null, "the picker window has priority over Force hover work inside its bounds");
+        ImGui.Io.MousePos = new(300, 200);
+        runtime.UpdateForceFrame();
+        Check(runtime._forceQuery != null, "an open picker allows Force hover outside its window bounds");
         runtime.KittenColorPickerVisible = false;
         Program.Modal = true;
         Check(!runtime.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Press) && runtime.ForcePicking,
@@ -129,7 +168,75 @@ internal sealed partial class SaberRuntime
         Check(!runtime.ForcePicking && !runtime._forceClickPending && runtime._force.CaptureCalls == 0
             && runtime._forceStatus.StartsWith("Force picker failed:"),
             "settled picker exceptions cancel locally without skipping the surrounding saber overlay or mutating physics");
-        Console.WriteLine("Force UI runtime checks passed (deferred clicks, native UI priority, settled commands, stale owners/targets, final move/throw, cleanup).");
+        Console.WriteLine("Force UI runtime checks passed (picker button states, deferred clicks, native UI priority, settled commands, stale owners/targets, final move/throw, cleanup).");
+    }
+
+    private static void ForcePickerButtons()
+    {
+        var runtime = new SaberRuntime();
+        runtime._forceLayout = ForceOverlayLayout.Create(SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2),
+            float2.Zero, new(1920, 1080));
+        runtime._forceLayoutAvailable = true;
+        var forceCenter = runtime._forceLayout.ForceCenter;
+        var angryCenter = runtime._forceLayout.AngryCenter;
+        void Draw()
+        {
+            DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear();
+            runtime.DrawForceOverlayCore(default);
+        }
+        bool Label(float2 center, string text) => DrawnLabels.Contains((center, text));
+        ImDrawListPtr.Circle Fill(float2 center) => ImDrawListPtr.Circles.Single(circle => circle.Center == center && circle.Filled);
+        ImDrawListPtr.Circle Ring(float2 center) => ImDrawListPtr.Circles.Single(circle => circle.Center == center && !circle.Filled);
+        Draw();
+        var idleForce = Fill(forceCenter);
+        var idleAngry = Fill(angryCenter);
+        Check(Label(forceCenter, "FORCE") && !DrawnLabels.Any(label => label.Text == "CANCEL"),
+            "idle Force controls show their action labels");
+
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter);
+        Draw();
+        Check(runtime.ForcePicking && !runtime._angryForce && Label(forceCenter, "CANCEL")
+            && !Label(angryCenter, "CANCEL") && Fill(forceCenter).Color != idleForce.Color
+            && Ring(forceCenter).Thickness > Ring(angryCenter).Thickness,
+            "the active Force picker displays Cancel with a brighter fill and stronger ring on its own button");
+        runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(300, 200)); runtime.UpdateForceFrame();
+        Check(runtime._forceQuery is { Capture: true }, "a pending capture exists before button cancellation");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter);
+        runtime.UpdateForceBeforePhysics(.016); Draw();
+        Check(!runtime.ForcePicking && runtime._forcePickOwner == null && runtime._forceQuery == null
+            && !runtime._forceClickPending && runtime._forceHover == null && ForceTargeting.Picks == 0
+            && runtime._forceRequests.Count == 0 && Label(forceCenter, "FORCE") && Fill(forceCenter) == idleForce,
+            "pressing the active Force button cancels selection, clears pending capture and restores its label and color");
+
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter);
+        runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(300, 200)); runtime.UpdateForceFrame();
+        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, angryCenter); Draw();
+        Check(runtime.ForcePicking && runtime._angryForce && runtime._forceQuery == null && !runtime._forceClickPending
+            && Label(forceCenter, "FORCE") && Label(angryCenter, "CANCEL")
+            && Fill(forceCenter) == idleForce && Fill(angryCenter).Color != idleAngry.Color
+            && Ring(angryCenter).Thickness > Ring(forceCenter).Thickness,
+            "the other mode switches to Angry Force and moves Cancel and the active ring without retaining an old click");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter); Draw();
+        Check(runtime.ForcePicking && !runtime._angryForce && Label(forceCenter, "CANCEL")
+            && !Label(angryCenter, "CANCEL") && Fill(angryCenter) == idleAngry,
+            "switching from Angry Force back to Force updates both button states");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, angryCenter);
+        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, angryCenter); Draw();
+        Check(!runtime.ForcePicking && !DrawnLabels.Any(label => label.Text == "CANCEL") && Fill(angryCenter) == idleAngry,
+            "pressing the active Angry Force button also cancels its picker and restores its normal appearance");
+
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime.BeginForcePicker(false); Draw();
+        Check(Label(forceCenter, "RELEASE") && Label(angryCenter, "THROW")
+            && !DrawnLabels.Any(label => label.Text == "CANCEL"),
+            "a held Force group preserves Release and Throw instead of picker cancellation labels");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter);
+        Check(runtime._forceRequests.TryPeek(out var release) && release.Action == ForceAction.Release,
+            "the Force button still queues release while holding a group");
+        runtime._forceRequests.Clear();
+        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, angryCenter);
+        Check(runtime._forceRequests.TryPeek(out var thrown) && thrown.Action == ForceAction.Throw,
+            "the Angry Force button still queues throw while holding a group");
     }
 
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

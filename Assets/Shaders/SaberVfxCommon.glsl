@@ -28,7 +28,7 @@ float movingNoise(float key, float time) {
 // Returns the start and span in metres, always inside the deployed blade.
 vec2 arcExtent(float arc, float seed) {
     float span = min(pc.shape.x * 0.32, 0.30);
-    float configuredArcs = clamp(pc.shape.w - 2.0, 1.0, 8.0);
+    float configuredArcs = clamp(pc.shape.w - 2.0, 1.0, 20.0);
     float center = clamp(0.16 + arc * (0.64 / max(configuredArcs - 1.0, 1.0))
         + 0.04 * sin(TAU * pc.animation.x * 0.125 + seed), 0.05, 0.95);
     return vec2((pc.shape.x - span) * center, span);

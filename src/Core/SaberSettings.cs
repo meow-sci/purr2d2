@@ -27,25 +27,25 @@ public sealed class SaberEffectSettings
     public void Reset(SaberType type)
     {
         bool dark = type == SaberType.Dark;
-        ShimmerAmount = dark ? 1.5f : .5f;
-        ShimmerSpeed = dark ? 1.5f : .6f;
-        ArcCount = dark ? 3 : 1;
-        ArcFrequency = dark ? 1.5f : .35f;
-        ArcAmplitude = dark ? 1.3f : .5f;
-        ArcBrightness = dark ? 1.1f : .65f;
-        ArcWidth = dark ? 1 : .8f;
+        ShimmerAmount = 1.5f;
+        ShimmerSpeed = 1.5f;
+        ArcCount = dark ? 12 : 8;
+        ArcFrequency = dark ? 6 : 3;
+        ArcAmplitude = dark ? 2.5f : .8f;
+        ArcBrightness = dark ? 4 : 2.5f;
+        ArcWidth = dark ? 3 : 1.75f;
     }
 
     public void Validate(SaberType type)
     {
         bool dark = type == SaberType.Dark;
-        ShimmerAmount = Clamp(ShimmerAmount, 0, 4, dark ? 1.5f : .5f);
-        ShimmerSpeed = Clamp(ShimmerSpeed, 0, 4, dark ? 1.5f : .6f);
+        ShimmerAmount = Clamp(ShimmerAmount, 0, 4, 1.5f);
+        ShimmerSpeed = Clamp(ShimmerSpeed, 0, 4, 1.5f);
         ArcCount = Math.Clamp(ArcCount, 0, SaberSettings.MaximumArcCount);
-        ArcFrequency = Clamp(ArcFrequency, .1f, 4, dark ? 1.5f : .35f);
-        ArcAmplitude = Clamp(ArcAmplitude, 0, 3, dark ? 1.3f : .5f);
-        ArcBrightness = Clamp(ArcBrightness, 0, 4, dark ? 1.1f : .65f);
-        ArcWidth = Clamp(ArcWidth, .25f, 3, dark ? 1 : .8f);
+        ArcFrequency = Clamp(ArcFrequency, .1f, SaberSettings.MaximumArcFrequency, dark ? 6 : 3);
+        ArcAmplitude = Clamp(ArcAmplitude, 0, 3, dark ? 2.5f : .8f);
+        ArcBrightness = Clamp(ArcBrightness, 0, SaberSettings.MaximumArcBrightness, dark ? 4 : 2.5f);
+        ArcWidth = Clamp(ArcWidth, .25f, SaberSettings.MaximumArcWidth, dark ? 3 : 1.75f);
     }
 
     private static float Clamp(float value, float min, float max, float fallback) =>
@@ -54,7 +54,10 @@ public sealed class SaberEffectSettings
 
 public sealed class SaberSettings
 {
-    public const int MaximumArcCount = 8;
+    public const int MaximumArcCount = 20;
+    public const float MaximumArcFrequency = 10;
+    public const float MaximumArcBrightness = 6;
+    public const float MaximumArcWidth = 4;
 
     public float BladeLength { get; set; } = 1.4f;
     public float ColorR { get; set; } = .12f;
@@ -69,6 +72,17 @@ public sealed class SaberSettings
     public float AimZ { get; set; } = .6f;
     public float FingerCurl { get; set; } = .12f;
     public bool HideMmu { get; set; } = true;
+    public float AngryForceRadius { get; set; } = 10;
+    public float ClutterPickTolerance { get; set; } = .2f;
+    public float ForceControlsOffsetX { get; set; }
+    public float ForceControlsOffsetY { get; set; }
+    public float SaberControlsOffsetX { get; set; }
+    public float SaberControlsOffsetY { get; set; }
+    public int SliceVertexArenaMiB { get; set; } = SliceResourceLimits.DefaultVertexArenaMiB;
+    public int SliceIndexArenaMiB { get; set; } = SliceResourceLimits.DefaultIndexArenaMiB;
+    public int SliceAssetDiskMiB { get; set; } = SliceResourceLimits.DefaultAssetDiskMiB;
+    public int SliceAssetEntryLimit { get; set; } = SliceResourceLimits.DefaultAssetEntryLimit;
+    public int SlicePhysicsVehicleLimit { get; set; } = SliceResourceLimits.DefaultPhysicsVehicleLimit;
     [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public SaberEffectSettings LightEffects { get; set; } = SaberEffectSettings.Create(SaberType.Light);
     [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
@@ -91,6 +105,17 @@ public sealed class SaberSettings
         AimX = Clamp(AimX, -1, 1, .22f); AimY = Clamp(AimY, -1, 1, .45f); AimZ = Clamp(AimZ, -1, 1, .6f);
         if (AimX * AimX + AimY * AimY + AimZ * AimZ < .0001f) { AimX = .22f; AimY = .45f; AimZ = .6f; }
         FingerCurl = Clamp(FingerCurl, 0, .5f, .12f);
+        AngryForceRadius = Clamp(AngryForceRadius, 1, 50, 10);
+        ClutterPickTolerance = Clamp(ClutterPickTolerance, 0, .5f, .2f);
+        ForceControlsOffsetX = Clamp(ForceControlsOffsetX, -1, 1, 0);
+        ForceControlsOffsetY = Clamp(ForceControlsOffsetY, -1, 1, 0);
+        SaberControlsOffsetX = Clamp(SaberControlsOffsetX, -1, 1, 0);
+        SaberControlsOffsetY = Clamp(SaberControlsOffsetY, -1, 1, 0);
+        SliceVertexArenaMiB = Math.Clamp(SliceVertexArenaMiB, SliceResourceLimits.MinimumVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB);
+        SliceIndexArenaMiB = Math.Clamp(SliceIndexArenaMiB, SliceResourceLimits.MinimumIndexArenaMiB, SliceResourceLimits.MaximumIndexArenaMiB);
+        SliceAssetDiskMiB = Math.Clamp(SliceAssetDiskMiB, SliceResourceLimits.MinimumAssetDiskMiB, SliceResourceLimits.MaximumAssetDiskMiB);
+        SliceAssetEntryLimit = Math.Clamp(SliceAssetEntryLimit, SliceResourceLimits.MinimumAssetEntryLimit, SliceResourceLimits.MaximumAssetEntryLimit);
+        SlicePhysicsVehicleLimit = Math.Clamp(SlicePhysicsVehicleLimit, SliceResourceLimits.MinimumPhysicsVehicleLimit, SliceResourceLimits.MaximumPhysicsVehicleLimit);
         EffectsFor(SaberType.Light).Validate(SaberType.Light);
         EffectsFor(SaberType.Dark).Validate(SaberType.Dark);
     }

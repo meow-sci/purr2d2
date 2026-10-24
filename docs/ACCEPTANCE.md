@@ -1,5 +1,118 @@
 # Acceptance record
 
+## Stable Force targeting and slice resource controls (2026-10-23)
+
+Force and Angry Force now display CANCEL while selecting; pressing the active
+button cancels, and pressing the other switches mode. Deferred picking carries
+the aiming ray relative to the owner so the next physics step does not leave it
+behind at orbital speed. Vessel markers follow their selected local surface;
+grounded clutter markers retain a planet-fixed anchor instead of a frozen
+inertial point. This follows the same current-frame/local-anchor principles used
+by Unscience decals, while retaining the settled handoff required by clutter.
+
+Clutter aim tolerance defaults to 0.20 m and is adjustable from 0–0.50 m. A bounded
+native sphere sweep runs only when exact picking finds no object or kitten
+blocker. It uses the actual collider contact, checks terrain along both the
+original ray and the assisted contact segment, and respects the owner's reach.
+Zero disables assistance. Stock tree trunk/root colliders are eligible; decorative
+trees without colliders remain unavailable. The marker does not read live physics
+from the render/UI callback.
+
+Slice resources now expose usage, configurable budgets and cleanup actions in
+Settings. Defaults are 128/64 MiB vertex/index memory, 2048 MiB saved assets,
+8192 fragment entries and 128 local physics vehicles. Graphics reservations take
+effect after saving and restarting; storage and physics admission limits apply
+immediately. Completed unpublished mesh allocations can be reclaimed, including
+automatically under pressure. Published native assets remain pinned. Debris
+cleanup removes only uncrewed, untracked, entirely generated slice vehicles,
+after confirmation and a settled-state recheck. It retains registered graphics
+memory and saved assets, so exhausting published mesh memory still needs a
+restart. Existing assets remain reusable after lowering storage limits.
+
+Focused regressions cover orbital translation, rotating frames, current markers,
+selection identity, tolerance bounds and capture, exact-hit priority, terrain
+occlusion, native sphere/box/capsule/compound queries, resource persistence,
+allocation retirement/publication, cleanup eligibility and confirmation UI.
+Native host checks are recorded in
+`artifacts/checks/ForceHostChecks/latest-forgiving-picking.log`. Exact and assisted
+clutter queries also pass a native regression with the camera 1500 m away and a
+rock 20 m from the kitten, preserving owner-based reach while extending the ray
+search bound (`artifacts/checks/ForceHostChecks/latest-camera-range.log`).
+The full managed/shader regression suite passes in
+`artifacts/force-resources-checks.log`. The final Release build has zero warnings
+or errors (`artifacts/force-resources-build.log`); source/stage validation passes,
+and all 29 ZIP files, the release DLL, README and archive checksum agree.
+
+Native acceptance remains pending: point and click at orbital vessels, Luna rocks
+and Earth tree trunks while moving, zooming and rotating the camera; verify the
+marker stays attached and CANCEL is visible. Compare tolerance zero/default/max,
+including rocks behind terrain. Repeatedly slice, cancel during upload, inspect
+usage and clear unused caches; then confirm debris removal frees physics capacity
+without deleting occupied, controlled, camera-followed or mixed craft. Save/reload
+remaining generated fragments and verify restart-only graphics settings.
+
+## Saber halo over water (2026-10-23)
+
+Replaced the host's destination-alpha-dependent additive blend with a dedicated
+`One + One` RGB blend that preserves attachment alpha. Open-water alpha can be
+zero, which previously erased the background under the halo ribbon. Both saber
+styles, arcs and sparks use the corrected pipeline. The late translucency hook,
+reverse-Z depth test and disabled depth writes are unchanged.
+
+- Release build passes with zero warnings/errors (`artifacts/water-blend-build.log`).
+- `SaberBlendChecks` uses the production Vulkan attachment state to verify faded
+  edges, HDR emission and overlapping ribbons against alpha 0, 0.25, 0.5 and 1;
+  it also reproduces the former zero-alpha black-border failure. Checks pass in
+  `artifacts/water-blend-checks.log` and are included in `tools/validate.py --run-tests`.
+- Source and staged Light/Dark GLSL compile/link with the 128-byte ABI
+  (`artifacts/water-blend-shaders.log`). Asset/stage validation passes; all 29
+  archive entries match the staged payload and the archive checksum matches.
+
+Native visual confirmation remains pending: inspect both saber styles and arcs
+over ocean, coastlines, terrain and atmosphere, including overlapping blades,
+occluding vessels, MSAA changes and a secondary viewport. The faded halo must
+leave the background intact and must not alter sunflare/transmittance behavior.
+
+## Saber and Force refinements (2026-10-23)
+
+Light and Dark effect defaults now match the requested profiles, with up to 20 arcs,
+frequency 10, brightness 6 and width 4 supported by settings, runtime tuning and
+shaders. Existing saved profiles are preserved; reset a profile to adopt its new
+defaults. Shared Settings includes a 1–50 m Angry Force radius (10 m default) and
+independent horizontal/vertical offsets for the complete left Force and right
+saber/movement control groups. Offsets persist with Save preferences and clamp the
+groups inside the viewport. Kitten rows and the Settings button stay fixed.
+
+The per-kitten button toggles a regular movable/resizable ImGui window with a title
+bar close button and ordinary scroll behavior. It no longer blocks interaction
+outside the window. Existing native camera drags and overlay drags retain their
+input ownership when crossing it. Ignite is now below and closer to Slice. The
+somersault diamond is shifted down by half a button diameter and its neighboring
+buttons are closer by the same amount.
+
+Force depth scrolling works while hovering the Move circle as well as during a
+drag; repeated events accumulate before the settled physics update. Angry Force
+uses the chosen radius for both vessel mesh surfaces and physical clutter, centered
+on the selected hit. The Force paw target is halfway lower toward its sampled
+resting height while retaining the measured arm solve.
+
+Focused checks cover profile defaults/reset/persistence, expanded VFX limits and
+shader ABI, grouped layout bounds/hit regions, hover/drag wheel movement and
+release/throw sequencing, radius bounds and pose composition. Actual KSA/Bepu host
+checks cover collider overlap boundaries at 1, 2, 10 and 50 m. Logs are under
+`artifacts/checks/ForceHostChecks/latest-refinements.log`,
+`artifacts/refinements-build.log` and `artifacts/refinements-checks.log`.
+The integrated build has zero warnings/errors. All regression groups pass; the
+full run caught one kitten-profile assertion still expecting the old Light arc
+count, which was updated to 8 and passed in the targeted rerun recorded at
+`artifacts/refinements-kitten-checks.log`. Source/staged assets and the final ZIP
+checksum also pass validation.
+
+Native in-game acceptance remains pending: verify the new profile appearance,
+toggle/move/resize/titlebar-close the kitten window, drag each position slider and
+save/reload preferences, inspect the revised button spacing and lowered paw, and
+scroll over the Move circle with captured clutter without holding the mouse.
+
 ## Overlay activation and refined layout (2026-10-23)
 
 Purr2D2 starts disabled each session, independently of saved preferences. The native game menu adds **Purr2D2 → Enabled**, which activates the overlay. Disabling hides its UI immediately and releases sabers, Force captures, pending cuts and somersault state at the next settled update. A rapid off/on pair still performs that cleanup before restarting. Persisted fragment registration remains available while disabled.

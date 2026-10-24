@@ -56,7 +56,8 @@ internal sealed partial class SaberRuntime
     internal void DrawUi()
     {
         _settingsWindowBoundsAvailable = false;
-        if (!_enabled || !_windowVisible || _disposed || !Program.DrawUI) return;
+        if (!_enabled || !_windowVisible || _disposed || !Program.DrawUI)
+        { _confirmSliceDebrisRemoval = false; return; }
         try
         {
             ImGui.SetNextWindowViewport(ImGui.GetMainViewport().ID);
@@ -76,6 +77,11 @@ internal sealed partial class SaberRuntime
                 ImGui.SeparatorText("Shared saber settings");
                 DrawSaberAppearanceSettings();
                 ImGui.TextWrapped("Use the overlay to control kittens. Each kitten's saber menu contains its color, type and shared effects.");
+                ImGui.SeparatorText("Force settings");
+                DrawForceSettings();
+                if (ImGui.CollapsingHeader("Slice resources")) DrawSliceResourceSettings();
+                else _confirmSliceDebrisRemoval = false;
+                if (ImGui.CollapsingHeader("Control positions")) DrawControlPositionSettings();
                 if (ImGui.CollapsingHeader("Character & grip")) DrawSaberCharacterSettings();
 
                 ImGui.Separator();
@@ -138,16 +144,16 @@ internal sealed partial class SaberRuntime
             changed |= ImGui.SliderInt("##ArcCount", ref arcCount, 0, SaberSettings.MaximumArcCount);
             ShowSaberControlTip("Maximum arcs per saber. Distance and screen size can reduce the count; 0 disables arcs.");
             SaberSettingsRow("Arc frequency");
-            changed |= ImGui.SliderFloat("##ArcFrequency", ref arcFrequency, .1f, 4, "%.2fx");
+            changed |= ImGui.SliderFloat("##ArcFrequency", ref arcFrequency, .1f, SaberSettings.MaximumArcFrequency, "%.2fx");
             ShowSaberControlTip("Burst rate per arc. 1x gives one burst every two seconds; higher rates make bursts more frequent and shorter.");
             SaberSettingsRow("Arc amplitude");
             changed |= ImGui.SliderFloat("##ArcAmplitude", ref arcAmplitude, 0, 3, "%.2fx");
             ShowSaberControlTip("How far arcs stray from the blade. 0 removes the outward spread; 1x is the baseline.");
             SaberSettingsRow("Arc brightness");
-            changed |= ImGui.SliderFloat("##ArcBrightness", ref arcBrightness, 0, 4, "%.2fx");
+            changed |= ImGui.SliderFloat("##ArcBrightness", ref arcBrightness, 0, SaberSettings.MaximumArcBrightness, "%.2fx");
             ShowSaberControlTip("Brightness of the electrical arcs. 0 hides them; 1x is the baseline.");
             SaberSettingsRow("Arc width");
-            changed |= ImGui.SliderFloat("##ArcWidth", ref arcWidth, .25f, 3, "%.2fx");
+            changed |= ImGui.SliderFloat("##ArcWidth", ref arcWidth, .25f, SaberSettings.MaximumArcWidth, "%.2fx");
             ShowSaberControlTip("Width of each electrical arc. 1x is the baseline width.");
         }
         finally { ImGui.EndTable(); }
@@ -166,6 +172,62 @@ internal sealed partial class SaberRuntime
             _preferencesSavedUntil = 0;
         }
         ShowSaberControlTip($"Restores only the shared {typeName} effects. Use Save preferences to keep the changes.");
+    }
+
+    private void DrawForceSettings()
+    {
+        if (!BeginSaberSettingsTable("##ForceSettings", "Clutter aim tolerance")) return;
+        float radius = _settings.AngryForceRadius, tolerance = _settings.ClutterPickTolerance;
+        bool changed;
+        try
+        {
+            SaberSettingsRow("Angry Force radius");
+            changed = ImGui.SliderFloat("##AngryForceRadius", ref radius, 1, 50, "%.1f m");
+            ShowSaberControlTip("Capture nearby objects within this distance of the selected surface point.");
+            SaberSettingsRow("Clutter aim tolerance");
+            changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
+            ShowSaberControlTip("After exact picking misses, a small sphere of this radius catches near misses on physical clutter. Exact hits take priority; 0 uses exact hits only.");
+        }
+        finally { ImGui.EndTable(); }
+        if (!changed) return;
+        _settings.AngryForceRadius = radius;
+        _settings.ClutterPickTolerance = tolerance;
+        _settings.Validate();
+        _preferencesSavedUntil = 0;
+    }
+
+    private void DrawControlPositionSettings()
+    {
+        ImGui.TextWrapped("Offsets from the default positions, as fractions of screen width and height. Positive X moves right; positive Y moves down.");
+        if (!BeginSaberSettingsTable("##ControlPositions", "Saber (right) X")) return;
+        float forceX = _settings.ForceControlsOffsetX, forceY = _settings.ForceControlsOffsetY;
+        float saberX = _settings.SaberControlsOffsetX, saberY = _settings.SaberControlsOffsetY;
+        bool changed = false;
+        try
+        {
+            SaberSettingsRow("Force (left) X");
+            changed |= ImGui.SliderFloat("##ForceControlsOffsetX", ref forceX, -1, 1, "%.2f width");
+            SaberSettingsRow("Force (left) Y");
+            changed |= ImGui.SliderFloat("##ForceControlsOffsetY", ref forceY, -1, 1, "%.2f height");
+            SaberSettingsRow("Saber (right) X");
+            changed |= ImGui.SliderFloat("##SaberControlsOffsetX", ref saberX, -1, 1, "%.2f width");
+            SaberSettingsRow("Saber (right) Y");
+            changed |= ImGui.SliderFloat("##SaberControlsOffsetY", ref saberY, -1, 1, "%.2f height");
+        }
+        finally { ImGui.EndTable(); }
+        if (changed)
+        {
+            _settings.ForceControlsOffsetX = forceX; _settings.ForceControlsOffsetY = forceY;
+            _settings.SaberControlsOffsetX = saberX; _settings.SaberControlsOffsetY = saberY;
+            _settings.Validate();
+            _preferencesSavedUntil = 0;
+        }
+        if (ImGui.Button("Reset control positions"))
+        {
+            _settings.ForceControlsOffsetX = _settings.ForceControlsOffsetY = 0;
+            _settings.SaberControlsOffsetX = _settings.SaberControlsOffsetY = 0;
+            _preferencesSavedUntil = 0;
+        }
     }
 
     private void DrawSavePreferences()

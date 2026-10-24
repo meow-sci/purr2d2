@@ -47,6 +47,7 @@ internal sealed partial class SaberRuntime : IDisposable
         _settingsPath = Path.Combine(directory, "settings.json");
         try { _settings = SaberSettings.Load(_settingsPath); }
         catch (Exception ex) { _settings = new(); Report("Could not read preferences; using defaults", ex); }
+        ApplySliceResourceSettings();
         _targeting.SliceHandler = (part, plane) => _slicer.Commit(part, _playerTime);
         _slicer.CutSparks = _renderer.AddCutSparks;
     }
@@ -125,6 +126,7 @@ internal sealed partial class SaberRuntime : IDisposable
                 if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
             }
             UpdateOtherSabers(supportedSpeed ? playerDt : 0);
+            UpdateSliceResources();
         }
         catch (Exception ex)
         {
@@ -196,6 +198,7 @@ internal sealed partial class SaberRuntime : IDisposable
 
     internal void ResetWorld()
     {
+        ResetSliceResourceRequests();
         ResetForce();
         _forcePose.Unbind();
         ResetSomersault();

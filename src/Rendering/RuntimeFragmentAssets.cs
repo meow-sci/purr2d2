@@ -9,6 +9,7 @@ using Brutal.VulkanApi;
 using HarmonyLib;
 using KSA;
 using KSA.Deformation;
+using Purr2D2.Core;
 using RenderCore;
 
 namespace Purr2D2.Rendering;
@@ -19,13 +20,10 @@ internal sealed record PreparedFragment(PartTemplate Template, string TemplateId
 /// <summary>Immutable generated native assets, backed by a startup-reserved part mesh arena.</summary>
 internal static partial class RuntimeFragmentAssets
 {
-    private const uint VertexCapacity = 32 * 1024 * 1024;
-    private const uint IndexCapacity = 16 * 1024 * 1024;
-    private const long DiskCapacity = 512L * 1024 * 1024;
-    private const int EntryCapacity = 1024;
     private const string Prefix = "Purr2D2_Fragment_";
     private static KSA.Mod? _mod;
-    private static uint _vertexBase, _indexBase, _vertexUsed, _indexUsed;
+    private static uint _vertexBase, _indexBase;
+    private static SliceMeshArena? _arena;
     private static bool _initialized, _installed;
     private static double _now;
     private static readonly Dictionary<string, double> HotCaps = new(StringComparer.Ordinal);
@@ -33,7 +31,11 @@ internal static partial class RuntimeFragmentAssets
     private static readonly Dictionary<string, string> FailedPreparations = new(StringComparer.Ordinal);
 
     /// <summary>Must run from ImmediateLoad, before DeviceMeshInterleaved.Shared.Build.</summary>
-    internal static void Initialize(KSA.Mod mod)
+    internal static void Initialize(KSA.Mod mod,
+        int vertexMiB = SliceResourceLimits.DefaultVertexArenaMiB,
+        int indexMiB = SliceResourceLimits.DefaultIndexArenaMiB,
+        int diskMiB = SliceResourceLimits.DefaultAssetDiskMiB,
+        int entryLimit = SliceResourceLimits.DefaultAssetEntryLimit)
     {
         if (_initialized) return;
         if (DeviceMeshInterleaved.Shared.IsBuilding || DeviceMeshInterleaved.Shared.IsBuilt)
@@ -45,8 +47,14 @@ internal static partial class RuntimeFragmentAssets
         var actual = typeof(DeviceMeshInterleaved).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         if (actual.Any(f => !f.IsPublic) || !actual.Select(f => f.Name).Order().SequenceEqual(fields.Order()))
             throw new InvalidOperationException("DeviceMeshInterleaved's plain-field layout changed; the runtime fragment adapter must be updated.");
-        _vertexBase = Reserve(ref DeviceMeshInterleaved.Shared.RunningVertexBufferSize, VertexCapacity, 32);
-        _indexBase = Reserve(ref DeviceMeshInterleaved.Shared.RunningIndexBufferSize, IndexCapacity, 4);
+        uint vertexBytes = checked((uint)(Math.Clamp(vertexMiB, SliceResourceLimits.MinimumVertexArenaMiB,
+            SliceResourceLimits.MaximumVertexArenaMiB) * SliceResourceLimits.BytesPerMiB));
+        uint indexBytes = checked((uint)(Math.Clamp(indexMiB, SliceResourceLimits.MinimumIndexArenaMiB,
+            SliceResourceLimits.MaximumIndexArenaMiB) * SliceResourceLimits.BytesPerMiB));
+        _vertexBase = Reserve(ref DeviceMeshInterleaved.Shared.RunningVertexBufferSize, vertexBytes, 32);
+        _indexBase = Reserve(ref DeviceMeshInterleaved.Shared.RunningIndexBufferSize, indexBytes, 4);
+        _arena = new(vertexBytes, indexBytes);
+        ConfigureStorageLimits(diskMiB, entryLimit);
         _mod = mod;
         // Native loading resolves all source materials later, before any save can instantiate parts.
         var directory = Path.Combine(mod.DirectoryPath, "Generated", "Slices");
@@ -64,7 +72,9 @@ internal static partial class RuntimeFragmentAssets
                 var bundle = XmlLoader.Load<AssetBundle>(path, mod)
                     ?? throw new InvalidDataException($"Could not restore generated slice assets from '{path}'. Keep this file and its GLB with the save.");
                 mod.Register(bundle);
+                _registeredTemplates += bundle.Assets.OfType<PartTemplate>().Count();
             }
+        RefreshDiskUsage(directory);
         _initialized = true;
     }
 
@@ -89,7 +99,11 @@ internal static partial class RuntimeFragmentAssets
         _installed = true;
     }
 
-    internal static void Update(double nowPlayerSeconds) => _now = nowPlayerSeconds;
+    internal static void Update(double nowPlayerSeconds)
+    {
+        _now = nowPlayerSeconds;
+        if (_now - _lastHeatPrune >= 1) { PruneExpiredHeat(); _lastHeatPrune = _now; }
+    }
     internal static void ClearHeat() => HotCaps.Clear();
     internal static void MarkHot(PreparedFragment prepared, double nowPlayerSeconds)
     {

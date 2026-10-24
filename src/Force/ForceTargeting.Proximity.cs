@@ -11,11 +11,14 @@ internal static partial class ForceTargeting
     /// Settled-thread query around the primary hit: vessel render triangles and native physical clutter colliders.
     /// Clutter uses collider surface distance, which can differ from its visible mesh. Nothing mutates until all queries pass.
     /// </summary>
-    internal static bool Gather(KittenEva owner, ForcePick pick, bool angry, List<ForceTarget> destination, out string reason)
+    internal static bool Gather(KittenEva owner, ForcePick pick, bool angry, List<ForceTarget> destination, out string reason,
+        double angryRadius = ForceMath.DefaultAngryRadius)
     {
         destination.Clear();
         reason = "The selected object changed; pick again.";
         if (!Valid(owner, pick)) return false;
+        if (angry && !ForceMath.ValidAngryRadius(angryRadius))
+        { reason = "Angry Force radius must be between 1 and 50 m; nothing was captured."; return false; }
         var vesselIds = new HashSet<string>(StringComparer.Ordinal);
         var clutterIds = new HashSet<ClutterForceIdentity>();
         if (pick.Vehicle is { } primaryVehicle) { destination.Add(new(primaryVehicle)); vesselIds.Add(primaryVehicle.Id); }
@@ -31,7 +34,7 @@ internal static partial class ForceTargeting
                 || !IsLive(vehicle) || !ReferenceEquals(vehicle.Parent, owner.Parent)) continue;
             if (++vehicles > MaximumVehicles) { reason = "Too many objects for a safe Angry Force capture."; return false; }
             var origin = vehicle.GetPositionCci();
-            if (!ForceMath.Finite(origin) || (origin - hit).Length() > vehicle.BoundingSphereRadiusBody + ForceMath.AngryRadius) continue;
+            if (!ForceMath.Finite(origin) || (origin - hit).Length() > vehicle.BoundingSphereRadiusBody + angryRadius) continue;
             var query = (hit - origin).Transform(vehicle.GetBody2Cci().Inverse()) + vehicle.CenterOfMassAsmb;
             bool found = false;
             foreach (var full in vehicle.Parts.Parts)
@@ -47,7 +50,7 @@ internal static partial class ForceTargeting
             { reason = "Nearby geometry exceeds the Angry Force surface budget; nothing was captured."; return false; }
             if (!found) continue;
             if (destination.Count >= ForceController.MaximumCaptured)
-            { reason = "More than 32 objects are within 2 m; nothing was captured."; return false; }
+            { reason = $"More than 32 objects are within {angryRadius:0.#} m; nothing was captured."; return false; }
             destination.Add(new(vehicle));
             vesselIds.Add(vehicle.Id);
 
@@ -67,7 +70,7 @@ internal static partial class ForceTargeting
                             if (++triangles > MaximumProximityTriangles) return false;
                             double distance = ForceMath.SurfaceDistanceSquared(query, vertices[i].Transform(matrix),
                                 vertices[i + 1].Transform(matrix), vertices[i + 2].Transform(matrix));
-                            if (distance <= ForceMath.AngryRadius * ForceMath.AngryRadius + 1e-9) return true;
+                            if (distance <= angryRadius * angryRadius + 1e-9) return true;
                         }
                     }
                 }
@@ -75,7 +78,7 @@ internal static partial class ForceTargeting
             }
         }
         var clutterTargets = new List<ClutterForceTarget>();
-        if (!ClutterForceTargets.GatherNear(owner, hit, ForceMath.AngryRadius, clutterTargets,
+        if (!ClutterForceTargets.GatherNear(owner, hit, angryRadius, clutterTargets,
             ForceController.MaximumCaptured, out reason)) return false;
         foreach (var clutter in clutterTargets)
         {
@@ -84,7 +87,7 @@ internal static partial class ForceTargeting
             { reason = "A nearby physical ground object changed; nothing was captured."; return false; }
             if (!clutterIds.Add(clutter.StableKey)) continue;
             if (destination.Count >= ForceController.MaximumCaptured)
-            { reason = "More than 32 objects are within 2 m; nothing was captured."; return false; }
+            { reason = $"More than 32 objects are within {angryRadius:0.#} m; nothing was captured."; return false; }
             destination.Add(new(clutter));
         }
         return true;

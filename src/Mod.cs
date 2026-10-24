@@ -2,6 +2,7 @@ using HarmonyLib;
 using Purr2D2.Runtime;
 using Purr2D2.Rendering;
 using Purr2D2.Slicing;
+using Purr2D2.Core;
 using StarMap.API;
 
 namespace Purr2D2;
@@ -18,7 +19,15 @@ public sealed class Mod
     {
         _directory = mod.DirectoryPath;
         // Reserve native mesh space and register persisted slice templates before game saves load.
-        RuntimeFragmentAssets.Initialize(mod);
+        SaberSettings settings;
+        try { settings = SaberSettings.Load(Path.Combine(_directory, "settings.json")); }
+        catch (Exception error)
+        {
+            settings = new();
+            Console.WriteLine($"[purr2d2] Could not read slice resource preferences; using defaults: {error.Message}");
+        }
+        RuntimeFragmentAssets.Initialize(mod, settings.SliceVertexArenaMiB, settings.SliceIndexArenaMiB,
+            settings.SliceAssetDiskMiB, settings.SliceAssetEntryLimit);
     }
 
     [StarMapAllModsLoaded]

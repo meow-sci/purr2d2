@@ -1,6 +1,7 @@
 using System.Reflection;
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Rendering;
 
 namespace Purr2D2.Slicing;
@@ -15,6 +16,9 @@ internal readonly record struct PreparedPhysicsFragment(PreparedFragment Asset, 
 internal static partial class NativeSlicePhysics
 {
     private const int MaximumPieces = 8;
+    internal static int VehicleLimit { get; private set; } = SliceResourceLimits.DefaultPhysicsVehicleLimit;
+    internal static void ConfigureVehicleLimit(int limit) => VehicleLimit = Math.Clamp(limit,
+        SliceResourceLimits.MinimumPhysicsVehicleLimit, SliceResourceLimits.MaximumPhysicsVehicleLimit);
     private static readonly Action<Vehicle, double3>? SetBodyRates = typeof(Vehicle)
         .GetProperty(nameof(Vehicle.BodyRates), BindingFlags.Instance | BindingFlags.Public)?
         .GetSetMethod(true)?.CreateDelegate<Action<Vehicle, double3>>();
@@ -46,8 +50,11 @@ internal static partial class NativeSlicePhysics
         if (owner.Parts.Count > 4096) { reason = "Vehicle exceeds the native-isolation budget (4096 parts)."; return false; }
         if (!ValidateTree(owner, out reason)) return false;
         int edges = sources.Sum(p => p.TreeChildren.Count(c => !c.IsAttachedInternal)) + (full.TreeParent is null ? 0 : 1);
-        if (owner.BubbleVehicleCount + edges + MaximumPieces > PartFailure.MaximumVehiclesPerBubble)
-        { reason = "Insufficient native physics slots for safe isolation and slice fragments."; return false; }
+        // The stock 30-vehicle constant is a debris eviction policy, not a native
+        // slot allocation limit: Split/AdoptSeparatedVehicle use dynamic lists.
+        // Keep a bounded mod budget and never evict other vessels implicitly.
+        if (owner.BubbleVehicleCount + edges + MaximumPieces > VehicleLimit)
+        { reason = $"Slice physics budget is full: {owner.BubbleVehicleCount} local vehicles + {edges} isolation split(s) + up to {MaximumPieces} fragments exceed the {VehicleLimit} vehicle limit. Raise the limit or explicitly remove generated debris in Settings."; return false; }
         reason = "";
         return true;
     }

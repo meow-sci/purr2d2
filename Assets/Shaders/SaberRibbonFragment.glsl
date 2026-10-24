@@ -12,7 +12,7 @@ void main() {
         float core = 1.0 - smoothstep(radius * 0.2, radius, distanceToArc);
         float ends = smoothstep(0.0, 0.12, positionOnRibbon.y)
             * (1.0 - smoothstep(0.88, 1.0, positionOnRibbon.y));
-        // KSA's additive state writes attachment alpha. Fade RGB, always retain alpha=1.
+        // The saber adds RGB and preserves attachment alpha. Fade the emitted RGB.
         outColor = vec4((pc.color.rgb * halo + vec3(core * 0.85))
             * effectBrightness * ends, 1.0);
         return;

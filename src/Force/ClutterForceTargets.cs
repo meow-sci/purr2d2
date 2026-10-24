@@ -163,8 +163,10 @@ internal static partial class ClutterForceTargets
         var direction = double3.NormalizeOrZero(rayCci.Direction).Transform(cci2Ccf);
         if (origin.LengthSquared() > 4096.0 * 4096)
         { reason = "Ground objects must be selected near the current physics bubble."; return false; }
+        if (!TryPickRange(rayCci.Origin - owner.GetPositionCci(), out float maximumDistance))
+        { reason = "The Force pick range is invalid."; return false; }
         var query = new PickQuery(bubble, owner.System);
-        bubble.ConstraintSim!.Simulation.RayCast(origin.ToBepu(), direction.ToBepu(), (float)ForceTargeting.MaximumRange,
+        bubble.ConstraintSim!.Simulation.RayCast(origin.ToBepu(), direction.ToBepu(), maximumDistance,
             bubble.ConstraintSim.BufferPool, ref query);
         if (query.Exceeded) { reason = "Ground geometry exceeds the Force pick budget."; return false; }
         if (query.Target == null) { reason = ""; return false; }
@@ -178,7 +180,7 @@ internal static partial class ClutterForceTargets
     {
         destination.Clear();
         if (!TryContext(owner, out var bubble, out reason)) return reason.Length == 0;
-        if (!ForceMath.Finite(centerCci) || !double.IsFinite(radius) || radius <= 0 || radius > ForceMath.AngryRadius || maximum < 0)
+        if (!ForceMath.Finite(centerCci) || !ForceMath.ValidAngryRadius(radius) || maximum < 0)
         { reason = "The ground-object proximity query is invalid."; return false; }
         var cci2Ccf = bubble!.Parent.GetCci2Ccf(bubble.Origin.Time);
         var center = centerCci.Transform(cci2Ccf) - ClutterForceNative.Origin(bubble.GroundClutterStatics);
@@ -196,6 +198,66 @@ internal static partial class ClutterForceTargets
                 : "Too many nearby ground objects for a safe Force capture."; return false;
         }
         reason = ""; return true;
+    }
+
+    /// <summary>Settled-only forgiving pick, used only after exact vessel/clutter picking misses.</summary>
+    internal static bool TryPickNear(KittenEva owner, Ray rayCci, double tolerance,
+        out ClutterForceTarget? target, out double distance, out double3 hitCci, out string reason)
+    {
+        target = null; distance = double.PositiveInfinity; hitCci = default; reason = "";
+        if (!double.IsFinite(tolerance) || tolerance < 0 || tolerance > .5)
+        { reason = "Ground-object pick tolerance must be between 0 and 0.5 m."; return false; }
+        if (tolerance == 0 || !TryContext(owner, out var bubble, out reason)) return false;
+        if (!ForceMath.Finite(rayCci.Origin) || !ForceMath.Finite(rayCci.Direction) || rayCci.Direction.LengthSquared() < .5)
+        { reason = "The Force pick ray is invalid."; return false; }
+        var cci2Ccf = bubble!.Parent.GetCci2Ccf(bubble.Origin.Time);
+        var originCcf = ClutterForceNative.Origin(bubble.GroundClutterStatics);
+        var origin = rayCci.Origin.Transform(cci2Ccf) - originCcf;
+        var direction = double3.NormalizeOrZero(rayCci.Direction).Transform(cci2Ccf);
+        if (!ForceMath.Finite(origin) || origin.LengthSquared() > 4096.0 * 4096)
+        { reason = "Ground objects must be selected near the current physics bubble."; return false; }
+        if (!TryPickRange(rayCci.Origin - owner.GetPositionCci(), out float maximumDistance))
+        { reason = "The Force pick range is invalid."; return false; }
+        var sim = bubble.ConstraintSim!;
+        var query = new NearPickQuery<NativeClutterPickFilter>(sim.Simulation,
+            new(bubble.GroundClutterStatics), origin.ToBepu(), direction.ToBepu(), (float)tolerance);
+        var pose = new RigidPose(origin.ToBepu());
+        var velocity = new BodyVelocity(direction.ToBepu());
+        sim.Simulation.Sweep(new Sphere((float)tolerance), in pose, in velocity, maximumDistance,
+            sim.BufferPool, ref query, .0001f, .00001f, 32);
+        if (query.Exceeded || query.Unsupported || query.OriginOverlap)
+        {
+            reason = query.Exceeded ? "Ground geometry exceeds the forgiving Force pick budget."
+                : query.Unsupported ? "A nearby ground collider cannot be picked safely."
+                : "The forgiving Force pick starts inside a ground object; move the camera clear of it.";
+            return false;
+        }
+        if (query.Hit is not { } collider) return false;
+        if (!TryTarget(bubble, owner.System, collider, out target) || target == null || !target.IsValid)
+        { target = null; reason = "The nearby ground object changed during selection."; return false; }
+        // Native positive-time sweep locations are actual surface contacts, not
+        // the swept sphere centre. Keep that off-ray point for anchoring and for
+        // the caller's separate terrain check along camera-to-contact segment.
+        hitCci = (originCcf + Double3Ex.FromBepu(query.Contact)).Transform(cci2Ccf.Inverse());
+        distance = double3.Dot(hitCci - rayCci.Origin, double3.NormalizeOrZero(rayCci.Direction));
+        if (!ForceMath.Finite(hitCci) || !double.IsFinite(distance) || distance <= 0)
+        { target = null; distance = double.PositiveInfinity; hitCci = default; reason = "The nearby ground contact is invalid."; return false; }
+        reason = target.DisplayName; return true;
+    }
+
+    // Triangle inequality bounds the camera-to-contact distance for every point
+    // within Force range of the kitten. Final owner-to-contact checks stay in the
+    // unified picker; this never widens the actual capture range or bubble safety.
+    internal static bool TryPickRange(double3 ownerRelativeRayOrigin, out float maximumDistance)
+    {
+        maximumDistance = 0;
+        if (!ForceMath.Finite(ownerRelativeRayOrigin)) return false;
+        double distance = ownerRelativeRayOrigin.Length() + ForceTargeting.MaximumRange;
+        if (!double.IsFinite(distance) || distance > float.MaxValue) return false;
+        maximumDistance = (float)distance;
+        // Float conversion must not shorten a conservative distance bound.
+        if (maximumDistance < distance) maximumDistance = float.BitIncrement(maximumDistance);
+        return float.IsFinite(maximumDistance);
     }
 
     private static bool TryTarget(PhysicsBubble bubble, CelestialSystem system, CollidableReference collidable, out ClutterForceTarget? target)

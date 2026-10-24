@@ -13,10 +13,11 @@ internal static class ForceControllerChecks
         RollbackContinuesAfterFailure();
         InvalidOwnerAndJoinFailure();
         MixedAngryEitherPrimary();
+        ConfigurableAngryRadius();
         CombinedLimitPreflight();
         MixedRollbackAndInvalidation();
         MixedImmediateOffsetAndLocalBubble();
-        Console.WriteLine($"Force controller checks passed ({_checks} assertions: rigid mixed groups, exact 2 m vessel surfaces, deduplication, combined 32 limit, once-only release/throw, rollback and world/key cleanup).");
+        Console.WriteLine($"Force controller checks passed ({_checks} assertions: rigid mixed groups, configurable exact surface radius, deduplication, combined 32 limit, once-only release/throw, rollback and world/key cleanup).");
     }
 
     private static (ForceController Controller, KittenEva Owner, Vehicle Target) Setup(string id)
@@ -121,11 +122,11 @@ internal static class ForceControllerChecks
                 ClutterForceTargets.Candidates = [primary, boundary, duplicate, outside];
                 var pick = clutterPrimary ? new ForcePick(primary, new(2, 0, 0)) : Pick(target);
                 var gathered = new List<ForceTarget>();
-                Check(ForceTargeting.Gather(owner, pick, true, gathered, out _), "mixed native/vessel query succeeds for either primary type");
+                Check(ForceTargeting.Gather(owner, pick, true, gathered, out _, 2), "mixed native/vessel query succeeds for either primary type");
                 Check(gathered.Count == 4 && gathered.Count(t => t.Vehicle != null) == 2
                     && gathered.Count(t => t.Clutter != null) == 2,
                     "Angry primary of either type includes both kinds through exactly 2 m and excludes 2.001 m");
-                Check(controller.Capture(owner, pick, true) && controller.CapturedCount == 4,
+                Check(controller.Capture(owner, pick, true, 2) && controller.CapturedCount == 4,
                     "mixed capture owns the combined deduplicated group");
                 Check(primary.Captures == 1 && boundary.Captures == 1 && duplicate.Captures == 0 && outside.Captures == 0,
                     "same native key is promoted once and out-of-radius clutter remains untouched");
@@ -154,6 +155,38 @@ internal static class ForceControllerChecks
                 Check(controller.Capture(owner, clutterPrimary ? new ForcePick(primary, primary.State.Position) : Pick(target), false)
                     && controller.CapturedCount == 1, "ordinary Force captures only the selected type");
                 controller.Release(false);
+            }
+        }
+    }
+
+    private static void ConfigurableAngryRadius()
+    {
+        Check(ForceMath.DefaultAngryRadius == 10, "Angry Force defaults to a ten metre capture radius");
+        foreach (double radius in new[] { 1.0, 10, 50 })
+        foreach (bool clutterPrimary in new[] { false, true })
+        {
+            var (controller, owner, target) = Setup("radius-" + radius + "-" + clutterPrimary);
+            using (controller)
+            {
+                var boundaryVessel = new Vehicle(owner.System, owner.Parent, "boundary", new(2 + radius, 0, 0), double3.Zero);
+                var outsideVessel = new Vehicle(owner.System, owner.Parent, "outside", new(2 + radius + .001, 0, 0), double3.Zero);
+                var primary = new ClutterForceTarget(owner, "primary", new(2, 0, 0), double3.Zero);
+                var boundary = new ClutterForceTarget(owner, "boundary-rock", new(2, radius, 0), double3.Zero);
+                var outside = new ClutterForceTarget(owner, "outside-rock", new(2, radius + .001, 0), double3.Zero);
+                ClutterForceTargets.Candidates = [primary, boundary, outside];
+                var pick = clutterPrimary ? new ForcePick(primary, new(2, 0, 0)) : Pick(target);
+                bool captured = radius == 10 ? controller.Capture(owner, pick, true)
+                    : controller.Capture(owner, pick, true, radius);
+                Check(captured && controller.CapturedCount == 4 && !boundaryVessel.HasPhysicsBubble
+                    && boundary.Captures == 1 && outsideVessel.HasPhysicsBubble && outside.Captures == 0,
+                    $"radius {radius} m includes the vessel/clutter boundary and excludes surfaces .001 m beyond it for either primary");
+                controller.Release(false);
+                foreach (double invalid in new[] { .999, 50.001, double.NaN, double.PositiveInfinity })
+                {
+                    int writes = target.PlanWrites, promotions = primary.Captures;
+                    Check(!controller.Capture(owner, pick, true, invalid) && target.PlanWrites == writes
+                        && primary.Captures == promotions, "invalid radius rejects the query before any source mutation");
+                }
             }
         }
     }

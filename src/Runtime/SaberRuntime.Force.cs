@@ -25,8 +25,10 @@ internal sealed partial class SaberRuntime
     private ForceQuery? _forceQuery;
     private string _forceStatus = "";
     private enum ForceAction { Capture, Release, Throw }
-    private readonly record struct ForceRequest(KittenEva Owner, ForceAction Action, ForcePick? Target = null, bool Angry = false);
-    private readonly record struct ForceQuery(KittenEva Owner, ForcePickRay Ray, bool Capture, bool Angry);
+    private readonly record struct ForceRequest(KittenEva Owner, ForceAction Action, ForcePick? Target = null,
+        bool Angry = false, double AngryRadius = 10);
+    private readonly record struct ForceQuery(KittenEva Owner, ForcePickRay Ray, bool Capture, bool Angry,
+        double AngryRadius, double ClutterTolerance = .2);
 
     internal bool ForceHolding => !_forceDisposed && _force.HasCapture;
     internal KittenEva? ForceOwner => !_forceDisposed ? _force.Owner : null;
@@ -62,7 +64,7 @@ internal sealed partial class SaberRuntime
                 }
                 if (request.Action == ForceAction.Capture && request.Target is { } pick)
                 {
-                    if (_force.Capture(request.Owner, pick, request.Angry))
+                    if (_force.Capture(request.Owner, pick, request.Angry, request.AngryRadius))
                     {
                         _forceDrag.Reset(); _forceMovePending = false; _forceMoveOwner = null;
                     }
@@ -93,18 +95,18 @@ internal sealed partial class SaberRuntime
     {
         var query = _forceQuery;
         _forceQuery = null;
-        if (query is not { } pending || !ForcePicking || !ForceCanUse || KittenColorPickerVisible
+        if (query is not { } pending || !ForcePicking || !ForceCanUse || KittenColorPickerContainsPointer(ImGui.GetIO().MousePos)
             || ImGui.GetIO().AppFocusLost || Program.IsModalOpen() || !ReferenceEquals(pending.Owner, _owner)
             || !ReferenceEquals(_forcePickOwner, _owner)) return;
         try
         {
-            ForceTargeting.TryPick(pending.Owner, pending.Ray, out _forceHover, out var reason);
+            ForceTargeting.TryPick(pending.Owner, pending.Ray, out _forceHover, out var reason, pending.ClutterTolerance);
             _forceStatus = _forceHover != null
-                ? $"Click to hold {_forceHover.DisplayName}." + (pending.Angry ? " Includes nearby objects within 2 m of the hit." : "")
+                ? $"Click to hold {_forceHover.DisplayName}." + (pending.Angry ? $" Includes nearby objects within {pending.AngryRadius:0.#} m of the hit." : "")
                 : reason;
             if (pending.Capture && _forceHover != null && _forceRequests.Count < 32)
             {
-                _forceRequests.Enqueue(new(pending.Owner, ForceAction.Capture, _forceHover, pending.Angry));
+                _forceRequests.Enqueue(new(pending.Owner, ForceAction.Capture, _forceHover, pending.Angry, pending.AngryRadius));
                 _forceStatus = "Capturing " + _forceHover.DisplayName + "...";
                 CancelForcePicker();
             }
@@ -142,13 +144,13 @@ internal sealed partial class SaberRuntime
     private void UpdateForceFrameCore()
     {
         UpdateForceVisibility();
-        if (!ForcePicking || !ForceCanUse || KittenColorPickerVisible) return;
+        if (!ForcePicking || !ForceCanUse) return;
         var io = ImGui.GetIO();
         if (io.AppFocusLost) { ResetForceGestures(); return; }
         if (_forceQuery is { Capture: true }) return;
         var pointer = _forceClickPending ? _forceClickPointer : io.MousePos;
         if ((!_forceClickPending && (io.WantCaptureMouse || !CursorTarget.IsHitTestViewport(Program.MainViewport)))
-            || io.WantTextInput || Program.IsModalOpen()
+            || io.WantTextInput || Program.IsModalOpen() || KittenColorPickerContainsPointer(pointer)
             || (_overlayLayoutAvailable && _overlayLayout.Hit(pointer) != SaberOverlayHit.None)
             || (_forceLayoutAvailable && _forceLayout.Hit(pointer) != ForceOverlayHit.None))
         { _forceHover = null; _forceClickPending = false; _forceQuery = null; return; }
@@ -163,7 +165,8 @@ internal sealed partial class SaberRuntime
         ray.Direction = double3.NormalizeOrZero(ray.Direction);
         if (ForceTargeting.TrySnapshotRay(_owner!, ray, out var snapshot))
         {
-            _forceQuery = new(_owner!, snapshot, _forceClickPending, _angryForce);
+            _forceQuery = new(_owner!, snapshot, _forceClickPending, _angryForce, _settings.AngryForceRadius,
+                _settings.ClutterPickTolerance);
         }
         else { _forceQuery = null; _forceHover = null; }
         _forceClickPending = false;
@@ -175,8 +178,8 @@ internal sealed partial class SaberRuntime
         if (_selectingSlice) Queue(Command.CancelSlice);
         _forcePickOwner = _owner; _angryForce = angry; _selectingForce = true;
         _forceHover = null; _forceClickPending = false; _forceQuery = null; _forceNextHoverTime = 0;
-        _forceStatus = angry ? "Angry Force: select a target and objects within 2 m of the hit. Right-click or Esc cancels."
-            : "Force: point at a vessel, debris or nearby rock and click. Right-click or Esc cancels.";
+        _forceStatus = angry ? $"Angry Force: select a target and objects within {_settings.AngryForceRadius:0.#} m of the hit. Right-click or Esc cancels."
+            : "Force: point at a vessel, debris, rock or tree trunk and click. Right-click or Esc cancels.";
     }
 
     private void CancelForcePicker()
@@ -193,6 +196,16 @@ internal sealed partial class SaberRuntime
         // Retain a final drag offset until the settled handoff processes the release.
     }
 
+    private void ToggleForcePicker(bool angry)
+    {
+        if (ForcePicking && _angryForce == angry)
+        {
+            CancelForcePicker();
+            _forceStatus = "Force selection cancelled.";
+        }
+        else BeginForcePicker(angry);
+    }
+
     private bool HandleForceOverlayPress(ForceOverlayHit hit, float2 pointer)
     {
         if (hit == ForceOverlayHit.None) return false;
@@ -201,11 +214,11 @@ internal sealed partial class SaberRuntime
         {
             case ForceOverlayHit.Force:
                 if (_force.HasCapture) QueueForceAction(ForceAction.Release);
-                else BeginForcePicker(false);
+                else ToggleForcePicker(false);
                 break;
             case ForceOverlayHit.AngryForce:
                 if (_force.HasCapture) QueueForceAction(ForceAction.Throw);
-                else BeginForcePicker(true);
+                else ToggleForcePicker(true);
                 break;
             case ForceOverlayHit.Move:
                 if (!_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)) break;
@@ -231,13 +244,30 @@ internal sealed partial class SaberRuntime
         _forceMovePending = true;
     }
 
+    // GLFW input only updates the pending body-frame offset. The settled handoff
+    // applies it to every captured vessel and native clutter body together.
+    private bool ScrollForcePointer(double ticks)
+    {
+        if (!ForceCanUse || !_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)) return false;
+        var bodyToEgo = double4x4.CreateFromQuaternion(_owner!.Body2Ego);
+        if (!double4x4.Invert(bodyToEgo, out var egoToBody)) return false;
+        double3 current = _forceMovePending && ReferenceEquals(_forceMoveOwner, _owner)
+            ? _forceMoveOffset : _force.GroupOffsetBody;
+        var forward = double3.TransformNormal(Program.MainViewport.GetCamera().GetForwardEcl(), egoToBody);
+        if (!_forceDrag.Scroll(ticks, current, forward)) return false;
+        _forceMoveOwner = _owner;
+        _forceMoveOffset = _forceDrag.Offset;
+        _forceMovePending = true;
+        return true;
+    }
+
     private bool HandleForcePickerPress(GlfwMouseButton button, float2 pointer)
     {
         if (!ForcePicking) return false;
         if (button == GlfwMouseButton.Right) { CancelForcePicker(); return true; }
         if (button != GlfwMouseButton.Left || !ForceCanUse) return true;
         var io = ImGui.GetIO();
-        if (io.WantCaptureMouse || io.WantTextInput || Program.IsModalOpen()
+        if (io.WantCaptureMouse || io.WantTextInput || Program.IsModalOpen() || KittenColorPickerContainsPointer(pointer)
             || !CursorTarget.IsHitTestViewport(Program.MainViewport)) return true;
         _forceClickPointer = pointer;
         _forceClickPending = true;
@@ -253,7 +283,7 @@ internal sealed partial class SaberRuntime
             return true;
         }
         var io = ImGui.GetIO();
-        if (!ForcePicking || KittenColorPickerVisible || io.WantTextInput || io.WantCaptureKeyboard || Program.IsModalOpen()) return false;
+        if (!ForcePicking || KittenColorPickerContainsPointer(io.MousePos) || io.WantTextInput || io.WantCaptureKeyboard || Program.IsModalOpen()) return false;
         if (action != GlfwKeyAction.Release) { _forceEscapeHeld = true; CancelForcePicker(); }
         return true;
     }
@@ -296,12 +326,17 @@ internal sealed partial class SaberRuntime
         var white = new ImColor8(225, 245, 255, 255);
         var muted = new ImColor8(130, 155, 175, 255);
         var color = ForceCanUse ? white : muted;
-        draw.AddCircleFilled(layout.ForceCenter, layout.ButtonRadius, new ImColor8(15, 80, 130, 128), 48);
-        draw.AddCircleFilled(layout.AngryCenter, layout.ButtonRadius, new ImColor8(135, 30, 35, 128), 48);
-        draw.AddCircle(layout.ForceCenter, layout.ButtonRadius, color, 48, 1);
-        draw.AddCircle(layout.AngryCenter, layout.ButtonRadius, color, 48, 1);
-        CenterOverlayText(draw, layout.ForceCenter, color, ForceHolding ? "RELEASE" : "FORCE", layout.ButtonRadius * 1.75f);
+        bool forcePicking = !ForceHolding && ForcePicking && !_angryForce;
+        bool angryPicking = !ForceHolding && ForcePicking && _angryForce;
+        draw.AddCircleFilled(layout.ForceCenter, layout.ButtonRadius,
+            forcePicking ? new ImColor8(30, 125, 190, 210) : new ImColor8(15, 80, 130, 128), 48);
+        draw.AddCircleFilled(layout.AngryCenter, layout.ButtonRadius,
+            angryPicking ? new ImColor8(190, 45, 50, 210) : new ImColor8(135, 30, 35, 128), 48);
+        draw.AddCircle(layout.ForceCenter, layout.ButtonRadius, color, 48, forcePicking ? Math.Max(2, 3 * layout.Scale) : 1);
+        draw.AddCircle(layout.AngryCenter, layout.ButtonRadius, color, 48, angryPicking ? Math.Max(2, 3 * layout.Scale) : 1);
+        CenterOverlayText(draw, layout.ForceCenter, color, ForceHolding ? "RELEASE" : forcePicking ? "CANCEL" : "FORCE", layout.ButtonRadius * 1.75f);
         if (ForceHolding) CenterOverlayText(draw, layout.AngryCenter, color, "THROW", layout.ButtonRadius * 1.75f);
+        else if (angryPicking) CenterOverlayText(draw, layout.AngryCenter, color, "CANCEL", layout.ButtonRadius * 1.75f);
         else
         {
             float labelFont = Math.Min(ImGui.GetFontSize(), 12 * layout.Scale);
@@ -321,11 +356,11 @@ internal sealed partial class SaberRuntime
             draw.AddCircle(layout.MoveCenter + _forceDrag.PointerOffset * (layout.MoveRadius * .65f),
                 Math.Max(2, 5 * layout.Scale), white, 16, 1);
         string status = ForceHolding ? $"Holding {_force.CapturedCount} object(s).\n" + _force.Status : _forceStatus;
-        if (string.IsNullOrEmpty(status)) status = "Force: select one object.\nAngry Force: include objects within 2 m.";
+        if (string.IsNullOrEmpty(status)) status = $"Force: select one object.\nAngry Force: include objects within {_settings.AngryForceRadius:0.#} m.";
         draw.PushClipRect(layout.StatusMin, layout.StatusMax, true);
         try { draw.AddText(ImGui.GetFont(), font, layout.StatusMin, color, status, layout.StatusMax.X - layout.StatusMin.X); }
         finally { draw.PopClipRect(); }
-        if (!KittenColorPickerVisible && !SettingsContainsPointer(ImGui.GetIO().MousePos)
+        if (!KittenColorPickerContainsPointer(ImGui.GetIO().MousePos) && !SettingsContainsPointer(ImGui.GetIO().MousePos)
             && layout.Hit(ImGui.GetIO().MousePos) == ForceOverlayHit.Move)
             ImGui.SetTooltip("Hold and drag to move in the camera plane. Wheel up brings objects closer; down moves them away. Release keeps their position. Re-grab to move farther.");
         if (_forceHover != null && ForcePicking && Program.GetMainCamera() is { } camera
@@ -341,7 +376,7 @@ internal sealed partial class SaberRuntime
             draw.AddCircle(position, 19, new ImColor8(0, 0, 0, 220), 48, 5);
             draw.AddCircle(position, 19, green, 48, 2);
             draw.AddCircleFilled(position, 3, green, 16);
-            string label = _forceHover.DisplayName + (_angryForce ? " + objects within 2 m" : " — click to hold");
+            string label = _forceHover.DisplayName + (_angryForce ? $" + objects within {_settings.AngryForceRadius:0.#} m" : " — click to hold");
             float wrap = Math.Max(100, Math.Min(320, ui.Size.X - 24));
             var labelSize = ImGui.CalcTextSize(label, false, wrap);
             var labelPosition = new float2(Math.Clamp(position.X + 25, ui.Pos.X + 8,

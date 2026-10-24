@@ -33,6 +33,9 @@ internal static class ForcePoseMath
             || !SomersaultPoseMath.Finite(wrist)) return false;
         float reach = ((elbow - shoulder).Length() + (wrist - elbow).Length()) * .88f;
         float3 target = shoulder + ReachDirection(aim) * reach;
+        // Lower the raised hand halfway towards its native sampled height, while
+        // retaining its outward/forward reach and the measured-length arm solve.
+        target.Y = (target.Y + wrist.Y) * .5f;
         // The saber solver's elbow hint points right. Mirror its inputs and outputs
         // to obtain the same measured-length solve with a left/outward elbow hint.
         if (!SaberPoseMath.TrySolveArm(Mirror(shoulder), Mirror(elbow), Mirror(wrist), Mirror(target),

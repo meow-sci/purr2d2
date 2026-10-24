@@ -10,8 +10,8 @@ internal readonly record struct SaberVfxTuning(float ShimmerAmount, float Shimme
     float ArcFrequency, float ArcAmplitude, float ArcBrightness, float ArcWidth)
 {
     internal static SaberVfxTuning Default => new(1, 1, 3, 1, 1, 1, 1);
-    internal static SaberVfxTuning LightDefault => new(.5f, .6f, 1, .35f, .5f, .65f, .8f);
-    internal static SaberVfxTuning DarkDefault => new(1.5f, 1.5f, 3, 1.5f, 1.3f, 1.1f, 1);
+    internal static SaberVfxTuning LightDefault => new(1.5f, 1.5f, 8, 3, .8f, 2.5f, 1.75f);
+    internal static SaberVfxTuning DarkDefault => new(1.5f, 1.5f, 12, 6, 2.5f, 4, 3);
 
     internal static SaberVfxTuning FromEffects(SaberEffectSettings effects, SaberType type) =>
         new SaberVfxTuning(effects.ShimmerAmount, effects.ShimmerSpeed, effects.ArcCount,
@@ -24,10 +24,10 @@ internal readonly record struct SaberVfxTuning(float ShimmerAmount, float Shimme
         SaberVfx.Clamp(ShimmerAmount, 0, 4, fallback.ShimmerAmount),
         SaberVfx.Clamp(ShimmerSpeed, 0, 4, fallback.ShimmerSpeed),
         Math.Clamp(ArcCount, 0, SaberSettings.MaximumArcCount),
-        SaberVfx.Clamp(ArcFrequency, .1f, 4, fallback.ArcFrequency),
+        SaberVfx.Clamp(ArcFrequency, .1f, SaberSettings.MaximumArcFrequency, fallback.ArcFrequency),
         SaberVfx.Clamp(ArcAmplitude, 0, 3, fallback.ArcAmplitude),
-        SaberVfx.Clamp(ArcBrightness, 0, 4, fallback.ArcBrightness),
-        SaberVfx.Clamp(ArcWidth, .25f, 3, fallback.ArcWidth));
+        SaberVfx.Clamp(ArcBrightness, 0, SaberSettings.MaximumArcBrightness, fallback.ArcBrightness),
+        SaberVfx.Clamp(ArcWidth, .25f, SaberSettings.MaximumArcWidth, fallback.ArcWidth));
 }
 
 /// <summary>Continuous rate-scaled phases; changing a setting never multiplies an already wrapped clock.</summary>
@@ -46,7 +46,7 @@ internal struct SaberVfxClock
     {
         if (!double.IsFinite(now) || now < 0) { _anchored = false; return; }
         shimmerSpeed = SaberVfx.Clamp(shimmerSpeed, 0, 4, 1);
-        arcFrequency = SaberVfx.Clamp(arcFrequency, .1f, 4, 1);
+        arcFrequency = SaberVfx.Clamp(arcFrequency, .1f, SaberSettings.MaximumArcFrequency, 1);
         if (!_anchored)
         {
             _anchored = true;

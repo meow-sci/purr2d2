@@ -52,14 +52,14 @@ internal sealed partial class ForceController : IDisposable
         }
     }
 
-    internal bool Capture(KittenEva owner, ForcePick target, bool angry)
+    internal bool Capture(KittenEva owner, ForcePick target, bool angry, double angryRadius = ForceMath.DefaultAngryRadius)
     {
         if (!_available || _disposed) { Status = "Force physics is unavailable."; return false; }
         if (HasCapture) { Status = "Release the held objects before another capture."; return false; }
         var candidates = new List<ForceTarget>(MaximumCaptured);
         try
         {
-            if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal)) { Status = refusal; return false; }
+            if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal, angryRadius)) { Status = refusal; return false; }
             if (candidates.Count is < 1 or > MaximumCaptured)
             { Status = "The Force target group exceeds the capture limit; nothing was captured."; return false; }
         }

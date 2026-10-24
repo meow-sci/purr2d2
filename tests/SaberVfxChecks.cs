@@ -79,37 +79,40 @@ internal static class SaberVfxChecks
             "render snapshots retain each shared type profile's distinct defaults");
         var lightDetail = SaberVfx.Detail(200, 8, 2, 1.4f, light);
         var darkDetail = SaberVfx.Detail(200, 8, 2, 1.4f, dark);
-        Check(lightDetail.ArcCount == 1 && darkDetail.ArcCount == 3
-            && lightDetail.ShimmerStrength == .06f * .5f && darkDetail.ShimmerStrength == .06f * 1.5f,
+        Check(lightDetail.ArcCount == 8 && darkDetail.ArcCount == 12
+            && lightDetail.ShimmerStrength == .06f * 1.5f && darkDetail.ShimmerStrength == .06f * 1.5f,
             "Light's calmer profile and Dark's stronger profile reach the detail policy independently");
-        settings.LightEffects.ArcCount = 8;
+        settings.LightEffects.ArcCount = 20;
         settings.LightEffects.ShimmerAmount = 4;
         var strong = SaberVfxTuning.FromEffects(settings.LightEffects, SaberType.Light);
-        Check(light.ArcCount == 1 && strong.ArcCount == 8 && dark.ArcCount == 3,
+        Check(light.ArcCount == 8 && strong.ArcCount == 20 && dark.ArcCount == 12,
             "immutable frame snapshots do not change underneath another type or viewport");
         var strongest = SaberVfx.Detail(200, 8, 2, 1.4f, strong);
-        Check(strongest.ArcCount == 8 && strongest.Segments == 10
-            && strongest.ArcCount * 2 * (strongest.Segments + 1) == 176,
-            "maximum effects stay within eight ribbon instances and 176 procedural vertices");
+        Check(strongest.ArcCount == 20 && strongest.Segments == 10
+            && strongest.ArcCount * 2 * (strongest.Segments + 1) == 440,
+            "maximum effects stay within twenty ribbon instances and 440 procedural vertices");
         var invalid = new SaberVfxTuning(float.NaN, -1, int.MaxValue, float.PositiveInfinity,
             -1, float.MaxValue, 0).Clamped();
-        Check(invalid.ShimmerAmount == 1 && invalid.ShimmerSpeed == 0 && invalid.ArcCount == 8
+        Check(invalid.ShimmerAmount == 1 && invalid.ShimmerSpeed == 0 && invalid.ArcCount == 20
             && invalid.ArcFrequency == 1 && invalid.ArcAmplitude == 0
-            && invalid.ArcBrightness == 4 && invalid.ArcWidth == .25f,
+            && invalid.ArcBrightness == 6 && invalid.ArcWidth == .25f,
             "render snapshots independently bound unvalidated settings before shader use");
-        foreach (int count in new[] { -99, 0, 1, 3, 8, int.MaxValue })
+        var maximum = new SaberVfxTuning(4, 4, 20, 10, 3, 6, 4).Clamped();
+        Check(maximum.ArcCount == 20 && maximum.ArcFrequency == 10 && maximum.ArcBrightness == 6 && maximum.ArcWidth == 4,
+            "render snapshots retain the expanded frequency, brightness and width limits");
+        foreach (int count in new[] { -99, 0, 1, 8, 12, 20, int.MaxValue })
         foreach (float pixels in new[] { 0, 24, 80, 180, float.MaxValue })
         foreach (float radius in new[] { 0, 1, 2, 6, float.MaxValue })
         foreach (double distance in new[] { 0, 10, 40, double.MaxValue })
         foreach (float length in new[] { .001f, .12f, .18f, 1.4f, 12f })
         {
-            var tuning = new SaberVfxTuning(4, 4, count, 4, 3, 4, 3);
+            var tuning = new SaberVfxTuning(4, 4, count, 10, 3, 6, 4);
             var detail = SaberVfx.Detail(pixels, radius, distance, length, tuning);
-            Check(detail.ArcCount is >= 0 and <= 8 && detail.ArcVisibility is >= 0 and <= 1
-                && detail.ShimmerStrength is >= 0 and <= .24f && detail.ArcLevel is >= 0 and <= 8,
+            Check(detail.ArcCount is >= 0 and <= 20 && detail.ArcVisibility is >= 0 and <= 1
+                && detail.ShimmerStrength is >= 0 and <= .24f && detail.ArcLevel is >= 0 and <= 20,
                 "all supported tuning, footprints, ranges and lengths produce finite bounded detail");
             Check(detail.ArcCount == 0 ? detail.Segments == 0
-                : detail.Segments is >= 6 and <= 10 && detail.ArcCount * 2 * (detail.Segments + 1) <= 176,
+                : detail.Segments is >= 6 and <= 10 && detail.ArcCount * 2 * (detail.Segments + 1) <= 440,
                 "tuning cannot exceed the GPU arc vertex budget");
         }
         foreach (var disabled in new[] { dark with { ArcCount = 0 }, dark with { ArcBrightness = 0 } })
@@ -225,6 +228,12 @@ internal static class SaberVfxChecks
             "a world-clock reset reanchors without rewinding visible animation");
         clock.Advance(.125, 4, 4);
         Check(Near(PhaseDelta(shimmer, clock.ShimmerTime), .5f), "time after a world-clock reset advances from the preserved phase");
+
+        var fastest = new SaberVfxClock();
+        fastest.Advance(0, 4, 10);
+        fastest.Advance(.125, 4, 10);
+        Check(Near(fastest.ShimmerTime, .5f) && Near(fastest.BurstTime, 1.25f),
+            "the maximum arc frequency reaches the shader clock without a lower internal clamp");
 
         foreach (float rate in new[] { .1f, .35f, .6f, 1.5f, 4 })
         foreach (double uptime in new[] { 1e9, 1e12, double.MaxValue })

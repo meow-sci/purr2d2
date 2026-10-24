@@ -92,7 +92,7 @@ internal sealed partial class SaberRuntime
         sharedDark.ArcCount = 7;
         Check(ReferenceEquals(sharedDark, runtime._settings.EffectsFor(runtime.SaberTypeFor(second)))
             && runtime._settings.EffectsFor(runtime.SaberTypeFor(second)).ArcCount == 7
-            && runtime._settings.LightEffects.ArcCount == 1,
+            && runtime._settings.LightEffects.ArcCount == 8,
             "two Dark kittens resolve the same editable profile without changing Light's profile");
         runtime.SetKittenSaberType(second, SaberType.Light);
         Program.ControlledVehicle = second;

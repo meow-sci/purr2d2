@@ -198,6 +198,12 @@ public sealed unsafe class SaberRenderer : IDisposable
         var fragment = ModLibrary.Get<ShaderReference>(light ? "Purr2D2_Light_Frag" : "Purr2D2_Glow_Frag");
         if (vertex?.Shader is not { } vert || fragment?.Shader is not { } frag)
             throw new InvalidOperationException("Purr2D2 glow shader assets did not load");
+        var blendAttachment = SaberBlendState.CreateAttachment();
+        var blendState = new VkPipelineColorBlendStateCreateInfo
+        {
+            AttachmentCount = 1,
+            Attachments = &blendAttachment,
+        };
         Span<VkPipelineShaderStageCreateInfo> stages = stackalloc VkPipelineShaderStageCreateInfo[2];
         stages[0] = new VkPipelineShaderStageCreateInfo
         {
@@ -220,7 +226,7 @@ public sealed unsafe class SaberRenderer : IDisposable
                 InputAssemblyState = Presets.InputAssembly.TriangleStrip,
                 RasterizationState = Presets.Rasterization.Fill.CullNone,
                 DepthStencilState = RenderingPresets.ReverseZDepthStencil.DepthTestNoWrite,
-                ColorBlendState = RenderingPresets.BlendState.BlendAdditive,
+                ColorBlendState = &blendState,
             };
             // Each view can use a different sample count. Cache by formats+samples, never target extent.
             target.SetupGraphicsPipeline(ref info);

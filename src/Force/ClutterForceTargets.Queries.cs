@@ -8,6 +8,70 @@ namespace Purr2D2.Force;
 
 internal static partial class ClutterForceTargets
 {
+    internal interface IClutterPickFilter { bool Accept(CollidableReference collidable); }
+
+    private readonly struct NativeClutterPickFilter(BubbleClutterStatics native) : IClutterPickFilter
+    {
+        public bool Accept(CollidableReference collidable) => collidable.Mobility == CollidableMobility.Static
+            ? native.IsClutterStatic(collidable.StaticHandle) : native.IsClutterBody(collidable.BodyHandle);
+    }
+
+    // The native simulation and this exact production handler are exercised by
+    // host checks using a value-type filter, without constructing a game/world.
+    internal struct NearPickQuery<TFilter>(Simulation simulation, TFilter filter, Vector3 origin,
+        Vector3 direction, float tolerance) : ISweepHitHandler where TFilter : struct, IClutterPickFilter
+    {
+        internal CollidableReference? Hit;
+        internal Vector3 Contact;
+        internal float Time = float.PositiveInfinity;
+        internal bool Exceeded, Unsupported, OriginOverlap;
+        private int _candidates, _children, _shapeChildren;
+
+        public bool AllowTest(CollidableReference collidable)
+        {
+            if (Exceeded || Unsupported || OriginOverlap || !filter.Accept(collidable)) return false;
+            if (++_candidates > MaximumCandidates) { Exceeded = true; return false; }
+            var shape = collidable.Mobility == CollidableMobility.Static ? simulation.Statics[collidable.StaticHandle].Shape
+                : simulation.Bodies[collidable.BodyHandle].Collidable.Shape;
+            return Supports(shape, 0);
+        }
+        public bool AllowTest(CollidableReference collidable, int childIndex)
+        {
+            if (++_children > MaximumChildTests) Exceeded = true;
+            return !Exceeded && !Unsupported && !OriginOverlap;
+        }
+        private bool Supports(TypedIndex shape, int depth)
+        {
+            if (depth > 8 || ++_shapeChildren > MaximumChildTests) { Exceeded = true; return false; }
+            if (simulation.NarrowPhase.SweepTaskRegistry.GetTask(Sphere.TypeId, shape.Type) == null)
+            { Unsupported = true; return false; }
+            if (shape.Type == Compound.TypeId || shape.Type == BigCompound.TypeId)
+            {
+                var children = shape.Type == Compound.TypeId ? simulation.Shapes.GetShape<Compound>(shape.Index).Children
+                    : simulation.Shapes.GetShape<BigCompound>(shape.Index).Children;
+                for (int i = 0; i < children.Length; i++) if (!Supports(children[i].ShapeIndex, depth + 1)) return false;
+                return true;
+            }
+            if (shape.Type == Sphere.TypeId || shape.Type == Box.TypeId || shape.Type == Capsule.TypeId
+                || shape.Type == Cylinder.TypeId || shape.Type == ConvexHull.TypeId) return true;
+            Unsupported = true; return false;
+        }
+        public void OnHit(ref float maximumT, float t, Vector3 hitLocation, Vector3 hitNormal, CollidableReference collidable)
+        {
+            if (Exceeded || Unsupported || OriginOverlap) return;
+            // A zero-time overlap provides no reliable unique surface anchor.
+            if (!float.IsFinite(t) || t <= 0 || !Finite(hitLocation) || !Finite(hitNormal))
+            { Unsupported = true; return; }
+            if (t >= Time) return;
+            if ((hitLocation - (origin + direction * t)).LengthSquared() > (tolerance + .002f) * (tolerance + .002f))
+            { Unsupported = true; return; }
+            Hit = collidable; Contact = hitLocation; Time = t; maximumT = t;
+        }
+        public void OnHitAtZeroT(ref float maximumT, CollidableReference collidable)
+        { OriginOverlap = true; Hit = null; maximumT = 0; }
+        private static bool Finite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+    }
+
     private struct PickQuery(PhysicsBubble bubble, CelestialSystem system) : IRayHitHandler
     {
         internal ClutterForceTarget? Target;

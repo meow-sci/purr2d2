@@ -6,6 +6,7 @@ using Brutal.GltfApi;
 using Brutal.VulkanApi;
 using Brutal.VulkanApi.Abstractions;
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Slicing;
 
 namespace Purr2D2.Rendering;
@@ -35,16 +36,16 @@ internal static partial class RuntimeFragmentAssets
             cancel.ThrowIfCancellationRequested();
             var fragment = data.Fragments[i];
             string glbPath = Path.Combine(directory, fragment.Id + ".glb"), xmlPath = Path.Combine(directory, fragment.Id + ".xml");
-            long existing = 0; int entries = 0;
-            foreach (var path in Directory.EnumerateFiles(directory))
+            lock (StorageGate)
             {
-                existing = checked(existing + new FileInfo(path).Length);
-                if (Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase)) entries++;
+                RefreshDiskUsage(directory);
+                long additional = (File.Exists(glbPath) ? 0 : fragment.Glb.Length) + (File.Exists(xmlPath) ? 0 : fragment.Xml.Length);
+                if ((additional > 0 && _diskBytes + additional > Volatile.Read(ref _diskCapacity))
+                    || (!File.Exists(xmlPath) && _diskEntries >= Volatile.Read(ref _entryCapacity)))
+                    throw new InvalidDataException("Persistent slice asset budget is full. Increase the disk or entry limit in Settings; existing save assets are retained.");
+                try { WriteImmutable(glbPath, fragment.Glb); WriteImmutable(xmlPath, fragment.Xml); }
+                finally { RefreshDiskUsage(directory); }
             }
-            long additional = (File.Exists(glbPath) ? 0 : fragment.Glb.Length) + (File.Exists(xmlPath) ? 0 : fragment.Xml.Length);
-            if (existing + additional > DiskCapacity || (!File.Exists(xmlPath) && entries >= EntryCapacity))
-                throw new InvalidDataException("Persistent slice asset budget is full; existing save assets are retained.");
-            WriteImmutable(glbPath, fragment.Glb); WriteImmutable(xmlPath, fragment.Xml);
             var meshes = new MeshReference[fragment.MeshNames.Length];
             using (var gltf = new GltfLoader(glbPath))
                 for (int m = 0; m < meshes.Length; m++)
@@ -83,14 +84,18 @@ internal static partial class RuntimeFragmentAssets
         private StagingPool? _pending;
         private string? _registering;
         private DetachedSliceFragment? _nativePreparing;
-        private bool _cancelled;
+        private SliceMeshArena.Allocation? _allocation;
+        private bool _cancelled, _disposed;
         internal readonly List<PreparedPhysicsFragment> Fragments = new();
         internal bool Done { get; private set; }
         internal string? Error { get; private set; }
         internal string SlowestStep { get; private set; } = "none";
         internal double SlowestStepMs { get; private set; }
         private string _step = "asset setup";
-        internal UploadJob(LoadedSlice source) { _source = source; _steps = Prepare().GetEnumerator(); }
+        internal UploadJob(LoadedSlice source)
+        {
+            _source = source; _steps = Prepare().GetEnumerator(); _activeUploadJobs++;
+        }
         internal void Advance()
         {
             if (Done) return;
@@ -120,8 +125,9 @@ internal static partial class RuntimeFragmentAssets
         {
             foreach (var loaded in _source.Fragments)
             {
-                // Drain only a fragment whose registration/upload has already begun.
-                // Unstarted fragments and ephemeral native instances need no cancellation work.
+                // Published registration must drain to keep native IDs complete.
+                // Before publication, cancellation may abandon the reserved region
+                // after completing only its already-submitted GPU copies.
                 if (_cancelled) yield break;
                 var data = loaded.Data;
                 if (FailedPreparations.TryGetValue(data.Id, out var failed)) throw new InvalidOperationException(failed);
@@ -132,13 +138,13 @@ internal static partial class RuntimeFragmentAssets
                 {
                     uint vertexBytes = checked((uint)data.Uploads.Sum(u => (long)u.VertexBytes));
                     uint indexBytes = checked((uint)data.Uploads.Sum(u => (long)u.IndexBytes));
-                    if (vertexBytes > VertexCapacity - _vertexUsed || indexBytes > IndexCapacity - _indexUsed)
-                        throw new InvalidOperationException("Runtime slice mesh arena is full. Save and restart to reclaim it.");
-                    uint vertex = _vertexBase + _vertexUsed, index = _indexBase + _indexUsed;
-                    _vertexUsed += vertexBytes; _indexUsed += indexBytes;
+                    if (_arena == null || !_arena.TryAllocate(vertexBytes, indexBytes, out _allocation) || _allocation == null)
+                        throw new InvalidOperationException("Runtime slice mesh arena is full. Registered meshes remain reserved for save compatibility; increase the startup mesh limits in Settings and restart. Unpublished uploads can be reclaimed without a restart.");
+                    uint vertex = _vertexBase + _allocation.VertexOffset, index = _indexBase + _allocation.IndexOffset;
                     var regions = new List<UploadRegion>();
                     for (int i = 0; i < loaded.Meshes.Length; i++)
                     {
+                        if (_cancelled) yield break;
                         _step = "mesh binding";
                         var mesh = loaded.Meshes[i];
                         if (i < data.Uploads.Length)
@@ -157,13 +163,19 @@ internal static partial class RuntimeFragmentAssets
                     int region = 0, consumed = 0;
                     while (region < regions.Count)
                     {
+                        if (_cancelled) yield break;
                         _step = "GPU upload";
                         _pending = SubmitBatch(regions, ref region, ref consumed);
                         yield return 0;
                         while (!_pending.WaitFor(0)) yield return 0;
                         _pending.Dispose(); _pending = null; // Fence already signalled; Dispose cannot stall.
+                        if (_cancelled) yield break;
                     }
                     // Nothing becomes visible in the native registry before every upload completed.
+                    // From this point an interrupted registration can still leave native references;
+                    // the allocation must remain pinned even if the fragment never spawns.
+                    if (_cancelled) yield break;
+                    _arena.Publish(_allocation); _allocation = null;
                     _registering = data.Id;
                     foreach (var mesh in loaded.Meshes)
                     {
@@ -181,6 +193,7 @@ internal static partial class RuntimeFragmentAssets
                     _step = "bundle registration";
                     _mod!.Register(loaded.Bundle);
                     template = ModLibrary.Get<PartTemplate>(data.Id);
+                    _registeredTemplates++;
                     _registering = null; // A preflight failure can retry a completely registered template.
                 }
                 yield return 0;
@@ -223,9 +236,19 @@ internal static partial class RuntimeFragmentAssets
         // the background of subsequent frames so partially registered IDs remain reusable.
         public void Dispose()
         {
-            _steps.Dispose(); _pending?.Dispose(); _pending = null;
-            _nativePreparing?.Dispose(); _nativePreparing = null;
-            foreach (var fragment in Fragments) fragment.Native.Dispose();
+            if (_disposed) return;
+            _disposed = true;
+            try
+            {
+                _steps.Dispose();
+                // Native StagingPool.Dispose waits for submitted copies before returning.
+                // Never retire an unpublished range before that ownership boundary.
+                _pending?.Dispose(); _pending = null;
+                if (_allocation != null) { _arena!.RetireUnpublished(_allocation); _allocation = null; }
+                _nativePreparing?.Dispose(); _nativePreparing = null;
+                foreach (var fragment in Fragments) fragment.Native.Dispose();
+            }
+            finally { _activeUploadJobs--; }
         }
     }
 

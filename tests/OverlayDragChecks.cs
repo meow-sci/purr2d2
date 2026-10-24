@@ -124,8 +124,9 @@ internal static class OverlayDragChecks
             Check(MathF.Abs(layout.SwingRadius - 132 * layout.Scale) < 1e-4f
                 && MathF.Abs(layout.SliceRadius - 27 * layout.Scale) < 1e-4f
                 && layout.SliceCenter.X < layout.SwingCenter.X
-                && layout.SliceCenter.Y > layout.SwingCenter.Y + layout.SwingRadius,
-                "large swing circle has a smaller slice control below-left");
+                && layout.SliceCenter.Y > layout.SwingCenter.Y
+                && (layout.SliceCenter - layout.SwingCenter).Length() > layout.SwingRadius + layout.SliceRadius,
+                "slice takes the upper action position below-left without touching swing");
             Check(layout.Hit(layout.SwingCenter) == SaberOverlayHit.Swing
                 && layout.Hit(layout.SwingCenter + new float2(layout.SwingRadius * .9f)) == SaberOverlayHit.None
                 && layout.Hit(layout.SliceCenter) == SaberOverlayHit.Slice,
@@ -153,8 +154,9 @@ internal static class OverlayDragChecks
             Check(contained && separate && exactHits && layout.SomersaultRadius == layout.SliceRadius
                 && layout.IgniteRadius == layout.SliceRadius && layout.IgniteCenter.X < layout.SwingCenter.X
                 && layout.IgniteCenter.Y > layout.SwingCenter.Y
-                && layout.IgniteCenter.X < layout.SliceCenter.X && layout.IgniteCenter.Y < layout.SliceCenter.Y,
-                "seven separate circular hit regions fit; ignite and slice form a pair below-left of swing");
+                && layout.IgniteCenter.X > layout.SliceCenter.X && layout.IgniteCenter.Y > layout.SliceCenter.Y
+                && (layout.IgniteCenter - layout.SliceCenter).Length() < 64 * layout.Scale,
+                "seven separate circular hit regions fit; ignite tucks below and closer to slice");
             Check(layout.Hit((layout.SettingsMin + layout.SettingsMax) * .5f) == SaberOverlayHit.Settings
                 && layout.SettingsMin.Y > layout.ListBodyTop + layout.ListBodyHeight
                 && layout.SettingsMax.Y < layout.ListMax.Y && layout.SettingsMin.X > layout.ListMin.X
@@ -182,6 +184,10 @@ internal static class OverlayDragChecks
                 && layout.StatusMin.X >= origin.X && layout.StatusMax.X <= origin.X + size.X
                 && layout.StatusMax.Y <= origin.Y + size.Y && layout.StatusMax.Y - layout.StatusMin.Y >= 48 * layout.Scale - 1e-3f,
                 "forward/left/right/back form a diamond below swing/slice with a separate visible status area");
+            Check(MathF.Abs((layout.LeftCenter.Y - layout.SwingCenter.Y) / layout.Scale - 268) < 1e-3f
+                && MathF.Abs((layout.LeftCenter - layout.ForwardCenter).Length() / layout.Scale
+                    - (66 * MathF.Sqrt(2) - 27)) < 1e-3f,
+                "somersault buttons sit half a button lower and each neighbor moves half a button closer");
             var hidden = SaberOverlayLayout.Create(origin, size, font, 100, showSomersaultButtons: false);
             Check(hidden.Valid && !hidden.ShowSomersaultButtons && hidden.SwingCenter == layout.SwingCenter
                 && hidden.ListMax == layout.ListMax && hidden.StatusMin == layout.StatusMin
@@ -216,6 +222,60 @@ internal static class OverlayDragChecks
             && !SaberOverlayLayout.Create(float2.Zero, new(240, 220), float.NaN, 100).Valid
             && !SaberOverlayLayout.Create(float2.Zero, new(240, 220), 16, 100, float.NaN).Valid,
             "insufficient work area or nonfinite UI inputs cannot leave invisible controls");
+        LayoutOffsets();
+    }
+
+    private static void LayoutOffsets()
+    {
+        foreach (var size in new float2[] { new(1920, 1080), new(240, 220), new(420, 820), new(1920, 220) })
+        {
+            var origin = new float2(-400, -200);
+            const float inset = 30;
+            var layout = SaberOverlayLayout.Create(origin, size, 16, 40, inset);
+            Check(layout.WithControlsOffset(origin, size, float2.Zero, inset) == layout,
+                "zero saved offsets preserve the default action layout");
+            foreach (var offset in new float2[] { new(-1, -1), new(1, 1), new(-1, 1), new(1, -1), new(-100, 100) })
+            {
+                var moved = layout.WithControlsOffset(origin, size, offset, inset);
+                var delta = moved.SwingCenter - layout.SwingCenter;
+                Check(moved.Valid && moved.ControlsMin.X >= origin.X - 1e-3f
+                    && moved.ControlsMin.Y >= origin.Y + inset - 1e-3f
+                    && moved.ControlsMax.X <= origin.X + size.X + 1e-3f
+                    && moved.ControlsMax.Y <= origin.Y + size.Y + 1e-3f,
+                    "extreme action offsets clamp the whole group below the menu and inside compact viewports");
+                Check((moved.SliceCenter - layout.SliceCenter - delta).Length() < 1e-3f
+                    && (moved.IgniteCenter - layout.IgniteCenter - delta).Length() < 1e-3f
+                    && (moved.ForwardCenter - layout.ForwardCenter - delta).Length() < 1e-3f
+                    && (moved.BackwardCenter - layout.BackwardCenter - delta).Length() < 1e-3f
+                    && (moved.LeftCenter - layout.LeftCenter - delta).Length() < 1e-3f
+                    && (moved.RightCenter - layout.RightCenter - delta).Length() < 1e-3f
+                    && (moved.StatusMin - layout.StatusMin - delta).Length() < 1e-3f
+                    && (moved.StatusMax - layout.StatusMax - delta).Length() < 1e-3f
+                    && moved.SwingRadius == layout.SwingRadius && moved.Scale == layout.Scale,
+                    "saber, movement buttons and status translate rigidly without changing scale or spacing");
+                Check(moved.ListMin == layout.ListMin && moved.ListMax == layout.ListMax
+                    && moved.ListBodyTop == layout.ListBodyTop && moved.SettingsMin == layout.SettingsMin
+                    && moved.SettingsMax == layout.SettingsMax
+                    && moved.ColorSwatchMin(0, 0) == layout.ColorSwatchMin(0, 0),
+                    "moving action controls leaves the kitten list, swatches and Settings anchored");
+                Check(moved.Hit(moved.SwingCenter) == SaberOverlayHit.Swing
+                    && moved.Hit(moved.SliceCenter) == SaberOverlayHit.Slice
+                    && moved.Hit(moved.IgniteCenter) == SaberOverlayHit.Ignite
+                    && moved.Hit(moved.ForwardCenter) == SaberOverlayHit.SomersaultForward
+                    && moved.Hit(moved.BackwardCenter) == SaberOverlayHit.SomersaultBackward
+                    && moved.Hit(moved.LeftCenter) == SaberOverlayHit.SomersaultLeft
+                    && moved.Hit(moved.RightCenter) == SaberOverlayHit.SomersaultRight,
+                    "translated actions retain their drawn hit targets, including over the fixed kitten list");
+            }
+        }
+        var normal = SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2);
+        var custom = normal.WithControlsOffset(float2.Zero, new(1920, 1080), new(-.05f, .04f));
+        Check((custom.SwingCenter - normal.SwingCenter - new float2(-96, 43.2f)).Length() < 1e-3f,
+            "unclamped custom X and Y positions use viewport fractions");
+        Check(normal.WithControlsOffset(float2.Zero, new(1920, 1080), new(float.NaN, float.PositiveInfinity)) == normal
+            && !normal.WithControlsOffset(float2.Zero, new(100, 100), float2.Zero).Valid
+            && !normal.WithControlsOffset(float2.Zero, new(1920, 1080), float2.Zero, float.NaN).Valid,
+            "nonfinite offsets reset per axis and unusable work areas leave no invisible action targets");
     }
 
     private static void SomersaultPressOwnership()

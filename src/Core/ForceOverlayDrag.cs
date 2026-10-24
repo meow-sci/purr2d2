@@ -48,6 +48,20 @@ public sealed class ForceOverlayDrag
         UpdateOffset();
     }
 
+    /// <summary>Wheel depth also works over the idle move circle, without starting a drag.</summary>
+    public bool Scroll(double ticks, double3 currentOffset, double3 forwardBody)
+    {
+        if (!double.IsFinite(ticks) || ticks == 0 || !Finite(currentOffset)
+            || !TryUnit(forwardBody, out var forward)) return false;
+        if (Held) Scroll(ticks);
+        else
+        {
+            Offset = Clamp(Clamp(currentOffset) - forward * (Math.Clamp(ticks, -100, 100) * WheelStepMeters));
+            _baseline = Offset; _depth = 0; PointerOffset = float2.Zero;
+        }
+        return true;
+    }
+
     public void Release() => Held = false;
 
     public void Reset()

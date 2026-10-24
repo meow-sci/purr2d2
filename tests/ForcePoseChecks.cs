@@ -35,8 +35,10 @@ internal static class ForcePoseChecks
             Check(MathF.Abs((solvedElbow - shoulder).Length() - 13) < .001f
                 && MathF.Abs((solvedWrist - solvedElbow).Length() - 10) < .001f,
                 "Force IK preserves both measured left-arm lengths");
-            Check(solvedWrist.X > shoulder.X && solvedWrist.Y > shoulder.Y && solvedWrist.Z > shoulder.Z,
-                "every gesture remains outward, raised and in front of the left shoulder");
+            float3 raisedTarget = shoulder + ForcePoseMath.ReachDirection(aim) * (23 * .88f);
+            Check(solvedWrist.X > shoulder.X && solvedWrist.Z > shoulder.Z
+                && MathF.Abs(solvedWrist.Y - (raisedTarget.Y + wrist.Y) * .5f) < .001f,
+                "every gesture retains outward/forward reach at half the previous lift from the native paw height");
         }
         Check(!ForcePoseMath.TrySolve(shoulder, shoulder, wrist, float3.UnitZ, out _, out _)
             && !ForcePoseMath.TrySolve(new(float.NaN), elbow, wrist, float3.UnitZ, out _, out _),
@@ -50,6 +52,7 @@ internal static class ForcePoseChecks
         model.Skeleton = FingerRig();
         var stock = new StockFingerPose(); model.AnimProcessors.Add(stock);
         TransformTRS[] native = model.Sample();
+        float nativeWristHeight = model.Skeleton.WorldTransforms[9].Translation.Y;
         using var force = new ForcePoseController();
         Check(force.Bind(kitten) && force.Eligible && model.AnimProcessors.Count == 2,
             "Force binds an independent left-hand overlay with no saber equipped");
@@ -69,9 +72,11 @@ internal static class ForcePoseChecks
         float3 shoulder = model.Skeleton.WorldTransforms[7].Translation;
         float3 elbow = model.Skeleton.WorldTransforms[8].Translation;
         float3 wrist = model.Skeleton.WorldTransforms[9].Translation;
-        Check(wrist.X > shoulder.X && wrist.Y > shoulder.Y && wrist.Z > shoulder.Z
+        float raisedHeight = shoulder.Y + ForcePoseMath.ReachDirection(float3.UnitZ).Y * (23 * .88f);
+        Check(wrist.X > shoulder.X && wrist.Y > nativeWristHeight && wrist.Y < shoulder.Y && wrist.Z > shoulder.Z
+            && MathF.Abs(wrist.Y - (raisedHeight + nativeWristHeight) * .5f) < .004f
             && MathF.Abs((elbow - shoulder).Length() - 13) < .001f && MathF.Abs((wrist - elbow).Length() - 10) < .001f,
-            "the live processor raises an outward left paw without stretching its rig");
+            "the live processor lowers the Force lift by half without stretching its rig");
         for (int i = 18; i < 22; i++) SameRotation(held[i].Rotation, floatQuat.Identity,
             "discovered left fingers open towards their reference rotations");
         Check(kitten.Renderable.Avatar.Attachments.Mmu.Enabled, "Force pose does not acquire or change MMU visibility ownership");

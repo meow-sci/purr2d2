@@ -688,6 +688,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Force/ForcePhysicsPatches.cs", source / "src/Force/ForceMath.cs",
         source / "src/Cutting/CutGeometry.cs", source / "tests/force/ControllerHostStubs.cs",
         source / "tests/force/ForceControllerChecks.cs"]
+    force_targeting_sources = [source / "src/Force/ForceTargeting.cs", source / "src/Force/ForceMath.cs",
+        source / "src/Cutting/CutGeometry.cs", source / "tests/force/TargetingHostStubs.cs",
+        source / "tests/force/ForceTargetingChecks.cs"]
     shader_code, shader_output = run_shader_checks(source, stage)
     outputs = [shader_output]
     result = shader_code
@@ -710,17 +713,27 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("ForceMathChecks", force_math_sources, None),
         ("ForceUiChecks", force_ui_sources, None),
         ("ForceControllerChecks", force_controller_sources, None),
+        ("ForceTargetingChecks", force_targeting_sources, None),
+        ("SliceResourceMaintenanceChecks", [source / "src/Slicing/SliceResourceMaintenance.cs",
+            source / "tests/resources/SliceResourceMaintenanceHostStubs.cs",
+            source / "tests/resources/SliceResourceMaintenanceChecks.cs"], None),
+        ("SliceResourceUiChecks", [source / "src/Runtime/SaberRuntime.SliceResourceUi.cs",
+            source / "src/Core/SaberSettings.cs", source / "tests/resources/SliceResourceUiHostStubs.cs",
+            source / "tests/resources/SliceResourceUiChecks.cs"], None),
+        ("SliceMeshArenaChecks", [source / "src/Core/SliceMeshArena.cs", source / "tests/SliceMeshArenaChecks.cs"], None),
         ("SaberVfxChecks", vfx_sources, None),
+        ("SaberBlendChecks", [source / "src/Rendering/SaberBlendState.cs", source / "tests/SaberBlendChecks.cs"], None),
     ):
         code, output = _run_managed_project(source, name, required, program,
-                                           harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks"))
+                                           harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks"),
+                                           host_references=("Brutal.Vulkan", "Brutal.Core") if name == "SaberBlendChecks" else ())
         outputs.append(output)
         result = result or code
     return result, "\n".join(outputs)
 
 
 def _run_managed_project(source: Path, name: str, required: list[Path], program: str | None,
-                         *, harmony: bool = False) -> tuple[int, str]:
+                         *, harmony: bool = False, host_references: tuple[str, ...] = ()) -> tuple[int, str]:
     """Generate isolated projects so game stubs cannot leak into the core checks or mod."""
     numerics = (source.parent / "ksa-game-assemblies/current/dll/Brutal.Numerics.dll").resolve()
     missing = [path.relative_to(source).as_posix() for path in required if not path.is_file()]
@@ -735,13 +748,14 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
         program_path = check_dir / "Program.cs"
         program_path.write_text(program, encoding="utf-8")
         required = [*required, program_path]
-    required = [*required, source / "src/Core/SaberLimits.cs"]
+    required = list(dict.fromkeys([*required, source / "src/Core/SaberLimits.cs",
+                                  source / "src/Core/SliceResourceLimits.cs"]))
     includes = "\n".join(
         f'    <Compile Include="{Path(os.path.relpath(path, check_dir)).as_posix()}" />'
         for path in required
     )
     numerics_path = Path(os.path.relpath(numerics, check_dir)).as_posix()
-    extra_references = "\n".join(f'<Reference Include="{name}"><HintPath>{Path(numerics_path).with_name(name + ".dll").as_posix()}</HintPath><Private>true</Private></Reference>' for name in ("BepuPhysics", "BepuUtilities"))
+    extra_references = "\n".join(f'<Reference Include="{name}"><HintPath>{Path(numerics_path).with_name(name + ".dll").as_posix()}</HintPath><Private>true</Private></Reference>' for name in ("BepuPhysics", "BepuUtilities", *host_references))
     extra_packages = '<PackageReference Include="Lib.Harmony" Version="2.4.2" />' if harmony else ''
     project = textwrap.dedent(f"""\
         <Project Sdk="Microsoft.NET.Sdk">
