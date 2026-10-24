@@ -699,7 +699,10 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     ]
     force_math_sources = [source / "src/Force/ForceMath.cs", source / "src/Cutting/CutGeometry.cs",
                           source / "tests/force/ForceMathChecks.cs"]
+    overlay_text_sources = [source / "src/Core/OverlayStatusTextLayout.cs",
+        source / "tests/OverlayTextChecks.cs"]
     force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs",
+        source / "src/Runtime/SaberRuntime.OverlayText.cs", source / "src/Core/OverlayStatusTextLayout.cs",
         source / "src/Core/ForceOverlayDrag.cs", source / "src/Core/ForceOverlayLayout.cs",
         source / "src/Core/ForceOverlaySliderDrag.cs", source / "src/Core/ForceOffsetSmoother.cs",
         source / "src/Core/SaberOverlayDrag.cs", source / "src/Core/SaberOverlayLayout.cs",
@@ -737,6 +740,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("SomersaultPoseChecks", somersault_pose_sources, None),
         ("ForcePoseChecks", force_pose_sources, None),
         ("ForceMathChecks", force_math_sources, None),
+        ("OverlayTextChecks", overlay_text_sources,
+         "internal static class Program { static void Main() { OverlayTextChecks.Run(); } }"),
         ("ForceUiChecks", force_ui_sources, None),
         ("ForceControllerChecks", force_controller_sources, None),
         ("ForceTargetingChecks", force_targeting_sources, None),

@@ -49,7 +49,8 @@ internal static class ForceControllerChecks
         var (controller, owner, target) = Setup("follow");
         using (controller)
         {
-            Check(controller.Capture(owner, Pick(target), false), "capture accepted");
+            Check(controller.Capture(owner, Pick(target), false)
+                && controller.StatusSeverity == ForceStatusSeverity.None, "capture accepted without a warning");
             Check(controller.HasCapture && controller.CapturedCount == 1 && !target.HasPhysicsBubble, "capture leaves ordinary physics");
             var worker = target.TakeUpdateStateIfOrphaned();
             Check(worker != null && ForcePhysicsPatches.FilterCapturedWorker(worker) == null, "held cached worker is filtered");
@@ -67,7 +68,15 @@ internal static class ForceControllerChecks
             Equal(aim, new(2, 1, 0), "pose aim includes translated group offset");
             controller.Release(false);
             Check(!controller.HasCapture && ForcePhysicsPatches.FilterCapturedWorker(worker) == worker, "release permits native worker adoption");
+            Check(controller.StatusSeverity == ForceStatusSeverity.None, "successful release clears prior Force warnings");
             Equal(target.GetPositionCci(), new(9, 2, 0), "release retains current pose");
+
+            Check(controller.Capture(owner, Pick(target), false), "capture before a follow failure");
+            controller.SetOffset(new(0, 1, 0));
+            target.FailPlanWrite = target.PlanWrites + 1;
+            controller.Update(owner);
+            Check(!controller.HasCapture && controller.StatusSeverity == ForceStatusSeverity.Error,
+                "a failed follow update releases ownership and records an explicit error");
         }
     }
 
@@ -100,12 +109,30 @@ internal static class ForceControllerChecks
             first.FailPlanWrite = 2; // fail its rollback, after its successful initial capture write
             third.FailPlanWrite = 1; // fail the last capture write, after peers were already changed
             Check(!controller.Capture(owner, Pick(first), true), "partial capture fails visibly");
+            Check(controller.StatusSeverity == ForceStatusSeverity.Error,
+                "a failed capture rollback records an explicit error severity");
             Check(!controller.HasCapture, "partial failure clears owned group");
             Check(first.PlanWrites == 2 && second.PlanWrites == 2 && third.PlanWrites == 2,
                 "each changed source receives one rollback attempt even when earlier restoration fails");
             Equal(second.GetVelocityCci(), new(200, 0, 0), "one rollback failure cannot prevent later peer restoration");
             foreach (var item in new[] { first, second, third })
                 Check(ForcePhysicsPatches.FilterCapturedWorker(item.TakeUpdateStateIfOrphaned()) != null, "failed capture never strands a worker");
+        }
+
+        var (releaseController, releaseOwner, releaseTarget) = Setup("partial-release");
+        using (releaseController)
+        {
+            var badRelease = new ClutterForceTarget(releaseOwner, "bad-release", new(2, 0, 0), double3.Zero)
+                { FailRelease = true };
+            ClutterForceTargets.Candidates = [badRelease];
+            Check(releaseController.Capture(releaseOwner, Pick(releaseTarget), true),
+                "mixed target captured before partial release failure");
+            releaseController.Release(false);
+            Check(!releaseController.HasCapture && releaseController.StatusSeverity == ForceStatusSeverity.Warning,
+                "a partial release failure records a warning while clearing controller ownership");
+            releaseController.Reset();
+            Check(releaseController.StatusSeverity == ForceStatusSeverity.None,
+                "reset clears a stale release warning after cleanup");
         }
     }
 
@@ -349,8 +376,12 @@ internal static class ForceControllerChecks
             first.Live = true;
             Check(controller.Capture(owner, Pick(target), true), "mixed recapture before world replacement");
             Universe.CurrentSystem = new(); controller.Update(null);
-            Check(!controller.HasCapture && !first.Captured && !second.Captured,
-                "world replacement clears native ownership without following a stale frame");
+            Check(!controller.HasCapture && !first.Captured && !second.Captured
+                && controller.StatusSeverity == ForceStatusSeverity.Warning,
+                "world replacement clears native ownership without following a stale frame and records a warning");
+            controller.Reset();
+            Check(controller.StatusSeverity == ForceStatusSeverity.None,
+                "reset clears the obsolete world-change warning");
         }
     }
 
@@ -378,7 +409,8 @@ internal static class ForceControllerChecks
             clutter.Local = true;
             Check(controller.Capture(owner, Pick(target), true), "recapture before teardown");
             controller.Reset();
-            Check(!controller.HasCapture && clutter.Releases == 3 && JobSystems.VehicleSolver.Waits > 0,
+            Check(!controller.HasCapture && clutter.Releases == 3 && JobSystems.VehicleSolver.Waits > 0
+                && controller.StatusSeverity == ForceStatusSeverity.None,
                 "teardown joins the native solver and restores the native lease exactly once");
         }
     }
@@ -390,12 +422,15 @@ internal static class ForceControllerChecks
         {
             Check(controller.Capture(owner, Pick(target), false), "cleanup capture");
             Program.ControlledVehicle = null; controller.Update(null);
-            Check(!controller.HasCapture, "control change releases independently of saber");
+            Check(!controller.HasCapture && controller.StatusSeverity == ForceStatusSeverity.Warning,
+                "control change releases independently of saber and records a lifecycle warning");
             Program.ControlledVehicle = owner;
             Check(controller.Capture(owner, Pick(target), false), "join failure recapture");
             JobSystems.OrbitSolvers.ThrowOnWait = true;
             controller.Release(false);
-            Check(!controller.HasCapture && controller.Status.Contains("could not"), "join exception reports and clears ownership");
+            Check(!controller.HasCapture && controller.Status.Contains("could not")
+                && controller.StatusSeverity == ForceStatusSeverity.Error,
+                "join exception reports an explicit error and clears ownership");
             Check(ForcePhysicsPatches.FilterCapturedWorker(target.TakeUpdateStateIfOrphaned()) != null, "join exception cannot keep worker suppressed");
             JobSystems.OrbitSolvers.ThrowOnWait = false;
         }

@@ -1,5 +1,18 @@
 # Acceptance record
 
+## Mockup overlay refinement (2026-10-24)
+
+Force warning/error text is centered above Move Force with a 25-scaled-pixel gap; ordinary picking, capture, holding and release chatter stays hidden. Saber text is centered 25 scaled pixels below the lowest jump button, in a wrap area 50% wider than before. Both areas center each measured line independently and keep explicit paragraph breaks. Force settings show rounded current values when closed and beside the active nub, with no numeric wrapping. Display rounding preserves the actual distance setting. Count and Distance have the requested short tooltips.
+
+Force controls run from Count and Distance near the bottom toward Force and Angry Force on the right, with Angry Force raised along the circle. The existing edge gaps are preserved. The jump diamond moves upward by three quarters of a button diameter. Blue action rims use the same 25%-opacity white as the black controls. Status boxes, expanded pills and outside value labels participate in viewport bounds and overlay position clamping.
+
+Focused CoreChecks, ForceUiChecks, ForceControllerChecks (169 assertions) and OverlayTextChecks pass. Coverage includes warning severity and clearing, closed/active rounded values without wrapping, exact tooltips and rim colors, per-line centering, explicit newlines, Unicode-safe long-word wrapping, button spacing, menu/viewport bounds and custom offsets. Narrow viewports compact the Force group to prevent overlap and retain space for full-size numeric labels; 1920×1080 and 800×600 retain the shared control scale.
+
+The final Release build has zero warnings/errors. Source/stage validation passes; all 29 ZIP entries match staging, the staged DLL matches Release, and the archive SHA-256 verifies. Build and package logs: `artifacts/checks/mockup-ux-release.log` and `artifacts/checks/mockup-ux-stage.log`.
+
+Native acceptance remains pending: inspect the layout and multiline alignment at different UI scales, show Force errors and successful actions to confirm quiet normal operation, drag fractional distances while watching closed/open displays, and test both control groups at each viewport edge with custom offsets.
+
+
 ## Overlay polish, automatic preferences and movement smoothing (2026-10-24)
 
 Shared settings now save automatically to the mod's `settings.json` after one quiet second, including Force overlay sliders and both overlay position groups. Orderly shutdown flushes pending changes. Reset all settings deletes saved preferences and restores defaults without recreating the file until another change. Initial graphics reservations still require a restart. Settings uses collapsible Global lightsaber settings, Force settings, Overlay UI Positions and Character & grip groups, with Slice resources last and Reset all settings at the bottom. Tooltips use short paragraphs and wrap.

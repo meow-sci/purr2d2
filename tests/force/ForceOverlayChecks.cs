@@ -111,7 +111,8 @@ internal static class ForceOverlayChecks
             Check(force.Valid, "Force controls fit the supported viewport sizes");
             CheckSliderLayouts(force, "base supported viewport");
             Check(force.MoveCenter.X - force.MoveRadius >= origin.X
-                && force.ControlsMax.X < saber.SwingCenter.X - saber.SwingRadius
+                && force.ControlsMax.X < Math.Min(saber.SwingCenter.X - saber.SwingRadius,
+                    saber.SliceCenter.X - saber.SliceRadius)
                 && force.MoveCenter.Y - force.MoveRadius >= origin.Y + 30
                 && force.ControlsMax.Y <= origin.Y + size.Y,
                 "the full left Force group and right saber controls remain separate and within the work area");
@@ -122,19 +123,26 @@ internal static class ForceOverlayChecks
                 && force.Hit(force.MoveCenter) == ForceOverlayHit.Move
                 && force.Hit(force.MoveCenter - new float2(force.MoveRadius * .9f)) == ForceOverlayHit.None,
                 "drawing and all five Force hit targets share exact circles with click-through corners");
+            var angryOffset = force.AngryCenter - force.MoveCenter;
+            float angryAngle = MathF.Atan2(angryOffset.Y, angryOffset.X) * 180 / MathF.PI;
             Check(force.CaptureLimitCenter.X < force.AngryRadiusCenter.X
-                && force.AngryRadiusCenter.X < force.AngryCenter.X && force.AngryCenter.X < force.ForceCenter.X
-                && force.CaptureLimitCenter.Y == force.ForceCenter.Y
-                && force.AngryRadiusCenter.Y == force.AngryCenter.Y
-                && force.AngryCenter.Y > force.MoveCenter.Y + force.MoveRadius
+                && force.AngryRadiusCenter.X < force.ForceCenter.X && force.ForceCenter.X < force.AngryCenter.X
+                && force.CaptureLimitCenter.Y > force.AngryRadiusCenter.Y
+                && force.AngryRadiusCenter.Y > force.ForceCenter.Y && force.ForceCenter.Y > force.AngryCenter.Y
+                && force.AngryCenter.X > force.MoveCenter.X && angryOffset.Y > 0
+                && MathF.Abs(angryAngle - 5) < 1e-3f
                 && (force.CaptureLimitCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
                 && (force.AngryRadiusCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
                 && (force.ForceCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
                 && (force.AngryCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
-                && force.SliderEnvelope(ForceOverlayHit.CaptureLimit).Max.Y < force.StatusMin.Y
-                && force.SliderEnvelope(ForceOverlayHit.AngryRadius).Max.Y < force.StatusMin.Y
-                && force.StatusMax.Y <= origin.Y + size.Y,
-                "count, distance, Angry Force and Force form a separated left-to-right arc with pill and status space");
+                && MathF.Abs(force.StatusMax.Y - (force.MoveCenter.Y - force.MoveRadius - 25 * force.Scale)) < 1e-3f
+                && MathF.Abs(force.StatusMax.Y - force.StatusMin.Y - 96 * force.Scale) < 1e-3f
+                && MathF.Abs((force.StatusMin.X + force.StatusMax.X) * .5f - force.MoveCenter.X) < 1e-3f
+                && force.SliderEnvelope(ForceOverlayHit.CaptureLimit).Max.Y <= force.ControlsMax.Y
+                && force.SliderEnvelope(ForceOverlayHit.AngryRadius).Max.Y <= force.ControlsMax.Y
+                && force.StatusMax.Y < force.MoveCenter.Y - force.MoveRadius
+                && force.StatusMin.X >= origin.X && force.StatusMax.X <= origin.X + size.X,
+                "Count, Dist, Force and Angry follow a separated rising arc with the centered status above Move");
             float expectedGap = saber.SwingSliceEdgeGap;
             float captureGap = (force.CaptureLimitCenter - force.MoveCenter).Length()
                 - force.ButtonRadius - force.MoveRadius;
@@ -146,9 +154,9 @@ internal static class ForceOverlayChecks
                 - force.ButtonRadius - force.MoveRadius;
             float leftSpacing = (force.AngryRadiusCenter - force.CaptureLimitCenter).Length()
                 - force.ButtonRadius * 2;
-            float middleSpacing = (force.AngryCenter - force.AngryRadiusCenter).Length()
+            float middleSpacing = (force.ForceCenter - force.AngryRadiusCenter).Length()
                 - force.ButtonRadius * 2;
-            float rightSpacing = (force.ForceCenter - force.AngryCenter).Length()
+            float rightSpacing = (force.AngryCenter - force.ForceCenter).Length()
                 - force.ButtonRadius * 2;
             Check(MathF.Abs(captureGap - expectedGap) < 1e-3f
                 && MathF.Abs(angryRadiusGap - expectedGap) < 1e-3f

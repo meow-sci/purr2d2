@@ -192,14 +192,18 @@ internal static class OverlayDragChecks
                 && layout.ForwardCenter.Y < layout.LeftCenter.Y && layout.LeftCenter.Y < layout.BackwardCenter.Y
                 && layout.LeftCenter.X < layout.ForwardCenter.X && layout.RightCenter.X > layout.ForwardCenter.X
                 && layout.ForwardCenter.Y - layout.SomersaultRadius > layout.SwingCenter.Y + layout.SwingRadius
-                && layout.StatusMin.Y > layout.BackwardCenter.Y + layout.SomersaultRadius
+                && MathF.Abs(layout.StatusMin.Y - layout.BackwardCenter.Y - layout.SomersaultRadius - 25 * layout.Scale) < 1e-3f
                 && layout.StatusMin.X >= origin.X && layout.StatusMax.X <= origin.X + size.X
-                && layout.StatusMax.Y <= origin.Y + size.Y && layout.StatusMax.Y - layout.StatusMin.Y >= 48 * layout.Scale - 1e-3f,
-                "forward/left/right/back form a diamond below swing/slice with a separate visible status area");
-            Check(MathF.Abs((layout.LeftCenter.Y - layout.SwingCenter.Y) / layout.Scale - 268) < 1e-3f
+                && layout.StatusMax.Y <= origin.Y + size.Y
+                && MathF.Abs(layout.StatusMax.Y - layout.StatusMin.Y - 96 * layout.Scale) < 1e-3f
+                && MathF.Abs((layout.StatusMin.X + layout.StatusMax.X) * .5f - layout.SwingCenter.X) < 1e-3f
+                && layout.ControlsMin.X >= origin.X - 1e-3f && layout.ControlsMin.Y >= origin.Y - 1e-3f
+                && layout.ControlsMax.X <= origin.X + size.X + 1e-3f && layout.ControlsMax.Y <= origin.Y + size.Y + 1e-3f,
+                "forward/left/right/back form a diamond below swing/slice with a centered, bounded status area");
+            Check(MathF.Abs((layout.LeftCenter.Y - layout.SwingCenter.Y) / layout.Scale - 227.5f) < 1e-3f
                 && MathF.Abs((layout.LeftCenter - layout.ForwardCenter).Length() / layout.Scale
                     - (66 * MathF.Sqrt(2) - 27)) < 1e-3f,
-                "somersault buttons sit half a button lower and each neighbor moves half a button closer");
+                "the full somersault diamond moves up 40.5 scaled pixels while preserving its spacing");
             var hidden = SaberOverlayLayout.Create(origin, size, font, 100, showSomersaultButtons: false);
             Check(hidden.Valid && !hidden.ShowSomersaultButtons && hidden.SwingCenter == layout.SwingCenter
                 && hidden.ListMax == layout.ListMax && hidden.StatusMin == layout.StatusMin

@@ -167,7 +167,7 @@ internal sealed partial class SaberRuntime
                     var toggleKitten = AppearanceKitten;
                     var toggleText = toggleKitten != null && _fault == null
                         ? MovementButtonText : MovementButtonDisabledText;
-                    draw.AddCircle(layout.IgniteCenter, layout.IgniteRadius, toggleText, 48,
+                    draw.AddCircle(layout.IgniteCenter, layout.IgniteRadius, new ImColor8(255, 255, 255, 64), 48,
                         Math.Max(.5f, layout.Scale));
                     CenterOverlayText(draw, layout.IgniteCenter, toggleText,
                         toggleKitten != null && SaberEnabledFor(toggleKitten) ? "RETRACT" : "IGNITE", layout.IgniteRadius * 1.6f);
@@ -192,26 +192,7 @@ internal sealed partial class SaberRuntime
                     string status = SliceStatusVisible ? _sliceStatus
                         : layout.ShowSomersaultButtons && !canSomersault ? somersaultReason : "";
                     if (!string.IsNullOrWhiteSpace(status))
-                    {
-                        float width = layout.StatusMax.X - layout.StatusMin.X;
-                        var position = layout.StatusMin;
-                        float availableHeight = layout.StatusMax.Y - position.Y;
-                        var measured = ImGui.CalcTextSize(status, false, width * ImGui.GetFontSize() / fontSize)
-                            * (fontSize / ImGui.GetFontSize());
-                        // Long failure messages can widen to the left instead of disappearing below the screen.
-                        if (availableHeight > 0 && measured.Y > availableHeight)
-                        {
-                            width = Math.Min(layout.StatusMax.X - viewport.WorkPos.X, width * measured.Y / availableHeight);
-                            position.X = layout.StatusMax.X - width;
-                        }
-                        draw.PushClipRect(new(viewport.WorkPos.X, layout.StatusMin.Y), layout.StatusMax, true);
-                        try
-                        {
-                            draw.AddText(ImGui.GetFont(), fontSize, position + new float2(layout.Scale), new ImColor8(0, 0, 0, 255), status, width);
-                            draw.AddText(ImGui.GetFont(), fontSize, position, white, status, width);
-                        }
-                        finally { draw.PopClipRect(); }
-                    }
+                        DrawCenteredOverlayStatus(draw, status, layout.StatusMin, layout.StatusMax, fontSize, layout.Scale);
                 }
                 finally { draw.PopClipRect(); }
             }
@@ -259,7 +240,7 @@ internal sealed partial class SaberRuntime
         // Disabled controls retain the requested fill, and still own their visible circle's clicks.
         draw.AddCircleFilled(center, radius, MovementButtonFill, 48);
         var color = available ? MovementButtonText : MovementButtonDisabledText;
-        draw.AddCircle(center, radius, color, 48, Math.Max(.5f, radius / 27));
+        draw.AddCircle(center, radius, new ImColor8(255, 255, 255, 64), 48, Math.Max(.5f, radius / 27));
         var tip = center + direction * radius * .25f;
         var tail = center - direction * radius * .25f;
         var normal = new float2(-direction.Y, direction.X);

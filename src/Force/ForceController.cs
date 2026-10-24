@@ -5,6 +5,8 @@ using Purr2D2.Core;
 
 namespace Purr2D2.Force;
 
+internal enum ForceStatusSeverity { None, Warning, Error }
+
 /// <summary>One controlled kitten's transient Force hold. Mutations run only in the settled handoff.</summary>
 internal sealed partial class ForceController : IDisposable
 {
@@ -31,6 +33,7 @@ internal sealed partial class ForceController : IDisposable
     internal KittenEva? Owner { get; private set; }
     internal double3 GroupOffsetBody { get; private set; }
     internal string Status { get; private set; } = "";
+    internal ForceStatusSeverity StatusSeverity { get; private set; }
 
     internal void Install(Harmony harmony)
     {
@@ -40,6 +43,7 @@ internal sealed partial class ForceController : IDisposable
             ForcePhysicsPatches.Install(harmony);
             ClutterForceTargets.Install(harmony);
             _harmony = harmony; _available = true;
+            SetStatus("", ForceStatusSeverity.None);
         }
         catch (Exception ex)
         {
@@ -47,7 +51,7 @@ internal sealed partial class ForceController : IDisposable
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter patch cleanup failed: {cleanup}"); }
             try { ForcePhysicsPatches.Remove(harmony); }
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force patch cleanup failed: {cleanup}"); }
-            Status = "Force physics is incompatible with this game build.";
+            SetStatus("Force physics is incompatible with this game build.", ForceStatusSeverity.Error);
             Console.WriteLine($"[purr2d2] Force installation failed: {ex}");
         }
     }
@@ -55,18 +59,19 @@ internal sealed partial class ForceController : IDisposable
     internal bool Capture(KittenEva owner, ForcePick target, bool angry, double angryRadius = ForceMath.DefaultAngryRadius,
         int captureLimit = ForceCaptureLimits.Default)
     {
-        if (!_available || _disposed) { Status = "Force physics is unavailable."; return false; }
-        if (HasCapture) { Status = "Release the held objects before another capture."; return false; }
+        if (!_available || _disposed) { SetStatus("Force physics is unavailable.", ForceStatusSeverity.Warning); return false; }
+        if (HasCapture) { SetStatus("Release the held objects before another capture.", ForceStatusSeverity.Warning); return false; }
         if (!ForceCaptureLimits.Valid(captureLimit))
-        { Status = "The Force capture limit must be between 1 and 512 objects; nothing was captured."; return false; }
+        { SetStatus("The Force capture limit must be between 1 and 512 objects; nothing was captured.", ForceStatusSeverity.Warning); return false; }
         var candidates = new List<ForceTarget>(captureLimit);
         try
         {
-            if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal, angryRadius, captureLimit)) { Status = refusal; return false; }
+            if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal, angryRadius, captureLimit))
+            { SetStatus(refusal, ForceStatusSeverity.Warning); return false; }
             if (candidates.Count < 1 || candidates.Count > captureLimit)
-            { Status = $"The Force target group exceeds the {captureLimit}-object capture limit; nothing was captured."; return false; }
+            { SetStatus($"The Force target group exceeds the {captureLimit}-object capture limit; nothing was captured.", ForceStatusSeverity.Warning); return false; }
         }
-        catch (Exception ex) { Status = "Force target query failed: " + ex.Message; return false; }
+        catch (Exception ex) { SetStatus("Force target query failed: " + ex.Message, ForceStatusSeverity.Error); return false; }
         try
         {
             var ownerRotation = owner.GetBody2Cci().NormalizedOrZero();
@@ -109,7 +114,7 @@ internal sealed partial class ForceController : IDisposable
             Follow(Universe.GetLastSimStep().NextTime);
             // Publish only after every source has actually left its bubble and accepted its held state.
             ForcePhysicsPatches.Publish(_held.Where(item => item.Source != null).Select(item => item.Source!).ToArray());
-            Status = $"Holding {CapturedCount} object{(CapturedCount == 1 ? "" : "s")}.";
+            SetStatus($"Holding {CapturedCount} object{(CapturedCount == 1 ? "" : "s")}.", ForceStatusSeverity.None);
             return true;
         }
         catch (Exception ex)
@@ -130,7 +135,7 @@ internal sealed partial class ForceController : IDisposable
             }
             catch (Exception restoreError) { Console.WriteLine($"[purr2d2] Force capture rollback failed: {restoreError}"); }
             finally { Clear(); }
-            Status = "Force capture failed: " + ex.Message;
+            SetStatus("Force capture failed: " + ex.Message, ForceStatusSeverity.Error);
             Console.WriteLine($"[purr2d2] {Status}");
             return false;
         }
@@ -142,15 +147,22 @@ internal sealed partial class ForceController : IDisposable
         if (Owner == null || !ReferenceEquals(Owner, controlledOwner) || !ReferenceEquals(Owner, Program.ControlledVehicle)
             || !ForceTargeting.IsLive(Owner) || !ReferenceEquals(_system, Universe.CurrentSystem) || Program.EditorFlag
             || !ReferenceEquals(Owner.Parent, _parent) || _held.Any(item => !Valid(item)))
-        { Release(false); Status = "Force released after an owner, world or object change."; return; }
+        {
+            Release(false);
+            if (StatusSeverity == ForceStatusSeverity.None)
+                SetStatus("Force released after an owner, world or object change.", ForceStatusSeverity.Warning);
+            return;
+        }
         try { Follow(Universe.GetLastSimStep().NextTime); }
         catch (Exception ex)
         {
             // Never strand a vehicle outside the next ordinary worker-adoption pass.
             try { Release(false); }
-            finally { Clear(); Status = "Force ended: " + ex.Message; }
+            finally { Clear(); SetStatus("Force ended: " + ex.Message, ForceStatusSeverity.Error); }
             Console.WriteLine($"[purr2d2] {Status}");
         }
+        if (HasCapture && StatusSeverity != ForceStatusSeverity.None)
+            SetStatus($"Holding {CapturedCount} object{(CapturedCount == 1 ? "" : "s")}.", ForceStatusSeverity.None);
     }
 
     internal void SetOffset(double3 groupOffsetBody)
@@ -174,6 +186,7 @@ internal sealed partial class ForceController : IDisposable
         if (!HasCapture) return;
         int count = CapturedCount;
         string? failure = null;
+        bool joinFailed = false;
         try
         {
             JoinOrbitReaders();
@@ -195,10 +208,11 @@ internal sealed partial class ForceController : IDisposable
                 catch (Exception ex) { failure = ex.Message; Console.WriteLine($"[purr2d2] Force release failed for {held.DisplayName}: {ex}"); }
             }
         }
-        catch (Exception ex) { failure = ex.Message; Console.WriteLine($"[purr2d2] Force release could not join native readers: {ex}"); }
+        catch (Exception ex) { failure = ex.Message; joinFailed = true; Console.WriteLine($"[purr2d2] Force release could not join native readers: {ex}"); }
         finally { Clear(); }
-        Status = failure != null ? "Force released; an object could not be updated: " + failure
-            : $"{(throwObjects ? "Threw" : "Released")} {count} object{(count == 1 ? "" : "s")}.";
+        SetStatus(failure != null ? "Force released; an object could not be updated: " + failure
+            : $"{(throwObjects ? "Threw" : "Released")} {count} object{(count == 1 ? "" : "s")}.",
+            failure == null ? ForceStatusSeverity.None : joinFailed ? ForceStatusSeverity.Error : ForceStatusSeverity.Warning);
     }
 
     // Teardown can arrive outside the settled seam. Join before restoring any native clutter body.
@@ -211,7 +225,7 @@ internal sealed partial class ForceController : IDisposable
             finally { Clear(); }
         }
         else Clear();
-        Status = "";
+        if (_available) SetStatus("", ForceStatusSeverity.None);
     }
     private void Clear()
     {
@@ -222,6 +236,12 @@ internal sealed partial class ForceController : IDisposable
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter release cleanup failed: {cleanup}"); }
         _held.Clear(); Owner = null; _system = null; _parent = null;
         GroupOffsetBody = double3.Zero; _anchorBody = double3.Zero; _hasFrame = false; _offsetDirty = false;
+    }
+
+    private void SetStatus(string status, ForceStatusSeverity severity)
+    {
+        Status = status;
+        StatusSeverity = severity;
     }
 
     public void Dispose()

@@ -13,12 +13,36 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
     public float SliderTravel => 96 * Scale;
     public float SliderValueLabelGap => Math.Max(4, 6 * Scale);
     public float SliderValueLabelWidth => Math.Max(64, 32 * Scale);
+    public float SliderValueLabelHalfHeight => Math.Max(16, 16 * Scale);
     public float SliderValueLabelMaxX => Math.Max(CaptureLimitCenter.X, AngryRadiusCenter.X)
         + ButtonRadius + SliderValueLabelGap + SliderValueLabelWidth;
-    public float2 ControlsMin => new(Math.Min(MoveCenter.X - MoveRadius, CaptureLimitCenter.X - ButtonRadius),
-        MoveCenter.Y - MoveRadius);
-    public float2 ControlsMax => new(Math.Max(Math.Max(ForceCenter.X + ButtonRadius, StatusMax.X), SliderValueLabelMaxX),
-        StatusMax.Y);
+    public float2 ControlsMin
+    {
+        get
+        {
+            float minimumSettingX = Math.Min(CaptureLimitCenter.X, AngryRadiusCenter.X);
+            float minimumSettingY = Math.Min(CaptureLimitCenter.Y, AngryRadiusCenter.Y);
+            float minimumButtonX = Math.Min(minimumSettingX, Math.Min(AngryCenter.X, ForceCenter.X)) - ButtonRadius;
+            float minimumButtonY = Math.Min(minimumSettingY, Math.Min(AngryCenter.Y, ForceCenter.Y)) - ButtonRadius;
+            return new(Math.Min(StatusMin.X, Math.Min(MoveCenter.X - MoveRadius, minimumButtonX)),
+                Math.Min(StatusMin.Y, Math.Min(MoveCenter.Y - MoveRadius,
+                    Math.Min(minimumSettingY - Math.Max(ButtonRadius, SliderValueLabelHalfHeight), minimumButtonY))));
+        }
+    }
+    public float2 ControlsMax
+    {
+        get
+        {
+            float maximumSettingX = Math.Max(CaptureLimitCenter.X, AngryRadiusCenter.X);
+            float maximumSettingY = Math.Max(CaptureLimitCenter.Y, AngryRadiusCenter.Y);
+            float maximumButtonX = Math.Max(Math.Max(ForceCenter.X, AngryCenter.X), maximumSettingX) + ButtonRadius;
+            float maximumButtonY = Math.Max(Math.Max(ForceCenter.Y, AngryCenter.Y), maximumSettingY) + ButtonRadius;
+            float maximumSliderY = maximumSettingY + SliderTravel + Math.Max(ButtonRadius, SliderValueLabelHalfHeight);
+            return new(Math.Max(StatusMax.X, Math.Max(MoveCenter.X + MoveRadius,
+                    Math.Max(maximumButtonX, SliderValueLabelMaxX))),
+                Math.Max(StatusMax.Y, Math.Max(MoveCenter.Y + MoveRadius, Math.Max(maximumButtonY, maximumSliderY))));
+        }
+    }
 
     /// <summary>Bounds of a settings circle expanded vertically downward into its slider pill.</summary>
     public (float2 Min, float2 Max) SliderEnvelope(ForceOverlayHit hit)
@@ -58,23 +82,57 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
     {
         if (!saber.Valid || !float.IsFinite(origin.X) || !float.IsFinite(origin.Y)
             || !float.IsFinite(size.X) || !float.IsFinite(size.Y) || size.X <= 0 || size.Y <= 0) return default;
-        float scale = saber.Scale, radius = saber.SwingRadius, button = saber.SliceRadius;
+        float scale = saber.Scale;
         float edgeGap = saber.SwingSliceEdgeGap;
+        float availableRight = Math.Min(saber.SwingCenter.X - saber.SwingRadius,
+            saber.SliceCenter.X - saber.SliceRadius) - origin.X;
+        float interGroupGap = Math.Max(1, saber.Scale);
+        for (int i = 0; i < 64 && EstimateRightEdge(scale) + interGroupGap > availableRight; i++)
+            scale *= .98f;
+        if (EstimateRightEdge(scale) + interGroupGap > availableRight) return default;
+        float radius = 132 * scale, button = 27 * scale;
         float centerDistance = radius + button + edgeGap;
         float adjacentCenterDistance = button * 2 + edgeGap;
         float angleStep = 2 * MathF.Asin(Math.Clamp(adjacentCenterDistance / (2 * centerDistance), -1, 1));
-        // Ten scaled pixels beyond the old anchor keep the new leftmost circle inside the viewport.
-        var move = new float2(origin.X + 30 * scale + radius, saber.SwingCenter.Y);
-        var status = new float2(move.X - radius, move.Y + 330 * scale);
-        var captureLimit = move + new float2(MathF.Cos(MathF.PI / 2 + angleStep * 1.5f),
-            MathF.Sin(MathF.PI / 2 + angleStep * 1.5f)) * centerDistance;
-        var angryRadius = move + new float2(MathF.Cos(MathF.PI / 2 + angleStep * .5f),
-            MathF.Sin(MathF.PI / 2 + angleStep * .5f)) * centerDistance;
-        var angry = move + new float2(MathF.Cos(MathF.PI / 2 - angleStep * .5f),
-            MathF.Sin(MathF.PI / 2 - angleStep * .5f)) * centerDistance;
-        var force = move + new float2(MathF.Cos(MathF.PI / 2 - angleStep * 1.5f),
-            MathF.Sin(MathF.PI / 2 - angleStep * 1.5f)) * centerDistance;
+        // The wider centered info box needs 198 scaled pixels on each side of Move.
+        var move = new float2(origin.X + 198 * scale, saber.SwingCenter.Y);
+        const float angryAngleDegrees = 5;
+        float angleStepDegrees = angleStep * 180 / MathF.PI;
+        var angry = AtAngle(angryAngleDegrees);
+        var force = AtAngle(angryAngleDegrees + angleStepDegrees);
+        var angryRadius = AtAngle(angryAngleDegrees + 2 * angleStepDegrees);
+        var captureLimit = AtAngle(angryAngleDegrees + 3 * angleStepDegrees);
+        const float statusWidth = 396;
+        const float statusHeight = 96;
+        const float statusGap = 25;
+        float boxWidth = statusWidth * scale, boxHeight = statusHeight * scale;
+        var statusMax = new float2(move.X + boxWidth * .5f, move.Y - radius - statusGap * scale);
+        var statusMin = new float2(move.X - boxWidth * .5f, statusMax.Y - boxHeight);
         return new(captureLimit, angryRadius, angry, force, button, move, radius,
-            status, status + new float2(radius * 2, 48 * scale), scale);
+            statusMin, statusMax, scale);
+
+        float2 AtAngle(float degrees)
+        {
+            float radians = degrees * MathF.PI / 180;
+            return move + new float2(MathF.Cos(radians), MathF.Sin(radians)) * centerDistance;
+        }
+
+        float EstimateRightEdge(float candidateScale)
+        {
+            float candidateRadius = 132 * candidateScale, candidateButton = 27 * candidateScale;
+            float distance = candidateRadius + candidateButton + edgeGap;
+            float step = 2 * MathF.Asin(Math.Clamp((candidateButton * 2 + edgeGap) / (2 * distance), -1, 1));
+            float stepDegrees = step * 180 / MathF.PI;
+            float moveX = 198 * candidateScale;
+            float angryX = moveX + distance * MathF.Cos(5 * MathF.PI / 180);
+            float forceX = moveX + distance * MathF.Cos((5 + stepDegrees) * MathF.PI / 180);
+            float distanceX = moveX + distance * MathF.Cos((5 + 2 * stepDegrees) * MathF.PI / 180);
+            float countX = moveX + distance * MathF.Cos((5 + 3 * stepDegrees) * MathF.PI / 180);
+            float valueLabelMaxX = Math.Max(countX, distanceX) + candidateButton
+                + Math.Max(4, 6 * candidateScale) + Math.Max(64, 32 * candidateScale);
+            return Math.Max(396 * candidateScale,
+                Math.Max(moveX + candidateRadius, Math.Max(angryX + candidateButton,
+                    Math.Max(forceX + candidateButton, valueLabelMaxX))));
+        }
     }
 }

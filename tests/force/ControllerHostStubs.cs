@@ -201,7 +201,7 @@ namespace Purr2D2.Force
         internal readonly ClutterForceIdentity StableKey;
         internal string StableOrder => StableKey.Key;
         internal string DisplayName => StableKey.Key;
-        internal bool Live = true, Local = true, Captured, FailCapture;
+        internal bool Live = true, Local = true, Captured, FailCapture, FailRelease;
         internal int Captures, Releases, Writes, FailWrite;
         internal ForceRigidState State;
         internal bool IsValid => Live && ReferenceEquals(System, Universe.CurrentSystem);
@@ -233,7 +233,7 @@ namespace Purr2D2.Force
             if (_released) return true;
             _released = true; target.Captured = false; target.Releases++;
             if (state.HasValue && target.IsValid) target.State = state.Value;
-            return true;
+            return !target.FailRelease;
         }
         public void Dispose() => Release();
     }

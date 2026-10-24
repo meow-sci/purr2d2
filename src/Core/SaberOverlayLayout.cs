@@ -26,8 +26,8 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public float ColorSwatchSize => RowHeight * .62f;
     public float2 ColorSwatchMin(int row, float scroll) => new(ListMax.X - Padding - ColorSwatchSize,
         ListBodyTop + row * RowHeight - scroll + RowHeight * .18f);
-    public float2 ControlsMin => new(Math.Min(SwingCenter.X - SwingRadius, SliceCenter.X - SliceRadius),
-        SwingCenter.Y - SwingRadius);
+    public float2 ControlsMin => new(Math.Min(Math.Min(SwingCenter.X - SwingRadius, SliceCenter.X - SliceRadius), StatusMin.X),
+        Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y));
     public float2 ControlsMax => new(StatusMax.X, StatusMax.Y);
 
     /// <summary>Moves the action controls and their status together; offsets are fractions of the viewport.</summary>
@@ -105,10 +105,13 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         float minimumSwingY = listTop + (154 + 16) * scale + radius;
         float originalStep = smallRadius * 2 + 12 * scale;
         float step = originalStep - smallRadius / MathF.Sqrt(2);
-        // Lower the diamond's center by half a button, then tighten around that center.
-        float centerOffset = radius + 16 * scale + originalStep + smallRadius * 2;
+        float somersaultRaise = smallRadius * 1.5f; // 0.75 button diameters across the whole diamond.
+        float centerOffset = radius + 16 * scale + originalStep + smallRadius * 2 - somersaultRaise;
         float forwardOffset = centerOffset - step;
-        float maximumSwingY = origin.Y + size.Y - (forwardOffset + step * 2 + smallRadius + pad + 48 * scale + margin);
+        const float statusGap = 25;
+        const float statusHeight = 96;
+        float maximumSwingY = origin.Y + size.Y
+            - (forwardOffset + step * 2 + smallRadius + (statusGap + statusHeight) * scale + margin);
         if (minimumSwingY > maximumSwingY) return default;
         float swingY = Math.Clamp(origin.Y + size.Y * .5f, minimumSwingY, maximumSwingY);
         var swing = new float2(origin.X + size.X - 284 * scale, swingY);
@@ -122,8 +125,10 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         float height = Math.Max(header + row + footer, Math.Min(desiredHeight, maximumHeight));
         var forward = new float2(swing.X, swing.Y + forwardOffset);
         var backward = forward + new float2(0, step * 2);
-        var statusMin = new float2(min.X, backward.Y + smallRadius + pad);
-        var statusMax = statusMin + new float2(296, 48) * scale;
+        float statusWidth = 444 * scale;
+        var statusMin = new float2(swing.X - statusWidth * .5f,
+            backward.Y + smallRadius + statusGap * scale);
+        var statusMax = statusMin + new float2(statusWidth, statusHeight * scale);
         return new(min, min + new float2(296 * scale, height), min.Y + header,
             height - header - footer, footer, row, pad, swing, radius, slice, smallRadius, scale,
             forward, backward, forward + new float2(-step, step), forward + new float2(step, step), statusMin, statusMax,

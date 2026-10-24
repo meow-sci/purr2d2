@@ -17,12 +17,18 @@ namespace Brutal.ImGuiApi
     public static class ImGui
     {
         public static readonly TestIo Io = new();
+        public static string Tooltip = "";
         public static TestIo GetIO() => Io;
         public static TestViewport GetMainViewport() => new();
         public static float GetFontSize() => 16;
         public static int GetFont() => 0;
-        public static float2 CalcTextSize(string text, bool hide = false, float wrap = 0) => new(100, 20);
-        public static void SetTooltip(string text) { }
+        public static float2 CalcTextSize(string text, bool hide = false, float wrap = 0)
+        {
+            float width = text.Length * GetFontSize() * .5f;
+            if (wrap > 0 && width > wrap) return new(wrap, GetFontSize() * MathF.Ceiling(width / wrap));
+            return new(width, GetFontSize());
+        }
+        public static void SetTooltip(string text) => Tooltip = text;
     }
     public readonly struct ImDrawListPtr
     {
@@ -102,6 +108,8 @@ namespace KSA
 }
 namespace Purr2D2.Force
 {
+    internal enum ForceStatusSeverity { None, Warning, Error }
+
     internal sealed record ForcePick(KSA.Vehicle Vehicle) { internal bool Live = true; internal string DisplayName => Vehicle.Id; }
     internal readonly record struct ForcePickRay(KSA.Ray Cci);
     internal static class ForceTargeting
@@ -132,25 +140,26 @@ namespace Purr2D2.Force
         internal KSA.KittenEva? Owner;
         internal double3 GroupOffsetBody, ReleasedOffset;
         internal string Status = "";
+        internal ForceStatusSeverity StatusSeverity;
         internal readonly List<string> Events = [];
-        internal void Install(HarmonyLib.Harmony harmony) { }
+        internal void Install(HarmonyLib.Harmony harmony) { Status = ""; StatusSeverity = ForceStatusSeverity.None; }
         internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry, double angryRadius = 10,
             int captureLimit = Purr2D2.Core.ForceCaptureLimits.Default)
         {
             CaptureCalls++; CapturedRadius = angryRadius; CapturedLimit = captureLimit; Events.Add("Capture");
-            if (!pick.Live) { Status = "Stale target"; return false; }
-            HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; Status = "Holding"; return true;
+            if (!pick.Live) { Status = "Stale target"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
+            HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
         }
         internal void Update(KSA.KittenEva? owner)
         {
             Events.Add("Update");
             if (FailUpdate) throw new InvalidOperationException("Test failure");
-            if (HasCapture && !ReferenceEquals(owner, Owner)) { Release(false); Status = "Owner changed"; }
+            if (HasCapture && !ReferenceEquals(owner, Owner)) { Release(false); Status = "Owner changed"; StatusSeverity = ForceStatusSeverity.Warning; }
         }
         internal void SetOffset(double3 offset) { Events.Add("Offset"); GroupOffsetBody = offset; }
         internal void Release(bool thrown)
-        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; HasCapture = false; Owner = null; Status = "Released"; }
-        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; }
+        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; HasCapture = false; Owner = null; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; }
+        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; Status = ""; StatusSeverity = ForceStatusSeverity.None; }
         public void Dispose() => Disposed = true;
     }
 }
