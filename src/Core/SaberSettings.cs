@@ -98,6 +98,7 @@ public sealed class SaberSettings
     public bool HideMmu { get; set; } = true;
     public float AngryForceRadius { get; set; } = 10;
     public int ForceCaptureLimit { get; set; } = ForceCaptureLimits.Default;
+    public float ForceMaximumSpread { get; set; } = ForceSpreadLimits.DefaultMaximum;
     public float ClutterPickTolerance { get; set; } = .2f;
     public float ForceBreakupGroanPixels { get; set; } = 6f;
     public float ForceBreakupSplitPixels { get; set; } = 18f;
@@ -142,6 +143,7 @@ public sealed class SaberSettings
         JumpComboIntervalSeconds = Clamp(JumpComboIntervalSeconds, .1f, 1.5f, .75f);
         AngryForceRadius = Clamp(AngryForceRadius, 1, 50, 10);
         ForceCaptureLimit = Math.Clamp(ForceCaptureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
+        ForceMaximumSpread = (float)ForceSpreadLimits.ValidateMaximum(ForceMaximumSpread);
         ClutterPickTolerance = Clamp(ClutterPickTolerance, 0, .5f, .2f);
         ForceBreakupGroanPixels = Clamp(ForceBreakupGroanPixels, 1, 64, 6f);
         ForceBreakupSplitPixels = Clamp(ForceBreakupSplitPixels, 2, 128, 18f);

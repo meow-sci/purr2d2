@@ -231,6 +231,7 @@ internal sealed partial class SaberRuntime
     {
         if (!BeginSaberSettingsTable("##ForceSettings", "Force breakup split (px)")) return;
         float radius = _settings.AngryForceRadius, tolerance = _settings.ClutterPickTolerance;
+        float maximumSpread = _settings.ForceMaximumSpread;
         float breakupGroan = _settings.ForceBreakupGroanPixels, breakupSplit = _settings.ForceBreakupSplitPixels;
         int captureLimit = _settings.ForceCaptureLimit, breakupPieceLimit = _settings.ForceBreakupPieceLimit;
         bool changed;
@@ -245,6 +246,10 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
             ShowSaberControlTip("After an exact miss, this radius catches nearby physical clutter.\n\nExact hits take priority; 0 allows exact hits only.");
+            SaberSettingsRow("Maximum Force spread");
+            changed |= ImGui.SliderFloat("##ForceMaximumSpread", ref maximumSpread,
+                ForceSpreadLimits.MinimumMaximum, ForceSpreadLimits.Maximum, "%.1fx");
+            ShowSaberControlTip($"Caps shared Shift+wheel Force group spacing; individual object sizes are unchanged. Default: {ForceSpreadLimits.DefaultMaximum:0.0}x. Larger spreads move objects farther from the group center. Saves automatically; changes apply immediately, and lowering the cap eases a held group back within it.");
             SaberSettingsRow("Force breakup groan (px)");
             changed |= ImGui.SliderFloat("##ForceBreakupGroanPixels", ref breakupGroan, 1, 64, "%.1f px");
             ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before the placeholder groan plays; inward Shift+scroll unwinds.");
@@ -261,6 +266,7 @@ internal sealed partial class SaberRuntime
         _settings.AngryForceRadius = radius;
         _settings.ForceCaptureLimit = captureLimit;
         _settings.ClutterPickTolerance = tolerance;
+        _settings.ForceMaximumSpread = maximumSpread;
         _settings.ForceBreakupGroanPixels = breakupGroan;
         _settings.ForceBreakupSplitPixels = breakupSplit;
         _settings.ForceBreakupPieceLimit = breakupPieceLimit;

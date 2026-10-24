@@ -710,7 +710,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/OverlayTextChecks.cs"]
     slice_overlay_sources = [source / "src/Core/OverlayStatusTextLayout.cs",
         source / "src/Core/SliceOverlayLayout.cs", source / "tests/SliceOverlayLayoutChecks.cs"]
-    force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs", source / "src/Force/ForceMath.cs",
+    force_ui_sources = [source / "src/Core/ForceCaptureLift.cs",
+        source / "src/Pose/SaberPoseMath.cs", source / "src/Runtime/SaberRuntime.Force.cs", source / "src/Force/ForceMath.cs",
         source / "src/Core/ForceBreakupSequence.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Runtime/SaberRuntime.OverlayText.cs", source / "src/Core/OverlayStatusTextLayout.cs",
@@ -745,6 +746,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Audio/ForceBreakupAudio.cs", source / "src/Core/SaberSettings.cs",
                          source / "tests/audio/AudioChecks.cs"], None),
         ("ForceBreakupSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "tests/ForceBreakupSettingsChecks.cs"], None),
+        ("ForceSpreadSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "src/Core/SaberSettingsAutosaver.cs",
+            source / "src/Core/SaberLimits.cs", source / "src/Core/ForceCaptureLimits.cs", source / "src/Core/ForceBreakupLimits.cs",
+            source / "src/Core/SliceResourceLimits.cs", source / "tests/ForceSpreadSettingsChecks.cs"], None),
         ("SpaceSomersaultSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "src/Core/SaberSettingsAutosaver.cs",
             source / "src/Core/SomersaultMotion.cs", source / "src/Core/SomersaultKeyboardDirection.cs",
             source / "tests/SpaceSomersaultSettingsChecks.cs"], None),
@@ -759,6 +763,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("SomersaultPoseChecks", somersault_pose_sources, None),
         ("ForcePoseChecks", force_pose_sources, None),
         ("ForceMathChecks", force_math_sources, None),
+        ("ForceCaptureLiftChecks", [source / "src/Core/ForceCaptureLift.cs", source / "src/Pose/SaberPoseMath.cs",
+            source / "tests/ForceCaptureLiftChecks.cs"], None),
         ("ForceThrowDragChecks", force_throw_drag_sources,
          "internal static class Program { static void Main() { ForceThrowDragChecks.Run(); } }"),
         ("OverlayTextChecks", overlay_text_sources,
@@ -807,6 +813,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
     required = list(dict.fromkeys([*required, source / "src/Core/SaberLimits.cs",
                                   source / "src/Core/ForceCaptureLimits.cs",
                                   source / "src/Core/ForceBreakupLimits.cs",
+                                  source / "src/Core/ForceSpreadLimits.cs",
                                   source / "src/Core/SliceResourceLimits.cs"]))
     includes = "\n".join(
         f'    <Compile Include="{Path(os.path.relpath(path, check_dir)).as_posix()}" />'

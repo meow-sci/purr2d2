@@ -602,12 +602,22 @@ internal static class ForceControllerChecks
                 new(4, 1, 0), "group translation moves the centroid while retaining compressed spacing");
             Check(controller.TryGetPoseTargetBody(owner, out var translatedAim), "translated spread retains its pose target");
             Equal(translatedAim, new(3, 1.5, 0), "pose target follows the compressed primary plus group translation");
+            controller.SetSpread(80); controller.Update(owner);
+            Equal(first.GetPositionCci(), new(-156, 1, 0), "80x spread moves the primary farther from the shared centroid");
+            Equal(second.GetPositionCci(), new(4, 1, 0), "80x spread keeps the group center fixed");
+            Equal(clutter.State.Position, new(164, 1, 0), "80x spread applies to mixed native clutter spacing");
+            Equal((first.GetPositionCci() + second.GetPositionCci() + clutter.State.Position) / 3,
+                new(4, 1, 0), "80x spread preserves the mixed group's shared centroid");
+            Check(Math.Abs(doubleQuat.Dot(second.GetBody2Cci(), secondRotation)) > 1 - 1e-12,
+                "wide spread leaves each object's captured orientation intact");
+            Check(controller.TryGetPoseTargetBody(owner, out var wideAim), "a wide spread retains the selected pose target");
+            Equal(wideAim, new(-156, 1.5, 0), "the pose target follows the widely expanded primary without scaling its surface offset");
             controller.Release(false);
             Check(!controller.HasCapture && controller.GroupSpread == 1,
-                "release uses displayed spacing and clears spread ownership for the next capture");
-            Equal(first.GetPositionCci(), new(3, 1, 0), "released primary keeps the compressed displayed pose");
-            Equal(second.GetPositionCci(), new(4, 1, 0), "released vessel keeps its compressed displayed pose");
-            Equal(clutter.State.Position, new(5, 1, 0), "released clutter keeps the same compressed displayed pose");
+                "release uses displayed wide spacing and clears spread ownership for the next capture");
+            Equal(first.GetPositionCci(), new(-156, 1, 0), "released primary keeps the wide displayed pose");
+            Equal(second.GetPositionCci(), new(4, 1, 0), "released vessel keeps its wide displayed pose");
+            Equal(clutter.State.Position, new(164, 1, 0), "released clutter keeps the same wide displayed pose");
         }
 
         var (singleController, singleOwner, singleTarget) = Setup("single-spread");

@@ -20,6 +20,7 @@ internal sealed partial class SaberRuntime
     {
         internal float AngryForceRadius = 10, ClutterPickTolerance = .2f;
         internal float ForceBreakupGroanPixels = 6, ForceBreakupSplitPixels = 18, Volume = .55f;
+        internal float ForceMaximumSpread = 20;
         internal int ForceCaptureLimit = ForceCaptureLimits.Default;
         internal int ForceBreakupPieceLimit = ForceBreakupLimits.Default;
     }
@@ -266,9 +267,187 @@ internal sealed partial class SaberRuntime
             && runtime._forceStatus.StartsWith("Force picker failed:"),
             "settled picker exceptions cancel locally without skipping the surrounding saber overlay or mutating physics");
         FreshCaptureShiftSpread();
+        CaptureLiftRuntime();
+        ConfigurableSpreadRuntime();
         ExpansionBreakupRequests();
         BreakupGestureResetAndAudioLifecycle();
         Console.WriteLine("Force UI runtime checks passed (picker button states, deferred clicks, native UI priority, settled commands, stale owners/targets, final move/throw, cleanup).");
+    }
+
+    private static SaberRuntime CapturedForLift(bool angry, int capturedCount = 1)
+    {
+        var runtime = new SaberRuntime();
+        runtime._force.SimulatedCapturedCount = capturedCount;
+        runtime.BeginForcePicker(angry);
+        runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(100, 90));
+        runtime.UpdateForceFrame();
+        runtime.UpdateForceBeforePhysics(0);
+        return runtime;
+    }
+
+    private static void CaptureLiftRuntime()
+    {
+        var regular = CapturedForLift(false);
+        Check(regular.ForceHolding && regular._forceCaptureLift.IsActive
+            && regular._forceCaptureLift.Progress == 0 && regular._force.GroupOffsetBody == double3.Zero
+            && ReferenceEquals(regular._forceCaptureLiftOwner, regular._owner)
+            && ReferenceEquals(regular._forceMoveOwner, regular._owner),
+            "a successful regular single-object capture starts one lift at zero in the capture owner's movement handoff");
+        regular.UpdateForceBeforePhysics(.1);
+        regular.UpdateForceBeforePhysics(.1);
+        regular.UpdateForceBeforePhysics(.025);
+        Check(regular._force.GroupOffsetBody == new double3(0, 0, -.5)
+            && regular._forceOffsetSmoother.Offset == regular._force.GroupOffsetBody
+            && regular._forceOffsetSmoother.Target == regular._force.GroupOffsetBody,
+            "the settled handoff applies the eased BODY-up offset directly and seeds the spring at the displayed position");
+
+        var angry = CapturedForLift(true, capturedCount: 4);
+        angry._force.CanBreakup = true;
+        Check(angry._force.CapturedCount == 4 && angry._forceCaptureLift.IsActive,
+            "a successful multi-object Angry Force capture starts the same shared group lift");
+        angry.UpdateForceBeforePhysics(.05);
+        double liftBeforeShift = angry._forceCaptureLift.Progress;
+        Check(angry.ScrollForcePointer(1, shift: true) && angry._forceCaptureLift.IsActive,
+            "Shift+scroll changes spread without cancelling the capture lift");
+        for (int i = 0; i < 4; i++)
+            Check(angry.ScrollForcePointer(-.125, shift: true), "fractional breakup input is accepted during the lift");
+        angry.UpdateForceBeforePhysics(.016);
+        Check(angry._forceBreakupSequence.StageOneActive && angry._force.BreakupActive
+            && angry._force.BreakupCalls == 1 && angry._force.CaptureCalls == 1
+            && angry._forceCaptureLift.IsActive && angry._forceCaptureLift.Progress > liftBeforeShift,
+            "early breakup preparation continues under the same lift without restarting capture feedback");
+
+        var depth = CapturedForLift(false);
+        depth.UpdateForceBeforePhysics(.05);
+        double3 beforeDepth = depth._force.GroupOffsetBody;
+        Check(depth.ScrollForcePointer(1) && !depth._forceCaptureLift.IsActive
+            && depth._force.GroupOffsetBody == beforeDepth
+            && depth._forceOffsetSmoother.Offset == beforeDepth
+            && depth._forceOffsetSmoother.Target == beforeDepth,
+            "accepted ordinary depth input cancels the unfinished cue at the visible pose without a snap");
+        double3 depthTarget = depth._forceMoveOffset;
+        depth.UpdateForceBeforePhysics(.016);
+        Check(depth._force.GroupOffsetBody.Z > beforeDepth.Z && depth._force.GroupOffsetBody.Z < depthTarget.Z,
+            "manual depth smoothly takes over from the displayed lift position");
+
+        var drag = CapturedForLift(false);
+        drag.UpdateForceBeforePhysics(.05);
+        double3 beforeDrag = drag._force.GroupOffsetBody;
+        drag._forceLayout = ForceOverlayLayout.Create(
+            SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080));
+        Check(drag.HandleForceOverlayPress(ForceOverlayHit.Move, drag._forceLayout.MoveCenter)
+            && !drag._forceCaptureLift.IsActive && drag._force.GroupOffsetBody == beforeDrag
+            && drag._forceOffsetSmoother.Offset == beforeDrag && drag._forceOffsetSmoother.Target == beforeDrag,
+            "accepted Move drag input takes over the lift at the displayed group position");
+        drag.MoveForcePointer(drag._forceLayout.MoveCenter + new float2(20, 0));
+        drag.UpdateForceBeforePhysics(.016);
+        Check(drag._force.GroupOffsetBody.X > beforeDrag.X && drag._forceCaptureLift.Progress == 0,
+            "manual drag moves the group after takeover without replaying capture feedback");
+
+        var failure = new SaberRuntime();
+        ForceTargeting.Next = new(new Vehicle()) { Live = false };
+        failure.BeginForcePicker(false);
+        failure.HandleForcePickerPress(GlfwMouseButton.Left, new(100, 90));
+        failure.UpdateForceFrame();
+        failure.UpdateForceBeforePhysics(.016);
+        Check(failure._force.CaptureCalls == 1 && !failure.ForceHolding
+            && !failure._forceCaptureLift.IsActive && failure._forceCaptureLiftOwner == null
+            && failure._forceOffsetSmoother.Offset == double3.Zero,
+            "a rejected initial capture clears movement state and never starts lift feedback");
+
+        var completed = CapturedForLift(false);
+        for (int i = 0; i < 4; i++) completed.UpdateForceBeforePhysics(.1);
+        completed.UpdateForceBeforePhysics(.05);
+        Check(completed._force.GroupOffsetBody == new double3(0, 0, -1)
+            && !completed._forceCaptureLift.IsActive,
+            "the runtime retains exactly one metre of BODY-up offset when the lift completes");
+        for (int i = 0; i < 4; i++) completed.UpdateForceBeforePhysics(.1);
+        Check(completed._force.GroupOffsetBody == new double3(0, 0, -1)
+            && completed._force.CaptureCalls == 1 && !completed._forceCaptureLift.IsActive,
+            "later ordinary handoffs hold the endpoint without accumulating or replaying the lift");
+        completed._forceRequests.Enqueue(new(completed._owner!, ForceAction.Capture, ForceTargeting.Next));
+        completed.UpdateForceBeforePhysics(.016);
+        Check(completed._force.CaptureCalls == 2 && completed._force.GroupOffsetBody == new double3(0, 0, -1)
+            && !completed._forceCaptureLift.IsActive,
+            "a capture rejected while a hold exists neither restarts the lift nor changes the held pose");
+
+        var release = CapturedForLift(false);
+        release.UpdateForceBeforePhysics(.05);
+        release.QueueForceAction(ForceAction.Release);
+        release.UpdateForceBeforePhysics(.016);
+        Check(!release._forceCaptureLift.IsActive && release._forceCaptureLiftOwner == null
+            && release._force.ReleasedOffset == release._force.GroupOffsetBody
+            && release._force.ReleasedOffset.Z < 0,
+            "release clears the cue after handing off the current displayed group pose");
+
+        var thrown = CapturedForLift(false);
+        thrown.UpdateForceBeforePhysics(.05);
+        thrown.QueueForceAction(ForceAction.Throw);
+        thrown.UpdateForceBeforePhysics(.016);
+        Check(!thrown._forceCaptureLift.IsActive && thrown._forceCaptureLiftOwner == null
+            && thrown._force.ReleasedOffset == thrown._force.GroupOffsetBody
+            && thrown._force.ReleasedThrowSpeed == ForceMath.ThrowSpeed,
+            "throw clears the cue and uses the existing pose and speed without adding lift momentum");
+
+        var ownerChange = CapturedForLift(false);
+        ownerChange.UpdateForceBeforePhysics(.05);
+        ownerChange._owner = new(); Program.ControlledVehicle = ownerChange._owner;
+        ownerChange.UpdateForceBeforePhysics(.016);
+        Check(!ownerChange.ForceHolding && !ownerChange._forceCaptureLift.IsActive
+            && ownerChange._forceCaptureLiftOwner == null,
+            "owner change releases the held group and clears its unfinished lift");
+
+        var reset = CapturedForLift(false);
+        reset.ResetForce();
+        Check(!reset._forceCaptureLift.IsActive && reset._forceCaptureLiftOwner == null,
+            "world reset clears the unfinished lift");
+        var disposed = CapturedForLift(false);
+        disposed.DisposeForce();
+        Check(!disposed._forceCaptureLift.IsActive && disposed._forceCaptureLiftOwner == null,
+            "runtime disposal clears the unfinished lift");
+
+        var hidden = CapturedForLift(false);
+        hidden.OverlayVisible = false;
+        hidden.UpdateForceVisibility();
+        Check(hidden._forceCaptureLift.IsActive && hidden.ForceHolding,
+            "hiding the HUD follows the existing held-group movement policy while the lift continues");
+    }
+
+    private static void ConfigurableSpreadRuntime()
+    {
+        var spread = new SaberRuntime();
+        spread._force.HasCapture = true; spread._force.Owner = spread._owner;
+        Check(spread.ScrollForcePointer(-.5, shift: true)
+            && Math.Abs(spread._forceSpreadTarget - Math.Pow(.9, -.5)) < 1e-12,
+            "fractional Shift+scroll remains continuous for group spread input");
+        for (int i = 0; i < 15; i++) spread.ScrollForcePointer(-1, shift: true);
+        Check(spread._forceSpreadTarget > 4 && spread._forceSpreadTarget <= spread._settings.ForceMaximumSpread,
+            "the default spread ceiling allows expansion past the previous four-times limit");
+        spread.UpdateForceBeforePhysics(.016);
+        Check(spread._force.GroupSpread > 1 && spread._force.GroupSpread < spread._forceSpreadTarget,
+            "expanded group spread still eases through the settled handoff");
+
+        var lowered = new SaberRuntime();
+        lowered._force.HasCapture = true; lowered._force.Owner = lowered._owner;
+        lowered._force.GroupSpread = 10; lowered._forceSpreadTarget = 10;
+        lowered._settings.ForceMaximumSpread = 2;
+        lowered._forceMoveOwner = lowered._owner;
+        lowered._forceOffsetSmoother.Reset(lowered._force.GroupOffsetBody);
+        lowered.UpdateForceBeforePhysics(.016);
+        Check(lowered._forceSpreadTarget == 2 && lowered._force.GroupSpread < 10
+            && lowered._force.GroupSpread > 2,
+            "lowering the spread ceiling clamps the target and eases the held group down without teleporting");
+
+        var raised = new SaberRuntime();
+        raised._force.HasCapture = true; raised._force.Owner = raised._owner;
+        raised._settings.ForceMaximumSpread = 100;
+        Check(raised.ScrollForcePointer(-41.5, shift: true)
+            && raised._forceSpreadTarget > 75 && raised._forceSpreadTarget < 85,
+            "raising the configurable spread ceiling allows Shift+scroll to request about eighty-times spread");
+        raised.UpdateForceBeforePhysics(.016);
+        for (int i = 0; i < 180; i++) raised.UpdateForceBeforePhysics(1.0 / 60);
+        Check(Math.Abs(raised._force.GroupSpread - raised._forceSpreadTarget) < 1e-5,
+            "a raised spread ceiling remains reachable after its normal smooth handoff");
     }
 
     private static void FreshCaptureShiftSpread()

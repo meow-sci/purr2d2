@@ -197,7 +197,8 @@ namespace Purr2D2.Force
         internal int CapturedLimit;
         internal double CapturedRadius;
         internal double GroupSpread = ForceMath.DefaultGroupSpread;
-        internal int CapturedCount => HasCapture ? 1 : 0;
+        internal int SimulatedCapturedCount = 1;
+        internal int CapturedCount => HasCapture ? SimulatedCapturedCount : 0;
         internal KSA.KittenEva? Owner;
         internal double3 GroupOffsetBody, ReleasedOffset;
         internal double ReleasedSpread = ForceMath.DefaultGroupSpread;
@@ -212,6 +213,7 @@ namespace Purr2D2.Force
             int captureLimit = Purr2D2.Core.ForceCaptureLimits.Default)
         {
             CaptureCalls++; CapturedRadius = angryRadius; CapturedLimit = captureLimit; Events.Add("Capture");
+            if (HasCapture) { Status = "Already holding"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
             if (!pick.Live) { Status = "Stale target"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
             HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
         }

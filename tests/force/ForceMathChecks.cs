@@ -1,4 +1,5 @@
 using Brutal.Numerics;
+using Purr2D2.Core;
 using Purr2D2.Force;
 
 internal static class ForceMathChecks
@@ -59,15 +60,36 @@ internal static class ForceMathChecks
         Check(Math.Abs(ForceMath.ScaleGroupSpread(.9, -1) - 1) < 1e-12,
             "one negative tick reverses one compress tick multiplicatively");
         Check(ForceMath.ScaleGroupSpread(1, 1000) == ForceMath.MinimumGroupSpread
-            && ForceMath.ScaleGroupSpread(1, -1000) == ForceMath.MaximumGroupSpread
+            && ForceMath.ScaleGroupSpread(1, -1000) == ForceSpreadLimits.Maximum
             && double.IsFinite(ForceMath.ScaleGroupSpread(double.PositiveInfinity, -1000)),
-            "extreme wheel input remains finite and bounded to the positive .05 to 4 range");
+            "extreme wheel input remains finite and bounded to the positive .05 to 100 range");
+        Check(Math.Abs(ForceMath.ScaleGroupSpread(3.9, -.5) - 3.9 * Math.Pow(.9, -.5)) < 1e-12
+            && ForceMath.ScaleGroupSpread(3.9, -.5) > 4,
+            "fractional wheel input smoothly crosses the former 4x ceiling");
+        Check(ForceMath.ScaleGroupSpread(1, -100, 20) == 20
+            && ForceMath.ScaleGroupSpread(1, -100, 80) == 80
+            && ForceMath.ClampGroupSpread(200, 80) == 80,
+            "an explicit 20x or 80x preference caps expansion independently of the 100x safety limit");
+        Check(ForceMath.ClampGroupSpread(50, 0) == 1
+            && ForceMath.ClampGroupSpread(50, double.NaN) == ForceSpreadLimits.DefaultMaximum,
+            "requested maxima normalize to 1x or the finite 20x fallback");
         Check(ForceMath.ScaleGroupSpread(2, double.NaN) == 2,
             "invalid wheel input cannot alter the current group spread");
         Check(ForceMath.TryFollow(new(10, 0, 0), double3.Zero, doubleQuat.Identity, double3.Zero,
             new(4, 0, 0), new(-2, 0, 0), doubleQuat.Identity, new(0, 1, 0), .5, out var state),
             "a bounded group scale produces a rigid follow state");
         Equal(state.Position, new(13, 1, 0), "spread scales centered offsets while preserving centroid and translation");
+        Check(ForceMath.TryFollow(new(10, 0, 0), double3.Zero, doubleQuat.Identity, double3.Zero,
+            new(4, 0, 0), new(1, 0, 0), doubleQuat.Identity, new(0, 3, 0), 80, out var wideState),
+            "an 80x group scale produces a valid rigid follow state");
+        Check(ForceMath.TryFollow(new(10, 0, 0), double3.Zero, doubleQuat.Identity, double3.Zero,
+            new(4, 0, 0), new(-1, 0, 0), doubleQuat.Identity, new(0, 3, 0), 80, out var otherWideState),
+            "opposite offset at an 80x group scale remains valid");
+        Equal((wideState.Position + otherWideState.Position) / 2, new(14, 3, 0),
+            "wide spreads preserve the shared centroid while moving members farther apart");
+        Equal(wideState.Position, new(94, 3, 0), "80x spread changes only the centered object offset");
+        Check(Math.Abs(doubleQuat.Dot(wideState.Body2Cci, doubleQuat.Identity)) > 1 - 1e-12,
+            "wide spread preserves object orientation");
         Check(!ForceMath.TryFollow(double3.Zero, double3.Zero, doubleQuat.Identity, double3.Zero,
             new(4, 0, 0), new(-2, 0, 0), doubleQuat.Identity, double3.Zero,
             ForceMath.MinimumGroupSpread / 2, out _), "out-of-range spread cannot corrupt a held object's state");

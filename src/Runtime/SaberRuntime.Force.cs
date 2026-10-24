@@ -14,6 +14,7 @@ internal sealed partial class SaberRuntime
     private readonly ForceController _force = new();
     private readonly ForceOverlayDrag _forceDrag = new();
     private readonly ForceOffsetSmoother _forceOffsetSmoother = new();
+    private readonly ForceCaptureLift _forceCaptureLift = new();
     private readonly ForceOverlaySliderDrag _forceSettingDrag = new();
     private readonly ForceThrowDrag _forceThrowDrag = new();
     private readonly ForceBreakupSequence _forceBreakupSequence = new();
@@ -24,6 +25,7 @@ internal sealed partial class SaberRuntime
     private ForceOverlayLayout _forceLayout;
     private bool _forceLayoutAvailable, _selectingForce, _angryForce, _forceDisposed, _forceEscapeHeld;
     private KittenEva? _forcePickOwner, _forceMoveOwner, _forceSettingOwner, _forceThrowOwner;
+    private KittenEva? _forceCaptureLiftOwner;
     private ForcePick? _forceHover;
     private double3 _forceMoveOffset;
     private double _forceSpreadTarget = ForceMath.DefaultGroupSpread;
@@ -85,13 +87,25 @@ internal sealed partial class SaberRuntime
                 && ReferenceEquals(_forceMoveOwner, _owner) && ReferenceEquals(_force.Owner, _owner);
             if (ownsCapture)
             {
-                if (_forceMovePending)
+                if (_forceCaptureLift.IsActive && ReferenceEquals(_forceCaptureLiftOwner, _owner))
                 {
-                    _forceOffsetSmoother.SetTarget(_forceMoveOffset);
+                    double3 liftOffset = _forceCaptureLift.Advance(dtPlayer);
+                    if (liftOffset != _force.GroupOffsetBody) _force.SetOffset(liftOffset);
+                    _forceOffsetSmoother.Reset(liftOffset);
+                    _forceMoveOffset = liftOffset;
                     _forceMovePending = false;
+                    if (!_forceCaptureLift.IsActive) _forceCaptureLiftOwner = null;
                 }
-                double3 displayed = _forceOffsetSmoother.Advance(dtPlayer);
-                if (displayed != _force.GroupOffsetBody) _force.SetOffset(displayed);
+                else
+                {
+                    if (_forceMovePending)
+                    {
+                        _forceOffsetSmoother.SetTarget(_forceMoveOffset);
+                        _forceMovePending = false;
+                    }
+                    double3 displayed = _forceOffsetSmoother.Advance(dtPlayer);
+                    if (displayed != _force.GroupOffsetBody) _force.SetOffset(displayed);
+                }
             }
             else if (!_force.HasCapture) ResetForceMovement();
             if (ForceCanUse && _force.HasCapture && ReferenceEquals(_force.Owner, _owner))
@@ -123,7 +137,11 @@ internal sealed partial class SaberRuntime
                 if (request.Action == ForceAction.Capture && request.Target is { } pick)
                 {
                     if (_force.Capture(request.Owner, pick, request.Angry, request.AngryRadius, request.CaptureLimit))
+                    {
                         ResetForceMovement();
+                        StartForceCaptureLift(request.Owner);
+                    }
+                    else if (!_force.HasCapture) ResetForceMovement();
                     if (_force.StatusSeverity != ForceStatusSeverity.None) SyncForceStatusFromController();
                     else SetForceStatus(_force.Status, ForceStatusSeverity.None);
                 }
@@ -445,6 +463,7 @@ internal sealed partial class SaberRuntime
                     double3.TransformNormal(camera.GetUpEcl(), egoToBody),
                     double3.TransformNormal(camera.GetForwardEcl(), egoToBody)))
                 {
+                    CancelForceCaptureLiftForManualMovement();
                     _forceMoveOwner = _owner;
                     _forceMoveOffset = current;
                     _forceMovePending = true;
@@ -514,6 +533,8 @@ internal sealed partial class SaberRuntime
 
     private void AdvanceForceSpread(double dtPlayer)
     {
+        double maximumSpread = ForceSpreadLimits.ValidateMaximum(_settings.ForceMaximumSpread);
+        _forceSpreadTarget = ForceMath.ClampGroupSpread(_forceSpreadTarget, maximumSpread);
         double current = _force.GroupSpread;
         if (current == _forceSpreadTarget || !double.IsFinite(dtPlayer) || dtPlayer <= 0) return;
         double elapsed = Math.Clamp(dtPlayer, 0, .1);
@@ -534,7 +555,7 @@ internal sealed partial class SaberRuntime
         if (shift)
         {
             _forceBreakupScrollPixels.Enqueue(ForceBreakupSequence.PixelsFromNativeScroll(ticks));
-            _forceSpreadTarget = ForceMath.ScaleGroupSpread(_forceSpreadTarget, ticks);
+            _forceSpreadTarget = ForceMath.ScaleGroupSpread(_forceSpreadTarget, ticks, _settings.ForceMaximumSpread);
             return true;
         }
         var bodyToEgo = double4x4.CreateFromQuaternion(_owner!.Body2Ego);
@@ -543,6 +564,7 @@ internal sealed partial class SaberRuntime
             ? _forceMoveOffset : _forceOffsetSmoother.Target;
         var forward = double3.TransformNormal(Program.MainViewport.GetCamera().GetForwardEcl(), egoToBody);
         if (!_forceDrag.Scroll(ticks, current, forward)) return false;
+        CancelForceCaptureLiftForManualMovement();
         _forceMoveOwner = _owner;
         _forceMoveOffset = _forceDrag.Offset;
         _forceMovePending = true;
@@ -610,6 +632,8 @@ internal sealed partial class SaberRuntime
 
     private void ResetForceMovement()
     {
+        _forceCaptureLift.Reset();
+        _forceCaptureLiftOwner = null;
         _forceDrag.Reset();
         _forceOffsetSmoother.Reset();
         _forceSpreadTarget = ForceMath.DefaultGroupSpread;
@@ -622,6 +646,27 @@ internal sealed partial class SaberRuntime
         _forceMoveOffset = double3.Zero;
         _forceMovePending = false;
         _forceMoveOwner = null;
+    }
+
+    private void StartForceCaptureLift(KittenEva owner)
+    {
+        _forceCaptureLift.Start();
+        _forceCaptureLiftOwner = owner;
+        _forceMoveOwner = owner;
+        _forceMoveOffset = _force.GroupOffsetBody;
+        _forceMovePending = false;
+        _forceOffsetSmoother.Reset(_force.GroupOffsetBody);
+    }
+
+    private void CancelForceCaptureLiftForManualMovement()
+    {
+        if (!_forceCaptureLift.IsActive && _forceCaptureLiftOwner == null) return;
+        _forceCaptureLift.Reset();
+        _forceCaptureLiftOwner = null;
+        double3 displayed = _force.GroupOffsetBody;
+        _forceOffsetSmoother.Reset(displayed);
+        _forceMoveOffset = displayed;
+        _forceMovePending = false;
     }
 
     private void ResetForce()

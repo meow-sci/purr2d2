@@ -1,5 +1,6 @@
 using Brutal.Numerics;
 using Purr2D2.Cutting;
+using Purr2D2.Core;
 
 namespace Purr2D2.Force;
 
@@ -16,7 +17,7 @@ internal static class ForceMath
     internal const double MaximumOffset = 25;
     internal const double DefaultGroupSpread = 1;
     internal const double MinimumGroupSpread = .05;
-    internal const double MaximumGroupSpread = 4;
+    internal const double MaximumGroupSpread = ForceSpreadLimits.Maximum;
     internal const double GroupSpreadWheelFactor = .9;
 
     internal static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
@@ -26,16 +27,20 @@ internal static class ForceMath
     internal static bool ValidAngryRadius(double radius) => double.IsFinite(radius)
         && radius >= MinimumAngryRadius && radius <= MaximumAngryRadius;
 
-    internal static double ClampGroupSpread(double spread) => double.IsFinite(spread)
-        ? Math.Clamp(spread, MinimumGroupSpread, MaximumGroupSpread) : DefaultGroupSpread;
+    internal static double ClampGroupSpread(double spread, double maximumSpread = MaximumGroupSpread)
+    {
+        double validatedMaximum = ForceSpreadLimits.ValidateMaximum(maximumSpread);
+        return double.IsFinite(spread)
+            ? Math.Clamp(spread, MinimumGroupSpread, validatedMaximum) : DefaultGroupSpread;
+    }
 
     /// <summary>Positive wheel ticks compress; negative ticks expand by reciprocal multiplicative steps.</summary>
-    internal static double ScaleGroupSpread(double current, double ticks)
+    internal static double ScaleGroupSpread(double current, double ticks, double maximumSpread = MaximumGroupSpread)
     {
-        current = ClampGroupSpread(current);
+        current = ClampGroupSpread(current, maximumSpread);
         if (!double.IsFinite(ticks) || ticks == 0) return current;
         double boundedTicks = Math.Clamp(ticks, -100, 100);
-        return ClampGroupSpread(current * Math.Pow(GroupSpreadWheelFactor, boundedTicks));
+        return ClampGroupSpread(current * Math.Pow(GroupSpreadWheelFactor, boundedTicks), maximumSpread);
     }
 
     internal static bool TryFollow(double3 ownerPosition, double3 ownerVelocity, doubleQuat ownerBody2Cci,
