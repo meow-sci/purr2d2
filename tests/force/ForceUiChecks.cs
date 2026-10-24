@@ -198,6 +198,7 @@ internal sealed partial class SaberRuntime
         Draw();
         var idleForce = Fill(forceCenter);
         var idleAngry = Fill(angryCenter);
+        var idleForceRing = Ring(forceCenter);
         Check(Label(forceCenter, "FORCE") && !DrawnLabels.Any(label => label.Text == "CANCEL"),
             "idle Force controls show their action labels");
 
@@ -205,7 +206,7 @@ internal sealed partial class SaberRuntime
         Draw();
         Check(runtime.ForcePicking && !runtime._angryForce && Label(forceCenter, "CANCEL")
             && !Label(angryCenter, "CANCEL") && Fill(forceCenter).Color != idleForce.Color
-            && Ring(forceCenter).Thickness > Ring(angryCenter).Thickness,
+            && Ring(forceCenter).Thickness > idleForceRing.Thickness,
             "the active Force picker displays Cancel with a brighter fill and stronger ring on its own button");
         runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(300, 200)); runtime.UpdateForceFrame();
         Check(runtime._forceQuery is { Capture: true }, "a pending capture exists before button cancellation");
@@ -222,8 +223,8 @@ internal sealed partial class SaberRuntime
         Check(runtime.ForcePicking && runtime._angryForce && runtime._forceQuery == null && !runtime._forceClickPending
             && Label(forceCenter, "FORCE") && Label(angryCenter, "CANCEL")
             && Fill(forceCenter) == idleForce && Fill(angryCenter).Color != idleAngry.Color
-            && Ring(angryCenter).Thickness > Ring(forceCenter).Thickness,
-            "the other mode switches to Angry Force and moves Cancel and the active ring without retaining an old click");
+            && !ImDrawListPtr.Circles.Any(circle => circle.Center == angryCenter && !circle.Filled),
+            "the other mode switches to borderless Angry Force and moves Cancel without retaining an old click");
         runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter); Draw();
         Check(runtime.ForcePicking && !runtime._angryForce && Label(forceCenter, "CANCEL")
             && !Label(angryCenter, "CANCEL") && Fill(angryCenter) == idleAngry,

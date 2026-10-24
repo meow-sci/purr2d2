@@ -323,35 +323,35 @@ internal sealed partial class SaberRuntime
     {
         if (!_forceLayoutAvailable) return;
         var layout = _forceLayout;
-        var white = new ImColor8(225, 245, 255, 255);
-        var muted = new ImColor8(130, 155, 175, 255);
+        var white = new ImColor8(255, 255, 255, 255);
+        var muted = new ImColor8(195, 200, 210, 255);
         var color = ForceCanUse ? white : muted;
         bool forcePicking = !ForceHolding && ForcePicking && !_angryForce;
         bool angryPicking = !ForceHolding && ForcePicking && _angryForce;
         draw.AddCircleFilled(layout.ForceCenter, layout.ButtonRadius,
-            forcePicking ? new ImColor8(30, 125, 190, 210) : new ImColor8(15, 80, 130, 128), 48);
+            forcePicking ? new ImColor8(0, 0, 255, 128) : new ImColor8(0, 0, 255, 64), 48);
         draw.AddCircleFilled(layout.AngryCenter, layout.ButtonRadius,
-            angryPicking ? new ImColor8(190, 45, 50, 210) : new ImColor8(135, 30, 35, 128), 48);
-        draw.AddCircle(layout.ForceCenter, layout.ButtonRadius, color, 48, forcePicking ? Math.Max(2, 3 * layout.Scale) : 1);
-        draw.AddCircle(layout.AngryCenter, layout.ButtonRadius, color, 48, angryPicking ? Math.Max(2, 3 * layout.Scale) : 1);
+            angryPicking ? new ImColor8(224, 24, 24, 210) : new ImColor8(224, 24, 24, 128), 48);
+        draw.AddCircle(layout.ForceCenter, layout.ButtonRadius, new ImColor8(100, 160, 255, 255), 48,
+            forcePicking ? Math.Max(2, 3 * layout.Scale) : Math.Max(.5f, layout.Scale));
         CenterOverlayText(draw, layout.ForceCenter, color, ForceHolding ? "RELEASE" : forcePicking ? "CANCEL" : "FORCE", layout.ButtonRadius * 1.75f);
         if (ForceHolding) CenterOverlayText(draw, layout.AngryCenter, color, "THROW", layout.ButtonRadius * 1.75f);
         else if (angryPicking) CenterOverlayText(draw, layout.AngryCenter, color, "CANCEL", layout.ButtonRadius * 1.75f);
         else
         {
-            float labelFont = Math.Min(ImGui.GetFontSize(), 12 * layout.Scale);
+            float labelFont = Math.Min(ImGui.GetFontSize(), 14 * layout.Scale);
             CenterOverlayText(draw, layout.AngryCenter - new float2(0, labelFont * .5f), color,
                 "ANGRY", layout.ButtonRadius * 1.75f, labelFont);
             CenterOverlayText(draw, layout.AngryCenter + new float2(0, labelFont * .5f), color,
                 "FORCE", layout.ButtonRadius * 1.75f, labelFont);
         }
         draw.AddCircleFilled(layout.MoveCenter, layout.MoveRadius, new ImColor8(0, 0, 0, 128), 64);
-        draw.AddCircle(layout.MoveCenter, layout.MoveRadius, ForceHolding ? white : muted, 64, Math.Max(.5f, layout.Scale));
         float font = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
-        CenterOverlayText(draw, layout.MoveCenter - new float2(0, font), ForceHolding ? white : muted,
-            "MOVE FORCE", layout.MoveRadius * 1.7f, font);
-        CenterOverlayText(draw, layout.MoveCenter + new float2(0, font * .5f), muted,
-            "drag + wheel depth", layout.MoveRadius * 1.7f, font);
+        var moveText = ForceHolding ? white : muted;
+        CenterOverlayText(draw, layout.MoveCenter - new float2(0, font * .55f), moveText,
+            "MOVE FORCE", layout.MoveRadius * 1.6f, font);
+        CenterOverlayText(draw, layout.MoveCenter + new float2(0, font * .65f), moveText,
+            "drag + wheel depth", layout.MoveRadius * 1.6f, font);
         if (_forceDrag.Held)
             draw.AddCircle(layout.MoveCenter + _forceDrag.PointerOffset * (layout.MoveRadius * .65f),
                 Math.Max(2, 5 * layout.Scale), white, 16, 1);
