@@ -14,6 +14,13 @@ public sealed class SaberEffectSettings
     public float ArcAmplitude { get; set; }
     public float ArcBrightness { get; set; }
     public float ArcWidth { get; set; }
+    // Dark-only cosmetic slag; kept in the shared profile for normal reset/autosave handling.
+    public int SparkCount { get; set; }
+    public float SparkFrequency { get; set; }
+    public float SparkSize { get; set; }
+    public float SparkBrightness { get; set; }
+    public float SparkLifetime { get; set; }
+    public float SparkSpeed { get; set; }
 
     public SaberEffectSettings() => Reset(SaberType.Light);
 
@@ -34,6 +41,10 @@ public sealed class SaberEffectSettings
         ArcAmplitude = dark ? 2.5f : .8f;
         ArcBrightness = dark ? 4 : 2.5f;
         ArcWidth = dark ? 3 : 1.75f;
+        SparkCount = 4;
+        SparkFrequency = 4;
+        SparkSize = SparkBrightness = SparkSpeed = 1;
+        SparkLifetime = .45f;
     }
 
     public void Validate(SaberType type)
@@ -46,6 +57,12 @@ public sealed class SaberEffectSettings
         ArcAmplitude = Clamp(ArcAmplitude, 0, 3, dark ? 2.5f : .8f);
         ArcBrightness = Clamp(ArcBrightness, 0, SaberSettings.MaximumArcBrightness, dark ? 4 : 2.5f);
         ArcWidth = Clamp(ArcWidth, .25f, SaberSettings.MaximumArcWidth, dark ? 3 : 1.75f);
+        SparkCount = Math.Clamp(SparkCount, 0, SaberSettings.MaximumSparkCount);
+        SparkFrequency = Clamp(SparkFrequency, 0, SaberSettings.MaximumSparkFrequency, 4);
+        SparkSize = Clamp(SparkSize, .25f, 3, 1);
+        SparkBrightness = Clamp(SparkBrightness, 0, 4, 1);
+        SparkLifetime = Clamp(SparkLifetime, .1f, .8f, .45f);
+        SparkSpeed = Clamp(SparkSpeed, .25f, 3, 1);
     }
 
     private static float Clamp(float value, float min, float max, float fallback) =>
@@ -58,6 +75,8 @@ public sealed class SaberSettings
     public const float MaximumArcFrequency = 10;
     public const float MaximumArcBrightness = 6;
     public const float MaximumArcWidth = 4;
+    public const int MaximumSparkCount = 8;
+    public const float MaximumSparkFrequency = 12;
 
     public float BladeLength { get; set; } = 1.4f;
     public float SliceReachMultiplier { get; set; } = SaberLimits.DefaultSliceReachMultiplier;

@@ -12,8 +12,9 @@ internal static class SaberVfxChecks
         DetailBoundaries();
         StableTimeAndSeed();
         RateScaledClock();
+        DarkSparkBudgetAndClock();
         AllocationBudget();
-        Console.WriteLine("Saber VFX checks passed (both profiles, ABI, bounded tuning/LOD, retraction/end-on, continuous clocks/seeds, zero allocations).");
+        Console.WriteLine("Saber VFX checks passed (both profiles, ABI, bounded tuning/LOD, Dark spark budget/timing, retraction/end-on, continuous clocks/seeds, zero allocations).");
     }
 
     private static void CpuShaderAbi()
@@ -260,6 +261,52 @@ internal static class SaberVfxChecks
     }
 
     private static float PhaseDelta(float before, float after) => (after - before + 256) % 256;
+
+    private static void DarkSparkBudgetAndClock()
+    {
+        var effects = SaberEffectSettings.Create(SaberType.Dark);
+        var tuning = DarkSaberSparkTuning.FromEffects(effects);
+        Check(tuning == new DarkSaberSparkTuning(4, 4, 1, 1, .45f, 1) && tuning.Enabled,
+            "default Dark sparks use four small short-lived embers four times per second");
+        effects.SparkCount = int.MaxValue; effects.SparkFrequency = float.MaxValue;
+        effects.SparkSize = float.NaN; effects.SparkBrightness = -1;
+        effects.SparkLifetime = float.PositiveInfinity; effects.SparkSpeed = 99;
+        effects.Validate(SaberType.Dark);
+        Check(DarkSaberSparkTuning.FromEffects(effects) == new DarkSaberSparkTuning(8, 12, 1, 0, .45f, 3),
+            "invalid spark settings cannot exceed the supported emission and size bounds");
+        Check(DarkSaberSparkTuning.MaximumBursts * SaberSettings.MaximumSparkCount == 128,
+            "all kittens and viewports share a hard ceiling of 128 live sparks");
+        foreach (var disabled in new[] { tuning with { Count = 0 }, tuning with { Frequency = 0 }, tuning with { Brightness = 0 } })
+            Check(!disabled.Enabled, "zero amount, frequency, or intensity disables new spark work");
+        Check(DarkSaberSparkTuning.Visibility(12) == 1 && DarkSaberSparkTuning.Visibility(18) == .5f
+            && DarkSaberSparkTuning.Visibility(24) == 0 && DarkSaberSparkTuning.Visibility(double.NaN) == 0,
+            "distant sparks fade and are culled before recording GPU commands");
+        var clock = new DarkSaberSparkClock();
+        Check(clock.TryEmit(10, 4, .25f, out float first), "a newly visible saber can emit immediately");
+        for (int view = 0; view < 4; view++)
+            Check(!clock.TryEmit(10, 4, .25f, out _), "extra viewports never duplicate emission in one frame");
+        Check(!clock.TryEmit(10.249, 4, .25f, out _)
+            && clock.TryEmit(10.25, 4, .25f, out float next) && first != next,
+            "frequency is bursts per second and each burst has a fresh deterministic seed");
+        Check(clock.TryEmit(100, 4, .25f, out _)
+            && !clock.TryEmit(100, 4, .25f, out _), "a hitch produces one burst without replaying missed windows");
+        Check(!clock.TryEmit(100, 12, .25f, out _) && clock.TryEmit(100.084, 12, .25f, out _),
+            "frequency edits take effect without duplicating the current burst");
+        Check(clock.TryEmit(0, 4, .25f, out _) && !clock.TryEmit(0, 4, .25f, out _),
+            "world clock resets reanchor spark emission without freezing it");
+        Check(!clock.TryEmit(double.NaN, 4, .25f, out _) && !clock.TryEmit(0, 0, .25f, out _),
+            "invalid clocks and disabled frequency fail closed");
+        for (int i = 0; i < 1000; i++) clock.TryEmit(i, 12, .25f, out _);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        float total = 0;
+        for (int i = 0; i < 10000; i++)
+        {
+            if (clock.TryEmit(i, 12, .25f, out float seed)) total += seed;
+            total += DarkSaberSparkTuning.FromEffects(effects).Speed + DarkSaberSparkTuning.Visibility(i % 30);
+        }
+        Check(total > 0 && GC.GetAllocatedBytesForCurrentThread() == before,
+            "spark scheduling, snapshots and culling allocate no memory per frame");
+    }
     private static bool Near(float actual, float expected) => Math.Abs(actual - expected) < .0001f;
 
     private static void AllocationBudget()

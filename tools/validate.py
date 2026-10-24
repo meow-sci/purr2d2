@@ -726,7 +726,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     shader_code, shader_output = run_shader_checks(source, stage)
     outputs = [shader_output]
     result = shader_code
-    vfx_sources = [source / "src/Rendering/SaberVfx.cs", source / "src/Core/SaberSettings.cs", source / "tests/SaberVfxChecks.cs",
+    vfx_sources = [source / "src/Rendering/SaberVfx.cs", source / "src/Rendering/DarkSaberSparks.cs",
+                   source / "src/Core/SaberSettings.cs", source / "tests/SaberVfxChecks.cs",
                    source / "artifacts/checks/SaberVfxChecks/GlowPush.cs"]
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),

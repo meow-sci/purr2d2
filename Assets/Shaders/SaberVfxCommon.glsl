@@ -2,8 +2,8 @@
 layout(push_constant) uniform GlowPush {
     mat4 mvp;
     vec4 color; // tint, brightness (hot/char) or radial amplitude (arc)
-    vec4 shape; // hot/char: half length,radius,core,mode0/1; arc: length,width,burstClock,2+count
-    vec4 animation; // phase seconds, owner seed, along offset / segments, shimmer / arc level
+    vec4 shape; // hot/char: half length,radius,core,mode0/1; arc: length,width,burstClock,2+count; slag: 0,width,speed,-1
+    vec4 animation; // phase,seed,along/segments,shimmer/level; slag: age,seed,lifetime,fall acceleration
     vec4 camera; // local camera position, arc visibility * HDR brightness
 } pc;
 

@@ -158,11 +158,14 @@ internal sealed partial class SaberRuntime
         ImGui.Separator();
         ImGui.TextWrapped($"{typeName} effects — shared by all {typeName} sabers");
         var effects = _settings.EffectsFor(type);
-        if (!BeginSaberSettingsTable("##SaberEffects", "Shimmer amount")) return;
+        if (!BeginSaberSettingsTable("##SaberEffects", type == SaberType.Dark ? "Spark spray speed" : "Shimmer amount")) return;
         float shimmerAmount = effects.ShimmerAmount, shimmerSpeed = effects.ShimmerSpeed;
         int arcCount = effects.ArcCount;
         float arcFrequency = effects.ArcFrequency, arcAmplitude = effects.ArcAmplitude;
         float arcBrightness = effects.ArcBrightness, arcWidth = effects.ArcWidth;
+        int sparkCount = effects.SparkCount;
+        float sparkFrequency = effects.SparkFrequency, sparkSize = effects.SparkSize;
+        float sparkBrightness = effects.SparkBrightness, sparkLifetime = effects.SparkLifetime, sparkSpeed = effects.SparkSpeed;
         bool changed = false;
         try
         {
@@ -187,6 +190,24 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Arc width");
             changed |= ImGui.SliderFloat("##ArcWidth", ref arcWidth, .25f, SaberSettings.MaximumArcWidth, "%.2fx");
             ShowSaberControlTip("Arc width; 1× is the baseline.");
+            if (type == SaberType.Dark)
+            {
+                SaberSettingsRow("Spark amount");
+                changed |= ImGui.SliderInt("##SparkCount", ref sparkCount, 0, SaberSettings.MaximumSparkCount);
+                ShowSaberControlTip("Colored welding sparks per burst; 0 disables them. Sparks fade as they fall away.");
+                SaberSettingsRow("Spark frequency");
+                changed |= ImGui.SliderFloat("##SparkFrequency", ref sparkFrequency, 0, SaberSettings.MaximumSparkFrequency, "%.1f bursts/s");
+                ShowSaberControlTip("Spark bursts per second; 0 disables emission.");
+                SaberSettingsRow("Spark size");
+                changed |= ImGui.SliderFloat("##SparkSize", ref sparkSize, .25f, 3, "%.2fx");
+                SaberSettingsRow("Spark brightness");
+                changed |= ImGui.SliderFloat("##SparkBrightness", ref sparkBrightness, 0, 4, "%.2fx");
+                ShowSaberControlTip("Spark intensity in this kitten's saber color; 0 hides new sparks.");
+                SaberSettingsRow("Spark lifetime");
+                changed |= ImGui.SliderFloat("##SparkLifetime", ref sparkLifetime, .1f, .8f, "%.2f s");
+                SaberSettingsRow("Spark spray speed");
+                changed |= ImGui.SliderFloat("##SparkSpeed", ref sparkSpeed, .25f, 3, "%.2fx");
+            }
         }
         finally { ImGui.EndTable(); }
         if (changed)
@@ -195,6 +216,8 @@ internal sealed partial class SaberRuntime
             effects.ArcCount = arcCount; effects.ArcFrequency = arcFrequency;
             effects.ArcAmplitude = arcAmplitude; effects.ArcBrightness = arcBrightness;
             effects.ArcWidth = arcWidth;
+            effects.SparkCount = sparkCount; effects.SparkFrequency = sparkFrequency; effects.SparkSize = sparkSize;
+            effects.SparkBrightness = sparkBrightness; effects.SparkLifetime = sparkLifetime; effects.SparkSpeed = sparkSpeed;
             effects.Validate(type);
         }
         if (ImGui.Button($"Reset {typeName} effects"))

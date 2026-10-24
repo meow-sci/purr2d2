@@ -4,6 +4,13 @@ layout(location=1) in float effectBrightness;
 layout(location=0) out vec4 outColor;
 
 void main() {
+    if (pc.shape.w < -0.5) {
+        // Tiny untextured colored streak; no white core, noise, lighting, or halo samples.
+        float edge = max(1.0 - abs(positionOnRibbon.x), 0.0)
+            * max(1.0 - abs(positionOnRibbon.y), 0.0);
+        outColor = vec4(pc.color.rgb * (pc.color.a * effectBrightness * edge), 1.0);
+        return;
+    }
     if (pc.shape.w > 1.5) {
         float distanceToArc = abs(positionOnRibbon.x);
         float radius = pc.shape.y * 0.1875;

@@ -1,5 +1,15 @@
 # Acceptance record
 
+## Dark saber welding sparks (2026-10-24)
+
+Dark sabers emit short colored slag streaks from the deployed blade. Each burst captures its birth position in the celestial body-fixed frame and inherits the kitten's surface-relative velocity, so subsequent paw motion does not drag existing sparks. Simple analytic spray/fall and quadratic cooling use player time. The shader multiplies the saber RGB directly, without a white core. Light sabers do not emit this effect.
+
+Dark's shared effects expose amount, frequency, size, brightness, lifetime and spray speed, with autosave and profile reset. Fixed arrays cap all sabers together at 16 live bursts, eight sparks per burst and 32 tracked sources. Each burst uses one instanced draw of four vertices per spark in the existing glow pipeline. Distant/subpixel sources and offscreen bursts are skipped, with a 12–24 m fade. Excess work is dropped without catch-up. No emitters, GPU buffers, textures, physics queries or lights are added. Native Particles off suppresses the effect.
+
+Focused VFX checks pass for bounded defaults/invalid tuning, zero-effect controls, distance fade, repeated viewport submissions, frequency edits, clock resets, missed windows and zero-allocation scheduling. Core settings checks cover legacy defaults, all six saved values and reset. Both GLSL pairs compile/link with the reflected 128-byte interface intact. The complete managed/shader regression run passes (`artifacts/checks/dark-sparks-validation.log`). Release builds with zero warnings/errors; source/stage validation passes, all 29 packaged files match staging, and the Release DLL and archive checksum match. Other logs: `artifacts/checks/dark-sparks-settings.log`, `dark-sparks-release.log` and `dark-sparks-stage.log`.
+
+Native acceptance remains pending: inspect saturated red/green/purple sabers for matching-color bright births, downward streaks and complete fading; swing and walk to confirm old sparks detach; compare Light/Dark, ignition/retraction, Particles off, multiple kittens/viewports, pause and world reload. Adjust all six controls, disable each emission control with zero, restart and reset Dark to verify persistence/isolation. Compare frame times at defaults and all maxima with many equipped kittens; the hard budgets are verified structurally, not a measured GPU time guarantee.
+
 ## Repeated manual cuts and Force group spacing (2026-10-24)
 
 An active manual cut uses a green square made from corner brackets. White “slicing...” sits above the white part name, both centered above the marker. Projection, owner/source validity and viewport clipping still apply. The Slice grace / reach tooltip uses the requested blade-length multiplier description.

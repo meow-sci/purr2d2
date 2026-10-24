@@ -15,7 +15,7 @@ using Purr2D2.Core;
 namespace Purr2D2.Rendering;
 
 /// <summary>Native PBR hilt, depth-tested HDR blade/VFX, local light spill and bounded cut sparks.</summary>
-public sealed unsafe class SaberRenderer : IDisposable
+public sealed unsafe partial class SaberRenderer : IDisposable
 {
     private static SaberRenderer? _instance;
     private readonly Dictionary<int, List<Blade>> _blades = new();
@@ -61,6 +61,7 @@ public sealed unsafe class SaberRenderer : IDisposable
         if (_disposed) return;
         _lightVfx = SaberVfxTuning.FromEffects(settings.EffectsFor(SaberType.Light), SaberType.Light);
         _darkVfx = SaberVfxTuning.FromEffects(settings.EffectsFor(SaberType.Dark), SaberType.Dark);
+        _slagTuning = DarkSaberSparkTuning.FromEffects(settings.EffectsFor(SaberType.Dark));
     }
 
     public void Initialize(Harmony harmony)
@@ -165,6 +166,8 @@ public sealed unsafe class SaberRenderer : IDisposable
                 _blades.Add(viewport.ShaderSlot, list = new List<Blade>(1));
             list.Add(new Blade(emitterToEgo, float.Clamp(lengthMeters, 0, SaberLimits.MaximumBladeLength),
                 color, SaberVfx.Seed(kitten.Id), type == SaberType.Dark ? SaberType.Dark : SaberType.Light));
+            if (type == SaberType.Dark)
+                SubmitSlag(kitten, viewport, emitterToEgo, lengthMeters, color);
         }
         catch (Exception ex) { Report("saber submission", ex); }
     }
@@ -179,6 +182,7 @@ public sealed unsafe class SaberRenderer : IDisposable
     /// <summary>Player-time seconds: cooling remains visible while simulation is paused.</summary>
     public void Update(double now)
     {
+        UpdateSlag(now);
         _lightClock.Advance(now, _lightVfx.ShimmerSpeed, _lightVfx.ArcFrequency);
         _darkClock.Advance(now, _darkVfx.ShimmerSpeed, _darkVfx.ArcFrequency);
         _now = now;
@@ -186,7 +190,11 @@ public sealed unsafe class SaberRenderer : IDisposable
             if (now - _sparks[i].Born > .7 || _sparks[i].Part.Tree?.OwningVehicle is not { IsDisposed: false }) _sparks.RemoveAt(i);
     }
 
-    public void ClearEffects() => _sparks.Clear();
+    public void ClearEffects()
+    {
+        _sparks.Clear();
+        ClearSlag();
+    }
 
     private static PassKey Key(RenderTarget target) => new(target.Samples,
         target.ColorImage?.Format ?? VkFormat.Undefined, target.DepthImage?.Format ?? VkFormat.Undefined);
@@ -238,7 +246,8 @@ public sealed unsafe class SaberRenderer : IDisposable
     {
         if (_disposed || _gpuFailed || !viewport.Visible
             || !_pipelines.TryGetValue(Key(viewport.OffscreenTarget), out var pair)) return;
-        if (_sparks.Count == 0 && (!_blades.TryGetValue(viewport.ShaderSlot, out var blades) || blades.Count == 0)) return;
+        if (_sparks.Count == 0 && _slagCount == 0
+            && (!_blades.TryGetValue(viewport.ShaderSlot, out var blades) || blades.Count == 0)) return;
 
         // The blade has no depth writes. Drawing before atmosphere/cloud composition makes
         // those passes attenuate its light using the distant planet's depth instead of the blade's.
@@ -299,6 +308,7 @@ public sealed unsafe class SaberRenderer : IDisposable
 
         // Sparks deliberately retain the original hot branch, without either style's shimmer.
         commands.BindPipeline(VkPipelineBindPoint.Graphics, pair.Dark);
+        DrawSlag(camera, commands, projection);
         bool lightBound = false;
         foreach (var spark in _sparks)
         {
@@ -551,6 +561,7 @@ public sealed unsafe class SaberRenderer : IDisposable
         _emitters.Clear();
         _blades.Clear();
         _sparks.Clear();
+        ClearSlag();
         // Initialization can fail before the host renderer exists. In that case there is
         // nothing GPU-owned to free, and looking up the device would itself be unsafe.
         if (!_hasLayout && _hilt == null && _pipelines.Count == 0) return;

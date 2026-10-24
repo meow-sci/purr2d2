@@ -41,6 +41,40 @@ void drawArc() {
 }
 
 void main() {
+    if (pc.shape.w < -0.5) {
+        // Four vertices per ember. Analytic motion avoids a simulation/update buffer.
+        float seed = pc.animation.y + float(gl_InstanceIndex) * 23.0;
+        float age = pc.animation.x;
+        float life = pc.animation.z * mix(0.65, 1.0, hash(seed + 7.0));
+        float fade = max(1.0 - age / life, 0.0);
+        effectBrightness = fade * fade;
+        if (age >= life) {
+            positionOnRibbon = vec2(0);
+            gl_Position = vec4(0, 0, 0, 1);
+            return;
+        }
+        vec3 velocity = vec3(hash(seed + 11.0) * 2.0 - 1.0,
+            mix(0.1, 0.9, hash(seed + 31.0)), hash(seed + 53.0) * 2.0 - 1.0)
+            * (1.6 * pc.shape.z);
+        vec3 gravity = vec3(0, -pc.animation.w, 0);
+        vec3 point = velocity * age + gravity * (0.5 * age * age);
+        vec3 tangent = velocity + gravity * age;
+        // A short velocity-aligned streak, with a camera-facing width.
+        float speed = length(tangent);
+        tangent /= max(speed, 0.0001);
+        vec3 side = cross(tangent, pc.camera.xyz - point);
+        if (dot(side, side) < 1e-12) side = cross(tangent, vec3(1, 0, 0));
+        if (dot(side, side) < 1e-12) side = cross(tangent, vec3(0, 0, 1));
+        side *= inversesqrt(max(dot(side, side), 1e-12));
+        vec2 corner = vec2((gl_VertexIndex & 1) == 0 ? -1.0 : 1.0,
+            gl_VertexIndex < 2 ? -1.0 : 1.0);
+        float width = pc.shape.y * mix(0.65, 1.0, hash(seed + 71.0));
+        float halfLength = width + min(speed * 0.012, 0.045 * pc.shape.z);
+        positionOnRibbon = corner;
+        gl_Position = pc.mvp * vec4(point + side * (corner.x * width)
+            + tangent * (corner.y * halfLength), 1);
+        return;
+    }
     if (pc.shape.w > 1.5) {
         drawArc();
         return;
