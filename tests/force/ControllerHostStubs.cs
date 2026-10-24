@@ -126,7 +126,7 @@ namespace KSA
         internal int FailPlanWrite;
         internal double3[] BreakupOffsets = [];
         internal bool FailBreakupPreparation, FailBreakupCommit, Drained;
-        internal int BreakupCommits;
+        internal int BreakupCommits, BreakupPreparationSteps = 1, BreakupPlanDisposedAtWaitCount = -1;
         internal Vehicle(CelestialSystem system, IParentBody parent, string id, double3 position, double3 velocity)
         {
             System = system; Parent = parent; Id = id;
@@ -177,22 +177,42 @@ namespace Purr2D2.Force
     // separately against real KSA. This boundary models irreversible replacement.
     internal sealed class ForceVehicleBreakup(Vehicle source) : IDisposable
     {
+        private readonly double3[] _offsets = source.BreakupOffsets.ToArray();
+        private readonly Part[] _parts = source.Parts.Items.ToArray();
+        private int _remainingPreparationSteps = Math.Max(1, source.BreakupPreparationSteps);
+        private bool _captureComplete, _ready, _failed, _disposed;
+        internal bool CaptureComplete => _captureComplete;
+        internal bool Failed => _failed;
+        internal string? Error => _failed ? "fixture breakup preparation failed" : null;
+        internal bool Ready => _ready && !_disposed;
         internal static bool NeedsBreakup(Vehicle vehicle) => vehicle.BreakupOffsets.Length > 1;
-        internal int Count => source.BreakupOffsets.Length;
-        internal void Prepare()
-        { if (source.FailBreakupPreparation) throw new InvalidOperationException("fixture breakup preparation failed"); }
+        internal int Count => _captureComplete ? _offsets.Length : 0;
+        internal bool IsCurrent() => !_disposed && !source.IsDisposed && source.Parts.Items.SequenceEqual(_parts);
+        internal void AdvancePreparation(double budgetMilliseconds = 1.5)
+        {
+            if (_disposed || _ready || _failed) return;
+            if (!double.IsFinite(budgetMilliseconds) || budgetMilliseconds <= 0) return;
+            if (!_captureComplete) { _captureComplete = true; return; }
+            if (source.FailBreakupPreparation) { _failed = true; return; }
+            _ready = --_remainingPreparationSteps <= 0;
+        }
         internal Vehicle[] Commit()
         {
+            if (!Ready || !IsCurrent()) throw new InvalidOperationException("fixture plan is not ready/current");
             if (source.FailBreakupCommit) throw new InvalidOperationException("fixture breakup commit failed");
             source.BreakupCommits++;
-            var pieces = source.BreakupOffsets.Select((offset, i) => new Vehicle(source.System, source.Parent,
+            var pieces = _offsets.Select((offset, i) => new Vehicle(source.System, source.Parent,
                 source.Id + "_piece" + i, source.GetPositionCci() + offset.Transform(source.GetBody2Cci()), source.GetVelocityCci())
                 { Body2Cce = source.GetBody2Cci(), BodyRates = source.BodyRates }).ToArray();
             source.Drained = source.IsDisposed = true;
             source.System.All.Items.Remove(source);
             return pieces;
         }
-        public void Dispose() { }
+        public void Dispose()
+        {
+            if (!_disposed) source.BreakupPlanDisposedAtWaitCount = JobSystems.VehicleSolver.Waits;
+            _disposed = true;
+        }
     }
     internal sealed record ForcePick(Vehicle? Vehicle, Part? Part, ClutterForceTarget? Clutter,
         IParentBody Parent, CelestialSystem System, double3 HitBody, double3 HitCci)

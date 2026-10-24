@@ -1,5 +1,51 @@
 using Brutal.Numerics;
 
+namespace Purr2D2.Runtime
+{
+    internal sealed class ManualForceBreakupClock : TimeProvider
+    {
+        private const long Frequency = 1_000_000_000;
+        private long _timestamp;
+        public override long TimestampFrequency => Frequency;
+        public override long GetTimestamp() => _timestamp;
+        internal void Advance(double seconds)
+        {
+            if (double.IsFinite(seconds) && seconds > 0)
+                _timestamp = checked(_timestamp + (long)Math.Round(seconds * Frequency));
+        }
+    }
+}
+
+namespace Purr2D2.Audio
+{
+    using KSA;
+    internal sealed class ForceBreakupAudio : IDisposable
+    {
+        internal readonly List<string> Events = [];
+        internal double3 LastEmitter;
+        private int _groanUpdatesRemaining, _breakUpdatesRemaining;
+        internal int Groans, Breaks, Resets, Updates;
+        internal bool HasActiveChannels => _groanUpdatesRemaining > 0 || _breakUpdatesRemaining > 0;
+        internal bool LastPaused, PausedAtGroan, PausedAtBreak;
+        internal void Initialize() { }
+        internal void PlayGroan(KittenEva owner, double3 emitterBody, float volume)
+        { Groans++; LastEmitter = emitterBody; PausedAtGroan = LastPaused; _groanUpdatesRemaining = 3; Events.Add("Groan"); }
+        internal void PlayBreak(KittenEva owner, double3 emitterBody, float volume)
+        { Breaks++; LastEmitter = emitterBody; PausedAtBreak = LastPaused; _breakUpdatesRemaining = 3; Events.Add("Break"); }
+        internal void Update(KittenEva owner, double3 emitterBody, float volume, bool paused = false)
+        {
+            Updates++; LastEmitter = emitterBody; LastPaused = paused;
+            if (_groanUpdatesRemaining > 0) _groanUpdatesRemaining--;
+            if (_breakUpdatesRemaining > 0) _breakUpdatesRemaining--;
+        }
+        internal void Stop() => Reset();
+        internal void Reset()
+        { Resets++; _groanUpdatesRemaining = _breakUpdatesRemaining = 0; Events.Add("Reset"); }
+        internal void Shutdown() => Reset();
+        public void Dispose() => Reset();
+    }
+}
+
 namespace HarmonyLib { public sealed class Harmony { } }
 namespace Brutal.GlfwApi
 {
@@ -79,6 +125,11 @@ namespace KSA
 {
     public class Vehicle { public string Id = "Target"; }
     public sealed class KittenEva : Vehicle { public bool IsDisposed; public doubleQuat Body2Ego = doubleQuat.Identity; }
+    public static class Universe
+    {
+        public static double SimulationSpeed = 1;
+        public static double GetSimulationSpeed() => SimulationSpeed;
+    }
     public struct Ray { public double3 Origin, Direction; }
     public sealed class TestViewport
     {
@@ -113,6 +164,7 @@ namespace KSA
 }
 namespace Purr2D2.Force
 {
+    using Purr2D2.Core;
     internal enum ForceStatusSeverity { None, Warning, Error }
 
     internal sealed record ForcePick(KSA.Vehicle Vehicle) { internal bool Live = true; internal string DisplayName => Vehicle.Id; }
@@ -138,7 +190,8 @@ namespace Purr2D2.Force
     internal sealed class ForceController : IDisposable
     {
         internal bool HasCapture, Disposed, FailUpdate;
-        internal int CaptureCalls, BreakupCalls;
+        internal int CaptureCalls, BreakupCalls, BreakupCancels, BreakupPreparationCalls, BreakupCommitCalls;
+        internal bool CanBreakup, BreakupActive, BreakupPrepared = true, BreakupCompletesOnCommit = true;
         internal int CapturedLimit;
         internal double CapturedRadius;
         internal double GroupSpread = ForceMath.DefaultGroupSpread;
@@ -150,6 +203,8 @@ namespace Purr2D2.Force
         internal string Status = "";
         internal ForceStatusSeverity StatusSeverity;
         internal readonly List<string> Events = [];
+        internal bool TryGetPoseTargetBody(KSA.KittenEva owner, out double3 target)
+        { target = GroupOffsetBody; return HasCapture && ReferenceEquals(Owner, owner); }
         internal void Install(HarmonyLib.Harmony harmony) { Status = ""; StatusSeverity = ForceStatusSeverity.None; }
         internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry, double angryRadius = 10,
             int captureLimit = Purr2D2.Core.ForceCaptureLimits.Default)
@@ -166,10 +221,27 @@ namespace Purr2D2.Force
         }
         internal void SetOffset(double3 offset) { Events.Add("Offset"); GroupOffsetBody = offset; }
         internal void SetSpread(double spread) { Events.Add("Spread"); GroupSpread = ForceMath.ClampGroupSpread(spread); }
-        internal void BreakApart(KSA.KittenEva owner) { Events.Add("Breakup"); BreakupCalls++; }
+        internal bool BeginBreakup(KSA.KittenEva owner)
+        {
+            if (!CanBreakup || !HasCapture || !ReferenceEquals(Owner, owner) || BreakupActive) return false;
+            Events.Add("BreakupBegin"); BreakupCalls++; BreakupActive = true; BreakupPrepared = true; return true;
+        }
+        internal ForceBreakupStepResult AdvanceBreakup(KSA.KittenEva owner, bool splitRequested, bool delayElapsed)
+        {
+            Events.Add("BreakupAdvance");
+            if (!BreakupActive || !HasCapture || !ReferenceEquals(Owner, owner)) return default;
+            BreakupPreparationCalls++;
+            if (!BreakupPrepared) return new(true, false, false, false);
+            if (!splitRequested || !delayElapsed) return new(true, false, false, false);
+            BreakupCommitCalls++;
+            if (BreakupCompletesOnCommit) { BreakupActive = false; return new(false, false, true, true); }
+            return new(true, false, true, false);
+        }
+        internal void CancelBreakup()
+        { if (!BreakupActive) return; Events.Add("BreakupCancel"); BreakupCancels++; BreakupActive = false; }
         internal void Release(bool thrown, double throwSpeed = ForceMath.ThrowSpeed)
-        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; }
-        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; }
+        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
+        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
         public void Dispose() => Disposed = true;
     }
 }

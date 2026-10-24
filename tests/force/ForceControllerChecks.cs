@@ -17,6 +17,8 @@ internal static class ForceControllerChecks
         GroupSpreadAroundCentroid();
         BreakupKeepsMixedHold();
         BreakupPreflightAndPartialFailure();
+        IncrementalBreakupCommitsAtLateReadiness();
+        BreakupOwnershipCancellation();
         ConfigurableAngryRadius();
         CombinedLimitPreflight();
         InvalidCaptureLimits();
@@ -62,7 +64,12 @@ internal static class ForceControllerChecks
             var clutterPosition = clutter.State.Position;
             controller.TryGetPoseTargetBody(owner, out var aim);
             Check(target.BreakupCommits == 0, "changing displayed spread alone does not break a captured vehicle");
-            controller.BreakApart(owner);
+            Check(controller.BeginBreakup(owner), "a held intact vehicle accepts a staged breakup plan");
+            PrepareBreakup(controller, owner);
+            Check(controller.BreakupPrepared && target.BreakupCommits == 0,
+                "fully warmed stage-one preparation remains invisible until the split request");
+            var committed = controller.AdvanceBreakup(owner, splitRequested: true, delayElapsed: true);
+            Check(committed.SourceCommitted && committed.Completed, "the prepared source commits after both gesture gates pass");
             var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece")).OrderBy(v => v.Id).ToArray();
             Check(target.Drained && target.IsDisposed && target.BreakupCommits == 1 && pieces.Length == 2
                 && controller.CapturedCount == 4, "breakup replaces only the intact vehicle and retains all resulting debris");
@@ -77,8 +84,8 @@ internal static class ForceControllerChecks
             Equal(pieces[1].GetPositionCci() - pieces[0].GetPositionCci(), new(2, 0, 0),
                 "subsequent spread scales the new pieces around their existing hold frame");
             var before = pieces.Select(p => p.GetPositionCci()).ToArray();
-            controller.BreakApart(owner);
-            Check(controller.CapturedCount == 4 && target.BreakupCommits == 1, "ordinary debris does not recursively break up");
+            Check(!controller.BeginBreakup(owner) && controller.CapturedCount == 4 && target.BreakupCommits == 1,
+                "ordinary debris does not recursively break up");
             controller.SetOffset(new(2, 2, 0)); controller.Update(owner);
             for (int i = 0; i < pieces.Length; i++) Equal(pieces[i].GetPositionCci(), before[i] + double3.UnitX,
                 "existing translation moves replacement debris normally");
@@ -97,24 +104,112 @@ internal static class ForceControllerChecks
             var second = new Vehicle(owner.System, owner.Parent, "second", new(6, 0, 0), double3.Zero)
                 { BreakupOffsets = [new(0, -.5, 0), new(0, .5, 0)], FailBreakupPreparation = true };
             Check(controller.Capture(owner, Pick(target), true, 10), "two intact vehicles capture before breakup failure");
-            controller.BreakApart(owner);
+            Check(controller.BeginBreakup(owner), "multi-source breakup begins with incremental plans");
+            AdvanceUntilTerminal(controller, owner);
             Check(!target.Drained && !second.Drained && target.BreakupCommits == 0 && controller.CapturedCount == 2
                 && controller.StatusSeverity == ForceStatusSeverity.Warning,
                 "all sources remain intact when any peer fails native preparation");
             second.FailBreakupPreparation = false;
             target.BreakupOffsets = new double3[ForceCaptureLimits.Maximum + 1];
-            controller.BreakApart(owner);
+            Check(controller.BeginBreakup(owner), "capacity preflight can be retried after preparation failure");
+            AdvanceUntilTerminal(controller, owner);
             Check(!target.Drained && !second.Drained && controller.Status.Contains("exceed"),
                 "the complete replacement count is bounded before any irreversible operation");
             target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
             second.FailBreakupCommit = true;
-            controller.BreakApart(owner);
+            Check(controller.BeginBreakup(owner), "valid counts retry before a partial commit test");
+            PrepareBreakup(controller, owner);
+            var firstCommit = controller.AdvanceBreakup(owner, splitRequested: true, delayElapsed: true);
+            Check(firstCommit.SourceCommitted && !firstCommit.Completed,
+                "at most one source commits during each safe handoff");
+            AdvanceUntilTerminal(controller, owner);
             Check(target.Drained && !second.Drained && controller.CapturedCount == 3,
                 "a later commit failure retains both already committed debris and the surviving source");
             controller.SetOffset(new(0, 1, 0)); controller.Update(owner);
             Check(controller.HasCapture && controller.CapturedCount == 3 && controller.StatusSeverity == ForceStatusSeverity.Warning,
                 "partial native breakup remains a valid ordinary hold for movement and release");
             controller.Release(false);
+        }
+    }
+
+    private static void PrepareBreakup(ForceController controller, KittenEva owner)
+    {
+        for (int i = 0; i < 64 && controller.BreakupActive && !controller.BreakupPrepared; i++)
+            controller.AdvanceBreakup(owner, splitRequested: false, delayElapsed: false);
+    }
+
+    private static ForceBreakupStepResult AdvanceUntilTerminal(ForceController controller, KittenEva owner)
+    {
+        ForceBreakupStepResult result = default;
+        for (int i = 0; i < 64 && controller.BreakupActive; i++)
+        {
+            result = controller.AdvanceBreakup(owner, splitRequested: true, delayElapsed: true);
+            if (result.Failed || result.Completed) break;
+        }
+        return result;
+    }
+
+    private static void IncrementalBreakupCommitsAtLateReadiness()
+    {
+        var (controller, owner, target) = Setup("breakup-late-ready");
+        using (controller)
+        {
+            target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
+            target.BreakupPreparationSteps = 10;
+            Check(controller.Capture(owner, Pick(target), false), "late-readiness source captures");
+            Check(controller.BeginBreakup(owner), "late-readiness source accepts stage one");
+            var first = controller.AdvanceBreakup(owner, splitRequested: true, delayElapsed: true);
+            Check(first.Active && !first.SourceCommitted && !controller.BreakupPrepared
+                && target.BreakupCommits == 0,
+                "stage two and its delay can be ready while incremental preparation is still pending");
+
+            Universe.Time = 1;
+            owner.SetNativeState(new(10, 0, 0), new(3, 0, 0), doubleQuat.Identity, double3.Zero);
+            controller.Update(owner);
+            var movedCenter = target.GetPositionCci();
+            var ready = controller.AdvanceBreakup(owner, splitRequested: true, delayElapsed: true);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece")).ToArray();
+            Check(ready.SourceCommitted && ready.Completed && pieces.Length == 2,
+                "the handoff that finishes preparation commits immediately when both gesture gates already passed");
+            Equal((pieces[0].GetPositionCci() + pieces[1].GetPositionCci()) * .5, movedCenter,
+                "commit uses the source's current world pose after it moved during preparation");
+            controller.Release(false);
+        }
+    }
+
+    private static void BreakupOwnershipCancellation()
+    {
+        foreach (string action in new[] { "release", "throw", "owner", "world", "topology", "reset" })
+        {
+            var (controller, owner, target) = Setup("breakup-cancel-" + action);
+            using (controller)
+            {
+                target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
+                Check(controller.Capture(owner, Pick(target), false), action + " cancellation source captures");
+                Check(controller.BeginBreakup(owner), action + " cancellation accepts stage one");
+                PrepareBreakup(controller, owner);
+                Check(controller.BreakupPrepared && target.BreakupCommits == 0,
+                    action + " cancellation starts from warmed but invisible preparation");
+
+                int waitsBeforeReset = JobSystems.VehicleSolver.Waits;
+                switch (action)
+                {
+                    case "release": controller.Release(false); break;
+                    case "throw": controller.Release(true); break;
+                    case "owner": Program.ControlledVehicle = null; controller.Update(null); break;
+                    case "world": Universe.CurrentSystem = new(); controller.Update(owner); break;
+                    case "topology": target.Parts.Items.Add(new() { Tree = target.Parts }); controller.Update(owner); break;
+                    case "reset": controller.Reset(); break;
+                }
+
+                Check(!controller.HasCapture && !controller.BreakupActive && !target.Drained
+                    && target.BreakupCommits == 0,
+                    action + " change cancels warmed preparation before it can affect a later hold");
+                if (action == "reset")
+                    Check(target.BreakupPlanDisposedAtWaitCount > waitsBeforeReset,
+                        "reset joins native vehicle readers before disposing warmed breakup roots");
+                if (action == "world") controller.Reset();
+            }
         }
     }
 

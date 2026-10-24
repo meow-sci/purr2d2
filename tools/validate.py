@@ -707,6 +707,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     slice_overlay_sources = [source / "src/Core/OverlayStatusTextLayout.cs",
         source / "src/Core/SliceOverlayLayout.cs", source / "tests/SliceOverlayLayoutChecks.cs"]
     force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs", source / "src/Force/ForceMath.cs",
+        source / "src/Core/ForceBreakupSequence.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Runtime/SaberRuntime.OverlayText.cs", source / "src/Core/OverlayStatusTextLayout.cs",
         source / "src/Core/ForceOverlayDrag.cs", source / "src/Core/ForceOverlayLayout.cs", source / "src/Core/ForceThrowDrag.cs",
@@ -717,6 +718,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/force/ForceOverlayChecks.cs"]
     force_controller_sources = [source / "src/Force/ForceController.cs", source / "src/Force/ForceController.Follow.cs",
         source / "src/Force/ForceController.Breakup.cs",
+        source / "src/Core/ForceBreakupSequence.cs",
         source / "src/Force/ForceTarget.cs", source / "src/Force/ForceTargeting.Proximity.cs",
         source / "src/Force/ForcePhysicsPatches.cs", source / "src/Force/ForceMath.cs",
         source / "src/Cutting/CutGeometry.cs", source / "tests/force/ControllerHostStubs.cs",
@@ -736,8 +738,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("ManualContactRuntimeChecks", manual_runtime_sources,
          "internal static class ManualContactRuntimeEntry { static void Main() { Purr2D2.Runtime.SaberRuntime.Run(); } }"),
         ("KittenSaberChecks", kitten_sources, None),
-        ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Core/SaberSettings.cs",
+        ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Audio/ForceBreakupAudio.cs", source / "src/Core/SaberSettings.cs",
                          source / "tests/audio/AudioChecks.cs"], None),
+        ("ForceBreakupSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "tests/ForceBreakupSettingsChecks.cs"], None),
         ("DetachedSliceChecks", fragment_sources, None),
         ("IsolationChecks", isolation_sources, None),
         ("QuietContactChecks", [source / "src/Slicing/QuietSliceContacts.cs", source / "tests/slicing/QuietContactChecks.cs"], None),

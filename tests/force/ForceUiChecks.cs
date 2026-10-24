@@ -19,6 +19,7 @@ internal sealed partial class SaberRuntime
     private sealed class TestSettings
     {
         internal float AngryForceRadius = 10, ClutterPickTolerance = .2f;
+        internal float ForceBreakupGroanPixels = 6, ForceBreakupSplitPixels = 18, Volume = .55f;
         internal int ForceCaptureLimit = ForceCaptureLimits.Default;
     }
     private readonly TestSettings _settings = new();
@@ -44,9 +45,11 @@ internal sealed partial class SaberRuntime
     }
     private SaberRuntime()
     {
+        _forceBreakupClock = new ManualForceBreakupClock();
         _forceLayout = default;
         _owner = new KittenEva(); Program.ControlledVehicle = _owner;
         Program.EditorFlag = Program.Modal = Program.HasMouseInputLatch = false;
+        Universe.SimulationSpeed = 1;
         Program.MainViewport = new(); CursorTarget.Hit = true;
         ImGui.Io.WantCaptureMouse = ImGui.Io.WantCaptureKeyboard = ImGui.Io.WantTextInput = ImGui.Io.AppFocusLost = false;
         ImGui.Io.MousePos = new(300, 200);
@@ -263,6 +266,7 @@ internal sealed partial class SaberRuntime
             "settled picker exceptions cancel locally without skipping the surrounding saber overlay or mutating physics");
         FreshCaptureShiftSpread();
         ExpansionBreakupRequests();
+        BreakupGestureResetAndAudioLifecycle();
         Console.WriteLine("Force UI runtime checks passed (picker button states, deferred clicks, native UI priority, settled commands, stale owners/targets, final move/throw, cleanup).");
     }
 
@@ -295,33 +299,201 @@ internal sealed partial class SaberRuntime
     {
         var runtime = new SaberRuntime();
         runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._force.CanBreakup = true;
         runtime.ScrollForcePointer(-1);
         runtime.ScrollForcePointer(1, shift: true);
-        runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.BreakupCalls == 0, "depth scrolling and Shift compression never request breakup");
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupCalls == 0 && runtime._forceBreakupAudio.Groans == 0,
+            "depth scrolling and Shift compression never request breakup or play a cue");
+
+        for (int i = 0; i < 4; i++)
+            Check(runtime.ScrollForcePointer(-.125, shift: true), "fractional Shift+scroll is accepted");
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupCalls == 1 && runtime._forceBreakupAudio.Groans == 1
+            && runtime._force.BreakupCommitCalls == 0 && runtime._forceBreakupSequence.TensionPixels == 6,
+            "four fractional native scroll events accumulate six continuous pixels and start stage one once");
+
         runtime.ScrollForcePointer(-1, shift: true);
-        runtime.ScrollForcePointer(2, shift: true);
-        Check(runtime._force.BreakupCalls == 0 && runtime._forceBreakupPending,
-            "expanding only queues breakup in the input callback, even if a subsequent tick compresses");
-        runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.BreakupCalls == 1 && !runtime._forceBreakupPending,
-            "the joined handoff consumes one explicit expansion request");
-        runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.BreakupCalls == 1, "spread smoothing cannot repeat a breakup request");
-        runtime._force.GroupSpread = runtime._forceSpreadTarget = ForceMath.MaximumGroupSpread;
+        AdvanceForce(runtime, 10, elapsedRealSeconds: .016);
+        Check(runtime._forceBreakupSequence.SplitRequested && runtime._force.BreakupCommitCalls == 0,
+            "a large simulation step cannot substitute for real elapsed time after crossing stage two");
+        AdvanceForce(runtime, .1, elapsedRealSeconds: .1);
+        Check(runtime._force.BreakupCommitCalls == 0,
+            "the monotonic clock remains below the .25 second visual gate");
+        AdvanceForce(runtime, .1, elapsedRealSeconds: .1);
+        Check(runtime._force.BreakupCommitCalls == 0,
+            "real elapsed time just below .25 seconds still cannot commit");
+        AdvanceForce(runtime, .1, elapsedRealSeconds: .04);
+        Check(runtime._force.BreakupCommitCalls == 1 && runtime._forceBreakupAudio.Breaks == 1,
+            "ready breakup commits as soon as .25 seconds of monotonic real time passes and plays one split cue");
+
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupCalls == 1 && runtime._force.BreakupCommitCalls == 1,
+            "a committed gesture cannot repeat either cue or source commit");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._force.CanBreakup = true;
+        runtime.ScrollForcePointer(-1.5, shift: true); // 18 px, both thresholds in one native event.
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupCalls == 1 && runtime._forceBreakupAudio.Groans == 1
+            && runtime._force.BreakupCommitCalls == 0,
+            "one event crossing both thresholds starts stage one and latches stage two without skipping its delay");
+        runtime.ScrollForcePointer(.6, shift: true); // unwind below split, retain stage one.
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupActive && !runtime._forceBreakupSequence.SplitRequested
+            && runtime._force.BreakupCommitCalls == 0,
+            "inward scrolling below stage two cancels commit while retaining stage-one preparation");
+        runtime.ScrollForcePointer(.6, shift: true); // unwind below stage one.
+        AdvanceForce(runtime, .016);
+        Check(!runtime._force.BreakupActive && !runtime._forceBreakupSequence.StageOneActive
+            && runtime._force.BreakupCancels == 1,
+            "inward scrolling below stage one cancels warmed preparation");
+        runtime.ScrollForcePointer(-.5, shift: true);
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupCalls == 2 && runtime._forceBreakupAudio.Groans == 2,
+            "a later outward crossing after cancellation starts a fresh stage-one cue and delay");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._force.CanBreakup = true;
+        runtime.ScrollForcePointer(-.5, shift: true);
+        AdvanceForce(runtime, .016);
         runtime.ScrollForcePointer(-1, shift: true);
-        runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.BreakupCalls == 2, "an expansion request still breaks an intact vehicle at maximum spread");
+        AdvanceForce(runtime, .016, elapsedRealSeconds: .5);
+        Check(runtime._force.BreakupCommitCalls == 1 && runtime._forceBreakupAudio.Breaks == 1,
+            "a true frame hitch past .25 seconds commits immediately without waiting extra capped simulation frames");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._force.CanBreakup = true;
+        runtime.ScrollForcePointer(-1.5, shift: true);
+        AdvanceForce(runtime, .016);
         runtime.ScrollForcePointer(-1, shift: true);
-        runtime.ResetForceMovement();
-        runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.BreakupCalls == 2 && !runtime._forceBreakupPending,
-            "movement reset clears stale expansion requests before another capture");
+        runtime.QueueForceAction(ForceAction.Throw);
+        AdvanceForce(runtime, .5);
+        Check(runtime._force.BreakupCommitCalls == 0 && !runtime._force.BreakupActive && !runtime.ForceHolding,
+            "a pending throw cancels prepared breakup before the handoff can commit it");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime.ScrollForcePointer(-2, shift: true);
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupCalls == 0 && runtime._forceBreakupAudio.Groans == 0,
+            "already broken debris and clutter retain ordinary spread without breakup cues");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._force.CanBreakup = true;
+        runtime.ScrollForcePointer(-.5, shift: true);
+        AdvanceForce(runtime, .016);
+        runtime._settings.ForceBreakupGroanPixels = 10;
+        runtime._settings.ForceBreakupSplitPixels = 20;
+        AdvanceForce(runtime, .016);
+        Check(!runtime._forceBreakupSequence.StageOneActive && !runtime._force.BreakupActive
+            && runtime._force.BreakupCancels == 1,
+            "editing thresholds cancels active preparation before the new thresholds take effect");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._force.CanBreakup = true;
         runtime.ScrollForcePointer(-1, shift: true);
+        AdvanceForce(runtime, .016);
         runtime._owner = new KittenEva(); Program.ControlledVehicle = runtime._owner;
-        runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.BreakupCalls == 2 && !runtime._forceBreakupPending,
-            "an owner switch releases the old hold without applying its queued breakup");
+        AdvanceForce(runtime, .016);
+        Check(!runtime.ForceHolding && runtime._force.BreakupCommitCalls == 0,
+            "an owner switch releases the old hold before pending breakup can commit");
+
+        var split = new ForceBreakupSequence();
+        var whole = split.ApplyScroll(ForceBreakupSequence.PixelsFromNativeScroll(-.5), 4, true);
+        var partitioned = new ForceBreakupSequence();
+        ForceBreakupInputResult each = default;
+        for (int i = 0; i < 4; i++)
+            each = partitioned.ApplyScroll(ForceBreakupSequence.PixelsFromNativeScroll(-.125), 4, true);
+        Check(whole.StageOneStarted && each.StageOneStarted
+            && Math.Abs(split.TensionPixels - partitioned.TensionPixels) < 1e-12,
+            "continuous pixel accumulation is invariant to partitioning the same fractional wheel travel");
+        var exactSix = new ForceBreakupSequence();
+        var exactSixResult = exactSix.ApplyScroll(6, 4, true);
+        var tenths = new ForceBreakupSequence();
+        ForceBreakupInputResult tenthsResult = default;
+        for (int i = 0; i < 10; i++) tenthsResult = tenths.ApplyScroll(.6, 4, true);
+        Check(exactSixResult.StageOneStarted && tenthsResult.StageOneStarted
+            && tenths.StageOneActive && tenths.TensionPixels < 6 && tenths.TensionPixels > 5.9,
+            "relative threshold tolerance accepts ten fractional 0.6px events without quantizing their accumulated distance");
+        var fractionalSplit = new ForceBreakupSequence();
+        fractionalSplit.ApplyScroll(6, 4, true);
+        for (int i = 0; i < 19; i++) fractionalSplit.ApplyScroll(.6, 4, true);
+        fractionalSplit.ApplyScroll(.599999999999999, 4, true);
+        Check(fractionalSplit.TensionPixels < 18 && fractionalSplit.TensionPixels > 17.9
+            && fractionalSplit.SplitRequested,
+            "the same distance tolerance handles fractional accumulation at the split threshold");
+        var nearUnwind = new ForceBreakupSequence();
+        nearUnwind.ApplyScroll(6, 4, true);
+        var withinTolerance = nearUnwind.ApplyScroll(-1e-12, 4.1, true);
+        var beyondTolerance = nearUnwind.ApplyScroll(-1e-10, 4.2, true);
+        Check(!withinTolerance.StageOneCancelled && beyondTolerance.StageOneCancelled
+            && nearUnwind.TensionPixels > 5.9,
+            "groan-threshold unwind uses the same tiny tolerance and preserves continuous residual distance");
+        var residual = new ForceBreakupSequence();
+        residual.ApplyScroll(10, 1, true);
+        var unwound = residual.ApplyScroll(-5, 1.1, true);
+        var rearmed = residual.ApplyScroll(1, 1.2, true);
+        Check(unwound.StageOneCancelled && residual.StageOneActive && rearmed.StageOneStarted
+            && residual.TensionPixels == 6 && residual.StageOneStartedAt == 1.2,
+            "unwinding below stage one retains the remaining pixel distance and rearms with a fresh delay");
+        var both = new ForceBreakupSequence();
+        var crossed = both.ApplyScroll(ForceBreakupSequence.PixelsFromNativeScroll(-1.5), 0, true);
+        Check(crossed.StageOneStarted && crossed.SplitRequested && !both.MinimumDelayElapsed(.249)
+            && both.MinimumDelayElapsed(.25),
+            "a single scroll event may cross both thresholds, but the exact .25 second gate still applies");
+    }
+
+    private static void BreakupGestureResetAndAudioLifecycle()
+    {
+        var runtime = new SaberRuntime();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._force.CanBreakup = true;
+        runtime.ScrollForcePointer(-.25, shift: true); // 3px, below stage one.
+        AdvanceForce(runtime, .016);
+        Check(runtime._forceBreakupSequence.TensionPixels == 3 && runtime._forceBreakupAudio.Groans == 0,
+            "subthreshold tension accumulates without starting audio");
+        runtime.OverlayVisible = false;
+        runtime.UpdateForceVisibility();
+        runtime.OverlayVisible = true;
+        AdvanceForce(runtime, .016); // consume the deferred cancellation before new input.
+        runtime.ScrollForcePointer(-.25, shift: true);
+        AdvanceForce(runtime, .016);
+        Check(runtime._forceBreakupSequence.TensionPixels == 3 && runtime._forceBreakupAudio.Groans == 0
+            && !runtime._force.BreakupActive,
+            "hiding the overlay clears subthreshold tension before a later gesture can reuse it");
+
+        runtime = new SaberRuntime();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._force.CanBreakup = true;
+        Universe.SimulationSpeed = 0;
+        runtime.ScrollForcePointer(-.5, shift: true);
+        AdvanceForce(runtime, .016);
+        Check(runtime._forceBreakupAudio.Groans == 1 && runtime._forceBreakupAudio.PausedAtGroan
+            && runtime._forceBreakupAudio.LastPaused,
+            "the current paused state is applied before the groan channel starts");
+
+        runtime.ScrollForcePointer(-1, shift: true);
+        AdvanceForce(runtime, .016, elapsedRealSeconds: .3);
+        Check(runtime._forceBreakupAudio.Breaks == 1 && runtime._forceBreakupAudio.PausedAtBreak
+            && runtime._forceBreakupAudio.LastPaused,
+            "the paused state is also applied before the split channel starts");
+        Universe.SimulationSpeed = 1;
+        AdvanceForce(runtime, .016);
+        AdvanceForce(runtime, .016);
+        Check(!runtime._forceBreakupAudioActive && !runtime._forceBreakupAudio.HasActiveChannels,
+            "finished one-shot channels clear the runtime audio polling flag");
+        int completedUpdates = runtime._forceBreakupAudio.Updates;
+        AdvanceForce(runtime, .016);
+        Check(runtime._forceBreakupAudio.Updates == completedUpdates,
+            "the runtime stops polling audio after both one-shot channels finish");
+    }
+
+    private static void AdvanceForce(SaberRuntime runtime, double dtPlayer, double? elapsedRealSeconds = null)
+    {
+        runtime._playerTime += double.IsFinite(dtPlayer) ? Math.Clamp(dtPlayer, 0, .1) : 0;
+        ((ManualForceBreakupClock)runtime._forceBreakupClock).Advance(elapsedRealSeconds ?? dtPlayer);
+        runtime.UpdateForceBeforePhysics(dtPlayer);
     }
 
     private static void ForcePickerButtons()

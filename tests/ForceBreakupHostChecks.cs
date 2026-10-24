@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Text;
 using System.Xml.Linq;
 using Brutal.Numerics;
@@ -57,6 +59,54 @@ internal static class ForceBreakupHostChecks
             "native breakup empties stores before source deletion and invokes no explosive failure or debris lottery");
         Check(commit.Any(c => c.Calls(AccessTools.Method(typeof(CollisionAvoidancePair), nameof(CollisionAvoidancePair.Link)))),
             "replacement siblings receive native overlap protection before release");
+        var candidates = ForceVehicleBreakup.BuildSiblingCandidates([
+            new(double3.Zero, 1), new(new(1.5, 0, 0), 1), new(new(10, 0, 0), 1), new(new(10.5, 0, 0), 1)
+        ]);
+        Check(candidates.SequenceEqual([new ForceVehicleBreakup.SiblingPair(0, 1), new ForceVehicleBreakup.SiblingPair(2, 3)]),
+            "worker candidate generation retains near sibling pairs and rejects clearly separated spheres");
+        var overlapCheck = AccessTools.Method(typeof(ForceVehicleBreakup), nameof(ForceVehicleBreakup.SphereBoundsOverlap));
+        var candidateBuilder = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(ForceVehicleBreakup), nameof(ForceVehicleBreakup.BuildSiblingCandidates)));
+        Check(!commit.Any(c => c.Calls(overlapCheck)) && candidateBuilder.Any(c => c.Calls(overlapCheck)),
+            "Commit links precomputed pair indices without an all-pairs geometric scan");
+        Check(commit.Any(c => c.operand is string value && value.Contains("stored contents may already have been released", StringComparison.Ordinal)),
+            "teardown failures report that source contents may already have been released");
+
+        var constructor = PatchProcessor.GetOriginalInstructions(AccessTools.Constructor(typeof(ForceVehicleBreakup), [typeof(Vehicle)]));
+        Check(!constructor.Any(c => c.operand is MethodInfo m && (m.DeclaringType == typeof(MeshReference)
+                || m.DeclaringType == typeof(Part) || m.DeclaringType == typeof(PartTree))),
+            "breakup construction records only source/thread identity and defers part and mesh capture");
+        var worker = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(ForceVehicleBreakup), "RunWorker"));
+        Check(worker.Any(c => c.operand is MethodInfo m && m.DeclaringType == typeof(Task) && m.Name == nameof(Task.Run))
+            && !worker.Any(c => c.operand is MethodInfo m && (m.Name == "StartNew" || m.Name == "Wait")),
+            "background preparation uses an ordinary bounded Task.Run worker without LongRunning or joins");
+        var poll = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(ForceVehicleBreakup), "AdvanceWorker"));
+        int completedCheck = poll.FindIndex(c => c.operand is MethodInfo m && m.Name == "get_IsCompleted");
+        int consumeResult = poll.FindIndex(c => c.operand is MethodInfo m && m.Name == "GetResult");
+        Check(completedCheck >= 0 && consumeResult > completedCheck
+            && !poll.Any(c => c.operand is MethodInfo m && (m.Name == "Wait" || m.Name == "get_Result")),
+            "worker results are consumed only after the completion poll and never through a blocking wait");
+
+        var workerDelegate = typeof(AuthoredDebrisAssets).GetProperty("PrepareOnWorker", BindingFlags.Static | BindingFlags.NonPublic);
+        var workerSignature = workerDelegate!.PropertyType.GetMethod("Invoke")!.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+        Check(workerSignature.SequenceEqual([typeof(AuthoredDebrisShape[]), typeof(string), typeof(CancellationToken)])
+            && workerSignature.All(type => type != typeof(Vehicle) && type != typeof(Part) && type != typeof(MeshReference)),
+            "worker input contains immutable debris DTOs and a path, with no live vehicle, part or mesh objects");
+        bool cancellationObserved = false;
+        using (var cancelled = new CancellationTokenSource())
+        {
+            cancelled.Cancel();
+            try { AuthoredDebrisAssets.Build(shape, cancelled.Token); }
+            catch (OperationCanceledException) { cancellationObserved = true; }
+        }
+        Check(cancellationObserved, "pure XML preparation observes cancellation before building detached assets");
+        bool candidateCancellationObserved = false;
+        using (var cancelled = new CancellationTokenSource())
+        {
+            cancelled.Cancel();
+            try { ForceVehicleBreakup.BuildSiblingCandidates([new(double3.Zero, 1), new(new(.5, 0, 0), 1)], cancelled.Token); }
+            catch (OperationCanceledException) { candidateCancellationObserved = true; }
+        }
+        Check(candidateCancellationObserved, "worker sibling-candidate generation observes cancellation");
         try { AuthoredDebrisAssets.Build(shape with { Extents = double3.Zero }); }
         catch (InvalidDataException) { Console.WriteLine("PASS: invalid debris dimensions refuse preparation"); return; }
         throw new InvalidOperationException("Invalid debris dimensions were accepted.");

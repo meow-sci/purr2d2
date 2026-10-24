@@ -77,7 +77,7 @@ internal static partial class RuntimeFragmentAssets
             }
         RefreshDiskUsage(directory);
         _initialized = true;
-        AuthoredDebrisAssets.Register = RegisterAuthoredDebris;
+        InstallAuthoredDebrisCallbacks();
     }
 
     private static uint Reserve(ref uint counter, uint capacity, uint alignment)

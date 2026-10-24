@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Xml.Linq;
 using Brutal.Numerics;
 using KSA;
@@ -11,26 +12,40 @@ internal sealed record AuthoredDebrisSurface(string Mesh, string Material, bool 
 internal sealed record AuthoredDebrisShape(AuthoredDebrisSurface[] Surfaces, double3 Center, double3 Extents,
     double Scale, float MassKg);
 
+/// <summary>Detached worker output. The bundle is not registered and has not received OnDataLoad.</summary>
+internal sealed record PreparedAuthoredDebrisAsset(string Id, AssetBundle Bundle);
+
+/// <summary>Incremental main-thread cursor for native asset loading and registration.</summary>
+internal interface IAuthoredDebrisRegistration
+{
+    bool Done { get; }
+    PartTemplate? Template { get; }
+    void AdvanceOne();
+}
+
 /// <summary>Inert, durable templates that reuse authored meshes without GPU uploads or mesh cutting.</summary>
 internal static class AuthoredDebrisAssets
 {
     internal const string Prefix = "Purr2D2_ForceDebris_";
-    internal static Func<byte[], string, int, PartTemplate>? Register { get; set; }
+    // Installed by RuntimeFragmentAssets.Initialize. The context callback is called on
+    // the main thread; PrepareOnWorker receives only detached DTOs, a path string and a token.
+    internal static Func<string>? CaptureDirectory { get; set; }
+    internal static Func<AuthoredDebrisShape[], string, CancellationToken, PreparedAuthoredDebrisAsset[]>? PrepareOnWorker { get; set; }
+    internal static Func<PreparedAuthoredDebrisAsset, IAuthoredDebrisRegistration>? BeginRegistration { get; set; }
 
-    internal static PartTemplate Prepare(AuthoredDebrisShape shape)
+    internal static (string Id, byte[] Xml) Build(AuthoredDebrisShape shape, CancellationToken cancel = default)
     {
-        var (id, xml) = Build(shape);
-        return (Register ?? throw new InvalidOperationException("Persistent Force debris assets are unavailable."))
-            (xml, id, shape.Surfaces.Length);
-    }
-
-    internal static (string Id, byte[] Xml) Build(AuthoredDebrisShape shape)
-    {
+        cancel.ThrowIfCancellationRequested();
         if (shape.Surfaces.Length == 0 || !float.IsFinite(shape.MassKg) || shape.MassKg <= .0001f
             || !double.IsFinite(shape.Scale) || shape.Scale <= 0 || !Finite(shape.Center) || !Finite(shape.Extents)
-            || shape.Extents.X <= 0 || shape.Extents.Y <= 0 || shape.Extents.Z <= 0
-            || shape.Surfaces.Any(s => string.IsNullOrEmpty(s.Mesh) || string.IsNullOrEmpty(s.Material)))
+            || shape.Extents.X <= 0 || shape.Extents.Y <= 0 || shape.Extents.Z <= 0)
             throw new InvalidDataException("Authored debris has invalid geometry, material or mass.");
+        foreach (var surface in shape.Surfaces)
+        {
+            cancel.ThrowIfCancellationRequested();
+            if (surface == null || string.IsNullOrEmpty(surface.Mesh) || string.IsNullOrEmpty(surface.Material))
+                throw new InvalidDataException("Authored debris has invalid geometry, material or mass.");
+        }
         string identity = Xml("identity").ToString(SaveOptions.DisableFormatting);
         string id = Prefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..24];
         return (id, Encoding.UTF8.GetBytes(Xml(id).ToString(SaveOptions.DisableFormatting)));
@@ -40,6 +55,7 @@ internal static class AuthoredDebrisAssets
             var visual = new XElement("SubPart", new XAttribute("Id", name + "_surface"));
             for (int i = 0; i < shape.Surfaces.Length; i++)
             {
+                cancel.ThrowIfCancellationRequested();
                 var surface = shape.Surfaces[i];
                 // KSA caches PartModel/PartModelGlass globally by module template ID.
                 // A local "model0" would make unrelated debris render the first mesh.

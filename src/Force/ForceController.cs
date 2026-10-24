@@ -135,6 +135,7 @@ internal sealed partial class ForceController : IDisposable
             Follow(Universe.GetLastSimStep().NextTime);
             // Publish only after every source has actually left its bubble and accepted its held state.
             ForcePhysicsPatches.Publish(_held.Where(item => item.Source != null).Select(item => item.Source!).ToArray());
+            RefreshBreakupEligibility();
             SetStatus($"Holding {CapturedCount} object{(CapturedCount == 1 ? "" : "s")}.", ForceStatusSeverity.None);
             return true;
         }
@@ -262,6 +263,7 @@ internal sealed partial class ForceController : IDisposable
     }
     private void Clear()
     {
+        CancelBreakupPlans();
         ForcePhysicsPatches.Clear();
         // Also handles partial capture, a lost bubble and exceptions before ordinary Release reached every peer.
         foreach (var held in _held)
@@ -271,7 +273,7 @@ internal sealed partial class ForceController : IDisposable
         GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
         _anchorBody = _groupCenterBody = _primaryCenteredOffsetBody = double3.Zero;
         _hasFrame = false; _offsetDirty = _spreadDirty = false;
-        _breakupRefused = false;
+        _breakupEligible = false; _breakupRefused = false;
     }
 
     private void SetStatus(string status, ForceStatusSeverity severity)

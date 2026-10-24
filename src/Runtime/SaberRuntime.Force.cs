@@ -3,6 +3,7 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
+using Purr2D2.Audio;
 using Purr2D2.Core;
 using Purr2D2.Force;
 
@@ -15,14 +16,18 @@ internal sealed partial class SaberRuntime
     private readonly ForceOffsetSmoother _forceOffsetSmoother = new();
     private readonly ForceOverlaySliderDrag _forceSettingDrag = new();
     private readonly ForceThrowDrag _forceThrowDrag = new();
+    private readonly ForceBreakupSequence _forceBreakupSequence = new();
+    private readonly ForceBreakupAudio _forceBreakupAudio = new();
+    private readonly TimeProvider _forceBreakupClock = TimeProvider.System;
     private readonly Queue<ForceRequest> _forceRequests = new();
+    private readonly Queue<double> _forceBreakupScrollPixels = new();
     private ForceOverlayLayout _forceLayout;
     private bool _forceLayoutAvailable, _selectingForce, _angryForce, _forceDisposed, _forceEscapeHeld;
     private KittenEva? _forcePickOwner, _forceMoveOwner, _forceSettingOwner, _forceThrowOwner;
     private ForcePick? _forceHover;
     private double3 _forceMoveOffset;
     private double _forceSpreadTarget = ForceMath.DefaultGroupSpread;
-    private bool _forceBreakupPending;
+    private bool _forceBreakupCancelPending, _forceBreakupAudioActive, _forceBreakupSplitCuePlayed;
     private bool _forceMovePending;
     private bool _forceClickPending;
     private float2 _forceClickPointer;
@@ -67,6 +72,13 @@ internal sealed partial class SaberRuntime
         if (_forceDisposed) return;
         try
         {
+            // A queued release/throw owns this handoff. Cancel warmed breakup work
+            // before any preparation or visible source commit can run.
+            if (_forceRequests.Count != 0
+                && _forceRequests.Any(request => request.Action is ForceAction.Release or ForceAction.Throw))
+                RequestForceBreakupCancel();
+            PrepareForceBreakupHandoff();
+
             // Input callbacks only publish a target. Advance the displayed offset here,
             // after workers have joined and before the Force controller follows it.
             bool ownsCapture = ForceCanUse && _force.HasCapture
@@ -84,13 +96,6 @@ internal sealed partial class SaberRuntime
             else if (!_force.HasCapture) ResetForceMovement();
             if (ForceCanUse && _force.HasCapture && ReferenceEquals(_force.Owner, _owner))
             {
-                // Remember the input direction, even at the spacing ceiling or when
-                // a later compress tick reverses the target before this handoff.
-                if (_forceBreakupPending)
-                {
-                    _forceBreakupPending = false;
-                    _force.BreakApart(_owner!);
-                }
                 AdvanceForceSpread(dtPlayer);
             }
 
@@ -124,6 +129,7 @@ internal sealed partial class SaberRuntime
                 }
                 else if (ReferenceEquals(_force.Owner, request.Owner))
                 {
+                    CancelForceBreakupAtHandoff();
                     _force.Release(request.Action == ForceAction.Throw, request.ThrowSpeed);
                     if (_force.StatusSeverity != ForceStatusSeverity.None) SyncForceStatusFromController();
                     else SetForceStatus(_force.Status, ForceStatusSeverity.None);
@@ -131,6 +137,7 @@ internal sealed partial class SaberRuntime
                 }
             }
             if (!_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)) _forceDrag.Release();
+            ProcessForceBreakupHandoff();
         }
         catch (Exception error)
         {
@@ -140,8 +147,137 @@ internal sealed partial class SaberRuntime
             ResetForceGestures();
             try { _force.Reset(); }
             catch (Exception cleanup) { Report("Force cleanup failed", cleanup); }
+            try { ResetForceBreakupAudio(); }
+            catch (Exception cleanup) { Report("Force breakup audio cleanup failed", cleanup); }
             Report("Force handoff failed", error);
         }
+    }
+
+    private void PrepareForceBreakupHandoff()
+    {
+        if (_forceBreakupSequence.Configure(_settings.ForceBreakupGroanPixels, _settings.ForceBreakupSplitPixels))
+            _forceBreakupCancelPending = true;
+        if (_forceBreakupCancelPending) CancelForceBreakupAtHandoff();
+    }
+
+    private void ProcessForceBreakupHandoff()
+    {
+        if (!ForceCanUse || !_force.HasCapture || _owner is not { } owner || !ReferenceEquals(_force.Owner, owner))
+        {
+            CancelForceBreakupAtHandoff();
+            return;
+        }
+
+        while (_forceBreakupScrollPixels.TryDequeue(out double pixels))
+        {
+            var input = _forceBreakupSequence.ApplyScroll(pixels, ForceBreakupNow, _force.CanBreakup);
+            if (input.StageOneCancelled)
+            {
+                _force.CancelBreakup();
+                if (_forceBreakupAudioActive) ResetForceBreakupAudio();
+                _forceBreakupSplitCuePlayed = false;
+            }
+            if (input.StageOneStarted)
+            {
+                if (!_force.BeginBreakup(owner))
+                {
+                    _forceBreakupSequence.Reset();
+                    if (_forceBreakupAudioActive) ResetForceBreakupAudio();
+                    _forceBreakupSplitCuePlayed = false;
+                    SyncForceStatusFromController();
+                    continue;
+                }
+                _forceBreakupSplitCuePlayed = false;
+                var emitter = _force.TryGetPoseTargetBody(owner, out var target) ? target : double3.Zero;
+                PrimeForceBreakupAudio(owner, emitter);
+                _forceBreakupAudio.PlayGroan(owner, emitter, _settings.Volume);
+                _forceBreakupAudioActive = _forceBreakupAudio.HasActiveChannels;
+            }
+        }
+
+        if (_forceBreakupSequence.StageOneActive && _force.BreakupActive)
+        {
+            var progress = _force.AdvanceBreakup(owner, _forceBreakupSequence.SplitRequested,
+                _forceBreakupSequence.MinimumDelayElapsed(ForceBreakupNow));
+            if (progress.SourceCommitted && !_forceBreakupSplitCuePlayed)
+            {
+                var emitter = _force.TryGetPoseTargetBody(owner, out var target) ? target : double3.Zero;
+                PrimeForceBreakupAudio(owner, emitter);
+                _forceBreakupAudio.PlayBreak(owner, emitter, _settings.Volume);
+                _forceBreakupAudioActive = _forceBreakupAudio.HasActiveChannels;
+                _forceBreakupSplitCuePlayed = true;
+            }
+            if (progress.Failed)
+            {
+                _forceBreakupSequence.Reset();
+                if (_forceBreakupAudioActive) ResetForceBreakupAudio();
+                _forceBreakupSplitCuePlayed = false;
+            }
+            else if (progress.Completed)
+            {
+                _forceBreakupSequence.Reset();
+                _forceBreakupSplitCuePlayed = false;
+            }
+        }
+        else if (_force.BreakupActive)
+        {
+            // The gesture crossed back below stage one or its start was invalidated.
+            _force.CancelBreakup();
+            _forceBreakupSplitCuePlayed = false;
+        }
+
+        UpdateForceBreakupAudio(owner);
+        if (_force.StatusSeverity != ForceStatusSeverity.None) SyncForceStatusFromController();
+    }
+
+    private void UpdateForceBreakupAudio(KittenEva owner)
+    {
+        if (!_forceBreakupAudioActive) return;
+        if (!ForceHolding || !ReferenceEquals(_force.Owner, owner))
+        {
+            ResetForceBreakupAudio();
+            return;
+        }
+        var emitter = _force.TryGetPoseTargetBody(owner, out var target) ? target : double3.Zero;
+        _forceBreakupAudio.Update(owner, emitter, _settings.Volume,
+            paused: !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()));
+        _forceBreakupAudioActive = _forceBreakupAudio.HasActiveChannels;
+    }
+
+    // Apply pause and spatial state before Play starts a new one-shot. The audio
+    // object uses the most recent pause state when creating its channel.
+    private void PrimeForceBreakupAudio(KittenEva owner, double3 emitter)
+    {
+        _forceBreakupAudio.Update(owner, emitter, _settings.Volume,
+            paused: !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()));
+        _forceBreakupAudioActive = _forceBreakupAudio.HasActiveChannels;
+    }
+
+    private void ResetForceBreakupAudio()
+    {
+        _forceBreakupAudio.Reset();
+        _forceBreakupAudioActive = false;
+    }
+
+    private double ForceBreakupNow => _forceBreakupClock.GetTimestamp()
+        / (double)_forceBreakupClock.TimestampFrequency;
+
+    private void RequestForceBreakupCancel()
+    {
+        _forceBreakupScrollPixels.Clear();
+        _forceBreakupSequence.Reset();
+        _forceBreakupSplitCuePlayed = false;
+        _forceBreakupCancelPending = true;
+    }
+
+    private void CancelForceBreakupAtHandoff()
+    {
+        _forceBreakupScrollPixels.Clear();
+        _forceBreakupSequence.Reset();
+        if (_force.BreakupActive) _force.CancelBreakup();
+        if (_forceBreakupAudioActive) ResetForceBreakupAudio();
+        _forceBreakupSplitCuePlayed = false;
+        _forceBreakupCancelPending = false;
     }
 
     // Clutter queries read live Bepu bodies. Only the settled phase may resolve
@@ -252,6 +388,7 @@ internal sealed partial class SaberRuntime
     {
         if (!ForceCanUse || _forceRequests.Count >= 32) return;
         _forceRequests.Enqueue(new(_owner!, action, ThrowSpeed: SanitizeThrowSpeed(throwSpeed)));
+        if (action is ForceAction.Release or ForceAction.Throw) RequestForceBreakupCancel();
         CancelForcePicker();
         _forceDrag.Release();
         // Retain a final drag offset until the settled handoff processes the release.
@@ -396,7 +533,7 @@ internal sealed partial class SaberRuntime
         if (!double.IsFinite(ticks) || ticks == 0) return false;
         if (shift)
         {
-            if (ticks < 0) _forceBreakupPending = true;
+            _forceBreakupScrollPixels.Enqueue(ForceBreakupSequence.PixelsFromNativeScroll(ticks));
             _forceSpreadTarget = ForceMath.ScaleGroupSpread(_forceSpreadTarget, ticks);
             return true;
         }
@@ -466,6 +603,9 @@ internal sealed partial class SaberRuntime
     private void ResetForceGestures()
     {
         CancelForcePicker(); _forceDrag.Release(); ReleaseForceSettingDrag(); CancelForceThrowDrag(); _forceLayoutAvailable = false;
+        if (_forceBreakupSequence.TensionPixels > 0 || _forceBreakupSequence.StageOneActive
+            || _force.BreakupActive || _forceBreakupScrollPixels.Count != 0)
+            RequestForceBreakupCancel();
     }
 
     private void ResetForceMovement()
@@ -473,7 +613,12 @@ internal sealed partial class SaberRuntime
         _forceDrag.Reset();
         _forceOffsetSmoother.Reset();
         _forceSpreadTarget = ForceMath.DefaultGroupSpread;
-        _forceBreakupPending = false;
+        _forceBreakupScrollPixels.Clear();
+        _forceBreakupSequence.Reset();
+        if (_force.BreakupActive) _force.CancelBreakup();
+        if (_forceBreakupAudioActive) ResetForceBreakupAudio();
+        _forceBreakupCancelPending = false;
+        _forceBreakupSplitCuePlayed = false;
         _forceMoveOffset = double3.Zero;
         _forceMovePending = false;
         _forceMoveOwner = null;
@@ -481,13 +626,17 @@ internal sealed partial class SaberRuntime
 
     private void ResetForce()
     {
-        ResetForceGestures(); ResetForceMovement(); _forceSettingDrag.Reset(); _forceRequests.Clear();
+        ResetForceGestures(); _forceSettingDrag.Reset(); _forceRequests.Clear();
         _forceEscapeHeld = false; SetForceStatus("", ForceStatusSeverity.None);
         if (!_forceDisposed)
         {
             _force.Reset();
             SyncForceStatusFromController();
         }
+        // The controller joins native readers before its Clear() cancels detached
+        // breakup roots. Reset local gesture/audio state only after that safe cleanup.
+        ResetForceMovement();
+        ResetForceBreakupAudio();
     }
 
     private void DisposeForce()
@@ -495,7 +644,8 @@ internal sealed partial class SaberRuntime
         if (_forceDisposed) return;
         ResetForce();
         _forceDisposed = true;
-        _force.Dispose();
+        try { _force.Dispose(); }
+        finally { _forceBreakupAudio.Dispose(); }
     }
 
     private void DrawForceOverlay(ImDrawListPtr draw)
@@ -590,7 +740,7 @@ internal sealed partial class SaberRuntime
         {
             var overlayHit = layout.Hit(overlayPointer);
             if (overlayHit == ForceOverlayHit.Move)
-                ShowSaberTooltip("Drag to move held objects in the camera plane.\n\nScroll to change depth; Shift+scroll compresses or expands the group. Expanding breaks captured vehicles into inert parts and subparts, emptying their tanks.");
+                ShowSaberTooltip("Drag to move held objects in the camera plane.\n\nScroll to change depth; Shift+scroll compresses or expands the group. Outward Shift+scroll builds breakup tension for intact vehicles; inward Shift+scroll unwinds it.");
             else if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
                 ShowSaberTooltip("Drag up to choose a throw speed from 25 to 200 m/s; release to throw.");
             else if (overlayHit == ForceOverlayHit.CaptureLimit)

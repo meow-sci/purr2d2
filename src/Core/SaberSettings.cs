@@ -98,6 +98,8 @@ public sealed class SaberSettings
     public float AngryForceRadius { get; set; } = 10;
     public int ForceCaptureLimit { get; set; } = ForceCaptureLimits.Default;
     public float ClutterPickTolerance { get; set; } = .2f;
+    public float ForceBreakupGroanPixels { get; set; } = 6f;
+    public float ForceBreakupSplitPixels { get; set; } = 18f;
     public float ForceControlsOffsetX { get; set; }
     public float ForceControlsOffsetY { get; set; }
     public float SaberControlsOffsetX { get; set; }
@@ -139,6 +141,9 @@ public sealed class SaberSettings
         AngryForceRadius = Clamp(AngryForceRadius, 1, 50, 10);
         ForceCaptureLimit = Math.Clamp(ForceCaptureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
         ClutterPickTolerance = Clamp(ClutterPickTolerance, 0, .5f, .2f);
+        ForceBreakupGroanPixels = Clamp(ForceBreakupGroanPixels, 1, 64, 6f);
+        ForceBreakupSplitPixels = Clamp(ForceBreakupSplitPixels, 2, 128, 18f);
+        ForceBreakupSplitPixels = Math.Max(ForceBreakupSplitPixels, ForceBreakupGroanPixels + 1f);
         ForceControlsOffsetX = Clamp(ForceControlsOffsetX, -1, 1, 0);
         ForceControlsOffsetY = Clamp(ForceControlsOffsetY, -1, 1, 0);
         SaberControlsOffsetX = Clamp(SaberControlsOffsetX, -1, 1, 0);

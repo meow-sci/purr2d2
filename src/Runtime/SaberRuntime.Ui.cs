@@ -229,8 +229,9 @@ internal sealed partial class SaberRuntime
 
     private void DrawForceSettings()
     {
-        if (!BeginSaberSettingsTable("##ForceSettings", "Clutter aim tolerance")) return;
+        if (!BeginSaberSettingsTable("##ForceSettings", "Force breakup split (px)")) return;
         float radius = _settings.AngryForceRadius, tolerance = _settings.ClutterPickTolerance;
+        float breakupGroan = _settings.ForceBreakupGroanPixels, breakupSplit = _settings.ForceBreakupSplitPixels;
         int captureLimit = _settings.ForceCaptureLimit;
         bool changed;
         try
@@ -244,12 +245,20 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
             ShowSaberControlTip("After an exact miss, this radius catches nearby physical clutter.\n\nExact hits take priority; 0 allows exact hits only.");
+            SaberSettingsRow("Force breakup groan (px)");
+            changed |= ImGui.SliderFloat("##ForceBreakupGroanPixels", ref breakupGroan, 1, 64, "%.1f px");
+            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before the placeholder groan plays; inward Shift+scroll unwinds.");
+            SaberSettingsRow("Force breakup split (px)");
+            changed |= ImGui.SliderFloat("##ForceBreakupSplitPixels", ref breakupSplit, 2, 128, "%.1f px");
+            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before Force breakup occurs; inward Shift+scroll unwinds.");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.AngryForceRadius = radius;
         _settings.ForceCaptureLimit = captureLimit;
         _settings.ClutterPickTolerance = tolerance;
+        _settings.ForceBreakupGroanPixels = breakupGroan;
+        _settings.ForceBreakupSplitPixels = breakupSplit;
         _settings.Validate();
     }
 
