@@ -122,7 +122,8 @@ internal sealed class SliceSourceCapture : IDisposable
         if (groups.Count == 0) throw new InvalidDataException("No supported native part-model surfaces found.");
         if (!double4x4.Invert(_full.MatrixAsmb2VehicleAsmb, out var inv)) throw new InvalidDataException("Part transform is unavailable.");
         CutPoint[] axes = [new(inv.M11, inv.M21, inv.M31), new(inv.M12, inv.M22, inv.M32), new(inv.M13, inv.M23, inv.M33)];
-        Input = new(groups.ToArray(), axes, materials, _mass, _seed);
+        Input = new(groups.ToArray(), axes, materials, _mass, _seed)
+        { GeneratedClosedGeometry = RuntimeFragmentAssets.IsGeneratedTemplate(_full.Template.Id) };
         if (!IsCurrent(_full)) throw new InvalidOperationException("Source changed during capture; try again.");
     }
     private static List<(MeshReference? Mesh, PbrMaterialReference? Material, bool Glass)> Models(Part part)

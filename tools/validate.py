@@ -584,6 +584,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Rendering/FragmentGlbWriter.cs",
         source / "src/Slicing/SlicePrincipalFrame.cs",
         source / "src/Slicing/SliceSourceFrame.cs",
+        source / "src/Slicing/QuietSliceMotion.cs",
         source / "tests/PlaneSliceChecks.cs",
         source / "tests/ShellSliceChecks.cs",
         source / "tests/CoreChecks.cs",
@@ -642,9 +643,11 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Slicing/SliceMeshPrecision.cs",
         source / "src/Slicing/SliceColliderGeometry.cs",
         source / "src/Slicing/SliceGeometryWork.cs",
+        source / "src/Slicing/QuietSubpartBreakup.cs",
         source / "src/Rendering/FragmentGlbWriter.cs",
         source / "src/Rendering/FragmentAssetWriter.cs",
         source / "tests/FragmentAssetChecks.cs",
+        source / "tests/QuietBreakupAssetChecks.cs",
     ]
     somersault_runtime_sources = [
         source / "src/Core/SomersaultMotion.cs",
@@ -704,8 +707,10 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
                          source / "tests/audio/AudioChecks.cs"], None),
         ("DetachedSliceChecks", fragment_sources, None),
         ("IsolationChecks", isolation_sources, None),
+        ("QuietContactChecks", [source / "src/Slicing/QuietSliceContacts.cs", source / "tests/slicing/QuietContactChecks.cs"], None),
+        ("QuietQuiescenceChecks", [source / "src/Slicing/QuietSliceQuiescence.cs", source / "tests/slicing/QuietQuiescenceChecks.cs"], None),
         ("FragmentAssetChecks", fragment_asset_sources,
-         "internal static class Program { static void Main() => FragmentAssetChecks.Run(); }"),
+         "internal static class Program { static void Main() { FragmentAssetChecks.Run(); QuietBreakupAssetChecks.Run(); } }"),
         ("SomersaultRuntimeChecks", somersault_runtime_sources, None),
         ("SomersaultWorkerChecks", somersault_worker_sources, None),
         ("SomersaultPoseChecks", somersault_pose_sources, None),
@@ -727,7 +732,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("SaberBlendChecks", [source / "src/Rendering/SaberBlendState.cs", source / "tests/SaberBlendChecks.cs"], None),
     ):
         code, output = _run_managed_project(source, name, required, program,
-                                           harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks"),
+                                           harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks", "QuietQuiescenceChecks"),
                                            host_references=("Brutal.Vulkan", "Brutal.Core") if name == "SaberBlendChecks" else ())
         outputs.append(output)
         result = result or code

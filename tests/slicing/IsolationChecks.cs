@@ -16,6 +16,7 @@ internal static class IsolationChecks
     {
         Vehicle.SplitOrder.Clear(); Vehicle.SplitTreeSizes.Clear(); PartTree.Created.Clear();
         Vehicle.ThrowOnSplit = 0; Vehicle.RerootAfterFirstSplit = null; Universe.CurrentSystem = new();
+        QuietSliceContacts.Protections = 0;
     }
     private static void RootLeafAndMidStack()
     {
@@ -43,6 +44,12 @@ internal static class IsolationChecks
         Check(original.Parts.Members.SequenceEqual([root, neighbor]) && isolated!.Owner.Parts.Members.SequenceEqual([selected]),
             "changing-owner isolation keeps the original rocket and selected shell intact");
         Check(PartTree.Created[1].OuterBegins == 2, "all later child splits share one retained outer staging scope");
+        Check(isolated!.ContentsReleased && isolated.Owner.Drained && isolated.Owner.EnginesOff && !original.Drained,
+            "source drains and engines switch off only after external resource branches separate");
+        Check(isolated.Neighbors.Length == 3 && isolated.Neighbors.All(v => !v.Drained),
+            "transaction retains exact neighboring owners without draining their contents");
+        isolated.Dispose();
+        Check(isolated.ContentsReleased && isolated.Owner.Drained, "cancellation does not claim released contents were restored");
         CheckClosed();
     }
     private static void DockingReroot()
@@ -66,6 +73,8 @@ internal static class IsolationChecks
         Vehicle.ThrowOnSplit = 2;
         Check(!NativeSlicePhysics.TryIsolate(selected, Ready, out _, out var reason, new()) && reason.Contains("partial native separation"),
             "split failure keeps the source and reports completed separations");
+        Check(QuietSliceContacts.Protections == 1 && !original.Drained,
+            "partial isolation protects completed separations without draining a still-connected host");
         CheckClosed();
 
         Reset();

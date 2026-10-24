@@ -153,45 +153,14 @@ internal static partial class NativeSlicePhysics
         var previouslyPresent = new HashSet<Vehicle>();
         var generatedTemplates = pieces.Select(p => p.Asset.Template).ToHashSet();
         var registeringIds = new HashSet<string>(StringComparer.Ordinal);
-        double emptiedMass = 0;
+        double emptiedMass = isolated.EmptiedMassKg;
         foreach (var item in sourceSystem.All.AsSpan()) if (item is Vehicle vehicle) previouslyPresent.Add(vehicle);
         try
         {
-            // Only the isolated cut part is drained. Neighboring tanks and their
-            // resource networks have already been separated by native Split.
-            // Preserve the assembly's world pose when removing off-centre fuel.
-            timings.Next(SliceCommitPhase.Drain);
-            var isolatedState = owner.GetPhysicsStatesMutable();
-            if (isolatedState.Props.Situation.IsOnRails())
-                isolatedState.UpdateFromAnalytic(owner.Orbit, in owner.Orbit.StateVectors, owner.Body2Cce, owner.BodyRates, Situation.Maneuvering);
-            isolatedState.Props.SetOnRails(false);
-            if (!owner.Parts.SubstanceStores.IsEmpty)
-            {
-                var oldCom = owner.CenterOfMassAsmb;
-                emptiedMass = owner.TotalMass;
-                owner.DepleteConsumables();
-                // Contents changed, not module membership. Rebuild the native mass/collider
-                // configuration without allocating a duplicate VehicleUpdateData snapshot.
-                owner.UpdateAfterPartTreeModification();
-                var drainedState = owner.GetPhysicsStatesMutable();
-                var newCom = drainedState.Props.CenterOfMassAsmb;
-                var shift = (new double3(newCom.X, newCom.Y, newCom.Z) - oldCom).Transform(drainedState.Kinematic.Body2Phys);
-                drainedState.Kinematic.PositionPhys += shift;
-                drainedState.Kinematic.VelocityPhys += double3.Cross(drainedState.Kinematic.AngularVelocityPhys, shift);
-                drainedState.Props.SetOnRails(false);
-                owner.SetFlightPlan(new FlightPlan(drainedState.ComputeOrbit(owner.OrbitColor), owner.Hash));
-                owner.UpdatePerFrameData();
-                emptiedMass -= owner.TotalMass;
-            }
+            if (!isolated.ContentsReleased) throw new InvalidOperationException("The source was not safely emptied during isolation.");
             var beforeStates = owner.GetPhysicsStates();
-            beforeStates.GetStatesCci(out var beforePosition, out var beforeVelocity, out var beforeBody2Cci);
+            beforeStates.GetStatesCci(out _, out var beforeVelocity, out var beforeBody2Cci);
             double3 beforeOmega = beforeStates.GetBodyRates().Transform(beforeBody2Cci);
-            var nativeInertia = owner.TotalMassPropsBody.Inertia;
-            var sourceRotation = double4x4.CreateFromQuaternion(beforeBody2Cci);
-            var sourceInertia = double4x4.Transpose(sourceRotation)
-                * SlicePrincipalFrame.Tensor(nativeInertia.XX, nativeInertia.YY, nativeInertia.ZZ,
-                    nativeInertia.YX, nativeInertia.ZX, nativeInertia.ZY) * sourceRotation;
-            var sourceAngularMomentum = SlicePrincipalFrame.ApplyTensor(beforeOmega, sourceInertia);
 
             timings.Next(SliceCommitPhase.Registration);
             if ((WorkerState!.GetValue(owner) as VehicleUpdateState)?.Bubble is not { } bubble)
@@ -213,6 +182,15 @@ internal static partial class NativeSlicePhysics
                 spawned.Add(fragment); // Rollback owns registered vehicles before any later operation can throw.
                 piece.Native.TransferredTo(fragment);
                 AdoptSeparated!(owner, fragment, bubble, deltaPhys.NormalizeOrZero());
+                // Native adoption copies relationships but drops SuppressAllContacts.
+                // Restore only this transaction's source/neighbor/sibling policy.
+                var worker = UpdateState(fragment)!;
+                QuietSliceContacts.Protect(worker, UpdateState(owner)!);
+                foreach (var neighbor in isolated.Neighbors)
+                    if (!neighbor.IsDisposed && UpdateState(neighbor) is { } neighborState)
+                        QuietSliceContacts.Protect(worker, neighborState);
+                foreach (var sibling in spawned)
+                    if (sibling != fragment) QuietSliceContacts.Protect(worker, UpdateState(sibling)!);
                 var state = fragment.GetPhysicsStatesMutable();
                 state.Kinematic.PositionPhys = ownerStates.Kinematic.PositionPhys + deltaPhys;
                 state.Kinematic.VelocityPhys = ownerStates.Kinematic.VelocityPhys
@@ -226,45 +204,18 @@ internal static partial class NativeSlicePhysics
             double actualMass = spawned.Sum(v => (double)v.TotalMass);
             if (Math.Abs(actualMass - owner.TotalMass) > Math.Max(.001, owner.TotalMass * 2e-5))
                 throw new InvalidOperationException("Native fragment mass changed during creation.");
-            double3 groupCentre = double3.Zero;
-            foreach (var fragment in spawned)
+            var bodies = spawned.Select((v, i) =>
             {
-                fragment.GetPhysicsStates().GetStatesCci(out var position, out _, out _);
-                groupCentre += position * fragment.TotalMass;
-            }
-            groupCentre /= actualMass;
-            double4x4 groupInertia = default;
-            foreach (var fragment in spawned)
-            {
-                fragment.GetPhysicsStates().GetStatesCci(out var position, out _, out var body2Cci);
-                var inertia = fragment.TotalMassPropsBody.Inertia;
-                var rotation = double4x4.CreateFromQuaternion(body2Cci);
-                groupInertia += double4x4.Transpose(rotation)
-                    * SlicePrincipalFrame.Tensor(inertia.XX, inertia.YY, inertia.ZZ, inertia.YX, inertia.ZX, inertia.ZY) * rotation
-                    + SlicePrincipalFrame.ParallelAxis(fragment.TotalMass, position - groupCentre);
-            }
-            // A uniform-density cut can change mass COM without moving the visible geometry.
-            // Preserve angular momentum about the old COM, including the new group's orbital term.
-            double3 totalMomentum = beforeVelocity * owner.TotalMass;
-            double3 spinMomentum = sourceAngularMomentum
-                - double3.Cross(groupCentre - beforePosition, totalMomentum);
-            // A gentle opening impulse makes the hot cut visible immediately.
-            // Remove its net linear and angular momentum before assigning spin.
+                v.GetPhysicsStates().GetStatesCci(out var position, out _, out _);
+                return new QuietFragmentBody(v.TotalMass, position, pieces[i].PositiveSide);
+            }).ToArray();
             var normalCci = cutNormal.Transform(sourceToIsolatedRotation).Transform(beforeBody2Cci).NormalizeOrZero();
-            double meanSign = pieces.Select((p, i) => (p.PositiveSide ? 1 : -1) * spawned[i].TotalMass).Sum() / actualMass;
-            var separation = pieces.Select(p => normalCci * ((p.PositiveSide ? 1 : -1) - meanSign) * .12).ToArray();
-            for (int i = 0; i < spawned.Count; i++)
-            {
-                spawned[i].GetPhysicsStates().GetStatesCci(out var position, out _, out _);
-                spinMomentum -= double3.Cross(position - groupCentre, separation[i] * spawned[i].TotalMass);
-            }
-            if (!SlicePrincipalFrame.TryAngularVelocity(groupInertia, spinMomentum, out var omega)
-                || omega.Length() > 300000) throw new InvalidOperationException("Conserved fragment angular velocity is invalid.");
+            var motion = QuietSliceMotion.Assign(bodies, beforeVelocity, beforeOmega, normalCci);
             for (int i = 0; i < spawned.Count; i++)
             {
                 var fragment = spawned[i];
                 fragment.GetPhysicsStates().GetStatesCci(out var position, out _, out var body2Cci);
-                double3 velocityCci = totalMomentum / actualMass + double3.Cross(omega, position - groupCentre) + separation[i];
+                double3 velocityCci = motion[i].Velocity, omega = motion[i].AngularVelocity;
                 var state = fragment.GetPhysicsStatesMutable();
                 if (state.Origin.BubFrame == BubbleFrame.Ccf)
                 {
@@ -284,13 +235,14 @@ internal static partial class NativeSlicePhysics
                 fragment.UpdatePerFrameData();
             }
             // This is the only deletion. Both complete fragments exist with native collision and durable IDs.
+            QuietSliceQuiescence.WatchFirstStep(spawned.Select(v => UpdateState(v)!).ToArray());
             timings.Next(SliceCommitPhase.SourceRemoval);
             // Native destruction clears the isolated shell's crew roster state. Crew
             // in neighboring branches moved with those branches during native Split.
             Universe.DestroyVehicle(owner, CrewDisposition.Kill);
             created = spawned.ToArray();
-            reason = $"Sliced into {spawned.Count} separating fragments."
-                + (emptiedMass > .001 ? $" Released {emptiedMass:F1} kg of stored propellant." : "");
+            reason = $"Quietly replaced with {spawned.Count} inert separating fragments."
+                + (emptiedMass > .001 ? $" Released {emptiedMass:F1} kg of stored contents during isolation." : "");
             return true;
         }
         catch (Exception error)
@@ -314,7 +266,7 @@ internal static partial class NativeSlicePhysics
             foreach (var fragment in spawned)
                 try { RollBackFragment(fragment, sourceSystem); }
                 catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Fragment rollback cleanup: {cleanup.Message}"); }
-            reason = $"Slice commit refused; original source retained{(emptiedMass > .001 ? " with tanks emptied" : "")}: {error.Message}";
+            reason = $"Slice commit refused; original source retained{(emptiedMass > .001 ? " with contents released and engines off" : "")}: {error.Message}";
             return false;
         }
     }

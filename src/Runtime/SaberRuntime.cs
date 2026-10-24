@@ -7,6 +7,7 @@ using Purr2D2.Core;
 using Purr2D2.Cutting;
 using Purr2D2.Pose;
 using Purr2D2.Rendering;
+using Purr2D2.Slicing;
 
 namespace Purr2D2.Runtime;
 
@@ -60,6 +61,7 @@ internal sealed partial class SaberRuntime : IDisposable
         InitializeForce(harmony);
         _renderer.Initialize(harmony);
         RuntimeFragmentAssets.Install(harmony);
+        QuietSliceQuiescence.Install(harmony);
         _audio.Initialize();
         _ready = true;
     }
@@ -69,6 +71,8 @@ internal sealed partial class SaberRuntime : IDisposable
         if (!_ready || _disposed) return;
         try
         {
+            QuietSliceQuiescence.BeginSettledUpdate();
+            QuietSliceContacts.Pump();
             if (!ApplyActivation()) { _slicer.PumpRetired(); return; }
             double playerDt = double.IsFinite(dtPlayer) ? Math.Clamp(dtPlayer, 0, .1) : 0;
             _playerTime += playerDt;
@@ -218,7 +222,7 @@ internal sealed partial class SaberRuntime : IDisposable
         _disposed = true; _ready = false;
         Cleanup(DisposeForce, "Force capture"); Cleanup(_forcePose.Dispose, "Force pose");
         Cleanup(_somersaultMotion.Dispose, "Somersault motion"); Cleanup(_somersaultPose.Dispose, "Somersault pose");
-        Cleanup(ResetWorld, "World"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
+        Cleanup(ResetWorld, "World"); Cleanup(QuietSliceContacts.RetireToNative, "Quiet slice contacts"); Cleanup(QuietSliceQuiescence.Clear, "Quiet slice modules"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
     }
     private static void Cleanup(Action action, string component)
     {

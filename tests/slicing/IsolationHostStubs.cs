@@ -61,6 +61,7 @@ namespace KSA
             if (ThrowOnEnd && Depth == 0) throw new InvalidOperationException("Fixture bulk finalization failure");
         }
     }
+    internal sealed class VehicleUpdateState { }
     internal sealed class Vehicle
     {
         internal static readonly List<string> SplitOrder = new();
@@ -71,6 +72,8 @@ namespace KSA
         internal readonly object System = Universe.CurrentSystem;
         internal readonly string Id;
         internal bool IsDisposed;
+        internal bool Drained, EnginesOff;
+        internal readonly VehicleUpdateState Worker = new();
         internal Seat[] Crew = [];
         internal Vehicle(string id, List<Part> members) { Id = id; Parts = new(members) { OwningVehicle = this }; }
         internal Vehicle? Split(Part.Connection edge, Part.Endpoint endpoint, int impulse, out object? pose)
@@ -103,9 +106,24 @@ namespace KSA
 }
 namespace Purr2D2.Slicing
 {
+    internal static class QuietSliceContacts
+    {
+        internal static int Protections;
+        internal static void Protect(KSA.VehicleUpdateState a, KSA.VehicleUpdateState b) => Protections++;
+        internal static void ProtectExisting(KSA.VehicleUpdateState state, IReadOnlySet<KSA.VehicleUpdateState> participants) { }
+    }
     internal readonly record struct PreparedPhysicsFragment(bool Valid);
+    internal static class QuietSliceQuiescence { internal static void Release(KSA.VehicleUpdateState state) { } }
     internal static partial class NativeSlicePhysics
     {
+        internal static KSA.VehicleUpdateState? UpdateState(KSA.Vehicle owner) => owner.Worker;
+        private static void ProtectIsolation(IsolatedSliceSource isolated) { }
+        private static void Quiesce(IsolatedSliceSource isolated, SliceCommitTimings timings)
+        {
+            if (isolated.Owner.Parts.Count != isolated.Parts.Length) throw new InvalidOperationException("Drained unsplit host");
+            isolated.Owner.Drained = isolated.Owner.EnginesOff = isolated.ContentsReleased = true;
+            isolated.EmptiedMassKg = 10;
+        }
         internal static bool ValidateSource(KSA.Part struck, out string reason)
         {
             reason = "Stale fixture source";

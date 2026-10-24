@@ -105,7 +105,8 @@ internal sealed class ArbitrarySlicer : IDisposable
                     try { CutSparks?.Invoke(created[i].Parts.Root, spark.Point, spark.Normal, now); }
                     catch (Exception effect) { Console.WriteLine("[purr2d2] Slice completed; spark effect: " + effect.Message); }
             }
-            return new(true, reason + " Cut faces are cooling.");
+            return new(true, reason + (_loaded.Data.AuthoredSubpartFallback
+                ? " Used authored subpart boundaries because mesh cutting failed." : " Cut faces are cooling."));
         }
         catch (Exception error) { return new(false, "Slice commit failed: " + error.Message); }
         finally
@@ -148,7 +149,7 @@ internal sealed class ArbitrarySlicer : IDisposable
         // corrupt partial IDs and lets a later cut reuse the prepared assets after cancellation.
         if (_upload != null) { _upload.Cancel(); _retiredUpload = _upload; _upload = null; }
         _loaded = null;
-        Isolation = null;
+        Isolation?.Dispose(); Isolation = null;
     }
     internal void PumpRetired()
     {

@@ -6,8 +6,17 @@ namespace Purr2D2.Slicing;
 /// <summary>Only assembly coordinates survive the isolation frame. Physics state
 /// must be sampled again at the later swap after the solver has applied.</summary>
 internal sealed record IsolatedSliceSource(Part Source, Part[] Parts, Vehicle Owner,
-    double4x4 PartTransform, double4x4 SourceToIsolated, doubleQuat SourceToIsolatedRotation)
+    double4x4 PartTransform, double4x4 SourceToIsolated, doubleQuat SourceToIsolatedRotation) : IDisposable
 {
+    internal Vehicle[] Neighbors { get; init; } = [];
+    internal bool ContentsReleased { get; set; }
+    internal double EmptiedMassKg { get; set; }
+    public void Dispose()
+    {
+        if (NativeSlicePhysics.UpdateState(Owner) is { } state) QuietSliceQuiescence.Release(state);
+        // Pair protection is owned by the settled cleanup queue until native
+        // clearance, even when cancellation retains an overlapping empty shell.
+    }
     internal bool IsCurrent(out string reason)
     {
         reason = "The isolated source changed before the fragment swap.";
@@ -42,6 +51,8 @@ internal static partial class NativeSlicePhysics
         SliceFrameDiagnostics.SetSourceDetails(sources.Length, boundaries.Count);
         if (!double4x4.Invert(full.MatrixAsmb2VehicleAsmb, out var oldAssemblyToPart))
         { reason = "Source transformation is singular."; return false; }
+        var separatedStates = new HashSet<VehicleUpdateState>();
+        if (UpdateState(full.Tree!.OwningVehicle!) is { } initialState) separatedStates.Add(initialState);
         try
         {
             timings.Next(SliceCommitPhase.Isolation);
@@ -53,7 +64,7 @@ internal static partial class NativeSlicePhysics
                 foreach (var boundary in boundaries)
                 {
                     bulk.Include(boundary.Source.Tree!);
-                    if (!SplitBoundary(boundary.Source, boundary.Neighbor))
+                    if (!SplitBoundary(boundary.Source, boundary.Neighbor, separatedStates))
                     { reason = "A connection refused native isolation; the source remains intact with completed native separations."; return false; }
                 }
             }
@@ -63,8 +74,14 @@ internal static partial class NativeSlicePhysics
             var transform = oldAssemblyToPart * full.MatrixAsmb2VehicleAsmb;
             if (!double4x4.Decompose(transform, out var scale, out var rotation, out _) || (scale - double3.One).Length() > 1e-5)
             { reason = "Native isolation unexpectedly changed source scale; the separated source is retained."; return false; }
-            isolated = new(full, sources, owner, full.MatrixAsmb2VehicleAsmb, transform, rotation);
-            reason = "Source isolated; preparing the fragment swap.";
+            isolated = new(full, sources, owner, full.MatrixAsmb2VehicleAsmb, transform, rotation)
+            {
+                Neighbors = boundaries.Select(b => b.Neighbor.Tree?.OwningVehicle)
+                    .Where(v => v != null && v != owner).Cast<Vehicle>().Distinct().ToArray()
+            };
+            ProtectIsolation(isolated);
+            Quiesce(isolated, timings);
+            reason = "Source isolated and emptied; preparing the fragment swap.";
             return true;
         }
         catch (Exception error)
@@ -72,12 +89,13 @@ internal static partial class NativeSlicePhysics
             // Split is itself irreversible: an exception inside its vehicle
             // constructor can leave incomplete native adoption. Never imply
             // that arbitrary host failures restored a usable source graph.
-            reason = "Native isolation failed after partial native separation: " + error.Message;
+            reason = "Native isolation failed after partial native separation"
+                + (isolated?.ContentsReleased == true ? "; source contents were released" : "") + ": " + error.Message;
             return false;
         }
     }
 
-    private static bool SplitBoundary(Part full, Part neighbor)
+    private static bool SplitBoundary(Part full, Part neighbor, HashSet<VehicleUpdateState> participants)
     {
         Part.Connection? crossing = null;
         foreach (var edge in full.Connections)
@@ -85,6 +103,14 @@ internal static partial class NativeSlicePhysics
         if (crossing is null || full.Tree?.OwningVehicle is not { } owner) return false;
         var endpoint = crossing.Connectors[0].ConnectionPart.FullPart == full ? crossing.Connectors[0] : crossing.Connectors[1];
         if (owner.Split(crossing, endpoint, 0, out _) is not { } separated) return false;
+        // Each successful split is irreversible, even if a later boundary or bulk
+        // finalization fails. Protect that native relationship immediately.
+        if (UpdateState(owner) is { } originalState && UpdateState(separated) is { } separatedState)
+        {
+            participants.Add(originalState); participants.Add(separatedState);
+            QuietSliceContacts.Protect(originalState, separatedState);
+            foreach (var state in participants) QuietSliceContacts.ProtectExisting(state, participants);
+        }
         // Native Split moves the existing seats but leaves their roster vessel ID
         // unchanged. Keep surviving crew assigned to the actual new vessel while
         // preserving mission time, mission count and the seats themselves.

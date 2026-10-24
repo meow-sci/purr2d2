@@ -7,7 +7,10 @@ namespace Purr2D2.Slicing;
 // Worker inputs contain copied values only: never Part, Vehicle, MeshReference or a native material.
 internal sealed record SliceMaterialData(string Id, bool Glass);
 internal sealed record SliceInput(SliceFace[][] Groups, CutPoint[] Axes,
-    IReadOnlyDictionary<int, SliceMaterialData> Materials, float MassKg, uint Seed = 0);
+    IReadOnlyDictionary<int, SliceMaterialData> Materials, float MassKg, uint Seed = 0)
+{
+    internal bool GeneratedClosedGeometry { get; init; }
+}
 internal sealed record SlicePlan(SlicePlane Plane);
 internal sealed record CpuFragment(SlicePiece Piece, PrincipalFragment Frame, SliceFace[][] Solids, double3 Extents, float MassKg);
 internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments)
@@ -15,6 +18,7 @@ internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments)
     internal bool Faceted { get; init; }
     internal int Attempts { get; init; }
     internal string FacetFallback { get; init; } = "";
+    internal bool AuthoredSubpartFallback { get; init; }
 }
 
 internal static class SliceGeometryWork
@@ -22,7 +26,12 @@ internal static class SliceGeometryWork
     internal static CpuSlice Calculate(SliceInput input, CancellationToken cancel, Action<SlicePlan> publish)
     {
         cancel.ThrowIfCancellationRequested();
-        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel)) throw new InvalidDataException(reason);
+        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel))
+        {
+            if (QuietSubpartBreakup.TryBuild(input, out var authored, out var authoredFailure, cancel))
+            { publish(new(authored!.Plane)); return authored with { FacetFallback = reason }; }
+            throw new InvalidDataException(reason + " Authored-subpart fallback: " + authoredFailure);
+        }
         string failure = "No broad section could be found.";
         var candidates = AssistedSliceGeometry.Candidates(source, input.Axes, input.Seed).ToArray();
         string facetFailure = ""; int attempts = 0;
@@ -78,6 +87,11 @@ internal static class SliceGeometryWork
             publish(new(result.EffectivePlane));
             return new(result.EffectivePlane, assets) { Faceted = attempt.Faceted, Attempts = attempts, FacetFallback = attempt.Faceted ? "" : facetFailure };
         }
-        throw new InvalidDataException("This part could not be sliced: " + failure);
+        if (QuietSubpartBreakup.TryBuild(input, out var fallback, out var fallbackFailure, cancel))
+        {
+            publish(new(fallback!.Plane));
+            return fallback with { Attempts = attempts, FacetFallback = failure };
+        }
+        throw new InvalidDataException("This part could not be sliced: " + failure + " Authored-subpart fallback: " + fallbackFailure);
     }
 }

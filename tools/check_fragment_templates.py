@@ -56,10 +56,13 @@ for key, value in {'OutputType': 'Exe', 'TargetFramework': 'net10.0', 'ImplicitU
 items = ET.SubElement(project, 'ItemGroup')
 ET.SubElement(items, 'PackageReference', Include='Samboy063.Tomlet', Version='6.2.0')
 ET.SubElement(items, 'PackageReference', Include='Lib.Harmony', Version='2.4.2')
+# Native module callers mention KSA's logging constructor in their unchanged IL.
+ET.SubElement(items, 'PackageReference', Include='Microsoft.Extensions.Logging.Abstractions', Version='10.0.0')
 for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentTopology.cs',
                'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/SliceShellBuilder.cs',
-               'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SliceGeometryWork.cs',
+               'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs',
+               'src/Slicing/QuietSliceQuiescence.cs', 'tests/QuietSliceHooksChecks.cs',
                'src/Slicing/SliceColliderGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',
                'src/Slicing/SliceMeshPrecision.cs', 'src/Core/SaberLimits.cs',
                'src/Slicing/SliceDiagnosticCounters.cs', 'src/Slicing/SliceFrameDiagnostics.cs',

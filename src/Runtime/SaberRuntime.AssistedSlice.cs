@@ -65,7 +65,9 @@ internal sealed partial class SaberRuntime
     private void CancelAssistedSlice(string reason)
     {
         if (_slicer.Isolation is { Owner.IsDisposed: false } && reason.Length > 0)
-            reason += " Detached parts remain separated.";
+            reason += _slicer.Isolation.ContentsReleased
+                ? " Detached parts remain separated; the selected source remains empty and its engines are off."
+                : " Detached parts remain separated.";
         _selectingSlice = false; _sliceHover = null;
         _sliceSequence.Cancel();
         _sliceSelection?.Dispose(); _sliceSelection = null;

@@ -35,26 +35,51 @@ internal static class SlicingPhysicsChecks
         Check(!SlicePrincipalFrame.TryCreate(piece with { Inertia = new(-1, 2, 3, 0, 0, 0) }, out _, out _),
             "negative fragment inertia is rejected");
 
-        // Mass redistributes from the original COM to a geometrically correct but offset COM.
-        // Verify both P and L about the FIXED old source COM, not merely fragment spin.
-        double mass = 10;
-        double3 velocity = new(5, 2, -1), oldOmega = new(.3, -.4, .6), offset = new(.4, -.2, .1);
-        var sourceInertia = SlicePrincipalFrame.Tensor(8, 9, 10, .4, -.2, .1);
-        double3 oldAngular = SlicePrincipalFrame.ApplyTensor(oldOmega, sourceInertia);
-        double3 momentum = velocity * mass;
-        var groupInertia = SlicePrincipalFrame.Tensor(12, 14, 18, -.3, .1, -.5);
-        double3 wantedSpin = oldAngular - double3.Cross(offset, momentum);
-        Check(SlicePrincipalFrame.TryAngularVelocity(groupInertia, wantedSpin, out var omega), "fragment angular velocity solves from the full inertia tensor");
-        Near(SlicePrincipalFrame.ApplyTensor(omega, groupInertia) + double3.Cross(offset, momentum), oldAngular,
-            "shifted geometric COM preserves original spin plus orbital angular momentum");
-        double3 rA = new(-1, 0, 0), rB = new(1, 0, 0);
-        double3 vA = velocity + double3.Cross(omega, rA), vB = velocity + double3.Cross(omega, rB);
-        Near(vA * 5 + vB * 5, momentum, "fragment rigid velocity field conserves total linear momentum");
+        var bodyToPhys = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .7);
+        double3 oldCom = new(2, -1, 0), drainedCom = new(-.5, .3, .8), oldPosition = new(5, 8, 2), point = new(3, 4, 5);
+        double3 omegaPhys = new(.1, .2, -.3), sourceVelocity = new(0, 7800, 0);
+        var correction = QuietSliceMotion.DrainCorrection(oldCom, drainedCom, bodyToPhys, omegaPhys);
+        var oldPointOffset = double3.Transform(point - oldCom, bodyToPhys);
+        var newPointOffset = double3.Transform(point - drainedCom, bodyToPhys);
+        Near(oldPosition + correction.Position + newPointOffset, oldPosition + oldPointOffset,
+            "off-centre store depletion preserves every visible point's physical pose");
+        Near(sourceVelocity + correction.Velocity + double3.Cross(omegaPhys, newPointOffset),
+            sourceVelocity + double3.Cross(omegaPhys, oldPointOffset),
+            "off-centre store depletion preserves the inherited rotating velocity field");
+
+        QuietFragmentBody[] bodies = [new(2, new(8, 4, 2), false), new(8, new(11, 5, 3), true)];
+        double3 velocity = new(5, 2, -1), oldOmega = new(.3, -.4, .6);
+        var motion = QuietSliceMotion.Assign(bodies, velocity, oldOmega, double3.UnitY);
+        Near(motion[0].Velocity * 2 + motion[1].Velocity * 8, velocity * 10,
+            "off-centre unequal-mass fragments conserve total linear momentum");
+        foreach (var boost in new[] { double3.Zero, new double3(400, -120, 30), new double3(0, 7800, 0) })
+        {
+            var boosted = QuietSliceMotion.Assign(bodies, velocity + boost, oldOmega, double3.UnitY);
+            for (int i = 0; i < motion.Length; i++)
+            {
+                Near(boosted[i].Velocity - boost, motion[i].Velocity, "fragment velocity is invariant under uniform surface/orbital boosts");
+                Near(boosted[i].AngularVelocity, oldOmega, "bulk velocity never becomes newly introduced fragment spin");
+            }
+        }
+        var opening = QuietSliceMotion.Assign(bodies, double3.Zero, double3.Zero, double3.UnitY);
+        Near(opening[1].Velocity - opening[0].Velocity, double3.UnitY * QuietSliceMotion.RelativeOpeningSpeed,
+            "opposite sides open at the named tiny relative speed");
+        double energy = opening.Select((m, i) => .5 * bodies[i].Mass * double3.Dot(m.Velocity, m.Velocity)).Sum();
+        Check(energy <= .5 * 10 * Math.Pow(QuietSliceMotion.RelativeOpeningSpeed / 2, 2), "added opening kinetic energy is bounded independently of bulk speed");
+        var stationary = QuietSliceMotion.Assign(bodies, new(0, 7800, 0), double3.Zero, double3.UnitY);
+        Near(stationary[0].AngularVelocity, double3.Zero, "an offset geometric COM at orbital speed cannot generate spin");
+        CheckThrows(() => QuietSliceMotion.Assign([new(double.NaN, double3.Zero, true), bodies[0]], velocity, oldOmega, double3.UnitY),
+            "nonfinite motion inputs refuse before native assignment");
         Near(SlicePrincipalFrame.ApplyTensor(double3.UnitX, SlicePrincipalFrame.ParallelAxis(2, new double3(1, 2, 3))),
             new double3(26, -4, -6), "parallel-axis tensor includes offdiagonal products of inertia");
-        Check(!SlicePrincipalFrame.TryAngularVelocity(default, momentum, out _), "singular fragment inertia cannot launch invalid bodies");
+        Check(!SlicePrincipalFrame.TryAngularVelocity(default, velocity, out _), "singular fragment inertia cannot launch invalid bodies");
     }
 
+    private static void CheckThrows(Action action, string message)
+    {
+        try { action(); } catch (InvalidDataException) { Check(true, message); return; }
+        Check(false, message);
+    }
     private static void Near(double3 actual, double3 expected, string message) => Check((actual - expected).Length() < 1e-8, message);
     private static void Check(bool condition, string message)
     {
