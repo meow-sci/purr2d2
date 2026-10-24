@@ -9,7 +9,9 @@ internal sealed partial class SaberRuntime
     private readonly SomersaultMotionController _somersaultMotion = new();
     private readonly SomersaultPoseController _somersaultPose = new();
     private KittenEva? _somersaultPoseOwner;
-    private (KittenEva Owner, SomersaultDirection Direction, double PressTime)? _somersaultRequest;
+    private SomersaultRequest? _somersaultRequest;
+    private readonly record struct SomersaultRequest(KittenEva Owner, SomersaultDirection Direction,
+        double PressTime, bool FromSpace = false);
 
     // Includes a click waiting for the settled handoff: other actions must not
     // acquire the pose between that press and the next physics preparation.
@@ -51,6 +53,7 @@ internal sealed partial class SaberRuntime
 
     private void QueueSomersault(SomersaultDirection direction)
     {
+        if (!_settings.SpaceSomersaultEnabled) CancelPendingSpaceSomersault();
         // UI callbacks only enqueue. One pending request prevents hold/repeat or
         // multiple clicks in one frame from becoming another jump after landing.
         // Native event polling follows applied solver results but precedes our
@@ -60,7 +63,7 @@ internal sealed partial class SaberRuntime
         ApplySomersaultComboSettings();
         _somersaultMotion.Update(_owner);
         if (Enum.IsDefined(direction) && CanStartSomersault(out _, pressed) && _owner is { } owner)
-            _somersaultRequest = (owner, direction, pressed);
+            _somersaultRequest = new(owner, direction, pressed);
     }
 
     private void UpdateSomersault()
@@ -68,7 +71,15 @@ internal sealed partial class SaberRuntime
         ApplySomersaultComboSettings();
         if (!ReferenceEquals(_somersaultPoseOwner, _owner))
         {
+            // Input can arrive on the newly controlled EVA before this runtime
+            // has rebound its visual pose. Keep only that fresh actor's Space
+            // intent through the rebind; old-owner and button requests retain
+            // the existing reset behavior.
+            SomersaultRequest? freshSpaceRequest = _somersaultRequest is { FromSpace: true } spaceInput
+                && ReferenceEquals(spaceInput.Owner, _owner) && IsSpaceSomersaultScope(spaceInput.Owner)
+                    ? spaceInput : null;
             ResetSomersault();
+            _somersaultRequest = freshSpaceRequest;
             _somersaultPoseOwner = _owner;
             if (_owner != null) _somersaultPose.Bind(_owner);
         }
@@ -79,6 +90,7 @@ internal sealed partial class SaberRuntime
         var request = _somersaultRequest;
         _somersaultRequest = null;
         if (request is { } queued && ReferenceEquals(queued.Owner, _owner)
+            && (!queued.FromSpace || IsSpaceSomersaultScope(queued.Owner))
             && CanStartSomersault(out _, queued.PressTime)
             && _somersaultMotion.Request(queued.Owner, queued.Direction, queued.PressTime))
         {

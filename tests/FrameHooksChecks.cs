@@ -1,10 +1,14 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using Brutal.Concurrency.Jobs;
+using Brutal.GlfwApi;
+using Brutal.ImGuiApi;
+using Brutal.ImGuiApi.Abstractions;
 using HarmonyLib;
 using KSA;
 using Purr2D2.Runtime;
 using Purr2D2.Slicing;
+using RenderCore.Input;
 
 internal static class FrameHooksChecks
 {
@@ -78,7 +82,8 @@ internal static class FrameHooksChecks
         var waitWrapper = AccessTools.Method(typeof(GameHooks), "WaitVehicleSolver")!;
         try { waitWrapper.Invoke(null, [null]); throw new Exception("Native null scheduler exception was swallowed."); }
         catch (TargetInvocationException error) when (error.InnerException is NullReferenceException) { }
-        Console.WriteLine("PASS: actual KSA PrepareFrame IL preserves four exact call stacks, all other instructions and labels; missing/ambiguous/reordered/prefixed seams rejected; native wait exception preserved");
+        CheckSpaceSomersaultInputHook();
+        Console.WriteLine("PASS: actual KSA PrepareFrame IL preserves four exact call stacks, all other instructions and labels; missing/ambiguous/reordered/prefixed seams rejected; native wait exception preserved; Space somersault hook delegates safely at KittenEva.OnKey");
 
         void Reject(Action<List<CodeInstruction>> mutate, string description)
         {
@@ -88,5 +93,101 @@ internal static class FrameHooksChecks
             throw new Exception("Frame transpiler accepted " + description + ".");
         }
     }
+
+    private static void CheckSpaceSomersaultInputHook()
+    {
+        var kittenOnKey = AccessTools.Method(typeof(KittenEva), nameof(KittenEva.OnKey), [typeof(GlfwKeyEvent)])!;
+        Require(kittenOnKey.DeclaringType == typeof(KittenEva) && kittenOnKey.IsVirtual
+            && kittenOnKey.ReturnType == typeof(bool) && kittenOnKey.GetParameters().Select(p => p.ParameterType).SequenceEqual([typeof(GlfwKeyEvent)]),
+            "Space somersault must patch the native KittenEva.OnKey(GlfwKeyEvent) override returning bool.");
+        var prefix = AccessTools.Method(typeof(GameHooks), nameof(GameHooks.SpaceSomersaultKey))!;
+        var prefixParameters = prefix.GetParameters();
+        Require(prefix.IsStatic && prefix.ReturnType == typeof(bool)
+            && prefixParameters.Length == 3
+            && prefixParameters[0].ParameterType == typeof(KittenEva)
+            && prefixParameters[1].ParameterType == typeof(GlfwKeyEvent)
+            && prefixParameters[2].ParameterType == typeof(bool).MakeByRefType(),
+            "Space somersault prefix must match Harmony's instance/event/result contract.");
+
+        var programKey = AccessTools.Method(typeof(Program), nameof(Program.OnKey),
+            [typeof(GlfwWindow), typeof(GlfwKey), typeof(int), typeof(GlfwKeyAction), typeof(GlfwModifier)])!;
+        var dispatchKey = AccessTools.Method(typeof(Program), "DispatchKeyEvent")!;
+        var programKeyCalls = PatchProcessor.GetOriginalInstructions(programKey).Where(c => c.operand is MethodInfo).Select(c => (MethodInfo)c.operand!).ToList();
+        var dispatchCalls = PatchProcessor.GetOriginalInstructions(dispatchKey).Where(c => c.operand is MethodInfo).Select(c => (MethodInfo)c.operand!).ToList();
+        var dispatch = AccessTools.Method(typeof(Program), "DispatchKeyEvent")!;
+        var controls = new[]
+        {
+            AccessTools.Method(typeof(GameSettings), "OnKeyAll", [typeof(GlfwKeyEvent)])!,
+            AccessTools.Method(typeof(Popup), "OnKeyAll", [typeof(GlfwKeyEvent)])!,
+            AccessTools.Method(typeof(ConsoleWindowEx), "OnKey", [typeof(ConsoleWindow), typeof(GlfwWindow), typeof(GlfwKey), typeof(int), typeof(GlfwKeyAction), typeof(GlfwModifier)])!,
+            AccessTools.PropertyGetter(typeof(ConsoleWindow), "IsOpen")!,
+            AccessTools.PropertyGetter(typeof(ImGuiIOPtr), "WantCaptureKeyboard")!,
+            dispatch
+        };
+        int previous = -1;
+        foreach (MethodInfo control in controls)
+        {
+            int index = programKeyCalls.FindIndex(control.Equals);
+            Require(index > previous, $"Program.OnKey no longer applies native guard/routing {control.DeclaringType?.Name}.{control.Name} in order.");
+            previous = index;
+        }
+        var editorKey = AccessTools.Method(typeof(VehicleEditor), "OnKey", [typeof(GlfwKeyEvent)])!;
+        var cameraKey = AccessTools.Method(typeof(Camera), "OnKey", [typeof(GlfwKeyEvent)])!;
+        var activeControllerKey = AccessTools.Method(typeof(Controller), "OnKey", [typeof(GlfwKeyEvent)])!;
+        var vehicleKey = AccessTools.Method(typeof(Vehicle), "OnKey", [typeof(GlfwKeyEvent)])!;
+        var route = new[] { editorKey, cameraKey, activeControllerKey, vehicleKey };
+        previous = -1;
+        foreach (MethodInfo method in route)
+        {
+            int index = dispatchCalls.FindIndex(method.Equals);
+            Require(index > previous, $"Program.DispatchKeyEvent no longer routes editor/camera/controller before the vehicle ({method.DeclaringType?.Name}.{method.Name}).");
+            previous = index;
+        }
+
+        var eventValue = new GlfwKeyEvent(null!, GlfwKeyAction.Press, GlfwKey.Space, (GlfwModifier)0);
+        var runtime = new SaberRuntime { SpaceSomersaultFilterResult = true };
+        GameHooks.Runtime = runtime;
+        object?[] args = [null, eventValue, false];
+        bool runOriginal = (bool)prefix.Invoke(null, args)!;
+        Require(!runOriginal && Equals(args[2], true) && runtime.SpaceSomersaultFilterCalls == 1
+            && runtime.LastSpaceSomersaultOwner == null
+            && runtime.LastSpaceSomersaultKeyEvent.Key == GlfwKey.Space
+            && runtime.LastSpaceSomersaultKeyEvent.Action == GlfwKeyAction.Press,
+            "A runtime-accepted somersault press must set the handled result and suppress native kitten input.");
+
+        runtime.SpaceSomersaultFilterCalls = 0;
+        runtime.SpaceSomersaultFilterResult = false;
+        args = [null, eventValue, false];
+        runOriginal = (bool)prefix.Invoke(null, args)!;
+        Require(runOriginal && Equals(args[2], false) && runtime.SpaceSomersaultFilterCalls == 1,
+            "A runtime-unhandled Space event must reach native KittenEva.OnKey without changing its result.");
+
+        GameHooks.Runtime = null;
+        args = [null, eventValue, false];
+        runOriginal = (bool)prefix.Invoke(null, args)!;
+        Require(runOriginal && Equals(args[2], false),
+            "A missing runtime must pass native kitten input through unchanged.");
+
+        runtime.SpaceSomersaultFilterThrows = true;
+        runtime.SpaceSomersaultFilterCalls = 0;
+        GameHooks.Runtime = runtime;
+        SaberRuntime.LastReportMessage = null;
+        SaberRuntime.LastReportException = null;
+        args = [null, eventValue, false];
+        runOriginal = (bool)prefix.Invoke(null, args)!;
+        Require(runOriginal && Equals(args[2], false) && runtime.SpaceSomersaultFilterCalls == 1
+            && SaberRuntime.LastReportMessage == "Space somersault input hook failed"
+            && SaberRuntime.LastReportException is InvalidOperationException,
+            "A runtime failure must be reported and must not break native input dispatch.");
+
+        var focus = AccessTools.Method(typeof(GameHooks), "OverlayFocus")!;
+        focus.Invoke(null, [null, GlfwFocusEvent.LostFocus]);
+        Require(runtime.OverlayFocusLostCalls == 1 && runtime.PendingSpaceSomersaultCancelCalls == 1,
+            "Losing focus on the main window must release overlay input and cancel pending keyboard somersault intent.");
+        GameHooks.Runtime = null;
+
+        Console.WriteLine("PASS: actual KSA keyboard guard/controller ordering and KittenEva.OnKey signature verified; accepted, declined, absent and failing runtime paths preserve native input contract; main-window focus loss cancels pending keyboard intent");
+    }
+
     private static void Require(bool value, string message) { if (!value) throw new Exception(message); }
 }

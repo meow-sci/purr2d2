@@ -667,9 +667,11 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     ]
     somersault_runtime_sources = [
         source / "src/Core/SomersaultMotion.cs",
+        source / "src/Core/SomersaultKeyboardDirection.cs",
         source / "src/Core/AssistedSliceSequence.cs",
         source / "src/Core/SaberSwing.cs",
         source / "src/Runtime/SaberRuntime.Somersault.cs",
+        source / "src/Runtime/SaberRuntime.SpaceSomersault.cs",
         source / "tests/somersault/RuntimeHostStubs.cs",
         source / "tests/somersault/RuntimeChecks.cs",
     ]
@@ -678,6 +680,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SomersaultSequence.cs",
         source / "src/Runtime/SomersaultMotionController.cs",
         source / "src/Runtime/SaberRuntime.Somersault.cs",
+        source / "src/Runtime/SaberRuntime.SpaceSomersault.cs",
+        source / "src/Core/SomersaultKeyboardDirection.cs",
         source / "tests/motion/HostStubs.cs",
         source / "tests/motion/SomersaultWorkerChecks.cs",
         source / "tests/motion/SomersaultInputChecks.cs",
@@ -741,6 +745,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Audio/ForceBreakupAudio.cs", source / "src/Core/SaberSettings.cs",
                          source / "tests/audio/AudioChecks.cs"], None),
         ("ForceBreakupSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "tests/ForceBreakupSettingsChecks.cs"], None),
+        ("SpaceSomersaultSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "src/Core/SaberSettingsAutosaver.cs",
+            source / "src/Core/SomersaultMotion.cs", source / "src/Core/SomersaultKeyboardDirection.cs",
+            source / "tests/SpaceSomersaultSettingsChecks.cs"], None),
         ("DetachedSliceChecks", fragment_sources, None),
         ("IsolationChecks", isolation_sources, None),
         ("QuietContactChecks", [source / "src/Slicing/QuietSliceContacts.cs", source / "tests/slicing/QuietContactChecks.cs"], None),

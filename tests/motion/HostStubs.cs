@@ -1,15 +1,19 @@
 using System.Runtime.CompilerServices;
+using Brutal.GlfwApi;
 using Brutal.Numerics;
 
 // Only the native host boundary is replaced. The fixture runs the production
 // controller and its actual Harmony transpiler on an optimized virtual caller.
-namespace KSA;
+namespace KSA
+{
 
 internal static class Program
 {
     internal static bool EditorFlag;
     internal static Vehicle? ControlledVehicle;
     internal static double PlayerTime;
+    internal static GlfwWindow MainWindow = new();
+    internal static GlfwWindow GetWindow() => MainWindow;
     internal static double GetPlayerTime() => PlayerTime;
 }
 
@@ -219,4 +223,31 @@ internal sealed class VehicleUpdateState
         => CharacterControlInputs = inputs;
     internal void PrepareLadderFromVehicle(in LadderWorkerInputs inputs, ReadOnlySpan<LadderNode> nodes)
     { LadderWorkerInputs = inputs; LadderNodeCount = nodes.Length; }
+}
+}
+
+namespace Brutal.GlfwApi
+{
+    internal enum GlfwKey { Space, Up, Down, Left, Right }
+    internal enum GlfwKeyAction { Release, Press, Repeat }
+    internal enum GlfwModifier { None }
+    internal sealed class GlfwWindow
+    {
+        private readonly Dictionary<GlfwKey, GlfwKeyAction> _keys = new();
+        internal GlfwKeyAction GetKey(GlfwKey key) => _keys.GetValueOrDefault(key, GlfwKeyAction.Release);
+        internal void SetKey(GlfwKey key, GlfwKeyAction action) => _keys[key] = action;
+    }
+}
+
+namespace RenderCore.Input
+{
+    using Brutal.GlfwApi;
+    internal readonly struct GlfwKeyEvent(GlfwWindow window, GlfwKeyAction action, GlfwKey key)
+    {
+        internal GlfwWindow Window { get; } = window;
+        internal GlfwKeyAction Action { get; } = action;
+        internal GlfwKey Key { get; } = key;
+        internal void Deconstruct(out GlfwWindow window, out GlfwKeyAction action, out GlfwKey key, out GlfwModifier modifiers)
+        { window = Window; action = Action; key = Key; modifiers = GlfwModifier.None; }
+    }
 }

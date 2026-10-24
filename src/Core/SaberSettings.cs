@@ -94,6 +94,7 @@ public sealed class SaberSettings
     public float AimZ { get; set; } = .6f;
     public float FingerCurl { get; set; } = .12f;
     public float JumpComboIntervalSeconds { get; set; } = .75f;
+    public bool SpaceSomersaultEnabled { get; set; } = true;
     public bool HideMmu { get; set; } = true;
     public float AngryForceRadius { get; set; } = 10;
     public int ForceCaptureLimit { get; set; } = ForceCaptureLimits.Default;

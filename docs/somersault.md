@@ -12,6 +12,27 @@ Starts require normal 1× simulation speed, RCS disabled, upright terrain contac
 
 Saber ignition and equipment follow explicit player commands, independently of locomotion transitions. Grounded, airborne, MMU, tumbling and rightening modes retain the held saber. Ladder and swimming modes temporarily suspend the hand pose without clearing ignition or a pending equip; presentation resumes when a supported mode returns. Explicit retraction still takes effect during suspension, and boarding, world resets and disposal still release equipment.
 
+## Space-bar control
+
+The global **Space-bar somersaults** option under **Settings → Character & grip** defaults to on, including when loading older preferences. With the mod enabled and an ordinary Grounded/Airborne EVA kitten controlled, a fresh Space press requests the existing custom jump. The four overlay buttons keep their existing behavior, whether this option is on or off. The option does not require the overlay to be visible.
+
+The literal arrow keys are sampled once at the Space press. Resolve combinations in this order:
+
+| Held arrows | Selected direction |
+| --- | --- |
+| Left + Right, with any other arrows | Forward |
+| Left without Right, with any Up/Down | Left |
+| Right without Left, with any Up/Down | Right |
+| Up, including Up + Down | Forward |
+| Down alone | Backward |
+| None | Forward |
+
+Keyboard requests use the same ground, rig, speed, RCS, swing/slice and combo eligibility as the existing custom action. A blocked on-foot request does nothing rather than falling back to a second stock jump. Holding Space and native key repeat cannot queue more jumps; releases still reach native input to clear held controls. Separate fresh presses can request the existing double/triple jump combo, which retains its first direction.
+
+The input hook runs at `KittenEva.OnKey`, after the game's settings, popup, console, ImGui, editor, camera and active-controller input routes. Other vehicles and non-jump EVA modes retain normal Space behavior. Disabling the setting restores stock Space input and discards a pending keyboard request; it does not change a pending button request or an already launched custom jump. Pending keyboard intent is actor-bound and cancelled on focus loss, world reset or invalid control changes. No physics mutation occurs in the key callback.
+
+Automated checks cover all 16 arrow combinations, default-on/legacy preferences, false autosave/reload, keyboard arbitration and lifecycle, native event routing, and unchanged button behavior. In-game acceptance should confirm bare Space, mixed arrows, deliberate double/triple presses, held Space through landing, GUI text/menu focus, disabling/re-enabling, control switching, and the existing buttons with the option off.
+
 ## Physics ownership
 
 `SomersaultMotionController` validates and patches the sole virtual `Vehicle.PrepareWorker(SimStep)` call in `Universe.PrepareVehicleWorkers`. Its wrapper calls the native preparation first, including derived EVA character/ladder snapshots, then modifies only the requested kitten's prepared worker state. It applies a bounded, surface-relative velocity delta once, takes the prepared body off rails, and initializes native airborne state without leaving a second stock jump impulse armed. Public vehicle state is updated through the game's normal solver results.

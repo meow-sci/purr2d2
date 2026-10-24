@@ -1,5 +1,7 @@
 using KSA;
+using Brutal.GlfwApi;
 using Purr2D2.Core;
+using RenderCore.Input;
 
 // This fixture links the actual runtime input partial and motion controller.
 // Only pose/slice boundaries are replaced; native worker preparation/apply is
@@ -20,11 +22,15 @@ namespace Purr2D2.Runtime
 {
     internal sealed partial class SaberRuntime
     {
-        private bool _ready = true, _disposed = false, _selectingSlice = false;
+        private bool _ready = true, _disposed = false, _selectingSlice = false, _enabled = true;
         private string? _fault = null;
         private KittenEva? _owner;
         private readonly TestSettings _settings = new();
-        private sealed class TestSettings { internal float JumpComboIntervalSeconds = .75f; }
+        private sealed class TestSettings
+        {
+            internal float JumpComboIntervalSeconds = .75f;
+            internal bool SpaceSomersaultEnabled = true;
+        }
         private readonly FixturePose _pose = new();
         private readonly FixtureSlice _sliceSequence = new();
         private sealed class FixturePose { internal bool Swinging => false; }
@@ -43,7 +49,12 @@ namespace Purr2D2.Runtime
             runtime._settings.JumpComboIntervalSeconds = .75f;
             runtime.UpdateSomersault();
             Program.PlayerTime = 10;
-            runtime.QueueSomersault(SomersaultDirection.Forward);
+            var window = Program.GetWindow();
+            window.SetKey(GlfwKey.Up, GlfwKeyAction.Press);
+            Check(runtime.FilterSpaceSomersaultKey(owner,
+                    new GlfwKeyEvent(window, GlfwKeyAction.Press, GlfwKey.Space))
+                && runtime._somersaultRequest is { Direction: SomersaultDirection.Forward, PressTime: 10, FromSpace: true },
+                "the actual Space press captures the first grounded launch for the real worker controller");
             runtime.UpdateSomersault();
             var first = new SimStep(new(0), new(.02), .02);
             Universe.PrepareVehicleWorkers(first); Universe.Apply(first);
@@ -52,8 +63,11 @@ namespace Purr2D2.Runtime
             // PollEvents happens after ApplyVehicleSolvers but before the mod's
             // settled update. The queue must observe the first launch itself.
             Program.PlayerTime = 10.5;
-            runtime.QueueSomersault(SomersaultDirection.Backward);
-            Check(runtime._somersaultRequest is { PressTime: 10.5 },
+            window.SetKey(GlfwKey.Up, GlfwKeyAction.Release);
+            window.SetKey(GlfwKey.Left, GlfwKeyAction.Press);
+            Check(runtime.FilterSpaceSomersaultKey(owner,
+                    new GlfwKeyEvent(window, GlfwKeyAction.Press, GlfwKey.Space))
+                && runtime._somersaultRequest is { PressTime: 10.5, Direction: SomersaultDirection.Left },
                 "real input boundary accepts the exact-window second press before settled launch acknowledgement");
             Program.PlayerTime = 10.9;
             runtime.UpdateSomersault();
@@ -62,8 +76,11 @@ namespace Purr2D2.Runtime
             var second = new SimStep(new(.02), new(.12), .1);
             Universe.PrepareVehicleWorkers(second); Universe.Apply(second);
             Program.PlayerTime = 11;
-            runtime.QueueSomersault(SomersaultDirection.Left);
-            Check(runtime._somersaultRequest is { PressTime: 11 },
+            window.SetKey(GlfwKey.Left, GlfwKeyAction.Release);
+            window.SetKey(GlfwKey.Right, GlfwKeyAction.Press);
+            Check(runtime.FilterSpaceSomersaultKey(owner,
+                    new GlfwKeyEvent(window, GlfwKeyAction.Press, GlfwKey.Space))
+                && runtime._somersaultRequest is { PressTime: 11, Direction: SomersaultDirection.Right },
                 "real input boundary also observes an applied second boost before accepting the third press");
             runtime.UpdateSomersault();
             Check(motion.CommandId == 3, "input-to-worker integration accepts three deliberate requests once each");

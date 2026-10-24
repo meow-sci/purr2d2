@@ -7,6 +7,7 @@ using HarmonyLib;
 using KSA;
 using Purr2D2.Cutting;
 using Purr2D2.Slicing;
+using RenderCore.Input;
 
 namespace Purr2D2.Runtime;
 
@@ -40,6 +41,12 @@ internal static class GameHooks
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayFocus)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnKey), typeof(GlfwWindow), typeof(GlfwKey), typeof(int), typeof(GlfwKeyAction), typeof(GlfwModifier)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayKey)));
+        // Intercept only after Program has routed input through settings, popups,
+        // console/ImGui, editor, camera and the active controller. This keeps Space
+        // available to those native routes and lets the runtime decide whether the
+        // controlled on-foot kitten owns this press.
+        harmony.Patch(Require(typeof(KittenEva), nameof(KittenEva.OnKey), typeof(GlfwKeyEvent)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(SpaceSomersaultKey)));
         harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnMouseButton", typeof(GlfwWindow), typeof(GlfwMouseButton), typeof(GlfwButtonAction), typeof(GlfwModifier)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiMouseButton)));
         harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnScroll", typeof(GlfwWindow), typeof(double2)),
@@ -184,9 +191,30 @@ internal static class GameHooks
     private static bool OverlayScroll(GlfwWindow window, double2 offset) => !(Runtime?.FilterOverlayScroll(window, offset) ?? false);
     private static bool OverlayKey(GlfwWindow window, GlfwKey key, GlfwKeyAction action) =>
         !(Runtime?.FilterForceKey(window, key, action) ?? false);
+    internal static bool SpaceSomersaultKey(KittenEva __instance, GlfwKeyEvent keyEvent, ref bool __result)
+    {
+        var runtime = Runtime;
+        if (runtime == null) return true;
+        try
+        {
+            if (!runtime.FilterSpaceSomersaultKey(__instance, keyEvent)) return true;
+            __result = true;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            try { SaberRuntime.Report("Space somersault input hook failed", ex); }
+            catch { /* Diagnostics must not break native input dispatch. */ }
+            return true;
+        }
+    }
     private static void OverlayFocus(GlfwWindow window, GlfwFocusEvent focusEvent)
     {
-        if (window == Program.GetWindow() && focusEvent == GlfwFocusEvent.LostFocus) Runtime?.OverlayFocusLost();
+        if (window == Program.GetWindow() && focusEvent == GlfwFocusEvent.LostFocus)
+        {
+            Runtime?.OverlayFocusLost();
+            Runtime?.CancelPendingSpaceSomersault();
+        }
     }
     private static bool OverlayImGuiMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action) =>
         !(Runtime?.SuppressOverlayImGuiMouseButton(window, button, action) ?? false);

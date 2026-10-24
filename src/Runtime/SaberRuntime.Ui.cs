@@ -296,10 +296,11 @@ internal sealed partial class SaberRuntime
 
     private void DrawSaberCharacterSettings()
     {
-        if (!BeginSaberSettingsTable("##SaberCharacter", "Jump combo interval")) return;
+        if (!BeginSaberSettingsTable("##SaberCharacter", "Space-bar somersaults")) return;
         var grip = new float3(_settings.GripX, _settings.GripY, _settings.GripZ);
         var aim = new float3(_settings.AimX, _settings.AimY, _settings.AimZ);
         float curl = _settings.FingerCurl, jumpComboInterval = _settings.JumpComboIntervalSeconds;
+        bool spaceSomersaultEnabled = _settings.SpaceSomersaultEnabled;
         bool hideMmu = _settings.HideMmu, changed = false;
         try
         {
@@ -314,6 +315,9 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Jump combo interval");
             changed |= ImGui.SliderFloat("##JumpComboIntervalSeconds", ref jumpComboInterval, .1f, 1.5f, "%.2f s");
             ShowSaberControlTip("Maximum time between jump presses for a somersault combo.");
+            SaberSettingsRow("Space-bar somersaults");
+            changed |= ImGui.Checkbox("##SpaceSomersaultEnabled", ref spaceSomersaultEnabled);
+            ShowSaberControlTip("Bare Space starts a forward somersault; arrow keys choose the direction. Turn this off to keep Space's usual jump behavior.");
             SaberSettingsRow("Equipment");
             changed |= ImGui.Checkbox("Hide MMU controllers", ref hideMmu);
             ShowSaberControlTip("Hides standard MMU hand controllers while the lightsaber is equipped.");
@@ -322,7 +326,8 @@ internal sealed partial class SaberRuntime
         if (!changed) return;
         _settings.GripX = grip.X; _settings.GripY = grip.Y; _settings.GripZ = grip.Z;
         _settings.AimX = aim.X; _settings.AimY = aim.Y; _settings.AimZ = aim.Z;
-        _settings.FingerCurl = curl; _settings.JumpComboIntervalSeconds = jumpComboInterval; _settings.HideMmu = hideMmu;
+        _settings.FingerCurl = curl; _settings.JumpComboIntervalSeconds = jumpComboInterval;
+        _settings.SpaceSomersaultEnabled = spaceSomersaultEnabled; _settings.HideMmu = hideMmu;
         _settings.Validate();
     }
 
