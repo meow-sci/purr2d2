@@ -6,6 +6,7 @@ using System.Xml.Linq;
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Force;
 using Purr2D2.Rendering;
 
@@ -133,6 +134,9 @@ internal static class ForceBreakupHostChecks
     {
         Check(ForceVehicleBreakup.DefaultMaximumPieces == 50,
             "per-source breakup defaults to a 50-piece ceiling");
+        Check(ForceBreakupLimits.Clamp(int.MinValue) == ForceBreakupLimits.Minimum
+            && ForceBreakupLimits.Clamp(int.MaxValue) == ForceBreakupLimits.Maximum,
+            "configured breakup caps clamp to the two-piece and global 512-piece limits");
 
         int nextBranch = 0;
         int firstBranch = ForceVehicleBreakup.ResolveFirstLayerBranchIndex(true, -1, ref nextBranch);
@@ -172,6 +176,13 @@ internal static class ForceBreakupHostChecks
         Check(coarsenedParts.Length == 50 && coarsenedNodes.Length == 70
             && coarsenedNodes.Select(node => node.SourceIndex).Distinct().Count() == 70,
             "more than 50 full parts keep every part in nearby whole-part clusters");
+        var aboveDefaultParts = Enumerable.Range(0, 80)
+            .Select(index => new ForceBreakupSourceNode(index, -1, true,
+                Geometry(index, new(index, 0, 0), 1))).ToArray();
+        var aboveDefault = ForceBreakupPlanner.Build(aboveDefaultParts, 75, 800);
+        Check(aboveDefault.Length == 75
+            && aboveDefault.SelectMany(piece => piece.Shape.Nodes!).Select(node => node.SourceIndex).Distinct().Count() == 80,
+            "an explicit planner cap above 50 coarsens to 75 complete chunks");
         var extremeMassParts = Enumerable.Range(0, 50)
             .Select(index => new ForceBreakupSourceNode(index, -1, true,
                 Geometry(index, new(index, 0, 0), index == 49 ? 1e-20 : 1))).ToArray();

@@ -21,6 +21,7 @@ internal sealed partial class SaberRuntime
         internal float AngryForceRadius = 10, ClutterPickTolerance = .2f;
         internal float ForceBreakupGroanPixels = 6, ForceBreakupSplitPixels = 18, Volume = .55f;
         internal int ForceCaptureLimit = ForceCaptureLimits.Default;
+        internal int ForceBreakupPieceLimit = ForceBreakupLimits.Default;
     }
     private readonly TestSettings _settings = new();
     private double _playerTime = 0;
@@ -378,6 +379,25 @@ internal sealed partial class SaberRuntime
         AdvanceForce(runtime, .016);
         Check(runtime._force.BreakupCalls == 0 && runtime._forceBreakupAudio.Groans == 0,
             "already broken debris and clutter retain ordinary spread without breakup cues");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._force.CanBreakup = true;
+        runtime._settings.ForceBreakupPieceLimit = 73;
+        runtime.ScrollForcePointer(-.5, shift: true);
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupPieceLimits.SequenceEqual([73]),
+            "the configured global piece cap reaches the controller when a breakup plan starts");
+        runtime._settings.ForceBreakupPieceLimit = 8;
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupCalls == 1 && runtime._force.BreakupCancels == 0
+            && runtime._force.BreakupActive && runtime._force.BreakupPieceLimits.SequenceEqual([73]),
+            "changing only the cap does not restart an active plan; it keeps its original budget snapshot");
+        runtime.ScrollForcePointer(.6, shift: true);
+        AdvanceForce(runtime, .016);
+        runtime.ScrollForcePointer(-.5, shift: true);
+        AdvanceForce(runtime, .016);
+        Check(runtime._force.BreakupPieceLimits.SequenceEqual([73, 8]),
+            "a new plan picks up the cap edited during the previous plan");
 
         runtime = new();
         runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._force.CanBreakup = true;

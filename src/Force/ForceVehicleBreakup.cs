@@ -21,7 +21,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
     internal readonly record struct SiblingBounds(double3 Center, double Radius);
     internal readonly record struct SiblingPair(int First, int Second);
 
-    internal const int DefaultMaximumPieces = 50;
+    internal const int DefaultMaximumPieces = ForceBreakupLimits.Default;
     private const int MaximumTopLevelParts = 4096;
     private const int MaximumCapturedParts = 32768;
     private const int MaximumSmallStepsPerHandoff = 8;
@@ -129,7 +129,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
     internal ForceVehicleBreakup(Vehicle source, int maximumPieces)
     {
         _source = source;
-        _maximumPieces = Math.Clamp(maximumPieces, 2, DefaultMaximumPieces);
+        _maximumPieces = ForceBreakupLimits.Clamp(maximumPieces);
         _mainThreadId = Thread.CurrentThread.ManagedThreadId;
     }
 

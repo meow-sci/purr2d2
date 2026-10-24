@@ -170,6 +170,61 @@ internal static class ForceControllerChecks
             controller.Release(false);
         }
 
+        (controller, owner, target) = Setup("breakup-budget-custom-small");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            Check(controller.Capture(owner, Pick(target), false), "custom low-cap source captures intact");
+            Check(controller.BeginBreakup(owner, maximumPieces: 7), "a caller can set a breakup cap below the default");
+            var result = AdvanceUntilTerminal(controller, owner);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && pieces.Length == 7 && controller.CapturedCount == 7
+                && pieces.Sum(piece => piece.BreakupGeometryOffsets.Length) == 700,
+                "the low custom cap coarsens all geometry into exactly seven replacements");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-custom-large");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            Check(controller.Capture(owner, Pick(target), false), "custom high-cap source captures intact");
+            Check(controller.BeginBreakup(owner, maximumPieces: 75), "a caller can raise the breakup cap above 50");
+            var result = AdvanceUntilTerminal(controller, owner);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && pieces.Length == 75 && controller.CapturedCount == 75
+                && pieces.Sum(piece => piece.BreakupGeometryOffsets.Length) == 700,
+                "the high custom cap permits 75 replacements while retaining all geometry");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-custom-clamp-low");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            Check(controller.Capture(owner, Pick(target), false), "out-of-range low cap source captures intact");
+            Check(controller.BeginBreakup(owner, maximumPieces: int.MinValue), "an out-of-range low cap starts with a safe clamp");
+            var result = AdvanceUntilTerminal(controller, owner);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && pieces.Length == ForceBreakupLimits.Minimum,
+                "an out-of-range low cap clamps to the two-piece minimum");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-custom-clamp-high");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            Check(controller.Capture(owner, Pick(target), false), "out-of-range high cap source captures intact");
+            Check(controller.BeginBreakup(owner, maximumPieces: int.MaxValue), "an out-of-range high cap starts with a safe clamp");
+            var result = AdvanceUntilTerminal(controller, owner);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && pieces.Length == ForceBreakupLimits.Maximum
+                && controller.CapturedCount == ForceBreakupLimits.Maximum,
+                "an out-of-range high cap clamps to the global held-object maximum");
+            controller.Release(false);
+        }
+
         (controller, owner, target) = Setup("breakup-budget-near-limit");
         using (controller)
         {
@@ -181,7 +236,7 @@ internal static class ForceControllerChecks
             Check(controller.Capture(owner, Pick(target), true, angryRadius: 10, captureLimit: ForceCaptureLimits.Maximum)
                 && controller.CapturedCount == ForceCaptureLimits.Maximum - 4,
                 "a mixed hold can approach the 512-object ceiling before breakup");
-            Check(controller.BeginBreakup(owner), "a near-limit source receives only the available growth budget");
+            Check(controller.BeginBreakup(owner, maximumPieces: 300), "a near-limit source with a high custom cap receives only the available growth budget");
             var result = AdvanceUntilTerminal(controller, owner);
             var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
             Check(result.Completed && !result.Failed && pieces.Length == 5
@@ -235,6 +290,30 @@ internal static class ForceControllerChecks
             Check(result.Completed && !result.Failed && committedSources == 25 && retainedSources == 5
                 && allPieces.Length == 50 && controller.CapturedCount == 55,
                 "only 25 of 30 sources commit, leaving five intact and the action at exactly 50 new vehicles");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-custom-subset");
+        using (controller)
+        {
+            var candidates = new List<Vehicle> { target };
+            target.BreakupOffsets = FixtureBreakupOffsets(6);
+            for (int i = 1; i < 35; i++)
+                candidates.Add(new Vehicle(owner.System, owner.Parent, $"custom-eligible-{i:00}", new(2 + i * .001, 0, 0), double3.Zero)
+                    { BreakupOffsets = FixtureBreakupOffsets(6) });
+            Check(controller.Capture(owner, Pick(target), true, angryRadius: 10, captureLimit: ForceCaptureLimits.Maximum)
+                && controller.CapturedCount == 35,
+                "many sources can share a custom action-wide breakup budget");
+            Check(controller.BeginBreakup(owner, maximumPieces: 64)
+                && controller.Status.Contains("32 of 35", StringComparison.Ordinal),
+                "a custom 64-piece cap selects at most 32 sources while preserving two pieces per source");
+            var result = AdvanceUntilTerminal(controller, owner);
+            int committedSources = candidates.Count(source => source.Drained);
+            int retainedSources = candidates.Count(source => !source.Drained && !source.IsDisposed);
+            var allPieces = owner.System.All.Items.Where(vehicle => vehicle.Id.Contains("_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && !result.Failed && committedSources == 32 && retainedSources == 3
+                && allPieces.Length == 64 && controller.CapturedCount == 67,
+                "custom source selection and per-source quotas share exactly 64 action-wide replacement slots");
             controller.Release(false);
         }
 

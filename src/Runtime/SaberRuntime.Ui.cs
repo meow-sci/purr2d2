@@ -232,7 +232,7 @@ internal sealed partial class SaberRuntime
         if (!BeginSaberSettingsTable("##ForceSettings", "Force breakup split (px)")) return;
         float radius = _settings.AngryForceRadius, tolerance = _settings.ClutterPickTolerance;
         float breakupGroan = _settings.ForceBreakupGroanPixels, breakupSplit = _settings.ForceBreakupSplitPixels;
-        int captureLimit = _settings.ForceCaptureLimit;
+        int captureLimit = _settings.ForceCaptureLimit, breakupPieceLimit = _settings.ForceBreakupPieceLimit;
         bool changed;
         try
         {
@@ -251,6 +251,10 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Force breakup split (px)");
             changed |= ImGui.SliderFloat("##ForceBreakupSplitPixels", ref breakupSplit, 2, 128, "%.1f px");
             ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before Force breakup occurs; inward Shift+scroll unwinds.");
+            SaberSettingsRow("Breakup debris limit");
+            changed |= ImGui.SliderInt("##ForceBreakupPieceLimit", ref breakupPieceLimit,
+                ForceBreakupLimits.Minimum, ForceBreakupLimits.Maximum);
+            ShowSaberControlTip($"Maximum new debris pieces across all vehicles in one breakup (default {ForceBreakupLimits.Default}); applies to the next breakup.\n\nLarger limits create more physics objects. Smaller and deeper geometry stays grouped into fewer pieces.");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
@@ -259,6 +263,7 @@ internal sealed partial class SaberRuntime
         _settings.ClutterPickTolerance = tolerance;
         _settings.ForceBreakupGroanPixels = breakupGroan;
         _settings.ForceBreakupSplitPixels = breakupSplit;
+        _settings.ForceBreakupPieceLimit = breakupPieceLimit;
         _settings.Validate();
     }
 

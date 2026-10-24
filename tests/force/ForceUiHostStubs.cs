@@ -1,4 +1,5 @@
 using Brutal.Numerics;
+using Purr2D2.Core;
 
 namespace Purr2D2.Runtime
 {
@@ -191,6 +192,7 @@ namespace Purr2D2.Force
     {
         internal bool HasCapture, Disposed, FailUpdate;
         internal int CaptureCalls, BreakupCalls, BreakupCancels, BreakupPreparationCalls, BreakupCommitCalls;
+        internal readonly List<int> BreakupPieceLimits = [];
         internal bool CanBreakup, BreakupActive, BreakupPrepared = true, BreakupCompletesOnCommit = true;
         internal int CapturedLimit;
         internal double CapturedRadius;
@@ -221,10 +223,10 @@ namespace Purr2D2.Force
         }
         internal void SetOffset(double3 offset) { Events.Add("Offset"); GroupOffsetBody = offset; }
         internal void SetSpread(double spread) { Events.Add("Spread"); GroupSpread = ForceMath.ClampGroupSpread(spread); }
-        internal bool BeginBreakup(KSA.KittenEva owner)
+        internal bool BeginBreakup(KSA.KittenEva owner, int maximumPieces = ForceBreakupLimits.Default)
         {
             if (!CanBreakup || !HasCapture || !ReferenceEquals(Owner, owner) || BreakupActive) return false;
-            Events.Add("BreakupBegin"); BreakupCalls++; BreakupActive = true; BreakupPrepared = true; return true;
+            Events.Add("BreakupBegin"); BreakupPieceLimits.Add(maximumPieces); BreakupCalls++; BreakupActive = true; BreakupPrepared = true; return true;
         }
         internal ForceBreakupStepResult AdvanceBreakup(KSA.KittenEva owner, bool splitRequested, bool delayElapsed)
         {

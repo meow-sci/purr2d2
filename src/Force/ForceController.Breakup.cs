@@ -21,8 +21,9 @@ internal sealed partial class ForceController
     internal bool BreakupPrepared => _breakupPrepared;
 
     /// <summary>Only intact held vehicles enter the staged, incrementally prepared path.</summary>
-    internal bool BeginBreakup(KittenEva owner)
+    internal bool BeginBreakup(KittenEva owner, int maximumPieces = ForceBreakupLimits.Default)
     {
+        int actionPieceBudget = ForceBreakupLimits.Clamp(maximumPieces);
         if (_breakupActive || !HasCapture || !ReferenceEquals(Owner, owner) || !CanBreakup) return false;
         _breakupRefused = false;
         SetStatus($"Holding {CapturedCount} object{(CapturedCount == 1 ? "" : "s")}.", ForceStatusSeverity.None);
@@ -44,14 +45,14 @@ internal sealed partial class ForceController
                 if (held.Source is { } source && ForceVehicleBreakup.NeedsBreakup(source))
                     candidates.Add((held, source));
             int selectedCount = Math.Min(candidates.Count,
-                Math.Min(ForceVehicleBreakup.DefaultMaximumPieces / MinimumBreakupPieces, availableGrowth));
+                Math.Min(actionPieceBudget / MinimumBreakupPieces, availableGrowth));
             if (selectedCount == 0)
             {
                 RefreshBreakupEligibility();
                 return false;
             }
 
-            int totalPieceBudget = Math.Min(ForceVehicleBreakup.DefaultMaximumPieces, selectedCount + availableGrowth);
+            int totalPieceBudget = Math.Min(actionPieceBudget, selectedCount + availableGrowth);
             int baseQuota = totalPieceBudget / selectedCount;
             int extraPieces = totalPieceBudget % selectedCount;
             for (int i = 0; i < selectedCount; i++)

@@ -175,11 +175,12 @@ namespace KSA
 namespace Purr2D2.Force
 {
     using KSA;
+    using Purr2D2.Core;
     // The controller runs unchanged; native mesh/template construction is checked
     // separately against real KSA. This boundary models irreversible replacement.
     internal sealed class ForceVehicleBreakup : IDisposable
     {
-        internal const int DefaultMaximumPieces = 50;
+        internal const int DefaultMaximumPieces = ForceBreakupLimits.Default;
         private readonly Vehicle _source;
         private readonly double3[] _offsets;
         private readonly Part[] _parts;
@@ -192,12 +193,10 @@ namespace Purr2D2.Force
 
         internal ForceVehicleBreakup(Vehicle source, int maximumPieces)
         {
-            if (maximumPieces is < 2 or > DefaultMaximumPieces)
-                throw new ArgumentOutOfRangeException(nameof(maximumPieces), "Fixture breakup quota must be between 2 and 50.");
             _source = source;
             _offsets = source.BreakupOffsets.ToArray();
             _parts = source.Parts.Items.ToArray();
-            _maximumPieces = maximumPieces;
+            _maximumPieces = ForceBreakupLimits.Clamp(maximumPieces);
             _remainingPreparationSteps = Math.Max(1, source.BreakupPreparationSteps);
         }
 

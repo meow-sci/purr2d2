@@ -179,7 +179,7 @@ internal sealed partial class SaberRuntime
             }
             if (input.StageOneStarted)
             {
-                if (!_force.BeginBreakup(owner))
+                if (!_force.BeginBreakup(owner, _settings.ForceBreakupPieceLimit))
                 {
                     _forceBreakupSequence.Reset();
                     if (_forceBreakupAudioActive) ResetForceBreakupAudio();

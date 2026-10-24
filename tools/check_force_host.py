@@ -60,7 +60,7 @@ for key, value in {"OutputType": "Exe", "TargetFramework": "net10.0", "ImplicitU
 items = ET.SubElement(project, "ItemGroup")
 ET.SubElement(items, "PackageReference", Include="Samboy063.Tomlet", Version="6.2.0")
 ET.SubElement(items, "PackageReference", Include="Lib.Harmony", Version="2.4.2")
-for source in ["src/Core/SaberLimits.cs", "src/Core/ForceCaptureLimits.cs", "src/Core/ForceBreakupSequence.cs", "src/Core/SomersaultMotion.cs", "src/Core/SomersaultSequence.cs",
+for source in ["src/Core/SaberLimits.cs", "src/Core/ForceCaptureLimits.cs", "src/Core/ForceBreakupLimits.cs", "src/Core/ForceBreakupSequence.cs", "src/Core/SomersaultMotion.cs", "src/Core/SomersaultSequence.cs",
                "src/Runtime/SomersaultMotionController.cs", "src/Cutting/CutGeometry.cs",
                "src/Rendering/AuthoredDebrisAssets.cs", "src/Rendering/FragmentTemplateLoader.cs",
                "tests/ForceHostChecks.cs", "tests/ForceClutterBepuChecks.cs", "tests/ForceBreakupHostChecks.cs",

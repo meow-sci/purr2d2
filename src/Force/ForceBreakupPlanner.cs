@@ -1,5 +1,6 @@
 using System.Threading;
 using Brutal.Numerics;
+using Purr2D2.Core;
 using Purr2D2.Rendering;
 
 namespace Purr2D2.Force;
@@ -73,7 +74,7 @@ internal static class ForceBreakupPlanner
         CancellationToken cancel = default)
     {
         ArgumentNullException.ThrowIfNull(source);
-        maximumPieces = Math.Clamp(maximumPieces, 2, ForceVehicleBreakup.DefaultMaximumPieces);
+        maximumPieces = ForceBreakupLimits.Clamp(maximumPieces);
         if (!double.IsFinite(dryMass) || dryMass <= 0)
             throw new InvalidDataException("Vehicle dry mass is invalid.");
 

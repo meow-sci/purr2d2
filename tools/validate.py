@@ -806,6 +806,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
         required = [*required, program_path]
     required = list(dict.fromkeys([*required, source / "src/Core/SaberLimits.cs",
                                   source / "src/Core/ForceCaptureLimits.cs",
+                                  source / "src/Core/ForceBreakupLimits.cs",
                                   source / "src/Core/SliceResourceLimits.cs"]))
     includes = "\n".join(
         f'    <Compile Include="{Path(os.path.relpath(path, check_dir)).as_posix()}" />'
