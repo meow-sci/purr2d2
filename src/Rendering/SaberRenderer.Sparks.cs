@@ -23,8 +23,7 @@ public sealed unsafe partial class SaberRenderer
         internal DarkSaberSparkClock Clock;
     }
 
-    private readonly record struct SlagBurst(IParentBody Parent, double3 PositionCcf,
-        double3 VelocityCcf, double3 RightCcf, double3 UpCcf, float3 Color, double Born,
+    private readonly record struct SlagBurst(KittenEva Owner, DarkSaberSparkFrame Frame, float3 Color, double Born,
         float Seed, DarkSaberSparkTuning Tuning);
 
     private void SubmitSlag(KittenEva owner, IViewport viewport, float4x4 emitterToEgo,
@@ -59,29 +58,20 @@ public sealed unsafe partial class SaberRenderer
         if (!source.Clock.TryEmit(_now, _slagTuning.Frequency, SaberVfx.Seed(owner.Id), out float seed)
             || _slagCount == _slag.Length) return; // Drop surplus; never catch up after a hitch.
 
-        var parent = owner.Parent;
-        var toCcf = parent.GetCce2Ccf();
-        // Snapshot the emission point in the rotating celestial frame, never the moving paw.
-        // Keep astronomical positions in doubles until the final camera-relative transform.
-        var positionCce = owner.GetPositionCce();
-        var offset = start - camera.GetPositionEgo(owner)
-            + axis * (length * (.15 + .7 * ((seed * .61803398875) % 1)));
-        var positionCcf = (positionCce + offset).Transform(toCcf);
-        var up = positionCcf.NormalizeOrZero();
-        if (!Finite(positionCcf) || up.Length() < .5) return;
-        var right = double3.Cross(up, Math.Abs(up.X) < .8 ? double3.UnitX : double3.UnitZ).NormalizeOrZero();
-        // Subtract surface rotation so a standing kitten's particles don't slide at orbital speed.
-        var velocity = (owner.GetVelocityCce() - double3.Cross(parent.GetAngularVelocityCce(), positionCce)).Transform(toCcf);
-        if (!Finite(velocity)) return;
-        _slag[_slagCount++] = new SlagBurst(parent, positionCcf, velocity, right, up,
-            color, _now, seed, _slagTuning);
+        var emission = start + axis * (length * (.15 + .7 * ((seed * .61803398875) % 1)));
+        // Capture only the small emission offset, using the same camera-relative owner position
+        // as the saber. Following current owner translation works at any speed, even while
+        // physics is paused or warped; integrating orbital velocity with player time does not.
+        if (!DarkSaberSparkFrame.TryCreate(camera.GetPositionEgo(owner), emission,
+                owner.GetPositionCce(), out var frame)) return;
+        _slag[_slagCount++] = new SlagBurst(owner, frame, color, _now, seed, _slagTuning);
     }
 
     private void UpdateSlag(double now)
     {
         if (!double.IsFinite(now) || now < _now || now < 0) { ClearSlag(); return; }
         for (int i = _slagCount - 1; i >= 0; i--)
-            if (now - _slag[i].Born >= _slag[i].Tuning.Lifetime)
+            if (_slag[i].Owner.IsDisposed || now - _slag[i].Born >= _slag[i].Tuning.Lifetime)
             {
                 _slag[i] = _slag[--_slagCount];
                 _slag[_slagCount] = default;
@@ -105,16 +95,14 @@ public sealed unsafe partial class SaberRenderer
         {
             var burst = _slag[i];
             float age = (float)(_now - burst.Born);
-            if (age < 0 || age >= burst.Tuning.Lifetime) continue;
-            var rotation = burst.Parent.GetCcf2Cce();
-            var origin = (burst.PositionCcf + burst.VelocityCcf * age).Transform(rotation)
-                + camera.GetPositionEgo(burst.Parent);
+            if (burst.Owner.IsDisposed || age < 0 || age >= burst.Tuning.Lifetime) continue;
+            var origin = burst.Frame.Origin(camera.GetPositionEgo(burst.Owner));
             float visibility = DarkSaberSparkTuning.Visibility(origin.Length());
             double travel = 2.8 * burst.Tuning.Speed * burst.Tuning.Lifetime
                 + 3 * burst.Tuning.Lifetime * burst.Tuning.Lifetime + .2;
             if (visibility <= 0 || !Finite(origin) || camera.IsSphereOutsideFrustum(origin, travel)) continue;
-            var right = burst.RightCcf.Transform(rotation);
-            var up = burst.UpCcf.Transform(rotation);
+            var right = burst.Frame.Right;
+            var up = burst.Frame.Up;
             var forward = double3.Cross(right, up);
             var model = new double4x4(
                 right.X, right.Y, right.Z, 0,

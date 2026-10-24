@@ -1,7 +1,31 @@
 using System;
+using Brutal.Numerics;
 using Purr2D2.Core;
 
 namespace Purr2D2.Rendering;
+
+/// <summary>Follow owner translation, retaining the emission offset and orientation at birth.</summary>
+internal readonly record struct DarkSaberSparkFrame(double3 Offset, double3 Right, double3 Up)
+{
+    internal static bool TryCreate(double3 ownerEgo, double3 emissionEgo, double3 upEgo,
+        out DarkSaberSparkFrame frame)
+    {
+        frame = default;
+        if (!Finite(ownerEgo) || !Finite(emissionEgo) || !Finite(upEgo)) return false;
+        var offset = emissionEgo - ownerEgo;
+        var up = double3.NormalizeOrZero(upEgo);
+        if (!Finite(offset) || !Finite(up) || up.Length() < .5) return false;
+        var right = double3.NormalizeOrZero(double3.Cross(up, Math.Abs(up.X) < .8 ? double3.UnitX : double3.UnitZ));
+        frame = new(offset, right, up);
+        return true;
+    }
+
+    // Age only drives the small shader-local spray/fall, never astronomical travel.
+    internal double3 Origin(double3 ownerEgo) => ownerEgo + Offset;
+
+    private static bool Finite(double3 value) =>
+        double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
+}
 
 internal readonly record struct DarkSaberSparkTuning(int Count, float Frequency, float Size,
     float Brightness, float Lifetime, float Speed)

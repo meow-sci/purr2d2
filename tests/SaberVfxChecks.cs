@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Brutal.Numerics;
 using Purr2D2.Rendering;
 using Purr2D2.Core;
 
@@ -13,8 +14,9 @@ internal static class SaberVfxChecks
         StableTimeAndSeed();
         RateScaledClock();
         DarkSparkBudgetAndClock();
+        DarkSparkLocalFrame();
         AllocationBudget();
-        Console.WriteLine("Saber VFX checks passed (both profiles, ABI, bounded tuning/LOD, Dark spark budget/timing, retraction/end-on, continuous clocks/seeds, zero allocations).");
+        Console.WriteLine("Saber VFX checks passed (both profiles, ABI, bounded tuning/LOD, Dark spark budget/timing and landed/orbital frames, retraction/end-on, continuous clocks/seeds, zero allocations).");
     }
 
     private static void CpuShaderAbi()
@@ -307,6 +309,55 @@ internal static class SaberVfxChecks
         Check(total > 0 && GC.GetAllocatedBytesForCurrentThread() == before,
             "spark scheduling, snapshots and culling allocate no memory per frame");
     }
+    private static void DarkSparkLocalFrame()
+    {
+        var ownerAtBirth = new double3(5, -2, 10);
+        var offset = new double3(.25, .5, 1);
+        Check(DarkSaberSparkFrame.TryCreate(ownerAtBirth, ownerAtBirth + offset,
+            new double3(0, 6000000, 0), out var frame), "capture a camera-relative emission frame");
+        foreach (double orbitalSpeed in new[] { 0d, 7500, 30000, 100000 })
+        foreach (double age in new[] { 0d, 1d / 60, .25, .8 })
+        foreach (double simulationRate in new[] { 0d, 1, 1000 })
+        {
+            var translation = new double3(orbitalSpeed, orbitalSpeed * .5, -orbitalSpeed * .25)
+                * (age * simulationRate);
+            foreach (var cameraShift in new[] { double3.Zero, translation, new double3(19, -7, 4) })
+            {
+                var ownerNow = ownerAtBirth + translation - cameraShift;
+                var origin = frame.Origin(ownerNow);
+                Check((origin - ownerNow - offset).Length() < 1e-7,
+                    "landed, orbital, paused and warped sparks retain their small birth offset in each viewport");
+            }
+        }
+        Check(frame.Origin(ownerAtBirth) == ownerAtBirth + offset,
+            "visual aging between physics steps cannot advance an orbital velocity");
+        Check(DarkSaberSparkFrame.TryCreate(ownerAtBirth, ownerAtBirth + new double3(-1, 2, 3),
+                double3.UnitZ, out var nextFrame)
+            && frame.Offset == offset && frame.Up == double3.UnitY && nextFrame.Offset != frame.Offset,
+            "moving or rotating the paw cannot drag an existing burst's birth offset or spray direction");
+        foreach (var up in new[] { double3.UnitX, -double3.UnitX, double3.UnitY, double3.UnitZ, new double3(2, -3, 4) })
+        {
+            Check(DarkSaberSparkFrame.TryCreate(ownerAtBirth, ownerAtBirth + offset, up, out var basis)
+                && Math.Abs(basis.Right.Length() - 1) < 1e-12 && Math.Abs(basis.Up.Length() - 1) < 1e-12
+                && Math.Abs(double3.Dot(basis.Right, basis.Up)) < 1e-12,
+                "spray/fall basis remains orthonormal at every celestial pole and orbital orientation");
+        }
+        Check(!DarkSaberSparkFrame.TryCreate(ownerAtBirth, ownerAtBirth, double3.Zero, out _)
+            && !DarkSaberSparkFrame.TryCreate(new double3(double.NaN, 0, 0), ownerAtBirth, double3.UnitY, out _)
+            && !DarkSaberSparkFrame.TryCreate(ownerAtBirth, new double3(double.PositiveInfinity, 0, 0), double3.UnitY, out _),
+            "invalid local frames fail closed");
+        for (int i = 0; i < 1000; i++) DarkSaberSparkFrame.TryCreate(ownerAtBirth, ownerAtBirth + offset, double3.UnitY, out _);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        double sum = 0;
+        for (int i = 0; i < 10000; i++)
+        {
+            DarkSaberSparkFrame.TryCreate(ownerAtBirth, ownerAtBirth + offset, double3.UnitY, out var sampled);
+            sum += sampled.Origin(ownerAtBirth).X;
+        }
+        Check(sum > 0 && GC.GetAllocatedBytesForCurrentThread() == before,
+            "owner-relative spark frames allocate no memory per submission or draw");
+    }
+
     private static bool Near(float actual, float expected) => Math.Abs(actual - expected) < .0001f;
 
     private static void AllocationBudget()
