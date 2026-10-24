@@ -204,6 +204,8 @@ internal sealed partial class SaberRuntime
             && firstSaber.Audio.Updates > 0 && !firstSaber.Audio.LastTargetOn
             && firstSaber.Audio.LastDeployment == firstSaber.Blade.Deployment && firstSaber.Audio.Stops == stopsBeforeDisable,
             "the arm stays raised while the shrinking blade reaches the existing retraction audio path");
+        Check(firstSaber.Audio.LastType == SaberType.Dark,
+            "noncontrolled saber audio receives the kitten's Dark style during retraction");
         runtime.UpdateOtherSabers(.1); runtime.UpdateOtherSabers(.1);
         Check(firstSaber.Blade.Deployment == 0 && firstSaber.Blade.Equipped && firstSaber.Pose.Blend == 1,
             "the blade retracts completely before arm lowering starts");

@@ -2,6 +2,7 @@ using System;
 using Brutal.FmodApi;
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Core;
 
 namespace Purr2D2.Audio;
 
@@ -13,12 +14,17 @@ public sealed class SaberAudio : IDisposable
 {
     private const int MaxLoopStartsPerTransition = 4;
     private const float AudibleDeployment = 0.001f;
-    private SoundBehavior? _igniteSound;
+    private SoundBehavior? _lightIgniteSound;
+    private SoundBehavior? _darkIgniteSound;
     private SoundBehavior? _retractSound;
     private SoundBehavior? _humSound;
+    private SoundBehavior? _lightStaticSound;
+    private SoundBehavior? _darkStaticSound;
     private SoundBehavior? _contactSound;
     private IChannel? _transition;
     private IChannel? _hum;
+    private IChannel? _static;
+    private SaberType _type;
     private IChannel? _contact;
     private KittenEva? _owner;
     private bool _initializationAttempted;
@@ -28,8 +34,10 @@ public sealed class SaberAudio : IDisposable
     private bool _disposed;
     private bool _warnedPlayback;
     private int _humStarts;
+    private int _staticStarts;
     private int _contactStarts;
     private long _nextHumStart;
+    private long _nextStaticStart;
     private long _nextContactStart;
 
     public bool Ready => _humSound is not null && !_shutdown && !_disposed;
@@ -40,9 +48,12 @@ public sealed class SaberAudio : IDisposable
     {
         if (_initializationAttempted || _shutdown || _disposed || GameAudio.System.IsNull()) return;
         _initializationAttempted = true;
-        _igniteSound = Resolve("Purr2D2SaberIgnite");
+        _lightIgniteSound = Resolve("Purr2D2SaberLightIgnite");
+        _darkIgniteSound = Resolve("Purr2D2SaberDarkIgnite");
         _retractSound = Resolve("Purr2D2SaberRetract");
         _humSound = Resolve("Purr2D2SaberHum");
+        _lightStaticSound = Resolve("Purr2D2SaberLightStatic");
+        _darkStaticSound = Resolve("Purr2D2SaberDarkStatic");
         _contactSound = Resolve("Purr2D2SaberContact");
     }
 
@@ -50,8 +61,9 @@ public sealed class SaberAudio : IDisposable
     /// <param name="paused">Pass true for pause and unsupported time warp. No new channels are started.</param>
     /// <param name="swingSpeed">Tip speed relative to the kitten, in m/s; never orbital speed.</param>
     /// <param name="contact">Contact intensity from 0 to 1; zero stops the optional sizzle loop.</param>
+    /// <param name="type">Selects ignition and the additional ambient loop independently of blade color.</param>
     public void Update(KittenEva owner, double3 emitterBody, float deployment, bool targetOn,
-        bool paused, float volume, float swingSpeed = 0, float contact = 0)
+        bool paused, float volume, float swingSpeed = 0, float contact = 0, SaberType type = SaberType.Light)
     {
         if (_shutdown || _disposed) return;
         if (owner.IsDisposed || !Finite(emitterBody)) { Stop(); return; }
@@ -62,12 +74,20 @@ public sealed class SaberAudio : IDisposable
         contact = Clamp(contact, 0, 1);
         swingSpeed = Clamp(swingSpeed, 0, 30);
 
+        if (type != _type)
+        {
+            Cut(ref _static);
+            _type = type;
+            _staticStarts = 0;
+            _nextStaticStart = 0;
+        }
+
         if (targetOn != _lastTargetOn)
         {
             _lastTargetOn = targetOn;
             _transitionPending = true;
-            _humStarts = _contactStarts = 0;
-            _nextHumStart = _nextContactStart = 0;
+            _humStarts = _staticStarts = _contactStarts = 0;
+            _nextHumStart = _nextStaticStart = _nextContactStart = 0;
         }
 
         if (!Ready) return;
@@ -83,22 +103,29 @@ public sealed class SaberAudio : IDisposable
             {
                 Cut(ref _transition);
                 if (volume > 0)
-                    _transition = Play(targetOn ? _igniteSound : _retractSound, spatial, volume * 0.7f);
+                {
+                    SoundBehavior? ignite = _type == SaberType.Dark ? _darkIgniteSound : _lightIgniteSound;
+                    _transition = Play(targetOn ? ignite : _retractSound, spatial, volume * 0.7f);
+                }
                 _transitionPending = false;
             }
 
             float swing = Math.Clamp(swingSpeed / 6f, 0, 1);
             float humGain = volume * deployment * 0.42f * (1 + swing * 0.18f);
+            float staticGain = volume * deployment * 0.3f;
             if (deployment <= AudibleDeployment || volume <= 0)
             {
                 Cut(ref _hum);
+                Cut(ref _static);
                 Cut(ref _contact);
-                _humStarts = _contactStarts = 0;
-                _nextHumStart = _nextContactStart = 0;
+                _humStarts = _staticStarts = _contactStarts = 0;
+                _nextHumStart = _nextStaticStart = _nextContactStart = 0;
             }
             else if (!paused)
             {
                 EnsureLoop(ref _hum, _humSound, spatial, humGain, ref _humStarts, ref _nextHumStart);
+                EnsureLoop(ref _static, _type == SaberType.Dark ? _darkStaticSound : _lightStaticSound,
+                    spatial, staticGain, ref _staticStarts, ref _nextStaticStart);
                 if (contact > 0.01f)
                     EnsureLoop(ref _contact, _contactSound, spatial, volume * deployment * contact * 0.35f,
                         ref _contactStarts, ref _nextContactStart);
@@ -112,6 +139,7 @@ public sealed class SaberAudio : IDisposable
 
             Follow(ref _transition, spatial, volume * 0.7f, 1, paused);
             Follow(ref _hum, spatial, humGain, 1 + swing * 0.15f, paused);
+            Follow(ref _static, spatial, staticGain, 1, paused);
             Follow(ref _contact, spatial, volume * deployment * contact * 0.35f, 1, paused);
         }
         catch (Exception ex)
@@ -120,6 +148,7 @@ public sealed class SaberAudio : IDisposable
             // A stale camera, channel or scene must never interrupt the game's frame.
             Cut(ref _transition);
             Cut(ref _hum);
+            Cut(ref _static);
             Cut(ref _contact);
         }
     }
@@ -194,6 +223,7 @@ public sealed class SaberAudio : IDisposable
         if (_shutdown || _disposed) return;
         PauseOwned(ref _transition);
         PauseOwned(ref _hum);
+        PauseOwned(ref _static);
         PauseOwned(ref _contact);
     }
 
@@ -210,13 +240,14 @@ public sealed class SaberAudio : IDisposable
         {
             Cut(ref _transition);
             Cut(ref _hum);
+            Cut(ref _static);
             Cut(ref _contact);
         }
-        else _transition = _hum = _contact = null;
+        else _transition = _hum = _static = _contact = null;
         _owner = null;
         _lastTargetOn = _transitionPending = false;
-        _humStarts = _contactStarts = 0;
-        _nextHumStart = _nextContactStart = 0;
+        _humStarts = _staticStarts = _contactStarts = 0;
+        _nextHumStart = _nextStaticStart = _nextContactStart = 0;
     }
 
     /// <summary>Forget the previous EVA/world on save load, boarding, scene exit or equip change.</summary>

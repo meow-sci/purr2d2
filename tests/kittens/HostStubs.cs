@@ -119,15 +119,17 @@ namespace Purr2D2.Audio
         public int Updates;
         public bool LastTargetOn;
         public float LastDeployment;
+        public Purr2D2.Core.SaberType LastType;
         public void Shutdown() { Shutdowns++; Stop(); }
         public void Dispose() => Disposals++;
         public void Stop() => Stops++;
         public void Reset() => Stop();
         public void Suspend() => Suspends++;
         public void Update(KSA.KittenEva owner, double3 position, float deployment, bool targetOn,
-            bool paused, float volume, float swingSpeed = 0)
+            bool paused, float volume, float swingSpeed = 0, float contact = 0,
+            Purr2D2.Core.SaberType type = Purr2D2.Core.SaberType.Light)
         {
-            Updates++; LastTargetOn = targetOn; LastDeployment = deployment;
+            Updates++; LastTargetOn = targetOn; LastDeployment = deployment; LastType = type;
         }
     }
 }

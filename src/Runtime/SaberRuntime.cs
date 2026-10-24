@@ -149,7 +149,8 @@ internal sealed partial class SaberRuntime : IDisposable
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
                     !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.HasFreshBodyFrame,
-                    _settings.Volume, swingSpeed: _swingSpeed, contact: _sliceSequence.Swinging ? 1 : 0);
+                    _settings.Volume, swingSpeed: _swingSpeed, contact: _sliceSequence.Swinging ? 1 : 0,
+                    type: SaberTypeFor(_owner));
             else if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
             UpdateOtherSaberAudio();
         }
@@ -176,7 +177,8 @@ internal sealed partial class SaberRuntime : IDisposable
             }
             saber.Audio.Update(owner, emitter, saber.Blade.Deployment, saber.Blade.TargetOn,
                 !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !saber.Pose.Eligible,
-                _settings.Volume, swingSpeed: saber.SwingSpeed, contact: controlled && _sliceSequence.Swinging ? 1 : 0);
+                _settings.Volume, swingSpeed: saber.SwingSpeed, contact: controlled && _sliceSequence.Swinging ? 1 : 0,
+                type: saber.Type);
         }
     }
 

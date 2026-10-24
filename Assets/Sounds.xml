@@ -1,16 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Assets>
-  <!-- Ignite/hum: supplied recordings prepared as mono; retract/contact: original synthesis.
+  <!-- Hum: supplied recording prepared as mono; ignite/static/retract: supplied mono Ogg recordings;
+       contact: original synthesis.
        See docs/research-audio.md and tools/generate_audio.py for provenance and loop preparation. -->
   <SpatialSoundData Id="Purr2D2SaberSpatial" DistanceFilter="false">
     <VolumeRange Min="1" Max="35" />
   </SpatialSoundData>
-  <Sound Id="Purr2D2SaberIgnite" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/saber-ignite.wav" />
+  <Sound Id="Purr2D2SaberLightIgnite" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
+    <SoundFile Path="Assets/Audio/light_saber_on.ogg" />
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+  <Sound Id="Purr2D2SaberDarkIgnite" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
+    <SoundFile Path="Assets/Audio/dark_saber_on.ogg" />
     <SpatialSoundData Id="Purr2D2SaberSpatial" />
   </Sound>
   <Sound Id="Purr2D2SaberRetract" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/saber-retract.wav" />
+    <SoundFile Path="Assets/Audio/saber_close.ogg" />
     <SpatialSoundData Id="Purr2D2SaberSpatial" />
   </Sound>
   <Sound Id="Purr2D2SaberHum" ChannelId="Sfx" SimSpeed="Ignore" Priority="112">
@@ -19,6 +24,18 @@
         <Start Value="0" Unit="Pcm" />
         <End Value="93546" Unit="Pcm" />
       </Loop>
+    </SoundFile>
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+  <Sound Id="Purr2D2SaberLightStatic" ChannelId="Sfx" SimSpeed="Ignore" Priority="114">
+    <SoundFile Path="Assets/Audio/light_side_static.ogg">
+      <Loop />
+    </SoundFile>
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+  <Sound Id="Purr2D2SaberDarkStatic" ChannelId="Sfx" SimSpeed="Ignore" Priority="114">
+    <SoundFile Path="Assets/Audio/dark_side_static.ogg">
+      <Loop />
     </SoundFile>
     <SpatialSoundData Id="Purr2D2SaberSpatial" />
   </Sound>

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Prepare Purr2D2 sound effects using only Python's standard library.
 
-Default: synthesize original optional retraction/contact sounds only. Never overwrite
-supplied ignite/hum unless --supplied-sounds-dir is explicitly provided. That option
-prepares the user's lightsaber-ignite.wav and lightsaber-idle.wav as mono PCM,
+Default: synthesize the original optional contact sound only. Never overwrite
+the supplied hum unless --supplied-sounds-dir is explicitly provided. That option
+prepares the user's lightsaber-idle.wav as mono PCM,
 retaining sample rate and applying a short overlap to make the idle loop continuous.
 Run from any directory; outputs are relative to this script's repository root.
 """
@@ -48,32 +48,6 @@ def contact() -> list[float]:
     return result
 
 
-def retraction() -> list[float]:
-    duration = 0.28
-    rng = random.Random(0x52455452)
-    phase = 0.0
-    noise_low = 0.0
-    noise_smooth = 0.0
-    result = []
-    for index in range(int(RATE * duration)):
-        t = index / RATE
-        u = t / duration
-        frequency = 80 + 290 * (1 - u) ** 1.4
-        phase += TAU * frequency / RATE
-        noise_low += 0.06 * (rng.uniform(-1, 1) - noise_low)
-        noise_smooth += 0.35 * (noise_low - noise_smooth)
-        fizz = noise_low - noise_smooth
-        attack = min(1.0, t / 0.012)
-        release = min(1.0, (duration - t) / 0.065)
-        envelope = math.sin(attack * math.pi / 2) ** 2 * math.sin(release * math.pi / 2) ** 2
-        envelope *= (1 - u) ** 0.45
-        tone = (0.6 * math.sin(phase) + 0.23 * math.sin(phase * 2.01)
-                + 0.09 * math.sin(phase * 3.02))
-        result.append(envelope * (tone + fizz * 1.6))
-    result[0] = result[-1] = 0.0
-    return result
-
-
 def pcm_bytes(samples: list[float], peak: float) -> bytes:
     maximum = max(abs(value) for value in samples)
     scale = peak / maximum if maximum else 0
@@ -109,7 +83,6 @@ def write_sound(destination: Path, samples: list[float], peak: float | None, che
 
 def prepare_supplied(source_dir: Path, output_dir: Path, check: bool) -> None:
     for source_name, destination_name in (
-        ("lightsaber-ignite.wav", "saber-ignite.wav"),
         ("lightsaber-idle.wav", "saber-hum.wav"),
     ):
         source = source_dir / source_name
@@ -140,13 +113,28 @@ def check_manifest() -> None:
     manifest = ET.parse(ROOT / "Assets" / "Sounds.xml").getroot()
     assert manifest.tag == "Assets"
     sounds = manifest.findall("Sound")
-    assert len(sounds) == 4, "expected four saber sound declarations"
+    assert len(sounds) == 7, "expected seven saber sound declarations"
     for sound in sounds:
         assert sound.get("ChannelId") == "Sfx" and sound.get("SimSpeed") == "Ignore"
         file = sound.find("SoundFile")
         assert file is not None
         assert file.get("TwoD", "false") == "false"
         path = ROOT / file.attrib["Path"]
+        if path.suffix == ".ogg":
+            header = path.read_bytes()[:64]
+            packet = header.find(b"\x01vorbis")
+            assert header.startswith(b"OggS") and packet >= 0 and header[packet + 11] == 1, "expected mono Vorbis"
+            loop = file.find("Loop")
+            one_shots = {
+                "Purr2D2SaberRetract": "saber_close.ogg",
+                "Purr2D2SaberLightIgnite": "light_saber_on.ogg",
+                "Purr2D2SaberDarkIgnite": "dark_saber_on.ogg",
+            }
+            if sound.get("Id") in one_shots:
+                assert path.name == one_shots[sound.get("Id")] and loop is None, "transition must play its supplied sound once"
+            else:
+                assert loop is not None and len(loop) == 0, "static recordings use whole-file loops"
+            continue
         with wave.open(str(path), "rb") as recording:
             assert recording.getnchannels() == 1 and recording.getsampwidth() == 2
             frames = recording.getnframes()
@@ -156,7 +144,7 @@ def check_manifest() -> None:
             assert start is not None and end is not None
             assert start.attrib == {"Value": "0", "Unit": "Pcm"}
             assert end.attrib == {"Value": str(frames - 1), "Unit": "Pcm"}, "update XML bounds for prepared WAV"
-    print("Sounds.xml paths, PCM loop bounds and mixing declarations match prepared WAVs.")
+    print("Sounds.xml paths, WAV loop bounds, mono Ogg sounds and mixing declarations match runtime audio.")
 
 
 def main() -> None:
@@ -164,10 +152,9 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "Assets" / "Audio")
     parser.add_argument("--check", action="store_true", help="verify PCM format, endpoints, levels and loop seam")
     parser.add_argument("--supplied-sounds-dir", type=Path,
-                        help="explicitly prepare user-supplied lightsaber-ignite.wav and lightsaber-idle.wav")
+                        help="explicitly prepare user-supplied lightsaber-idle.wav")
     args = parser.parse_args()
     for name, samples, peak in (
-        ("saber-retract.wav", retraction(), 0.60),
         ("saber-contact.wav", contact(), 0.48),
     ):
         write_sound(args.output_dir / name, samples, peak, args.check)

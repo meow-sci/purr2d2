@@ -260,7 +260,8 @@ internal sealed partial class SaberRuntime
             float length = saber.Blade.Deployment * _settings.BladeLength;
             if (saber.Blade.Equipped && saber.FreshPoseThisTick && saber.Pose.TryGetBladeSegment(length, out var emitter, out _))
                 saber.Audio.Update(pair.Key, emitter, saber.Blade.Deployment, saber.Blade.TargetOn,
-                    unsupportedSpeed || !saber.Pose.HasFreshBodyFrame, _settings.Volume, saber.SwingSpeed);
+                    unsupportedSpeed || !saber.Pose.HasFreshBodyFrame, _settings.Volume, saber.SwingSpeed,
+                    type: saber.Type);
             else if (saber.Blade.Equipped) saber.Audio.Suspend();
             else saber.Audio.Stop();
         }

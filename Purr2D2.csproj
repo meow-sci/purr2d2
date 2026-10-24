@@ -34,7 +34,7 @@
           Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true'">
     <ItemGroup>
       <_StageFile Include="$(TargetPath);$(TargetDir)$(AssemblyName).deps.json;$(MSBuildProjectDirectory)/mod.toml;$(MSBuildProjectDirectory)/LICENSE;$(MSBuildProjectDirectory)/README.md" />
-      <_StageAsset Include="$(MSBuildProjectDirectory)/Assets/**/*.xml;$(MSBuildProjectDirectory)/Assets/**/*.glb;$(MSBuildProjectDirectory)/Assets/**/*.png;$(MSBuildProjectDirectory)/Assets/**/*.wav;$(MSBuildProjectDirectory)/Assets/**/*.vert;$(MSBuildProjectDirectory)/Assets/**/*.frag;$(MSBuildProjectDirectory)/Assets/**/*.glsl" />
+      <_StageAsset Include="$(MSBuildProjectDirectory)/Assets/**/*.xml;$(MSBuildProjectDirectory)/Assets/**/*.glb;$(MSBuildProjectDirectory)/Assets/**/*.png;$(MSBuildProjectDirectory)/Assets/**/*.wav;$(MSBuildProjectDirectory)/Assets/**/*.ogg;$(MSBuildProjectDirectory)/Assets/**/*.vert;$(MSBuildProjectDirectory)/Assets/**/*.frag;$(MSBuildProjectDirectory)/Assets/**/*.glsl" />
     </ItemGroup>
     <Error Condition="!Exists('%(_StageFile.Identity)')" Text="Required stage file missing: %(_StageFile.Identity)" />
     <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets/purr2d2.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/Sounds.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/PracticeTargets.xml')" Text="Required model, audio or practice-target asset manifest missing." />

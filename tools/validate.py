@@ -26,7 +26,7 @@ GLB_JSON_CHUNK = 0x4E4F534A
 GLB_BIN_CHUNK = 0x004E4942
 COMPONENT_BYTES = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}
 TYPE_COMPONENTS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
-REQUIRED_ASSET_EXTENSIONS = {".glb", ".png", ".wav", ".vert", ".frag"}
+REQUIRED_ASSET_EXTENSIONS = {".glb", ".png", ".wav", ".ogg", ".vert", ".frag"}
 ROOT_STAGE_FILES = {
     "Purr2D2.dll",
     "Purr2D2.deps.json",
@@ -375,6 +375,12 @@ def _check_xml_loop_bounds(root: Path, xml_path: Path, refs: list[tuple[Path, ET
             continue
         try:
             audio_path = _relative_asset_path(root, raw_path, f"{xml_path.relative_to(root).as_posix()} loop")
+            # Full-file compressed loops let FMOD use the decoded sample count.
+            # This validator only supports explicit PCM bounds for WAV assets.
+            if audio_path.suffix.lower() == ".ogg":
+                if any(len(loop) for loop in loops):
+                    issues.append(f"{raw_path}: Ogg loops must use whole-file <Loop /> bounds")
+                continue
             if audio_path not in wave_cache:
                 wave_cache[audio_path] = _wave_info(audio_path, f"{xml_path.relative_to(root).as_posix()} -> {raw_path}")
             _, frame_count = wave_cache[audio_path]
@@ -455,6 +461,10 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
                 _validate_png(path, context)
             except ValidationError as exc:
                 issues.append(str(exc))
+        elif path.suffix.lower() == ".ogg":
+            header = path.read_bytes()[:64]
+            if not header.startswith(b"OggS") or b"\x01vorbis" not in header:
+                issues.append(f"{context}: expected an Ogg Vorbis sound")
         elif path.suffix.lower() == ".wav":
             try:
                 wave_cache[path.resolve()] = _wave_info(path, context)
@@ -687,6 +697,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("CoreChecks", core_sources, core_program),
         ("TargetSelectionChecks", target_sources, None),
         ("KittenSaberChecks", kitten_sources, None),
+        ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Core/SaberSettings.cs",
+                         source / "tests/audio/AudioChecks.cs"], None),
         ("DetachedSliceChecks", fragment_sources, None),
         ("IsolationChecks", isolation_sources, None),
         ("FragmentAssetChecks", fragment_asset_sources,

@@ -7,48 +7,49 @@ and static verification; native playback still needs an in-game acceptance pass.
 
 ## Assets and provenance
 
-The activation and idle recordings were supplied by the user in the feature directory.
+The idle recording was supplied by the user in the feature directory.
 Their original files are unmodified. This project does not claim authorship or establish
-redistribution rights for those supplied recordings. The two optional additional sounds
-are original procedural synthesis generated from this repository's Python code.
+redistribution rights for those supplied recordings. The contact sound is
+original procedural synthesis generated from this repository's Python code. The Light/Dark
+ignition, static and saber close recordings were also supplied by the user and are copied unchanged from the workspace root.
 
 | Runtime file | Source | Preparation |
 | --- | --- | --- |
-| `Assets/Audio/saber-ignite.wav` | `feature/purr2d2-light-sabers/sounds/lightsaber-ignite.wav` | Entire clip, 98,000 frames at 44,100 Hz (2.22222 s), stereo averaged to mono. No resampling, normalization or trimming. |
+| `Assets/Audio/light_saber_on.ogg` | User-supplied `light_saber_on.ogg` | Unmodified mono Vorbis, 22,050 Hz, 2.143673 s; plays once when a Light saber ignites. |
+| `Assets/Audio/dark_saber_on.ogg` | User-supplied `dark_saber_on.ogg` | Unmodified mono Vorbis, 22,050 Hz, 2.143673 s; plays once when a Dark saber ignites. |
 | `Assets/Audio/saber-hum.wav` | `feature/purr2d2-light-sabers/sounds/lightsaber-idle.wav` | Stereo averaged to mono; 35 ms cosine overlap joins end to beginning. Original 95,091 frames becomes 93,547 frames at 44,100 Hz (2.12125 s). No resampling or normalization. |
-| `Assets/Audio/saber-retract.wav` | `tools/generate_audio.py` | Original descending oscillator/noise effect, fixed seed, mono 16-bit PCM, 48 kHz, 0.28 s. |
+| `Assets/Audio/saber_close.ogg` | User-supplied `saber_close.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.187392 s; plays once on retraction. |
+| `Assets/Audio/light_side_static.ogg` | User-supplied `light_side_static.ogg` | Unmodified mono Vorbis, 44,100 Hz, 4.77059 s; full-file loop. |
+| `Assets/Audio/dark_side_static.ogg` | User-supplied `dark_side_static.ogg` | Unmodified mono Vorbis, 48,000 Hz, 8.422646 s; full-file loop. |
 | `Assets/Audio/saber-contact.wav` | `tools/generate_audio.py` | Original periodic oscillator/noise sizzle, fixed seed, mono 16-bit PCM, 48 kHz, 2 s. |
 
 SHA-256 of original input recordings:
 
 ```text
-lightsaber-ignite.wav e7000a7881e7663e73f1bd99df1618e5c347fa2f9a2738b537254354746ce528
 lightsaber-idle.wav   e30a4532683ab70c083d98ee17a0d6f18579c9d640715543022c660342c99c6b
 ```
 
 SHA-256 of prepared runtime WAVs:
 
 ```text
-saber-ignite.wav  96822dc90660c4e779f56384797d888a87ac19fee16085b188e1a55afbd7acb5
 saber-hum.wav     42ea1c2d9b135de8573f593541ef5b0f3d06aba6d49c155c47f99a780795a744
-saber-retract.wav d4ca047eaae354f0242f666c9f5709c4c6b12463f018474fbf74234b02977de2
 saber-contact.wav 8fcaeaa8e56a2b8f89d8da99f8e652980065b503d1c20ac7e3e996c3a0ece567
 ```
 
-Regenerate optional synthesized sounds only:
+Regenerate the optional synthesized contact sound only:
 
 ```sh
 python3 tools/generate_audio.py --check
 ```
 
-Explicitly reprepare the supplied activation/idle recordings as well (from this repository):
+Explicitly reprepare the supplied idle recording as well (from this repository):
 
 ```sh
 python3 tools/generate_audio.py --check \
   --supplied-sounds-dir ../../feature/purr2d2-light-sabers/sounds
 ```
 
-The default command deliberately does not write activation or hum. The explicit input
+The default command deliberately does not write the hum or supplied Ogg recordings. The explicit input
 option reads the supplied files and writes only this repository's prepared outputs.
 It prints the input/output hashes, RMS, duration, sample count and loop seam jump.
 The source files' extra WAV metadata is not propagated into the mono runtime WAVs.
@@ -62,6 +63,19 @@ The loop should still be auditioned for perceptual repetition and any codec-spec
 boundary behavior in FMOD. XML bounds are explicit inclusive PCM sample indices:
 hum 0–93,546; contact 0–95,999.
 
+## Light/Dark ambient layer
+
+Each deployed saber plays its type's static recording alongside the existing hum,
+ignition/retraction and contact effects. Light uses the calmer recording; Dark uses
+the more violent recording. Type is independent of blade color. Changing type stops
+only the previous static channel and starts the new one on the next unpaused update.
+The layer uses the moving hilt's 3D position, the existing 1–35 m spatial range and
+Sfx routing, with gain `Volume × Deployment × 0.30`. Thus it grows with extension,
+recedes with distance, and respects both the mod and game volume controls. It shares
+the hum's pause, suspension, retry limits, mute, retraction and cleanup behavior.
+Ogg files are included in both the staged folder and release ZIP. In-game listening
+is still needed to assess the supplied loop seams and balance against the hum.
+
 ## Runtime API
 
 `src/Audio/SaberAudio.cs`, namespace `Purr2D2.Audio`, owns channels for one equipped saber.
@@ -69,7 +83,7 @@ hum 0–93,546; contact 0–95,999.
 ```csharp
 void Initialize();
 void Update(KittenEva owner, double3 emitterBody, float deployment,
-    bool targetOn, bool paused, float volume, float swingSpeed = 0, float contact = 0);
+    bool targetOn, bool paused, float volume, float swingSpeed = 0, float contact = 0, SaberType type = SaberType.Light);
 void Suspend();
 void Stop();
 void Reset();
@@ -82,7 +96,7 @@ in body coordinates. `swingSpeed` is blade-tip speed relative to the kitten in m
 and `contact` is an optional 0–1 sizzle intensity. Update after camera/pose evaluation,
 once on the main thread per frame, including frames with the HUD hidden.
 
-The implementation resolves four `SoundBehavior` assets, routes them through the
+The implementation resolves seven `SoundBehavior` assets, routes them through the
 game's SFX bus, starts channels paused while their first position is configured,
 and retains handles to move all active sounds. Activation/retraction play on target
 state transitions; the native hum loop follows deployment. A transition while paused
@@ -104,11 +118,12 @@ Channel acquisition/stealing retries are bounded to four starts per continuous e
 with increasing 250 ms cooldowns. A deliberate stop, new contact, blade toggle or
 owner reset permits a new budget. Missing assets and playback faults produce bounded
 diagnostics instead of repeated per-frame exceptions. XML audio resources belong to
-KSA; this class stops its channels and does not release the engine's shared WAV handles.
+KSA; this class stops its channels and does not release the engine's shared sound handles.
 
-The supplied activation recording is much quieter than idle (RMS approximately 0.030
-versus 0.407). Its original gain was preserved. Audition transition/idle balance in
-game before selecting final gains or deciding whether to normalize the recording.
+Ignition selects the current Light/Dark recording when the transition begins, including
+a deferred ignition after pause. Switching style while already lit does not replay
+ignition. The supplied recordings retain their original gain; audition transition/idle
+balance in game before selecting final gains.
 
 ## Spatial coordinates and vacuum
 
@@ -183,6 +198,12 @@ Paths below are relative to the workspace root:
   source-pinned examples, especially KSACars and KSArmory.
 
 ## Verification and remaining acceptance
+
+The managed `AudioChecks` harness runs the actual audio controller against a simulated
+mixer to cover layering, live Light/Dark switching, emitter position, deployment/volume
+gain, pause/resume, suspension, mute, retraction, world reset and shutdown. The kitten
+runtime checks also cover forwarding an uncontrolled kitten's style to audio. These
+checks do not execute FMOD or evaluate the audible distance curve or loop seams.
 
 `tools/generate_audio.py --check` verifies mono 16-bit PCM, exact frame counts, no clipping,
 non-silent levels, silent one-shot endpoints and loop seams within ordinary signal
