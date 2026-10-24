@@ -11,6 +11,7 @@ internal static class CoreChecks
     {
         BladeStateTransitions();
         SettingsValidationAndPersistence();
+        SettingsAutosaveSnapshots();
         SliceResourcePreferences();
         FragmentGlbWriterRoundTrip();
     }
@@ -73,6 +74,7 @@ internal static class CoreChecks
         Check(defaults.ClutterPickTolerance == .2f, "new preferences allow a twenty centimetre near miss on clutter");
         Check(defaults.ForceCaptureLimit == 128, "new preferences increase the combined Force capture limit to 128");
         Check(defaults.SliceReachMultiplier == 2, "new preferences preserve the existing two-times assisted slice reach");
+        Check(defaults.JumpComboIntervalSeconds == .75f, "new preferences use a 0.75-second somersault combo interval");
         Check(DefaultEffects(defaults.LightEffects, SaberType.Light) && DefaultEffects(defaults.DarkEffects, SaberType.Dark),
             "Light and Dark begin with distinct intentional effect profiles");
         Check(!ReferenceEquals(defaults.LightEffects, defaults.DarkEffects)
@@ -151,6 +153,13 @@ internal static class CoreChecks
         Check(settings.AngryForceRadius == 50 && settings.ForceControlsOffsetX == -1 && settings.ForceControlsOffsetY == 1
             && settings.SaberControlsOffsetX == 0 && settings.SaberControlsOffsetY == 0,
             "radius and normalized control offsets clamp to safe values and recover nonfinite preferences");
+        foreach (var (value, expected) in new[] { (0f, .1f), (.1f, .1f), (.75f, .75f), (1.5f, 1.5f), (2f, 1.5f), (float.NaN, .75f) })
+        {
+            settings.JumpComboIntervalSeconds = value;
+            settings.Validate();
+            Check(settings.JumpComboIntervalSeconds == expected,
+                "somersault combo interval preserves its bounds and recovers nonfinite preferences");
+        }
         settings.AngryForceRadius = -1;
         settings.Validate();
         Check(settings.AngryForceRadius == 1, "Angry Force radius keeps its one metre minimum");
@@ -189,6 +198,8 @@ internal static class CoreChecks
                 "a missing preferences file starts with Dark defaults");
             Check(SaberSettings.Load(path).SliceReachMultiplier == 2,
                 "a missing preferences file retains the exact prior assisted selection allowance");
+            Check(SaberSettings.Load(path).JumpComboIntervalSeconds == .75f,
+                "legacy preferences acquire the default somersault combo interval");
             File.WriteAllText(path, "{\"BladeLength\":0.85,\"GripX\":-13,\"GripY\":-8,\"GripZ\":18,\"AimX\":0.05,\"AimY\":0.8,\"AimZ\":0.6,\"FingerCurl\":0.2}");
             var explicitPreferences = SaberSettings.Load(path);
             Check(explicitPreferences.BladeLength == .85f && explicitPreferences.GripX == -13 && explicitPreferences.GripY == -8
@@ -241,6 +252,7 @@ internal static class CoreChecks
             settings.ClutterPickTolerance = .35f;
             settings.ForceCaptureLimit = 256;
             settings.SliceReachMultiplier = 3.25f;
+            settings.JumpComboIntervalSeconds = 1.25f;
             settings.ForceControlsOffsetX = -.25f; settings.ForceControlsOffsetY = .125f;
             settings.SaberControlsOffsetX = .5f; settings.SaberControlsOffsetY = -.75f;
             settings.Save(path);
@@ -260,7 +272,8 @@ internal static class CoreChecks
                 "Angry Force radius and both control groups' normalized offsets survive save and reload");
             Check(loaded.ClutterPickTolerance == .35f, "custom clutter aim tolerance survives save and reload");
             Check(loaded.ForceCaptureLimit == 256, "the configured combined Force capture limit survives save and reload");
-            Check(loaded.SliceReachMultiplier == 3.25f, "custom assisted slice grace survives Save preferences and reload");
+            Check(loaded.SliceReachMultiplier == 3.25f, "custom assisted slice grace survives preference save and reload");
+            Check(loaded.JumpComboIntervalSeconds == 1.25f, "custom somersault combo interval survives save and reload");
             using (var saved = JsonDocument.Parse(File.ReadAllText(path)))
                 Check(saved.RootElement.TryGetProperty("LightEffects", out _) && saved.RootElement.TryGetProperty("DarkEffects", out _)
                     && !saved.RootElement.TryGetProperty("ShimmerAmount", out _),
@@ -280,6 +293,61 @@ internal static class CoreChecks
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
         Pass("settings validation and profile persistence");
+    }
+
+    private static void SettingsAutosaveSnapshots()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "purr2d2-autosave-checks-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(directory, "settings.json");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var settings = new SaberSettings();
+            var autosaver = new SaberSettingsAutosaver(path, settings);
+            Check(!autosaver.Observe(settings, 0) && !autosaver.HasPendingChanges && !File.Exists(path),
+                "unchanged defaults do not create a preferences file");
+
+            settings.SaberControlsOffsetX = .375f;
+            Check(!autosaver.Observe(settings, 0) && autosaver.HasPendingChanges && !File.Exists(path),
+                "overlay position changes become pending without writing immediately");
+            settings.DarkEffects.ArcWidth = 2.25f;
+            Check(!autosaver.Observe(settings, .8) && autosaver.HasPendingChanges,
+                "nested effect changes reset the quiet period for the whole settings snapshot");
+            Check(!autosaver.Observe(settings, 1.79) && !File.Exists(path),
+                "autosave waits until one second has passed since the latest change");
+            Check(autosaver.Observe(settings, 1.8) && !autosaver.HasPendingChanges && File.Exists(path),
+                "autosave writes once the complete settings snapshot settles");
+            var loaded = SaberSettings.Load(path);
+            Check(loaded.SaberControlsOffsetX == .375f && loaded.DarkEffects.ArcWidth == 2.25f,
+                "autosave persists overlay positions and nested saber effects together");
+
+            var defaults = new SaberSettings();
+            Check(autosaver.DeletePreferencesAndRebase(defaults) && !File.Exists(path) && !autosaver.HasPendingChanges,
+                "reset deletes saved preferences and clears the autosave baseline");
+            Check(!autosaver.Observe(defaults, 20) && !File.Exists(path),
+                "observing reset defaults does not recreate the deleted preferences file");
+            defaults.SliceAssetEntryLimit = 9000;
+            Check(autosaver.Flush(defaults) && SaberSettings.Load(path).SliceAssetEntryLimit == 9000,
+                "shutdown flush writes a pending setting immediately");
+
+            string blockedParent = Path.Combine(directory, "file-parent");
+            File.WriteAllText(blockedParent, "block directory creation");
+            var blocked = new SaberSettingsAutosaver(Path.Combine(blockedParent, "settings.json"), new SaberSettings());
+            var changed = new SaberSettings { BladeLength = 2 };
+            Check(!blocked.Observe(changed, 0) && !blocked.Observe(changed, 1)
+                && blocked.HasPendingChanges && !string.IsNullOrWhiteSpace(blocked.LastError),
+                "autosave preserves pending settings and exposes write failures");
+            File.Delete(blockedParent);
+            Directory.CreateDirectory(blockedParent);
+            Check(blocked.Observe(changed, 6) && blocked.LastError == null
+                && SaberSettings.Load(Path.Combine(blockedParent, "settings.json")).BladeLength == 2,
+                "autosave retries a failed write after its backoff and clears the error");
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+        Pass("settings autosave snapshots and debounce");
     }
 
     private static void SliceResourcePreferences()

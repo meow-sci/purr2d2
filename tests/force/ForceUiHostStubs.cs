@@ -10,6 +10,7 @@ namespace Brutal.GlfwApi
 }
 namespace Brutal.ImGuiApi
 {
+    public enum ImDrawFlags { None }
     public readonly struct ImColor8(byte r, byte g, byte b, byte a) { public uint Value => (uint)(r | g << 8 | b << 16 | a << 24); }
     public sealed class TestIo { public bool WantCaptureMouse, WantCaptureKeyboard, WantTextInput, AppFocusLost; public float2 MousePos; }
     public sealed class TestViewport { public float2 Pos = float2.Zero, Size = new(640, 480); }
@@ -26,18 +27,41 @@ namespace Brutal.ImGuiApi
     public readonly struct ImDrawListPtr
     {
         public readonly record struct Circle(float2 Center, float Radius, uint Color, float Thickness, bool Filled);
-        public readonly record struct Rect(float2 Min, float2 Max, uint Color, float Rounding);
+        public readonly record struct Rect(float2 Min, float2 Max, uint Color, float Rounding, bool Filled, float Thickness);
+        public readonly record struct Text(int Font, float Size, float2 Position, uint Color, string Value, float Wrap);
+        public readonly record struct DrawEvent(string Kind, float2 Center, string Text);
         public static readonly List<Circle> Circles = [];
         public static readonly List<Rect> Rects = [];
+        public static readonly List<Text> Texts = [];
+        public static readonly List<DrawEvent> Events = [];
         public void AddCircleFilled(float2 point, float radius, ImColor8 color, int segments)
-            => Circles.Add(new(point, radius, color.Value, 0, true));
+        {
+            Circles.Add(new(point, radius, color.Value, 0, true));
+            Events.Add(new("circle-filled", point, ""));
+        }
         public void AddCircle(float2 point, float radius, ImColor8 color, int segments, float thickness)
-            => Circles.Add(new(point, radius, color.Value, thickness, false));
+        {
+            Circles.Add(new(point, radius, color.Value, thickness, false));
+            Events.Add(new("circle", point, ""));
+        }
         public void AddRectFilled(float2 min, float2 max, ImColor8 color, float rounding = 0)
-            => Rects.Add(new(min, max, color.Value, rounding));
+        {
+            Rects.Add(new(min, max, color.Value, rounding, true, 0));
+            Events.Add(new("rect-filled", (min + max) * .5f, ""));
+        }
+        public void AddRect(float2 min, float2 max, ImColor8 color, float rounding = 0,
+            ImDrawFlags flags = ImDrawFlags.None, float thickness = 1)
+        {
+            Rects.Add(new(min, max, color.Value, rounding, false, thickness));
+            Events.Add(new("rect", (min + max) * .5f, ""));
+        }
         public void PushClipRect(float2 a, float2 b, bool intersect) { }
         public void PopClipRect() { }
-        public void AddText(int font, float size, float2 position, ImColor8 color, string text, float wrap) { }
+        public void AddText(int font, float size, float2 position, ImColor8 color, string text, float wrap)
+        {
+            Texts.Add(new(font, size, position, color.Value, text, wrap));
+            Events.Add(new("text", position, text));
+        }
     }
 }
 namespace KSA

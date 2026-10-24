@@ -35,6 +35,9 @@ internal sealed class SomersaultMotionController : IDisposable
     internal string Status { get; private set; } = "";
     internal long CommandId { get; private set; }
     internal double InputTime => _inputTime();
+    internal double ComboIntervalSeconds => _combo.PressWindowSeconds;
+
+    internal void SetComboIntervalSeconds(double seconds) => _combo.ConfigurePressWindow(seconds);
 
     internal SomersaultMotionController(Func<double>? inputTime = null) => _inputTime = inputTime
         ?? (static () => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency);
@@ -112,7 +115,7 @@ internal sealed class SomersaultMotionController : IDisposable
     private bool CanBoost(KittenEva? owner, double pressTime, out string reason)
     {
         if (!CanControl(owner, out reason)) return false;
-        reason = "Press again within 0.5 s; three jumps maximum.";
+        reason = $"Press again within {_combo.PressWindowSeconds:0.##} s; three jumps maximum.";
         if (!ReferenceEquals(Owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem)
             || _sequence.Phase != SomersaultPhase.Airborne || !_combo.CanQueue(pressTime)
             || owner!.LocomotionState.Mode != LocomotionMode.Airborne || owner.Props.Situation.HasOceanContact()) return false;

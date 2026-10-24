@@ -10,6 +10,9 @@ namespace Purr2D2.Runtime;
 // Compile the real Force runtime partial. Only host UI/physics boundaries are fake.
 internal sealed partial class SaberRuntime
 {
+    private static readonly ImColor8 MovementButtonFill = new(0, 0, 255, 64);
+    private static readonly ImColor8 MovementButtonText = new(210, 230, 255, 255);
+    private static readonly ImColor8 MovementButtonDisabledText = new(135, 145, 165, 255);
     private bool _ready = true, _disposed = false, _selectingSlice = false;
     private bool OverlayVisible = true, KittenColorPickerVisible = false, _overlayLayoutAvailable = false;
     private SaberOverlayLayout _overlayLayout = default;
@@ -19,7 +22,6 @@ internal sealed partial class SaberRuntime
         internal int ForceCaptureLimit = ForceCaptureLimits.Default;
     }
     private readonly TestSettings _settings = new();
-    private double _preferencesSavedUntil;
     private double _playerTime = 0;
     private KittenEva? _owner;
     private int _sliceCancellations;
@@ -28,6 +30,7 @@ internal sealed partial class SaberRuntime
     private bool SettingsContainsPointer(float2 pointer) => false;
     private bool KittenColorPickerContainsPointer(float2 pointer) => KittenColorPickerVisible && pointer.X < 200;
     private static void Report(string operation, Exception error) { }
+    private static void ShowSaberTooltip(string text) => ImGui.SetTooltip(text);
     private static readonly List<(float2 Center, string Text)> DrawnLabels = [];
     private static void CenterOverlayText(ImDrawListPtr draw, float2 center, ImColor8 color, string text,
         float maxWidth = float.MaxValue, float fontSize = 0) => DrawnLabels.Add((center, text));
@@ -84,8 +87,19 @@ internal sealed partial class SaberRuntime
             && runtime._force.GroupOffsetBody == double3.Zero,
             "hover wheel events accumulate in the pending offset without mutating captured physics");
         runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.GroupOffsetBody == new double3(0, 0, 1.5) && !runtime._forceMovePending,
-            "settled handoff applies the accumulated hover depth once");
+        var wheelDisplayed = runtime._force.GroupOffsetBody;
+        Check(wheelDisplayed.Z > 0 && wheelDisplayed.Z < 1.5 && !runtime._forceMovePending,
+            "settled handoff begins smoothing accumulated wheel depth without applying the raw target");
+        Check(runtime.ScrollForcePointer(2) && runtime._forceMoveOffset == new double3(0, 0, 2.5)
+            && runtime._force.GroupOffsetBody == wheelDisplayed,
+            "wheel input during settling adds to the spring target while leaving the displayed group unchanged in the callback");
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._forceOffsetSmoother.Target == new double3(0, 0, 2.5)
+            && runtime._force.GroupOffsetBody.Z > wheelDisplayed.Z && runtime._force.GroupOffsetBody.Z < 2.5,
+            "the settled handoff continues from the visible position toward the accumulated wheel target");
+        for (int i = 0; i < 120; i++) runtime.UpdateForceBeforePhysics(1.0 / 60);
+        Check((runtime._force.GroupOffsetBody - new double3(0, 0, 2.5)).Length() < 1e-5,
+            "idle wheel depth settles at the accumulated requested distance after smoothing");
 
         runtime._force.Events.Clear();
         runtime._forceMoveOwner = runtime._owner;
@@ -96,9 +110,11 @@ internal sealed partial class SaberRuntime
         runtime.QueueForceAction(ForceAction.Throw);
         Check(runtime.ForceHolding, "throw clicks queue work and retain ownership until the safe handoff");
         runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.ReleasedOffset == new double3(8, 0, 1)
+        Check(runtime._force.ReleasedOffset == runtime._force.GroupOffsetBody
+            && runtime._force.ReleasedOffset != new double3(8, 0, 1)
+            && runtime._force.ReleasedOffset.X > 0 && runtime._force.ReleasedOffset.X < 8
             && runtime._force.Events.SequenceEqual(new[] { "Offset", "Update", "Throw" }),
-            "the final drag offset is applied before updating and throwing the held group");
+            "throw uses the offset displayed by one settled spring step instead of teleporting to the pending raw pointer target");
 
         runtime = new(); runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
         runtime._forceMoveOwner = runtime._owner;
@@ -109,8 +125,25 @@ internal sealed partial class SaberRuntime
         Check(runtime.ScrollForcePointer(-2) && runtime._forceMoveOffset == finalDragOffset - double3.UnitZ,
             "hover wheel after releasing a drag preserves the pending camera-plane movement");
         runtime.QueueForceAction(ForceAction.Release); runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._force.ReleasedOffset == finalDragOffset - double3.UnitZ && !runtime.ScrollForcePointer(1),
-            "release commits the final hover depth and later wheel input cannot move an unowned group");
+        Check(runtime._force.ReleasedOffset == runtime._force.GroupOffsetBody
+            && runtime._force.ReleasedOffset != finalDragOffset - double3.UnitZ && !runtime.ScrollForcePointer(1),
+            "release retains the currently displayed smoothed offset and later wheel input cannot move an unowned group");
+
+        runtime = new();
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._force.GroupOffsetBody = new(2, 0, 0);
+        runtime._forceMoveOwner = runtime._owner;
+        runtime._forceOffsetSmoother.Reset(runtime._force.GroupOffsetBody);
+        runtime._forceOffsetSmoother.SetTarget(new(8, 0, 0));
+        runtime._forceOffsetSmoother.Advance(1.0 / 60);
+        runtime._force.GroupOffsetBody = runtime._forceOffsetSmoother.Offset;
+        runtime._forceMoveOffset = new(8, 0, 0); runtime._forceMovePending = true;
+        runtime._forceLayout = ForceOverlayLayout.Create(
+            SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080));
+        Check(runtime.HandleForceOverlayPress(ForceOverlayHit.Move, runtime._forceLayout.MoveCenter)
+            && runtime._forceDrag.Offset == runtime._force.GroupOffsetBody
+            && runtime._forceMoveOffset == runtime._force.GroupOffsetBody,
+            "re-grabbing during motion rebases at the smoothed displayed position instead of the pending endpoint");
 
         runtime = new(); runtime.BeginForcePicker(false);
         ImGui.Io.WantCaptureMouse = true;
@@ -148,6 +181,14 @@ internal sealed partial class SaberRuntime
         Check(runtime._force.CaptureCalls == 0 && ForceTargeting.Picks == 0,
             "switching owner after a ray snapshot rejects the query before reading physics");
 
+        runtime = new(); runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._forceMoveOwner = runtime._owner; runtime._forceOffsetSmoother.SetTarget(new(8, 0, 0));
+        runtime._forceOffsetSmoother.Advance(.016);
+        runtime._owner = new(); Program.ControlledVehicle = runtime._owner; runtime.UpdateForceBeforePhysics(.016);
+        Check(!runtime.ForceHolding && runtime._forceOffsetSmoother.Offset == double3.Zero
+            && runtime._forceOffsetSmoother.Target == double3.Zero && runtime._forceOffsetSmoother.Velocity == double3.Zero,
+            "an owner switch releases the old capture and clears its spring state before another kitten can use Force");
+
         runtime = new(); runtime.BeginForcePicker(false);
         runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(100, 90)); runtime.UpdateForceFrame();
         ImGui.Io.AppFocusLost = true; runtime.UpdateForceBeforePhysics(.016);
@@ -168,11 +209,18 @@ internal sealed partial class SaberRuntime
         runtime.OverlayVisible = false; runtime.UpdateForceVisibility();
         Check(!runtime._selectingForce && !runtime._forceDrag.Held, "HUD hiding cancels selection and gesture state");
 
-        runtime = new(); runtime._force.FailUpdate = true; runtime.UpdateForceBeforePhysics(.016);
-        Check(runtime._forceStatus.StartsWith("Force suspended:") && !runtime.ForceHolding,
-            "Force handoff failures clean up locally without escaping into global saber reset");
+        runtime = new(); runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._forceMoveOwner = runtime._owner; runtime._forceOffsetSmoother.SetTarget(new(8, 0, 0));
+        runtime._force.FailUpdate = true; runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime._forceStatus.StartsWith("Force suspended:") && !runtime.ForceHolding
+            && runtime._forceOffsetSmoother.Offset == double3.Zero && runtime._forceOffsetSmoother.Target == double3.Zero
+            && runtime._forceOffsetSmoother.Velocity == double3.Zero,
+            "Force handoff failures release locally and clear spring state without escaping into global saber reset");
+        runtime._forceOffsetSmoother.SetTarget(new(5, 0, 0)); runtime._forceOffsetSmoother.Advance(.016);
         runtime.DisposeForce(); runtime.ResetForce();
-        Check(runtime._force.Disposed, "shutdown and a subsequent world reset are safe and idempotent");
+        Check(runtime._force.Disposed && runtime._forceOffsetSmoother.Offset == double3.Zero
+            && runtime._forceOffsetSmoother.Target == double3.Zero && runtime._forceOffsetSmoother.Velocity == double3.Zero,
+            "shutdown clears spring state and a subsequent world reset remains safe and idempotent");
         runtime = new(); runtime.BeginForcePicker(false); ForceTargeting.FailPick = true;
         runtime.UpdateForceFrame(); runtime.UpdateForceBeforePhysics(.016);
         Check(!runtime.ForcePicking && !runtime._forceClickPending && runtime._force.CaptureCalls == 0
@@ -207,9 +255,9 @@ internal sealed partial class SaberRuntime
         runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter);
         Draw();
         Check(runtime.ForcePicking && !runtime._angryForce && Label(forceCenter, "CANCEL")
-            && !Label(angryCenter, "CANCEL") && Fill(forceCenter).Color != idleForce.Color
+            && !Label(angryCenter, "CANCEL") && Fill(forceCenter).Color == idleForce.Color
             && Ring(forceCenter).Thickness > idleForceRing.Thickness,
-            "the active Force picker displays Cancel with a brighter fill and stronger ring on its own button");
+            "the active Force picker keeps the shared blue fill and displays Cancel with a stronger ring on its own button");
         runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(300, 200)); runtime.UpdateForceFrame();
         Check(runtime._forceQuery is { Capture: true }, "a pending capture exists before button cancellation");
         runtime.HandleForceOverlayPress(ForceOverlayHit.Force, forceCenter);
@@ -259,45 +307,92 @@ internal sealed partial class SaberRuntime
         runtime._forceLayoutAvailable = true;
         var count = runtime._forceLayout.CaptureLimitCenter;
         var distance = runtime._forceLayout.AngryRadiusCenter;
-        runtime._preferencesSavedUntil = 42;
-
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count)
             && runtime._forceSettingDrag.Held && runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Default,
             "pressing count opens its pill without changing the shared setting");
         runtime.MoveForcePointer(count + new float2(10000, runtime._forceLayout.SliderTravel * .5f));
-        Check(runtime._settings.ForceCaptureLimit == 384 && runtime._preferencesSavedUntil == 0,
-            "count drag writes the rounded value directly to shared settings and marks preferences dirty");
+        Check(runtime._settings.ForceCaptureLimit == 384,
+            "count drag writes the rounded value directly to shared settings");
         runtime.MoveForcePointer(count + new float2(-10000, 10000));
         Check(runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Maximum
             && !runtime._forceMovePending && runtime._force.CaptureCalls == 0 && runtime._forceQuery == null,
             "a held settings drag keeps updating outside its bounds without moving or targeting the world");
 
-        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear();
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
         runtime.DrawForceOverlayCore(default);
-        var pill = ImDrawListPtr.Rects.Single();
+        var pill = ImDrawListPtr.Rects.Single(rect => rect.Filled);
+        var pillRim = ImDrawListPtr.Rects.Single(rect => !rect.Filled);
         uint blackHalf = new ImColor8(0, 0, 0, 128).Value;
+        uint blackRim = new ImColor8(255, 255, 255, 64).Value;
+        var thumb = ImDrawListPtr.Circles.Single(circle => circle.Filled
+            && circle.Center == runtime._forceSettingDrag.Thumb(runtime._settings.ForceCaptureLimit));
+        var valueLabel = ImDrawListPtr.Texts.Last(text => text.Value == ForceCaptureLimits.Maximum.ToString());
+        Check(Math.Abs(thumb.Radius * 2 - (pill.Max.X - pill.Min.X) * .8f) < 1e-3f
+            && valueLabel.Size == ImGui.GetFontSize() && valueLabel.Position.X >= pill.Max.X
+            && Math.Abs(valueLabel.Position.Y + valueLabel.Size * .5f - thumb.Center.Y) < 1e-3f
+            && valueLabel.Position.X + valueLabel.Wrap <= runtime._forceLayout.ControlsMax.X + 1e-3f,
+            "the slider nub fills 80% of its pill; its regular-size value sits to the right, centered on the nub, inside reserved bounds");
+        var valueDraws = ImDrawListPtr.Texts.Where(text => text.Value == ForceCaptureLimits.Maximum.ToString()
+            && text.Position.X >= pill.Max.X).ToArray();
+        int forceFill = ImDrawListPtr.Events.FindIndex(e => e.Kind == "circle-filled" && e.Center == runtime._forceLayout.ForceCenter);
+        int angryFill = ImDrawListPtr.Events.FindIndex(e => e.Kind == "circle-filled" && e.Center == runtime._forceLayout.AngryCenter);
+        int valueForeground = ImDrawListPtr.Events.FindLastIndex(e => e.Kind == "text"
+            && e.Text == ForceCaptureLimits.Maximum.ToString());
+        int lastCircle = ImDrawListPtr.Events.FindLastIndex(e => e.Kind is "circle-filled" or "circle");
+        Check(valueDraws.Length == 2 && valueDraws[0].Color == new ImColor8(0, 0, 0, 255).Value
+            && valueDraws[1].Color == new ImColor8(255, 255, 255, 255).Value
+            && valueDraws[0].Position == valueDraws[1].Position + new float2(runtime._forceLayout.Scale)
+            && forceFill >= 0 && angryFill >= 0 && valueForeground > forceFill && valueForeground > angryFill
+            && lastCircle >= 0 && valueForeground > lastCircle,
+            "the active count value draws after every circle with a readable dark shadow behind its white label");
         Check(pill.Min == runtime._forceSettingDrag.PillMin && pill.Max == runtime._forceSettingDrag.PillMax
-            && pill.Color == blackHalf && pill.Rounding == runtime._forceLayout.ButtonRadius,
-            "the selected setting draws as a same-width downward rounded black pill");
+            && pill.Color == blackHalf && pill.Rounding == runtime._forceLayout.ButtonRadius
+            && pillRim.Min == pill.Min && pillRim.Max == pill.Max && pillRim.Color == blackRim
+            && pillRim.Rounding == pill.Rounding && pillRim.Thickness == Math.Max(.5f, runtime._forceLayout.Scale),
+            "the selected setting draws as a rounded black pill with the shared faint white rim");
+        Check(ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == runtime._forceLayout.MoveCenter
+                && circle.Color == blackRim && circle.Thickness == Math.Max(.5f, runtime._forceLayout.Scale))
+            && ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == distance
+                && circle.Color == blackRim && circle.Thickness == Math.Max(.5f, runtime._forceLayout.Scale)),
+            "Move Force and the inactive distance setting use the same faint white rim");
         runtime._forceLayout = originalLayout.WithControlsOffset(float2.Zero, new(1920, 1080), new(.02f, 0));
-        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear();
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
         runtime.DrawForceOverlayCore(default);
         Check(!runtime._forceSettingDrag.Held && ImDrawListPtr.Rects.Count == 0,
             "a viewport or offset layout change collapses stale press-time pill geometry");
         runtime._forceLayout = originalLayout;
-        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear();
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
         runtime.DrawForceOverlayCore(default);
         Check(ImDrawListPtr.Rects.Count == 0
             && ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == count
                 && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf)
             && ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == distance
-                && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf),
-            "release collapses both settings controls to circles matching Move's black fill and button radius");
+                && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf)
+            && ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == count && circle.Color == blackRim)
+            && ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == distance && circle.Color == blackRim)
+            && !DrawnLabels.Any(label => label.Center == count && label.Text == ForceCaptureLimits.Maximum.ToString())
+            && !DrawnLabels.Any(label => label.Center == distance && label.Text == "10m"),
+            "release collapses both settings controls to caption-only circles with Move's black fill");
 
         runtime.HandleForceOverlayPress(ForceOverlayHit.AngryRadius, distance);
         runtime.MoveForcePointer(distance - new float2(0, 10000));
         Check(runtime._settings.AngryForceRadius == 1 && runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Maximum,
             "distance drag clamps its own shared setting without maintaining a separate value copy");
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
+        runtime.DrawForceOverlayCore(default);
+        var distancePill = ImDrawListPtr.Rects.Single(rect => rect.Filled);
+        var distanceRim = ImDrawListPtr.Rects.Single(rect => !rect.Filled);
+        var distanceThumb = ImDrawListPtr.Circles.Single(circle => circle.Filled
+            && circle.Center == runtime._forceSettingDrag.Thumb(runtime._settings.AngryForceRadius));
+        var distanceValue = ImDrawListPtr.Texts.Last(text => text.Value == "1m" && text.Position.X >= distancePill.Max.X);
+        int distanceValueForeground = ImDrawListPtr.Events.FindLastIndex(e => e.Kind == "text" && e.Text == "1m");
+        int distanceLastCircle = ImDrawListPtr.Events.FindLastIndex(e => e.Kind is "circle-filled" or "circle");
+        Check(distanceRim.Color == blackRim && distanceRim.Min == distancePill.Min && distanceRim.Max == distancePill.Max
+            && Math.Abs(distanceThumb.Radius * 2 - (distancePill.Max.X - distancePill.Min.X) * .8f) < 1e-3f
+            && distanceValue.Size == ImGui.GetFontSize()
+            && Math.Abs(distanceValue.Position.Y + distanceValue.Size * .5f - distanceThumb.Center.Y) < 1e-3f
+            && distanceValueForeground > distanceLastCircle,
+            "the active distance value and faint-rimmed pill draw after all circles, with the value centered on its 80% nub");
         var replacement = new KittenEva(); runtime._owner = replacement; Program.ControlledVehicle = replacement;
         runtime.UpdateForceVisibility();
         Check(!runtime._forceSettingDrag.Held, "changing the controlled owner collapses an open settings pill");

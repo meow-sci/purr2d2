@@ -44,6 +44,43 @@ internal static class ForceOverlayChecks
             && drag.Offset.Length() <= ForceOverlayDrag.MaximumOffsetMeters + 1e-8,
             "extreme idle wheel input remains finite and within the group movement budget");
 
+        var sixtyHz = new ForceOffsetSmoother();
+        var oneFortyFourHz = new ForceOffsetSmoother();
+        sixtyHz.SetTarget(new(8, 0, 0)); oneFortyFourHz.SetTarget(new(8, 0, 0));
+        for (int i = 0; i < 15; i++) sixtyHz.Advance(1.0 / 60);
+        for (int i = 0; i < 36; i++) oneFortyFourHz.Advance(1.0 / 144);
+        Check(sixtyHz.Offset.X > 0 && sixtyHz.Offset.X < 8
+            && (sixtyHz.Offset - oneFortyFourHz.Offset).Length() < 1e-8,
+            "the critically damped target follows smoothly with equivalent motion at 60 and 144 Hz");
+        var releasedTarget = sixtyHz.Target;
+        double previousDistance = (releasedTarget - sixtyHz.Offset).Length();
+        double previousSpeed = sixtyHz.Velocity.Length();
+        for (int i = 0; i < 120; i++)
+        {
+            sixtyHz.Advance(1.0 / 60);
+            double distance = (releasedTarget - sixtyHz.Offset).Length();
+            Check(distance <= previousDistance + 1e-10 && distance >= 0
+                && sixtyHz.Offset.Length() <= ForceOverlayDrag.MaximumOffsetMeters + 1e-8,
+                "a released Force target eases toward its endpoint without overshoot or leaving the movement limit");
+            previousDistance = distance;
+        }
+        Check((sixtyHz.Offset - releasedTarget).Length() < 1e-5 && sixtyHz.Velocity.Length() < previousSpeed,
+            "the released drag settles with its residual velocity damped away");
+        var jitter = new ForceOffsetSmoother();
+        for (int i = 0; i < 120; i++)
+        {
+            jitter.SetTarget(new(i % 2 == 0 ? 1 : -1, 0, 0));
+            jitter.Advance(1.0 / 60);
+            Check(Math.Abs(jitter.Offset.X) < 1,
+                "small alternating pointer jitter is filtered instead of reproduced as raw movement");
+        }
+        jitter.Reset(new(2, 3, 4));
+        Check(jitter.Offset == new double3(2, 3, 4) && jitter.Target == jitter.Offset
+            && jitter.Velocity == double3.Zero,
+            "reset clears spring velocity and prevents motion from leaking into a later capture");
+        jitter.SetTarget(new(double.NaN, 0, 0));
+        Check(jitter.Target == new double3(2, 3, 4), "invalid spring targets cannot corrupt the retained position");
+
         var slider = new ForceOverlaySliderDrag();
         Check(slider.Begin(ForceOverlayHit.AngryRadius, new(80, 100), new(80, 100), 27, 96,
             10, 1, 50, false), "distance slider starts from a finite shared value");
@@ -98,6 +135,30 @@ internal static class ForceOverlayChecks
                 && force.SliderEnvelope(ForceOverlayHit.AngryRadius).Max.Y < force.StatusMin.Y
                 && force.StatusMax.Y <= origin.Y + size.Y,
                 "count, distance, Angry Force and Force form a separated left-to-right arc with pill and status space");
+            float expectedGap = saber.SwingSliceEdgeGap;
+            float captureGap = (force.CaptureLimitCenter - force.MoveCenter).Length()
+                - force.ButtonRadius - force.MoveRadius;
+            float angryRadiusGap = (force.AngryRadiusCenter - force.MoveCenter).Length()
+                - force.ButtonRadius - force.MoveRadius;
+            float angryGap = (force.AngryCenter - force.MoveCenter).Length()
+                - force.ButtonRadius - force.MoveRadius;
+            float forceGap = (force.ForceCenter - force.MoveCenter).Length()
+                - force.ButtonRadius - force.MoveRadius;
+            float leftSpacing = (force.AngryRadiusCenter - force.CaptureLimitCenter).Length()
+                - force.ButtonRadius * 2;
+            float middleSpacing = (force.AngryCenter - force.AngryRadiusCenter).Length()
+                - force.ButtonRadius * 2;
+            float rightSpacing = (force.ForceCenter - force.AngryCenter).Length()
+                - force.ButtonRadius * 2;
+            Check(MathF.Abs(captureGap - expectedGap) < 1e-3f
+                && MathF.Abs(angryRadiusGap - expectedGap) < 1e-3f
+                && MathF.Abs(angryGap - expectedGap) < 1e-3f
+                && MathF.Abs(forceGap - expectedGap) < 1e-3f
+                && MathF.Abs(leftSpacing - expectedGap) < 1e-3f
+                && MathF.Abs(middleSpacing - expectedGap) < 1e-3f
+                && MathF.Abs(rightSpacing - expectedGap) < 1e-3f
+                && force.ControlsMax.X >= force.SliderValueLabelMaxX,
+                "the four Force controls use the Swing/Slice edge gap around Move and between neighbors, with room reserved for slider values");
             Check(force.WithControlsOffset(origin, size, float2.Zero, 30) == force,
                 "zero Force offsets preserve the existing left-side anchors");
             foreach (var offset in new float2[] { new(-1, -1), new(1, 1), new(-1, 1), new(1, -1), new(100, -100) })

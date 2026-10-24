@@ -18,7 +18,7 @@ internal sealed partial class SaberRuntime
             + $"{usage.DiskEntries} / {usage.DiskEntryCapacity} entries\n"
             + $"Vehicles in local physics bubble: {_sliceResourceVehicleCount} / {_settings.SlicePhysicsVehicleLimit}\n"
             + $"Removable generated slice debris in this system: {_sliceResourceDebrisCount}");
-        ImGui.TextWrapped($"Unused upload memory available to recover: {SliceMemoryLabel(usage.ReclaimableVertexBytes + (long)usage.ReclaimableIndexBytes)}. "
+        ImGui.TextWrapped($"Unused upload memory available to recover: {SliceMemoryLabel(usage.ReclaimableVertexBytes + (long)usage.ReclaimableIndexBytes)}.\n\n"
             + $"Recovered this session: {SliceMemoryLabel(usage.ReclaimedVertexBytes + usage.ReclaimedIndexBytes)}.");
         ImGui.TextWrapped($"Automatic growth: {(usage.GrowthEnabled ? "on" : "off")}; vertex limit {SliceMemoryLabel(usage.VertexBytesMaximum)}, index limit {SliceMemoryLabel(usage.IndexBytesMaximum)}.\n"
             + $"Growth operations this session: {usage.GrowthCount}{(usage.GrowthPending ? " (waiting)" : "")}\n"
@@ -39,34 +39,34 @@ internal sealed partial class SaberRuntime
                 SaberSettingsRow("Initial vertex memory");
                 memoryChanged |= ImGui.SliderInt("##SliceVertexArenaMiB", ref vertex,
                     SliceResourceLimits.MinimumVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB, "%d MiB");
-                ShowSaberControlTip("Save preferences and restart KSA to change the memory reserved for generated fragment vertices.");
+                ShowSaberControlTip("Startup reservation for generated fragment vertices.\n\nApplies after restarting KSA.");
                 SaberSettingsRow("Initial index memory");
                 memoryChanged |= ImGui.SliderInt("##SliceIndexArenaMiB", ref index,
                     SliceResourceLimits.MinimumIndexArenaMiB, SliceResourceLimits.MaximumIndexArenaMiB, "%d MiB");
-                ShowSaberControlTip("Save preferences and restart KSA to change the memory reserved for generated fragment triangles.");
+                ShowSaberControlTip("Startup reservation for generated fragment indices.\n\nApplies after restarting KSA.");
                 SaberSettingsRow("Automatic growth");
                 liveChanged |= ImGui.Checkbox("##SliceAutoGrow", ref autoGrow);
-                ShowSaberControlTip("When a cut needs more mesh space, grow the buffers up to the limits below. Growth can briefly pause rendering and temporarily needs both old and new buffers. Disabling keeps existing allocations.");
+                ShowSaberControlTip("Grow buffers as needed, up to the limits below; off leaves current allocations unchanged.\n\nGrowth can briefly pause rendering and temporarily needs both old and new buffers.");
                 SaberSettingsRow("Maximum vertex memory");
                 liveChanged |= ImGui.SliderInt("##SliceVertexMaximumMiB", ref vertexMaximum,
                     vertex, SliceResourceLimits.MaximumVertexArenaMiB, "%d MiB");
-                ShowSaberControlTip("Maximum runtime slice vertex capacity. Applies now; lowering this does not shrink memory already allocated. Stock and startup-restored meshes are additional.");
+                ShowSaberControlTip("Maximum runtime vertex capacity; applies now.\n\nLowering it does not shrink existing allocations; stock and startup-restored meshes use additional memory.");
                 SaberSettingsRow("Maximum index memory");
                 liveChanged |= ImGui.SliderInt("##SliceIndexMaximumMiB", ref indexMaximum,
                     index, SliceResourceLimits.MaximumIndexArenaMiB, "%d MiB");
-                ShowSaberControlTip("Maximum runtime slice index capacity. Applies now; lowering this does not shrink memory already allocated. Save preferences keeps the limit for future runs.");
+                ShowSaberControlTip("Maximum runtime index capacity; applies now.\n\nLowering it does not shrink existing allocations.");
                 SaberSettingsRow("Slice storage");
                 liveChanged |= ImGui.SliderInt("##SliceAssetDiskMiB", ref disk,
                     SliceResourceLimits.MinimumAssetDiskMiB, SliceResourceLimits.MaximumAssetDiskMiB, "%d MiB");
-                ShowSaberControlTip("Applies now. Stops new fragment files at this budget; existing files and saves stay intact even when already over budget.");
+                ShowSaberControlTip("Limits new fragment files to this disk budget and applies now.\n\nExisting files and saves stay intact, even when they exceed the budget.");
                 SaberSettingsRow("Slice entry limit");
                 liveChanged |= ImGui.SliderInt("##SliceAssetEntryLimit", ref entries,
                     SliceResourceLimits.MinimumAssetEntryLimit, SliceResourceLimits.MaximumAssetEntryLimit);
-                ShowSaberControlTip("Applies now. Stops new cache entries at this limit; existing asset files stay intact.");
+                ShowSaberControlTip("Limits new cache entries and applies now.\n\nExisting asset files stay intact.");
                 SaberSettingsRow("Physics vehicle limit");
                 liveChanged |= ImGui.SliderInt("##SlicePhysicsVehicleLimit", ref vehicles,
                     SliceResourceLimits.MinimumPhysicsVehicleLimit, SliceResourceLimits.MaximumPhysicsVehicleLimit);
-                ShowSaberControlTip("Applies now. New cuts stop before they would exceed this number of vehicles in the local physics bubble. Existing vehicles are kept.");
+                ShowSaberControlTip("Limits new cuts to this vehicle count in the local physics bubble; applies now.\n\nExisting vehicles stay intact.");
             }
             finally { ImGui.EndTable(); }
             if (memoryChanged || liveChanged)
@@ -77,14 +77,13 @@ internal sealed partial class SaberRuntime
                 _settings.SliceAssetDiskMiB = disk; _settings.SliceAssetEntryLimit = entries;
                 _settings.SlicePhysicsVehicleLimit = vehicles;
                 _settings.Validate();
-                _preferencesSavedUntil = 0;
                 // Validation can raise a maximum to match an edited startup size;
                 // only growth limits apply live, never the startup reservation.
                 ApplySliceResourceSettings();
             }
         }
-        ImGui.TextWrapped("Save preferences and restart KSA to change initial graphics reservations. Automatic growth, maximums, physics and storage limits apply now; save them to keep them for future runs.");
-        ImGui.TextWrapped("Registered fragment meshes remain allocated. Automatic growth adds space within the chosen limits; clearing unused caches recovers unpublished uploads and preserves saved asset files.");
+        ImGui.TextWrapped("Startup graphics reservations take effect after restarting KSA. Other limits apply now and save automatically.");
+        ImGui.TextWrapped("Registered fragment meshes remain allocated. Automatic growth adds space within the chosen limits.\n\nClearing unused caches recovers unpublished uploads and keeps saved asset files.");
 
         bool maintain = CanMaintainSliceResources;
         if (!maintain || _sliceResourceDebrisCount <= 0) _confirmSliceDebrisRemoval = false;
@@ -105,8 +104,8 @@ internal sealed partial class SaberRuntime
 
         if (_confirmSliceDebrisRemoval)
         {
-            ImGui.TextWrapped($"Remove {_sliceResourceDebrisCount} generated debris vehicle(s) from this system? "
-                + "Saved fragment files will stay on disk. Loaded meshes will keep their graphics memory until KSA restarts.");
+            ImGui.TextWrapped($"Remove {_sliceResourceDebrisCount} generated debris vehicle(s) from this system?\n\n"
+                + "Saved fragment files stay on disk.\n\nLoaded meshes keep their graphics memory until KSA restarts.");
             if (ImGui.Button("Confirm debris removal"))
             {
                 if (CanMaintainSliceResources) QueueSliceDebrisClear();

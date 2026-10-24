@@ -11,6 +11,7 @@ internal static class SomersaultWorkerChecks
     private static int Main()
     {
         HookTransformation();
+        ConfigurableComboIntervals();
         OneShotAndAppliedAcknowledgement();
         RunningLaunchUsesPreparedSpeed();
         PausedBoundaryAndInterruption();
@@ -48,6 +49,35 @@ internal static class SomersaultWorkerChecks
         Universe.PrepareVehicleWorkers(step); Universe.Apply(step); motion.Update(owner);
     }
 
+    private static void ConfigurableComboIntervals()
+    {
+        using var motion = Setup(out var owner, out _);
+        Check(motion.ComboIntervalSeconds == .75, "the production controller starts with a 0.75-second combo interval");
+        Launch(motion, owner);
+        Program.PlayerTime = .750001;
+        Check(!motion.CanStart(owner, out var reason) && reason.Contains("0.75 s")
+            && !motion.Request(owner, SomersaultDirection.Forward),
+            "expired default combo feedback reports 0.75 seconds and rejects a late follow-up");
+        Program.PlayerTime = .75;
+        Check(motion.Request(owner, SomersaultDirection.Forward), "the production controller accepts the inclusive default boundary");
+
+        motion.Reset(); SetGrounded(owner); Program.PlayerTime = 2;
+        motion.SetComboIntervalSeconds(.1); Launch(motion, owner);
+        Program.PlayerTime = 2.100001;
+        Check(!motion.CanStart(owner, out reason) && reason.Contains("0.1 s")
+            && !motion.Request(owner, SomersaultDirection.Forward),
+            "the minimum configured interval controls both availability feedback and timing");
+        Program.PlayerTime = 2.1;
+        Check(motion.Request(owner, SomersaultDirection.Forward), "the minimum interval accepts its exact deadline");
+
+        motion.Reset(); SetGrounded(owner); Program.PlayerTime = 4;
+        motion.SetComboIntervalSeconds(1.5); Launch(motion, owner);
+        Program.PlayerTime = 5.500001;
+        Check(!motion.Request(owner, SomersaultDirection.Forward), "the maximum interval still rejects presses beyond its deadline");
+        Program.PlayerTime = 5.5;
+        Check(motion.Request(owner, SomersaultDirection.Forward), "the maximum interval accepts its exact deadline");
+    }
+
     private static void AirborneComboTransactions()
     {
         using var motion = Setup(out var owner, out _);
@@ -57,10 +87,10 @@ internal static class SomersaultWorkerChecks
         var firstVelocity = owner.Kinematic.VelocityPhys;
         double upSpeed = owner.FrameVelocity.Z - firstVelocity.Z;
         float angle = motion.RotationRadians;
-        Program.PlayerTime = .500001;
+        Program.PlayerTime = .750001;
         Check(!motion.Request(owner, SomersaultDirection.Forward), "just outside the first player-time window rejects a boost");
-        Program.PlayerTime = .5;
-        Check(motion.Request(owner, SomersaultDirection.Forward), "exactly 0.5 player seconds accepts a second jump despite stale terrain at launch");
+        Program.PlayerTime = .75;
+        Check(motion.Request(owner, SomersaultDirection.Forward), "exactly 0.75 player seconds accepts a second jump despite stale terrain at launch");
         Check(!motion.Request(owner, SomersaultDirection.Left) && motion.Direction == SomersaultDirection.Backward,
             "pending duplicate presses cannot add jumps or change the original rotation direction");
         Check(owner.Kinematic.VelocityPhys == firstVelocity && motion.RotationRadians == angle,

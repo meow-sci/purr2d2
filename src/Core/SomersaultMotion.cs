@@ -28,11 +28,18 @@ internal readonly record struct SomersaultLaunch(SomersaultProfile Profile, doub
 internal sealed class SomersaultCombo
 {
     internal const int MaximumJumps = 3;
-    internal const double PressWindowSeconds = .5;
+    internal const double DefaultPressWindowSeconds = .75;
+    internal const double MinimumPressWindowSeconds = .1;
+    internal const double MaximumPressWindowSeconds = 1.5;
     internal int JumpCount { get; private set; }
     internal bool Pending { get; private set; }
+    internal double PressWindowSeconds { get; private set; } = DefaultPressWindowSeconds;
     private double _lastPress;
     private bool _closed;
+
+    internal void ConfigurePressWindow(double seconds) => PressWindowSeconds = double.IsFinite(seconds)
+        ? Math.Clamp(seconds, MinimumPressWindowSeconds, MaximumPressWindowSeconds)
+        : DefaultPressWindowSeconds;
 
     internal bool CanQueue(double pressTime) => !_closed && !Pending && JumpCount is > 0 and < MaximumJumps
         && double.IsFinite(pressTime) && pressTime >= _lastPress && pressTime <= _lastPress + PressWindowSeconds;

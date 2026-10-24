@@ -34,8 +34,8 @@ internal sealed partial class SaberRuntime
         ImGui.SliderChanges["##SliceIndexArenaMiB"] = 128;
         runtime.DrawSliceResourceSettings();
         Check(runtime._settings.SliceVertexArenaMiB == 256 && runtime._settings.SliceIndexArenaMiB == 128
-            && runtime._appliedSettings == 1 && runtime._preferencesSavedUntil == 0
-            && ImGui.Text.Any(text => text.Contains("Save preferences and restart KSA")),
+            && runtime._appliedSettings == 1
+            && ImGui.Text.Any(text => text.Contains("Startup graphics reservations take effect after restarting KSA")),
             "initial memory sliders explain restart and synchronize ceilings without resizing the initial reservation");
         ImGui.Reset(); ImGui.SliderChanges["##SliceAssetDiskMiB"] = 4096;
         ImGui.SliderChanges["##SliceAssetEntryLimit"] = 12000; ImGui.SliderChanges["##SlicePhysicsVehicleLimit"] = 256;
@@ -61,7 +61,7 @@ internal sealed partial class SaberRuntime
             "cache clearing queues only cache maintenance");
         Draw("Remove generated slice debris");
         Check(runtime._confirmSliceDebrisRemoval && runtime._debrisClears == 0
-            && ImGui.Text.Any(text => text.Contains("Remove 7") && text.Contains("Saved fragment files will stay")),
+            && ImGui.Text.Any(text => text.Contains("Remove 7") && text.Contains("Saved fragment files stay")),
             "debris removal first displays a count and file-preservation confirmation without removing anything");
         Draw("Keep debris");
         Check(!runtime._confirmSliceDebrisRemoval && runtime._debrisClears == 0,

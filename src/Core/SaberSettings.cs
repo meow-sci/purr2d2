@@ -72,6 +72,7 @@ public sealed class SaberSettings
     public float AimY { get; set; } = .45f;
     public float AimZ { get; set; } = .6f;
     public float FingerCurl { get; set; } = .12f;
+    public float JumpComboIntervalSeconds { get; set; } = .75f;
     public bool HideMmu { get; set; } = true;
     public float AngryForceRadius { get; set; } = 10;
     public int ForceCaptureLimit { get; set; } = ForceCaptureLimits.Default;
@@ -93,6 +94,8 @@ public sealed class SaberSettings
     [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public SaberEffectSettings DarkEffects { get; set; } = SaberEffectSettings.Create(SaberType.Dark);
 
+    private static readonly JsonSerializerOptions PreferencesJsonOptions = new() { WriteIndented = true };
+
     public SaberEffectSettings EffectsFor(SaberType type)
     {
         if (type == SaberType.Dark) return DarkEffects ??= SaberEffectSettings.Create(SaberType.Dark);
@@ -111,6 +114,7 @@ public sealed class SaberSettings
         AimX = Clamp(AimX, -1, 1, .22f); AimY = Clamp(AimY, -1, 1, .45f); AimZ = Clamp(AimZ, -1, 1, .6f);
         if (AimX * AimX + AimY * AimY + AimZ * AimZ < .0001f) { AimX = .22f; AimY = .45f; AimZ = .6f; }
         FingerCurl = Clamp(FingerCurl, 0, .5f, .12f);
+        JumpComboIntervalSeconds = Clamp(JumpComboIntervalSeconds, .1f, 1.5f, .75f);
         AngryForceRadius = Clamp(AngryForceRadius, 1, 50, 10);
         ForceCaptureLimit = Math.Clamp(ForceCaptureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
         ClutterPickTolerance = Clamp(ClutterPickTolerance, 0, .5f, .2f);
@@ -142,10 +146,15 @@ public sealed class SaberSettings
 
     public void Save(string path)
     {
-        Validate();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         string temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(temporary, Snapshot());
         File.Move(temporary, path, overwrite: true);
+    }
+
+    internal string Snapshot()
+    {
+        Validate();
+        return JsonSerializer.Serialize(this, PreferencesJsonOptions);
     }
 }

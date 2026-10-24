@@ -54,7 +54,6 @@ namespace Purr2D2.Runtime
         private SliceResourceUsage _sliceResourceUsage;
         private int _sliceResourceVehicleCount, _sliceResourceDebrisCount;
         private string _sliceResourceStatus = "";
-        private double _preferencesSavedUntil = 100;
         private bool CanMaintainSliceResources = true;
         private int _appliedSettings, _cacheClears, _debrisClears;
         private void ApplySliceResourceSettings() => _appliedSettings++;

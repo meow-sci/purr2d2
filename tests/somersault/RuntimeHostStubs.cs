@@ -45,11 +45,14 @@ namespace Purr2D2.Runtime
         internal bool Active, Available = true;
         internal bool FollowupAvailable;
         internal double AllowedUntil = double.PositiveInfinity, LastPressTime;
+        internal double ComboIntervalSeconds = .75;
         internal double InputTime => KSA.Program.PlayerTime;
         internal int Launches;
         internal SomersaultDirection Direction;
         internal float RotationRadians => 0;
         internal float Tuck => 0;
+        internal void SetComboIntervalSeconds(double seconds) => ComboIntervalSeconds = double.IsFinite(seconds)
+            ? Math.Clamp(seconds, .1, 1.5) : .75;
         internal bool CanStart(KSA.KittenEva? owner, out string reason, double? pressTime = null)
         { reason = "Unavailable."; return Available && (pressTime ?? KSA.Program.GetPlayerTime()) <= AllowedUntil
             && owner is { IsDisposed: false } && (Active ? FollowupAvailable

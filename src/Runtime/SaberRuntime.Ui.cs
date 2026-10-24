@@ -2,12 +2,12 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using KSA;
 using Purr2D2.Core;
+using System.Diagnostics;
 
 namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime
 {
-    private double _preferencesSavedUntil;
     private string? _preferencesSaveError;
     private bool _settingsWindowBoundsAvailable;
     private float2 _settingsWindowMin, _settingsWindowMax;
@@ -56,6 +56,7 @@ internal sealed partial class SaberRuntime
     internal void DrawUi()
     {
         _settingsWindowBoundsAvailable = false;
+        ObserveSettingsAutosave();
         if (!_enabled || !_windowVisible || _disposed || !Program.DrawUI)
         { _confirmSliceDebrisRemoval = false; return; }
         try
@@ -73,19 +74,12 @@ internal sealed partial class SaberRuntime
                 if (_fault != null) ImGui.TextWrapped(_fault);
                 if (_renderer.LastError != null) ImGui.TextWrapped(_renderer.LastError);
                 if (_audio.LastError != null) ImGui.TextWrapped(_audio.LastError);
+                if (_preferencesSaveError != null) ImGui.TextWrapped(_preferencesSaveError);
 
-                ImGui.SeparatorText("Shared saber settings");
-                DrawSaberAppearanceSettings();
-                ImGui.TextWrapped("Use the overlay to control kittens. Each kitten's saber menu contains its color, type and shared effects.");
-                ImGui.SeparatorText("Force settings");
-                DrawForceSettings();
-                if (ImGui.CollapsingHeader("Slice resources")) DrawSliceResourceSettings();
-                else _confirmSliceDebrisRemoval = false;
-                if (ImGui.CollapsingHeader("Control positions")) DrawControlPositionSettings();
+                if (ImGui.CollapsingHeader("Global lightsaber settings")) DrawSaberAppearanceSettings();
+                if (ImGui.CollapsingHeader("Force settings")) DrawForceSettings();
+                if (ImGui.CollapsingHeader("Overlay UI Positions")) DrawControlPositionSettings();
                 if (ImGui.CollapsingHeader("Character & grip")) DrawSaberCharacterSettings();
-
-                ImGui.Separator();
-                DrawSavePreferences();
                 if (ImGui.CollapsingHeader("Slice diagnostics"))
                 {
                     string diagnostics = $"Purr2D2 {typeof(SaberRuntime).Assembly.GetName().Version}; KSA {typeof(Vehicle).Assembly.GetName().Version}\n"
@@ -97,10 +91,38 @@ internal sealed partial class SaberRuntime
                     ImGui.TextWrapped(diagnostics);
                     if (ImGui.Button("Copy slice diagnostics")) ImGui.SetClipboardText(diagnostics);
                 }
+                if (ImGui.CollapsingHeader("Slice resources")) DrawSliceResourceSettings();
+                else _confirmSliceDebrisRemoval = false;
+
+                ImGui.TextDisabled("Settings save automatically after a brief pause.");
+                ImGui.Separator();
+                if (ImGui.Button("Reset all settings")) ResetAllSettings();
+                ShowSaberControlTip("Restores all Purr2D2 settings to their defaults and deletes saved preferences.\n\nStartup graphics reservations update after restarting KSA.");
             }
             finally { ImGui.End(); }
         }
         catch (Exception ex) { Report("Settings window failed", ex); }
+        finally { ObserveSettingsAutosave(); }
+    }
+
+    private void ObserveSettingsAutosave()
+    {
+        double now = Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+        _settingsAutosaver.Observe(_settings, now);
+        _preferencesSaveError = _settingsAutosaver.LastError is { } error
+            ? "Could not update saved preferences: " + error
+            : null;
+    }
+
+    private void ResetAllSettings()
+    {
+        _settings = new SaberSettings();
+        _settings.Validate();
+        _settingsAutosaver.DeletePreferencesAndRebase(_settings);
+        _preferencesSaveError = _settingsAutosaver.LastError is { } error
+            ? "Could not reset saved preferences: " + error
+            : null;
+        ApplySliceResourceSettings();
     }
 
     private void DrawSaberAppearanceSettings()
@@ -115,11 +137,12 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Slice grace / reach");
             changed |= ImGui.SliderFloat("##SliceReachMultiplier", ref sliceReach,
                 SaberLimits.MinimumSliceReachMultiplier, SaberLimits.MaximumSliceReachMultiplier, "%.2fx");
-            ShowSaberControlTip("Maximum selection distance = visible blade length x this value; 1x adds no extra grace. Applies to assisted SLICE selection before the stroke starts. Use Save preferences to keep changes.");
+            ShowSaberControlTip("Select parts within visible blade length × this value.\n\nApplies before an assisted slice starts.");
             double visibleLength = _blade.Deployment * length;
             ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(length, sliceReach):F2} m fully extended.");
             SaberSettingsRow("Sound volume");
             changed |= ImGui.SliderFloat("##SoundVolume", ref volume, 0, 1, "%.2f");
+            ShowSaberControlTip("Overall volume for lightsaber sound effects and hum.");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
@@ -127,7 +150,6 @@ internal sealed partial class SaberRuntime
         _settings.SliceReachMultiplier = sliceReach;
         _settings.Volume = volume;
         _settings.Validate();
-        _preferencesSavedUntil = 0;
     }
 
     private void DrawSaberEffectsSettings(SaberType type)
@@ -146,25 +168,25 @@ internal sealed partial class SaberRuntime
         {
             SaberSettingsRow("Shimmer amount");
             changed |= ImGui.SliderFloat("##ShimmerAmount", ref shimmerAmount, 0, 4, "%.2fx");
-            ShowSaberControlTip("Strength of the blade shimmer. 0 keeps the halo steady; 1x is the baseline.");
+            ShowSaberControlTip("Shimmer strength; 0 keeps the halo steady.");
             SaberSettingsRow("Shimmer speed");
             changed |= ImGui.SliderFloat("##ShimmerSpeed", ref shimmerSpeed, 0, 4, "%.2fx");
-            ShowSaberControlTip("Motion speed of the blade shimmer. 0 freezes it; 1x is the baseline.");
+            ShowSaberControlTip("Shimmer speed; 0 freezes the motion.");
             SaberSettingsRow("Arc count");
             changed |= ImGui.SliderInt("##ArcCount", ref arcCount, 0, SaberSettings.MaximumArcCount);
-            ShowSaberControlTip("Maximum arcs per saber. Distance and screen size can reduce the count; 0 disables arcs.");
+            ShowSaberControlTip("Maximum arcs per saber; 0 disables them.\n\nDistance may reduce the visible count.");
             SaberSettingsRow("Arc frequency");
             changed |= ImGui.SliderFloat("##ArcFrequency", ref arcFrequency, .1f, SaberSettings.MaximumArcFrequency, "%.2fx");
-            ShowSaberControlTip("Burst rate per arc. 1x gives one burst every two seconds; higher rates make bursts more frequent and shorter.");
+            ShowSaberControlTip("Burst rate per arc; 1× gives one burst every two seconds.\n\nHigher rates create shorter, more frequent bursts.");
             SaberSettingsRow("Arc amplitude");
             changed |= ImGui.SliderFloat("##ArcAmplitude", ref arcAmplitude, 0, 3, "%.2fx");
-            ShowSaberControlTip("How far arcs stray from the blade. 0 removes the outward spread; 1x is the baseline.");
+            ShowSaberControlTip("Arc spread from the blade; 0 removes outward spread.");
             SaberSettingsRow("Arc brightness");
             changed |= ImGui.SliderFloat("##ArcBrightness", ref arcBrightness, 0, SaberSettings.MaximumArcBrightness, "%.2fx");
-            ShowSaberControlTip("Brightness of the electrical arcs. 0 hides them; 1x is the baseline.");
+            ShowSaberControlTip("Arc brightness; 0 hides them.");
             SaberSettingsRow("Arc width");
             changed |= ImGui.SliderFloat("##ArcWidth", ref arcWidth, .25f, SaberSettings.MaximumArcWidth, "%.2fx");
-            ShowSaberControlTip("Width of each electrical arc. 1x is the baseline width.");
+            ShowSaberControlTip("Arc width; 1× is the baseline.");
         }
         finally { ImGui.EndTable(); }
         if (changed)
@@ -174,14 +196,12 @@ internal sealed partial class SaberRuntime
             effects.ArcAmplitude = arcAmplitude; effects.ArcBrightness = arcBrightness;
             effects.ArcWidth = arcWidth;
             effects.Validate(type);
-            _preferencesSavedUntil = 0;
         }
         if (ImGui.Button($"Reset {typeName} effects"))
         {
             effects.Reset(type);
-            _preferencesSavedUntil = 0;
         }
-        ShowSaberControlTip($"Restores only the shared {typeName} effects. Use Save preferences to keep the changes.");
+        ShowSaberControlTip($"Restores shared {typeName} effects for all sabers of that type.");
     }
 
     private void DrawForceSettings()
@@ -194,13 +214,13 @@ internal sealed partial class SaberRuntime
         {
             SaberSettingsRow("Angry Force radius");
             changed = ImGui.SliderFloat("##AngryForceRadius", ref radius, 1, 50, "%.1f m");
-            ShowSaberControlTip("Capture nearby objects within this distance of the selected surface point.");
+            ShowSaberControlTip("Capture objects within this distance of the selected surface point.");
             SaberSettingsRow("Force capture limit");
             changed |= ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
-            ShowSaberControlTip($"Maximum total vessels, debris and physical ground objects in one Angry Force capture (default {ForceCaptureLimits.Default}). Higher counts cost more physics work. The selected target is always included; nearby objects fill the remaining slots, closest first. Applies to the next capture.");
+            ShowSaberControlTip($"Maximum vessels, debris, and ground objects per Angry Force capture (default {ForceCaptureLimits.Default}); applies next capture.\n\nThe selected target is included first, then nearest objects fill remaining slots.");
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
-            ShowSaberControlTip("After exact picking misses, a small sphere of this radius catches near misses on physical clutter. Exact hits take priority; 0 uses exact hits only.");
+            ShowSaberControlTip("After an exact miss, this radius catches nearby physical clutter.\n\nExact hits take priority; 0 allows exact hits only.");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
@@ -208,7 +228,6 @@ internal sealed partial class SaberRuntime
         _settings.ForceCaptureLimit = captureLimit;
         _settings.ClutterPickTolerance = tolerance;
         _settings.Validate();
-        _preferencesSavedUntil = 0;
     }
 
     private void DrawControlPositionSettings()
@@ -235,46 +254,20 @@ internal sealed partial class SaberRuntime
             _settings.ForceControlsOffsetX = forceX; _settings.ForceControlsOffsetY = forceY;
             _settings.SaberControlsOffsetX = saberX; _settings.SaberControlsOffsetY = saberY;
             _settings.Validate();
-            _preferencesSavedUntil = 0;
         }
         if (ImGui.Button("Reset control positions"))
         {
             _settings.ForceControlsOffsetX = _settings.ForceControlsOffsetY = 0;
             _settings.SaberControlsOffsetX = _settings.SaberControlsOffsetY = 0;
-            _preferencesSavedUntil = 0;
         }
-    }
-
-    private void DrawSavePreferences()
-    {
-        if (ImGui.Button("Save preferences"))
-        {
-            try
-            {
-                _settings.Save(_settingsPath);
-                _preferencesSavedUntil = _playerTime + 3;
-                _preferencesSaveError = null;
-            }
-            catch (Exception ex)
-            {
-                _preferencesSavedUntil = 0;
-                _preferencesSaveError = "Could not save preferences: " + ex.Message;
-            }
-        }
-        if (_playerTime < _preferencesSavedUntil)
-        {
-            ImGui.SameLine();
-            ImGui.TextDisabled("Saved");
-        }
-        if (_preferencesSaveError != null) ImGui.TextWrapped(_preferencesSaveError);
     }
 
     private void DrawSaberCharacterSettings()
     {
-        if (!BeginSaberSettingsTable("##SaberCharacter")) return;
+        if (!BeginSaberSettingsTable("##SaberCharacter", "Jump combo interval")) return;
         var grip = new float3(_settings.GripX, _settings.GripY, _settings.GripZ);
         var aim = new float3(_settings.AimX, _settings.AimY, _settings.AimZ);
-        float curl = _settings.FingerCurl;
+        float curl = _settings.FingerCurl, jumpComboInterval = _settings.JumpComboIntervalSeconds;
         bool hideMmu = _settings.HideMmu, changed = false;
         try
         {
@@ -286,16 +279,19 @@ internal sealed partial class SaberRuntime
             ShowSaberControlTip("X, Y and Z direction in kitten model space.");
             SaberSettingsRow("Finger curl");
             changed |= ImGui.SliderFloat("##FingerCurl", ref curl, 0, .5f, "%.2f rad");
+            SaberSettingsRow("Jump combo interval");
+            changed |= ImGui.SliderFloat("##JumpComboIntervalSeconds", ref jumpComboInterval, .1f, 1.5f, "%.2f s");
+            ShowSaberControlTip("Maximum time between jump presses for a somersault combo.");
             SaberSettingsRow("Equipment");
             changed |= ImGui.Checkbox("Hide MMU controllers", ref hideMmu);
+            ShowSaberControlTip("Hides standard MMU hand controllers while the lightsaber is equipped.");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.GripX = grip.X; _settings.GripY = grip.Y; _settings.GripZ = grip.Z;
         _settings.AimX = aim.X; _settings.AimY = aim.Y; _settings.AimZ = aim.Z;
-        _settings.FingerCurl = curl; _settings.HideMmu = hideMmu;
+        _settings.FingerCurl = curl; _settings.JumpComboIntervalSeconds = jumpComboInterval; _settings.HideMmu = hideMmu;
         _settings.Validate();
-        _preferencesSavedUntil = 0;
     }
 
     private static bool BeginSaberSettingsTable(string id, string? widestLabel = null)
@@ -321,6 +317,18 @@ internal sealed partial class SaberRuntime
 
     private static void ShowSaberControlTip(string text)
     {
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(text);
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ShowSaberTooltip(text);
+    }
+
+    private static void ShowSaberTooltip(string text)
+    {
+        ImGui.BeginTooltip();
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 26);
+        try { ImGui.TextWrapped(text); }
+        finally
+        {
+            ImGui.PopTextWrapPos();
+            ImGui.EndTooltip();
+        }
     }
 }

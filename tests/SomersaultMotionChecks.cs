@@ -18,21 +18,34 @@ internal static class SomersaultMotionChecks
     private static void ComboPressWindows()
     {
         var combo = new SomersaultCombo();
+        Check(combo.PressWindowSeconds == .75, "new combos default to a three-quarter-second press window");
         Check(!combo.Start(double.NaN) && combo.Start(10) && !combo.Start(11), "one finite first press owns the combo clock");
         Check(!combo.Queue(10.1), "unacknowledged input cannot consume another jump");
         combo.Acknowledge();
-        Check(!combo.Queue(10.500001) && !combo.Queue(9.9), "expired and backwards press times cannot restart the window");
-        Check(combo.Queue(10.5), "the inclusive half-second boundary accepts the second press");
-        Check(!combo.Queue(10.6), "a pending duplicate cannot move the accepted deadline");
+        Check(!combo.Queue(10.750001) && !combo.Queue(9.9), "expired and backwards press times cannot restart the window");
+        Check(combo.Queue(10.75), "the inclusive default boundary accepts the second press");
+        Check(!combo.Queue(10.8), "a pending duplicate cannot move the accepted deadline");
         combo.Acknowledge();
-        Check(!combo.Queue(11.000001) && combo.Queue(11), "third press chains from the second inclusive boundary");
+        Check(!combo.Queue(11.500001) && combo.Queue(11.5), "third press chains from the second inclusive boundary");
         combo.Acknowledge();
-        Check(combo.JumpCount == 3 && !combo.Queue(11.1), "three accepted jumps is the airborne maximum");
+        Check(combo.JumpCount == 3 && !combo.Queue(11.6), "three accepted jumps is the airborne maximum");
         combo.Reset(); combo.Start(20); combo.Acknowledge(); combo.Close();
         Check(!combo.Queue(20.1), "landing and pause closure reject remaining follow-ups");
         combo.Reset(); Check(combo.Start(30), "lifecycle reset permits a fresh grounded combo");
+        combo.ConfigurePressWindow(.1);
+        combo.Reset(); combo.Start(10); combo.Acknowledge();
+        Check(!combo.Queue(10.100001) && combo.Queue(10.1), "the configured minimum accepts exactly one tenth of a second");
+        combo.Acknowledge(); combo.Close(); combo.Reset();
+        combo.ConfigurePressWindow(1.5);
+        combo.Start(20); combo.Acknowledge();
+        Check(!combo.Queue(21.500001) && combo.Queue(21.5), "the configured maximum accepts exactly one and a half seconds");
+        combo.ConfigurePressWindow(99);
+        Check(combo.PressWindowSeconds == 1.5, "finite combo settings clamp to the configured maximum");
+        combo.ConfigurePressWindow(double.NaN);
+        Check(combo.PressWindowSeconds == SomersaultCombo.DefaultPressWindowSeconds,
+            "a nonfinite combo setting recovers to the default window");
         combo.Reset(); combo.Start(.6); combo.Acknowledge();
-        Check(combo.Queue(1.1), "deadline comparison preserves an inclusive boundary despite subtraction roundoff");
+        Check(combo.Queue(1.35), "deadline comparison preserves an inclusive boundary despite subtraction roundoff");
     }
 
     private static void AdditiveBoosts()

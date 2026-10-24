@@ -44,7 +44,9 @@ internal sealed partial class SaberRuntime
                     draw.AddLine(position + new float2(sign * 10 * scale, 0), position + new float2(sign * 29 * scale, 0), color, 2 * scale);
                     draw.AddLine(position + new float2(0, sign * 10 * scale), position + new float2(0, sign * 29 * scale), color, 2 * scale);
                 }
-                string label = slice.Part.DisplayName + (_selectingSlice ? allowed ? " — click to slice" : " — cannot slice" : "");
+                bool cutting = _manualSliceActive || _sliceSequence.Active;
+                string label = slice.Part.DisplayName + (cutting ? " — slicing..."
+                    : _selectingSlice ? allowed ? " — click to slice" : " — cannot slice" : "");
                 if (_selectingSlice && !allowed) label += "\n" + _sliceStatus;
                 var labelSize = ImGui.CalcTextSize(label);
                 var labelPosition = new float2(

@@ -11,6 +11,8 @@ internal sealed partial class SaberRuntime
     private bool _ready = true, _disposed = false;
     private string? _fault = null;
     private KittenEva? _owner;
+    private readonly TestSettings _settings = new();
+    private sealed class TestSettings { internal float JumpComboIntervalSeconds = .75f; }
     private readonly SaberPoseController _pose = new();
     private readonly AssistedSliceSequence _sliceSequence = new();
     private bool _selectingSlice;
@@ -26,7 +28,17 @@ internal sealed partial class SaberRuntime
         runtime._owner = first; Program.ControlledVehicle = first;
         runtime.UpdateSomersault();
         Check(runtime._somersaultPose.Eligible && runtime.CanStartSomersault(out _)
-            && runtime.ShowSomersaultButtons, "controlled landed kitten binds an independent movement pose");
+            && runtime.ShowSomersaultButtons && runtime._somersaultMotion.ComboIntervalSeconds == .75,
+            "controlled landed kitten binds an independent movement pose and the default combo interval");
+        runtime._settings.JumpComboIntervalSeconds = 1.5f;
+        Check(runtime.ShowSomersaultButtons && runtime._somersaultMotion.ComboIntervalSeconds == 1.5,
+            "the visible controls path propagates the configured maximum interval");
+        runtime._settings.JumpComboIntervalSeconds = .1f;
+        Check(runtime.CanStartSomersault(out _) && Math.Abs(runtime._somersaultMotion.ComboIntervalSeconds - .1) < 1e-6,
+            "availability checks propagate the configured minimum interval");
+        runtime.UpdateSomersault();
+        Check(Math.Abs(runtime._somersaultMotion.ComboIntervalSeconds - .1) < 1e-6,
+            "the settled somersault update keeps controller timing synchronized with settings");
         foreach (var direction in Enum.GetValues<SomersaultDirection>())
         {
             runtime.QueueSomersault(direction);

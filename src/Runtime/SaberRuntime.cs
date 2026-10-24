@@ -27,6 +27,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private readonly ArbitrarySlicer _slicer = new();
     private readonly string _settingsPath;
     private SaberSettings _settings;
+    private readonly SaberSettingsAutosaver _settingsAutosaver;
     private KittenEva? _owner;
     private object? _system;
     private UniverseTime _consumedTime;
@@ -49,6 +50,7 @@ internal sealed partial class SaberRuntime : IDisposable
         try { _settings = SaberSettings.Load(_settingsPath); }
         catch (Exception ex) { _settings = new(); Report("Could not read preferences; using defaults", ex); }
         ApplySliceResourceSettings();
+        _settingsAutosaver = new(_settingsPath, _settings);
         _targeting.SliceHandler = (part, plane) => _slicer.Commit(part, _playerTime);
         _slicer.CutSparks = _renderer.AddCutSparks;
     }
@@ -222,6 +224,8 @@ internal sealed partial class SaberRuntime : IDisposable
     internal void Shutdown()
     {
         if (_disposed) return;
+        if (!_settingsAutosaver.Flush(_settings))
+            Console.WriteLine("[purr2d2] " + _settingsAutosaver.LastError);
         _disposed = true; _ready = false;
         Cleanup(DisposeForce, "Force capture"); Cleanup(_forcePose.Dispose, "Force pose");
         Cleanup(_somersaultMotion.Dispose, "Somersault motion"); Cleanup(_somersaultPose.Dispose, "Somersault pose");

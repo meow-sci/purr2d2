@@ -13,7 +13,9 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
 {
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
     public float IgniteRadius => SliceRadius;
-    public float2 IgniteCenter => SwingCenter + new float2(-94, 160) * Scale;
+    public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
+    public float2 IgniteCenter => SwingCenter + new float2(-94, 160)
+        * ((SliceCenter - SwingCenter).Length() / MathF.Sqrt(94 * 94 + 160 * 160));
     public float SwingMarkerRadius => 5 * Scale;
     public float SwingTravelRadius => SwingRadius - SwingMarkerRadius;
     public float2 SwingIndicator(float2 offset) => SwingCenter + SaberOverlayDrag.ClampDisk(offset) * SwingTravelRadius;

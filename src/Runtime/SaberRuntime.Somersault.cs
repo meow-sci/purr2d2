@@ -17,11 +17,22 @@ internal sealed partial class SaberRuntime
 
     // Visibility belongs to the controlled EVA, not its momentary contact state.
     // Availability requires ground for the first jump, or a live combo window.
-    private bool ShowSomersaultButtons => !Program.EditorFlag
-        && _owner is { IsDisposed: false } kitten && ReferenceEquals(Program.ControlledVehicle, kitten);
+    private bool ShowSomersaultButtons
+    {
+        get
+        {
+            ApplySomersaultComboSettings();
+            return !Program.EditorFlag
+                && _owner is { IsDisposed: false } kitten && ReferenceEquals(Program.ControlledVehicle, kitten);
+        }
+    }
+
+    private void ApplySomersaultComboSettings()
+        => _somersaultMotion.SetComboIntervalSeconds(_settings.JumpComboIntervalSeconds);
 
     private bool CanStartSomersault(out string reason, double? pressTime = null)
     {
+        ApplySomersaultComboSettings();
         if (!_ready || _disposed || _fault != null)
         { reason = "Somersault unavailable."; return false; }
         if (Program.EditorFlag || _owner is not { IsDisposed: false }
@@ -46,6 +57,7 @@ internal sealed partial class SaberRuntime
         // settled update. Observe that result before testing a rapid follow-up.
         // Capture monotonic input time first; frame/solver stalls must not move it.
         double pressed = _somersaultMotion.InputTime;
+        ApplySomersaultComboSettings();
         _somersaultMotion.Update(_owner);
         if (Enum.IsDefined(direction) && CanStartSomersault(out _, pressed) && _owner is { } owner)
             _somersaultRequest = (owner, direction, pressed);
@@ -53,6 +65,7 @@ internal sealed partial class SaberRuntime
 
     private void UpdateSomersault()
     {
+        ApplySomersaultComboSettings();
         if (!ReferenceEquals(_somersaultPoseOwner, _owner))
         {
             ResetSomersault();

@@ -127,6 +127,12 @@ internal static class OverlayDragChecks
                 && layout.SliceCenter.Y > layout.SwingCenter.Y
                 && (layout.SliceCenter - layout.SwingCenter).Length() > layout.SwingRadius + layout.SliceRadius,
                 "slice takes the upper action position below-left without touching swing");
+            float sliceEdgeGap = (layout.SliceCenter - layout.SwingCenter).Length()
+                - layout.SwingRadius - layout.SliceRadius;
+            float igniteEdgeGap = (layout.IgniteCenter - layout.SwingCenter).Length()
+                - layout.SwingRadius - layout.IgniteRadius;
+            Check(MathF.Abs(igniteEdgeGap - sliceEdgeGap) < 1e-3f,
+                "Ignite/Retract and Slice keep matching edge gaps from the Swing circle");
             Check(layout.Hit(layout.SwingCenter) == SaberOverlayHit.Swing
                 && layout.Hit(layout.SwingCenter + new float2(layout.SwingRadius * .9f)) == SaberOverlayHit.None
                 && layout.Hit(layout.SliceCenter) == SaberOverlayHit.Slice,
@@ -146,8 +152,14 @@ internal static class OverlayDragChecks
                 contained &= center.X - radius >= origin.X - 1e-4f && center.Y - radius >= origin.Y - 1e-4f
                     && center.X + radius <= origin.X + size.X + 1e-4f
                     && center.Y + radius <= origin.Y + size.Y + 1e-4f;
+                var outsideCorner = center + new float2(radius * .9f);
+                var cornerTargets = circles.Where(circle => SaberOverlayDrag.ContainsCircle(
+                    outsideCorner, circle.Item1, circle.Item2)).ToArray();
                 exactHits &= layout.Hit(center) == hit
-                    && layout.Hit(center + new float2(radius * .9f)) == SaberOverlayHit.None;
+                    && !SaberOverlayDrag.ContainsCircle(outsideCorner, center, radius)
+                    && (cornerTargets.Length == 0
+                        ? layout.Hit(outsideCorner) == SaberOverlayHit.None
+                        : cornerTargets.Length == 1 && layout.Hit(outsideCorner) == cornerTargets[0].Item3);
                 for (int j = i + 1; j < circles.Length; j++)
                     separate &= (center - circles[j].Item1).Length() > radius + circles[j].Item2;
             }

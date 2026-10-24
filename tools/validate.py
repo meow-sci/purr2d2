@@ -577,6 +577,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Cutting/AssistedSliceGeometry.cs",
         source / "tests/AssistedSliceChecks.cs",
         source / "src/Core/SaberSettings.cs",
+        source / "src/Core/SaberSettingsAutosaver.cs",
+        source / "src/Core/ForceOffsetSmoother.cs",
         source / "src/Cutting/CutGeometry.cs",
         source / "src/Cutting/PlaneSlicer.cs",
         source / "src/Cutting/ClosedMeshPreparation.cs",
@@ -699,7 +701,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
                           source / "tests/force/ForceMathChecks.cs"]
     force_ui_sources = [source / "src/Runtime/SaberRuntime.Force.cs",
         source / "src/Core/ForceOverlayDrag.cs", source / "src/Core/ForceOverlayLayout.cs",
-        source / "src/Core/ForceOverlaySliderDrag.cs",
+        source / "src/Core/ForceOverlaySliderDrag.cs", source / "src/Core/ForceOffsetSmoother.cs",
         source / "src/Core/SaberOverlayDrag.cs", source / "src/Core/SaberOverlayLayout.cs",
         source / "tests/force/ForceUiChecks.cs", source / "tests/force/ForceUiHostStubs.cs",
         source / "tests/force/ForceOverlayChecks.cs"]

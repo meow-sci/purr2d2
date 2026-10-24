@@ -11,6 +11,10 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime
 {
+    private static readonly ImColor8 MovementButtonFill = new(0, 0, 255, 64);
+    private static readonly ImColor8 MovementButtonText = new(210, 230, 255, 255);
+    private static readonly ImColor8 MovementButtonDisabledText = new(135, 145, 165, 255);
+
     private readonly SaberOverlayDrag _overlayDrag = new();
     private readonly SaberOverlayPointerCapture _overlayPointerCapture = new();
     private bool _showSaberOverlay;
@@ -156,11 +160,14 @@ internal sealed partial class SaberRuntime
                         layout.SettingsMax.X - layout.SettingsMin.X - layout.Padding * 2, fontSize);
 
                     draw.AddCircleFilled(layout.SwingCenter, layout.SwingRadius, new ImColor8(0, 0, 0, 128), 64);
+                    draw.AddCircle(layout.SwingCenter, layout.SwingRadius, new ImColor8(255, 255, 255, 64), 64,
+                        Math.Max(.5f, layout.Scale));
                     draw.AddCircleFilled(layout.SliceCenter, layout.SliceRadius, new ImColor8(224, 24, 24, 128), 48);
-                    draw.AddCircleFilled(layout.IgniteCenter, layout.IgniteRadius, new ImColor8(0, 0, 255, 64), 48);
+                    draw.AddCircleFilled(layout.IgniteCenter, layout.IgniteRadius, MovementButtonFill, 48);
                     var toggleKitten = AppearanceKitten;
-                    var toggleText = toggleKitten != null && _fault == null ? white : muted;
-                    draw.AddCircle(layout.IgniteCenter, layout.IgniteRadius, new ImColor8(100, 160, 255, 255), 48,
+                    var toggleText = toggleKitten != null && _fault == null
+                        ? MovementButtonText : MovementButtonDisabledText;
+                    draw.AddCircle(layout.IgniteCenter, layout.IgniteRadius, toggleText, 48,
                         Math.Max(.5f, layout.Scale));
                     CenterOverlayText(draw, layout.IgniteCenter, toggleText,
                         toggleKitten != null && SaberEnabledFor(toggleKitten) ? "RETRACT" : "IGNITE", layout.IgniteRadius * 1.6f);
@@ -171,10 +178,10 @@ internal sealed partial class SaberRuntime
                         _selectingSlice ? "CANCEL" : "SLICE", layout.SliceRadius * 1.6f);
                     if (layout.ShowSomersaultButtons)
                     {
-                        DrawSomersaultButton(draw, layout.ForwardCenter, layout.SomersaultRadius, new(0, -1), "FWD", canSomersault);
-                        DrawSomersaultButton(draw, layout.LeftCenter, layout.SomersaultRadius, new(-1, 0), "LEFT", canSomersault);
-                        DrawSomersaultButton(draw, layout.RightCenter, layout.SomersaultRadius, new(1, 0), "RIGHT", canSomersault);
-                        DrawSomersaultButton(draw, layout.BackwardCenter, layout.SomersaultRadius, new(0, 1), "BACK", canSomersault);
+                        DrawSomersaultButton(draw, layout.ForwardCenter, layout.SomersaultRadius, new(0, -1), canSomersault);
+                        DrawSomersaultButton(draw, layout.LeftCenter, layout.SomersaultRadius, new(-1, 0), canSomersault);
+                        DrawSomersaultButton(draw, layout.RightCenter, layout.SomersaultRadius, new(1, 0), canSomersault);
+                        DrawSomersaultButton(draw, layout.BackwardCenter, layout.SomersaultRadius, new(0, 1), canSomersault);
                     }
                     // The small reticle moves inside the fixed circle; the control itself never moves.
                     if (_overlayDrag.Active)
@@ -247,21 +254,19 @@ internal sealed partial class SaberRuntime
     }
 
     private static void DrawSomersaultButton(ImDrawListPtr draw, float2 center, float radius, float2 direction,
-        string label, bool available)
+        bool available)
     {
         // Disabled controls retain the requested fill, and still own their visible circle's clicks.
-        draw.AddCircleFilled(center, radius, new ImColor8(0, 0, 255, 64), 48);
-        var color = available ? new ImColor8(210, 230, 255, 255) : new ImColor8(135, 145, 165, 255);
+        draw.AddCircleFilled(center, radius, MovementButtonFill, 48);
+        var color = available ? MovementButtonText : MovementButtonDisabledText;
         draw.AddCircle(center, radius, color, 48, Math.Max(.5f, radius / 27));
-        var arrow = center - new float2(0, radius * .24f);
-        var tip = arrow + direction * radius * .25f;
-        var tail = arrow - direction * radius * .25f;
+        var tip = center + direction * radius * .25f;
+        var tail = center - direction * radius * .25f;
         var normal = new float2(-direction.Y, direction.X);
         float thickness = Math.Max(.5f, radius / 18);
         draw.AddLine(tail, tip, color, thickness);
         draw.AddLine(tip, tip - direction * radius * .21f + normal * radius * .18f, color, thickness);
         draw.AddLine(tip, tip - direction * radius * .21f - normal * radius * .18f, color, thickness);
-        CenterOverlayText(draw, center + new float2(0, radius * .35f), color, label, radius * 1.65f, radius * .48f);
     }
 
     private static float OverlayMenuBarInset(ImGuiViewportPtr viewport)
@@ -532,7 +537,6 @@ internal sealed partial class SaberRuntime
                 SetKittenSaberColor(owner, color);
             DrawSaberEffectsSettings(type);
             ImGui.Separator();
-            DrawSavePreferences();
         }
         finally
         {

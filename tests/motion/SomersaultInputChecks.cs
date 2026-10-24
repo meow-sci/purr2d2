@@ -23,6 +23,8 @@ namespace Purr2D2.Runtime
         private bool _ready = true, _disposed = false, _selectingSlice = false;
         private string? _fault = null;
         private KittenEva? _owner;
+        private readonly TestSettings _settings = new();
+        private sealed class TestSettings { internal float JumpComboIntervalSeconds = .75f; }
         private readonly FixturePose _pose = new();
         private readonly FixtureSlice _sliceSequence = new();
         private sealed class FixturePose { internal bool Swinging => false; }
@@ -33,6 +35,12 @@ namespace Purr2D2.Runtime
         internal static void RunSomersaultInputChecks(SomersaultMotionController motion, KittenEva owner)
         {
             var runtime = new SaberRuntime(motion) { _owner = owner };
+            runtime.UpdateSomersault();
+            runtime._settings.JumpComboIntervalSeconds = .1f;
+            runtime.UpdateSomersault();
+            Check(Math.Abs(motion.ComboIntervalSeconds - .1) < 1e-6,
+                "the production settled runtime propagates a changed minimum combo interval to the controller");
+            runtime._settings.JumpComboIntervalSeconds = .75f;
             runtime.UpdateSomersault();
             Program.PlayerTime = 10;
             runtime.QueueSomersault(SomersaultDirection.Forward);

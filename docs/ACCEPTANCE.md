@@ -1,5 +1,18 @@
 # Acceptance record
 
+## Overlay polish, automatic preferences and movement smoothing (2026-10-24)
+
+Shared settings now save automatically to the mod's `settings.json` after one quiet second, including Force overlay sliders and both overlay position groups. Orderly shutdown flushes pending changes. Reset all settings deletes saved preferences and restores defaults without recreating the file until another change. Initial graphics reservations still require a restart. Settings uses collapsible Global lightsaber settings, Force settings, Overlay UI Positions and Character & grip groups, with Slice resources last and Reset all settings at the bottom. Tooltips use short paragraphs and wrap.
+
+Manual and assisted pending cuts show “slicing...” beside the part marker. Ignite/Retract shares Slice's gap from Swing. Force's four small controls use that same circle-edge gap both from Move Force and from their neighbors. Movement circles show centered arrows; blue actions share their fill, border and text styling. Black drag circles and Force settings controls/pills have a faint white rim at 25% opacity. Force slider nubs span 80% of the pill width and show the current value in regular-size text to the right, aligned with the nub.
+
+Force drag and wheel targets pass through a bounded, time-based critically damped spring in the settled physics handoff. Releasing the pointer settles toward the requested position; re-grabbing starts at the displayed position. Explicit Release/Throw uses the smoothed position, and capture/lifecycle resets clear movement state. The somersault combo interval defaults to 0.75 seconds and is adjustable from 0.1–1.5 seconds under Character & grip, with automatic persistence.
+
+Managed and shader checks pass. The broad run passed every harness except a layout assertion that assumed a point outside Slice could not fall inside Ignite; the corrected CoreChecks rerun passes while retaining all-pairs circle separation checks. The final Force UI rerun includes rims and active-slider draw ordering. Release builds with zero warnings/errors; source/stage validation passes, all 29 archive files match staging, and the Release DLL and SHA-256 checksum match. Logs: `artifacts/checks/ui-refinements-validation.log`, `ui-refinements-core-rerun.log`, `ui-refinements-force-ui.log`, `ui-refinements-release.log` and `ui-refinements-stage.log`.
+
+Native acceptance remains pending: check visual spacing and slider values at multiple UI scales; adjust settings and overlay sliders, close the window, restart and confirm persistence; reset and confirm defaults after restart; swing into a part and observe the pending marker; drag/scroll and re-grab held groups, release and throw mid-settle; exercise double/triple jumps near the configured minimum/default/maximum intervals.
+
+
 ## Force overlay sliders and capped nearby capture (2026-10-24)
 
 Count and Distance join Angry Force and Force in an arc below the left movement
