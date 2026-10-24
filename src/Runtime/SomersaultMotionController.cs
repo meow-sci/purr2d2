@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Diagnostics;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using Brutal.Numerics;
@@ -8,18 +9,23 @@ using Purr2D2.Core;
 
 namespace Purr2D2.Runtime;
 
-/// <summary>One prepared-worker launch transaction, followed by unmodified native flight.</summary>
+/// <summary>Once-only prepared-worker launch/boost transactions, with native flight between them.</summary>
 internal sealed class SomersaultMotionController : IDisposable
 {
     private static SomersaultMotionController? _current;
     private static readonly FieldInfo? WorkerField = typeof(Vehicle).GetField("_threadWorkerUpdateState", BindingFlags.Instance | BindingFlags.NonPublic);
     private readonly SomersaultSequence _sequence = new();
+    private readonly SomersaultCombo _combo = new();
+    private readonly Func<double> _inputTime;
     private Harmony? _harmony;
     private bool _available, _disposed, _hasAppliedTime;
     private string _unavailableReason = "Somersault physics is unavailable.";
     private object? _system;
     private UniverseTime _launchTime, _issuedThrough, _appliedThrough;
     private double _nativeLaunchTime;
+    private SomersaultProfile _launchProfile;
+    private bool _boostQueued, _awaitingBoost;
+    private double _boostStartElapsed;
     private KittenEva? _jumpReleaseOwner;
     internal bool Active => _sequence.Active;
     internal KittenEva? Owner { get; private set; }
@@ -28,6 +34,10 @@ internal sealed class SomersaultMotionController : IDisposable
     internal float Tuck => _sequence.Tuck;
     internal string Status { get; private set; } = "";
     internal long CommandId { get; private set; }
+    internal double InputTime => _inputTime();
+
+    internal SomersaultMotionController(Func<double>? inputTime = null) => _inputTime = inputTime
+        ?? (static () => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency);
 
     internal void Install(Harmony harmony)
     {
@@ -52,9 +62,9 @@ internal sealed class SomersaultMotionController : IDisposable
         }
     }
 
-    internal bool CanStart(KittenEva? owner, out string reason)
+    internal bool CanStart(KittenEva? owner, out string reason, double? pressTime = null)
     {
-        if (Active) { reason = "Somersault in progress."; return false; }
+        if (Active) return CanBoost(owner, pressTime ?? InputTime, out reason);
         // Availability is common to the four buttons. A selected direction is
         // revalidated by Request and at the actual upcoming worker handoff.
         return CanLaunch(owner, SomersaultDirection.Forward, out reason)
@@ -64,6 +74,22 @@ internal sealed class SomersaultMotionController : IDisposable
     }
 
     private bool CanLaunch(KittenEva? owner, SomersaultDirection direction, out string reason)
+    {
+        if (!CanControl(owner, out reason)) return false;
+        reason = "Land upright on terrain first.";
+        var state = owner!.LocomotionState;
+        if (state.Mode != LocomotionMode.Grounded || !owner.Props.Situation.HasTerrainContact()
+            || owner.Props.Situation.HasOceanContact() || state.JumpFired
+            || !float.IsFinite(state.UprightAlignment)
+            || state.UprightAlignment < MathF.Cos(KittenLocomotionTuning.Current.FeetDownTiltDeg * MathF.PI / 180)) return false;
+        var physics = owner.GetPhysicsStates();
+        physics.GetStatesCcf(out var position, out var velocity, out var body2Ccf);
+        return SomersaultMotion.TryLaunch(position, velocity, body2Ccf, physics.Kinematic.Body2Phys,
+            direction, physics.Environment.GravitationBub.Length(), out _, out reason,
+            KittenLocomotionTuning.Current.WalkSpeed, KittenLocomotionTuning.Current.RunSpeed);
+    }
+
+    private bool CanControl(KittenEva? owner, out string reason)
     {
         reason = _unavailableReason;
         if (!_available || _disposed) return false;
@@ -76,26 +102,41 @@ internal sealed class SomersaultMotionController : IDisposable
         if (!SomersaultMotion.NormalSpeed(speed)) return false;
         reason = "Disable RCS first.";
         if (owner.FlightComputer.RCSMode != FlightComputerRCSMode.Disabled) return false;
-        reason = "Land upright on terrain first.";
-        var state = owner.LocomotionState;
-        if (state.Mode != LocomotionMode.Grounded || !owner.Props.Situation.HasTerrainContact()
-            || owner.Props.Situation.HasOceanContact() || state.JumpFired
-            || !float.IsFinite(state.UprightAlignment)
-            || state.UprightAlignment < MathF.Cos(KittenLocomotionTuning.Current.FeetDownTiltDeg * MathF.PI / 180)) return false;
         reason = "Move into the active physics area.";
         var physics = owner.GetPhysicsStates();
         if (!owner.HasPhysicsBubble || !physics.Environment.InPhysicsRadius) return false;
-        physics.GetStatesCcf(out var position, out var velocity, out var body2Ccf);
-        return SomersaultMotion.TryLaunch(position, velocity, body2Ccf, physics.Kinematic.Body2Phys,
-            direction, physics.Environment.GravitationBub.Length(), out _, out reason,
-            KittenLocomotionTuning.Current.WalkSpeed, KittenLocomotionTuning.Current.RunSpeed);
+        reason = "";
+        return true;
     }
 
-    internal bool Request(KittenEva owner, SomersaultDirection direction)
+    private bool CanBoost(KittenEva? owner, double pressTime, out string reason)
+    {
+        if (!CanControl(owner, out reason)) return false;
+        reason = "Press again within 0.5 s; three jumps maximum.";
+        if (!ReferenceEquals(Owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem)
+            || _sequence.Phase != SomersaultPhase.Airborne || !_combo.CanQueue(pressTime)
+            || owner!.LocomotionState.Mode != LocomotionMode.Airborne || owner.Props.Situation.HasOceanContact()) return false;
+        reason = "";
+        return true;
+    }
+
+    internal bool Request(KittenEva owner, SomersaultDirection direction, double? pressTime = null)
     {
         if (!Enum.IsDefined(direction)) { Status = "Unknown somersault direction."; return false; }
-        if (Active) { Status = "Somersault in progress."; return false; }
+        double pressed = pressTime ?? InputTime;
+        if (Active)
+        {
+            if (!CanBoost(owner, pressed, out var boostReason)) { Status = boostReason; return false; }
+            if (!_combo.Queue(pressed)) return false;
+            // Keep the original visual axis and horizontal momentum even when
+            // another direction's circle was pressed during this combo.
+            _boostQueued = true;
+            CommandId++;
+            Status = "Preparing extra somersault.";
+            return true;
+        }
         if (!CanLaunch(owner, direction, out var reason)) { Status = reason; return false; }
+        if (!_combo.Start(pressed)) { Status = "Jump input time is unavailable."; return false; }
         Direction = direction;
         Owner = owner;
         _system = Universe.CurrentSystem;
@@ -113,7 +154,8 @@ internal sealed class SomersaultMotionController : IDisposable
         if (!Active) return;
         if (Owner is null || Owner.IsDisposed || !ReferenceEquals(Owner, controlledOwner)
             || !ReferenceEquals(Owner, Program.ControlledVehicle) || !ReferenceEquals(_system, Universe.CurrentSystem)
-            || !ReferenceEquals(Owner.System, Universe.CurrentSystem) || Program.EditorFlag)
+            || !ReferenceEquals(Owner.System, Universe.CurrentSystem) || Program.EditorFlag || Owner.IsEditedVehicle
+            || !Owner.IsControllable || !Owner.HasPhysicsBubble || !Owner.GetPhysicsStates().Environment.InPhysicsRadius)
         { Release("Somersault ended after a control or world change."); return; }
         if (Owner.FlightComputer.RCSMode != FlightComputerRCSMode.Disabled)
         { Release("Somersault ended: RCS enabled."); return; }
@@ -121,7 +163,7 @@ internal sealed class SomersaultMotionController : IDisposable
         if (speed == 0)
         {
             if (_sequence.Phase == SomersaultPhase.Queued) Release("Paused; somersault cancelled.");
-            else Status = "Paused.";
+            else { _boostQueued = false; _combo.Close(); Status = "Paused; jump combo closed."; }
             return;
         }
         if (!SomersaultMotion.NormalSpeed(speed))
@@ -141,21 +183,30 @@ internal sealed class SomersaultMotionController : IDisposable
         if (!stationaryStep && !SomersaultMotion.ValidStep(applied.DeltaTime))
         { Release("Somersault ended after an unsupported physics step."); return; }
         var state = Owner.LocomotionState;
-        if (_sequence.Phase == SomersaultPhase.AwaitingAcknowledgement)
+        if (_sequence.Phase == SomersaultPhase.AwaitingAcknowledgement || _awaitingBoost)
         {
             if (!double.IsFinite(state.JumpFiredTime) || Math.Abs(state.JumpFiredTime - _nativeLaunchTime) > 1e-5)
             { Release("Native launch was not acknowledged."); return; }
-            _sequence.Acknowledge();
+            if (_awaitingBoost)
+            {
+                if (!_sequence.AddTurn(_boostStartElapsed)) { Release("Extra turn was not acknowledged."); return; }
+                _awaitingBoost = false;
+            }
+            else _sequence.Acknowledge();
+            _combo.Acknowledge();
         }
         bool airborne = state.Mode == LocomotionMode.Airborne;
         bool terrain = Owner.Props.Situation.HasTerrainContact();
         bool interrupted = state.Mode is not (LocomotionMode.Airborne or LocomotionMode.Grounded);
         _sequence.AdvanceTo((applied.NextTime - _launchTime).Seconds(), airborne, terrain,
             state.ContactClearedSinceLiftoff, interrupted, KittenLocomotionTuning.Current.LiftoffGraceTime);
+        if (_sequence.Phase == SomersaultPhase.Recovering) { _combo.Close(); _boostQueued = false; }
         if (!Active)
         {
             Owner = null;
             _system = null;
+            _combo.Reset();
+            _hasAppliedTime = false;
             Status = "";
             return;
         }
@@ -182,7 +233,7 @@ internal sealed class SomersaultMotionController : IDisposable
                 // A paused already-launched move keeps its pose and ownership;
                 // a pending click never becomes a launch when time resumes.
                 if (Universe.GetSimulationSpeed() == 0 && _sequence.Phase != SomersaultPhase.Queued)
-                { SuppressOwnedInputs(owner, worker); return; }
+                { _boostQueued = false; _combo.Close(); SuppressOwnedInputs(owner, worker); return; }
                 Release("Somersault cancelled by a simulation or RCS change."); return;
             }
             if (!SomersaultMotion.ValidStep(step.DeltaTime) || step.NextTime <= step.PreviousTime
@@ -200,6 +251,21 @@ internal sealed class SomersaultMotionController : IDisposable
                     KittenLocomotionTuning.Current.WalkSpeed, KittenLocomotionTuning.Current.RunSpeed))
                 { Release(reason); return; }
                 CommitLaunch(worker, step, launch);
+            }
+            else if (_boostQueued)
+            {
+                // The captured press was already timed at request acceptance;
+                // worker latency must not turn an in-window press into a miss.
+                if (!CanControl(owner, out var reason) || worker.LocomotionState.Mode != LocomotionMode.Airborne
+                    || worker.LadderWorkerInputs.PendingAttach.Valid || owner.Props.Situation.HasOceanContact())
+                { Release(string.IsNullOrEmpty(reason) ? "Extra jump interrupted by contact or grabbing." : reason); return; }
+                var physics = worker.GetReadOnlyStates();
+                physics.GetStatesCcf(out var position, out _, out var body2Ccf);
+                if (!SomersaultProfile.TryCreate(physics.Environment.GravitationBub.Length(), out _)
+                    || !SomersaultMotion.TryBoost(position, body2Ccf, physics.Kinematic.Body2Phys,
+                        _launchProfile.UpSpeed, out var delta) || !SomersaultMotion.Finite(worker.Kinematic.VelocityPhys + delta))
+                { Release("The extra jump surface frame is unavailable."); return; }
+                CommitBoost(worker, step, delta);
             }
             SuppressOwnedInputs(owner, worker);
         }
@@ -233,6 +299,7 @@ internal sealed class SomersaultMotionController : IDisposable
         _launchTime = step.PreviousTime;
         _issuedThrough = step.NextTime;
         _nativeLaunchTime = state.JumpFiredTime;
+        _launchProfile = launch.Profile;
         worker.UpdateData.NewKinematicStates = kinematic;
         worker.UpdateData.NewVehicleProperties = props;
         worker.LocomotionState = state;
@@ -240,6 +307,31 @@ internal sealed class SomersaultMotionController : IDisposable
         worker.UpdateData.NewLocomotionState = state;
         _sequence.Dispatched(launch.Profile); // Consumed here; no subsequent preparation can add another delta.
         Status = "Launching somersault.";
+    }
+
+    private void CommitBoost(VehicleUpdateState worker, SimStep step, double3 delta)
+    {
+        var kinematic = worker.Kinematic;
+        kinematic.VelocityPhys += delta;
+        var props = worker.GetReadOnlyProps();
+        props.SetOnRails(false);
+        var state = worker.LocomotionState;
+        state.JumpConsumed = state.JumpFired = true;
+        state.JumpFiredTime = step.PreviousTime.Seconds();
+        var command = worker.LocomotionCommand;
+        command.Active = false;
+        command.JumpImpulse = 0;
+        _issuedThrough = step.NextTime;
+        _nativeLaunchTime = state.JumpFiredTime;
+        _boostStartElapsed = (step.PreviousTime - _launchTime).Seconds();
+        worker.UpdateData.NewKinematicStates = kinematic;
+        worker.UpdateData.NewVehicleProperties = props;
+        worker.LocomotionState = state;
+        worker.LocomotionCommand = command;
+        worker.UpdateData.NewLocomotionState = state;
+        _boostQueued = false; // Consume before another preparation can see it.
+        _awaitingBoost = true;
+        Status = "Launching extra somersault.";
     }
 
     private void SuppressOwnedInputs(KittenEva owner, VehicleUpdateState worker)
@@ -267,6 +359,9 @@ internal sealed class SomersaultMotionController : IDisposable
     private void Release(string status)
     {
         _sequence.Reset();
+        _combo.Reset();
+        _boostQueued = _awaitingBoost = false;
+        _launchProfile = default;
         Owner = _jumpReleaseOwner = null;
         _system = null;
         _hasAppliedTime = false;

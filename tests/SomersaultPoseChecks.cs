@@ -55,6 +55,17 @@ internal static class SomersaultPoseChecks
         model.Sample();
         Near(model.Skeleton.WorldTransforms[17].Translation, point, "fresh sampled baselines cannot accumulate rotations");
         Near(first[0].Scale, float3.One, "visual flip never shrinks the kitten");
+        foreach (float turn in new[] { MathF.Tau, 2 * MathF.Tau })
+        {
+            motion.SetMotion(SomersaultDirection.Left, turn + MathF.PI / 2, 0, true);
+            model.Sample();
+            Near(model.Skeleton.WorldTransforms[17].Translation, point,
+                "production pose renders the second and third turn beyond the original one-turn clamp");
+            motion.SetMotion(SomersaultDirection.Left, turn + MathF.PI, 0, true);
+            model.Sample();
+            Check((model.Skeleton.WorldTransforms[17].Translation - point).Length() > 1,
+                "each additional turn visibly progresses through another inverted pose");
+        }
         var other = new KittenEva();
         using var otherMotion = new SomersaultPoseController();
         Check(otherMotion.Bind(other), "second kitten binds independently");

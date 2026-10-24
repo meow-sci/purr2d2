@@ -674,8 +674,10 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SomersaultMotion.cs",
         source / "src/Core/SomersaultSequence.cs",
         source / "src/Runtime/SomersaultMotionController.cs",
+        source / "src/Runtime/SaberRuntime.Somersault.cs",
         source / "tests/motion/HostStubs.cs",
         source / "tests/motion/SomersaultWorkerChecks.cs",
+        source / "tests/motion/SomersaultInputChecks.cs",
     ]
     somersault_pose_sources = [
         source / "src/Core/SomersaultMotion.cs",

@@ -9,6 +9,8 @@ internal static class Program
 {
     internal static bool EditorFlag;
     internal static Vehicle? ControlledVehicle;
+    internal static double PlayerTime;
+    internal static double GetPlayerTime() => PlayerTime;
 }
 
 internal static class Universe

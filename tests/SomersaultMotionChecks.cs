@@ -8,8 +8,83 @@ internal static class SomersaultMotionChecks
         GravityAndTravel();
         FramesAndVelocityBounds();
         RunningMomentum();
+        ComboPressWindows();
+        AdditiveBoosts();
+        AdditionalTurns();
         SequenceAcknowledgementAndContact();
         EarlyImpactAndTimeout();
+    }
+
+    private static void ComboPressWindows()
+    {
+        var combo = new SomersaultCombo();
+        Check(!combo.Start(double.NaN) && combo.Start(10) && !combo.Start(11), "one finite first press owns the combo clock");
+        Check(!combo.Queue(10.1), "unacknowledged input cannot consume another jump");
+        combo.Acknowledge();
+        Check(!combo.Queue(10.500001) && !combo.Queue(9.9), "expired and backwards press times cannot restart the window");
+        Check(combo.Queue(10.5), "the inclusive half-second boundary accepts the second press");
+        Check(!combo.Queue(10.6), "a pending duplicate cannot move the accepted deadline");
+        combo.Acknowledge();
+        Check(!combo.Queue(11.000001) && combo.Queue(11), "third press chains from the second inclusive boundary");
+        combo.Acknowledge();
+        Check(combo.JumpCount == 3 && !combo.Queue(11.1), "three accepted jumps is the airborne maximum");
+        combo.Reset(); combo.Start(20); combo.Acknowledge(); combo.Close();
+        Check(!combo.Queue(20.1), "landing and pause closure reject remaining follow-ups");
+        combo.Reset(); Check(combo.Start(30), "lifecycle reset permits a fresh grounded combo");
+        combo.Reset(); combo.Start(.6); combo.Acknowledge();
+        Check(combo.Queue(1.1), "deadline comparison preserves an inclusive boundary despite subtraction roundoff");
+    }
+
+    private static void AdditiveBoosts()
+    {
+        SomersaultProfile.TryCreate(9.81, out var profile);
+        var position = new double3(0, 0, -1000);
+        foreach (double vertical in new[] { -12d, 0, 8 })
+        {
+            var incoming = new double3(4205, -1703, vertical);
+            Check(SomersaultMotion.TryBoost(position, doubleQuat.Identity, doubleQuat.Identity, profile.UpSpeed, out var delta),
+                "an airborne boost accepts ascent and descent without a surface-speed launch limit");
+            Near(incoming + delta, new(incoming.X, incoming.Y, vertical - profile.UpSpeed),
+                "each boost adds up-speed without replacing vertical, horizontal or moving-frame velocity");
+        }
+        var body2Ccf = doubleQuat.CreateFromAxisAngle(double3.UnitX, .6);
+        var body2Phys = doubleQuat.CreateFromAxisAngle(double3.UnitY, -.4);
+        Check(SomersaultMotion.TryBoost(position, body2Ccf, body2Phys, profile.UpSpeed, out var transformed),
+            "extra upward speed supports distinct surface and physics frames");
+        Near(double3.Transform(double3.Transform(transformed, doubleQuat.Inverse(body2Phys)), body2Ccf),
+            -double3.UnitZ * profile.UpSpeed, "only the current radial up vector is rotated into physics space");
+        Check(!SomersaultMotion.TryBoost(double3.Zero, body2Ccf, body2Phys, profile.UpSpeed, out _)
+            && !SomersaultMotion.TryBoost(position, body2Ccf, body2Phys, double.NaN, out _), "invalid boost frames and speeds fail before mutation");
+    }
+
+    private static void AdditionalTurns()
+    {
+        SomersaultProfile.TryCreate(9.81, out var profile);
+        foreach (int jumps in new[] { 2, 3 })
+        {
+            var sequence = new SomersaultSequence();
+            sequence.Queue(); sequence.Dispatched(profile); sequence.Acknowledge();
+            for (int i = 1; i < jumps; i++)
+            {
+                double start = .2 * i;
+                sequence.AdvanceTo(start, true, false, true, false, .2);
+                float before = sequence.RotationRadians;
+                Check(sequence.AddTurn(start) && sequence.RotationRadians == before, "accepting another turn preserves the current fractional rotation");
+                sequence.AdvanceTo(start + .001, true, false, true, false, .2);
+                Check(sequence.RotationRadians >= before && sequence.RotationRadians - before < .03f,
+                    "the appended turn starts continuously without a pose snap or backward reset");
+            }
+            sequence.AdvanceTo(profile.FlightSeconds + .7, true, false, true, false, .2);
+            Near(sequence.RotationRadians, jumps * MathF.Tau, "double and triple sequences complete every requested full turn");
+        }
+        var landed = new SomersaultSequence();
+        landed.Queue(); landed.Dispatched(profile); landed.Acknowledge(); landed.AddTurn(0);
+        landed.AdvanceTo(profile.FlightSeconds * .65, true, false, true, false, .2);
+        float angle = landed.RotationRadians;
+        Check(angle > MathF.Tau, "early multi-jump collision fixture has already completed one rotation");
+        landed.AdvanceTo(profile.FlightSeconds * .66, false, true, true, false, .2);
+        landed.AdvanceTo(landed.Elapsed + SomersaultSequence.RecoverySeconds / 2, false, true, true, false, .2);
+        Check(Math.Abs(landed.RotationRadians - angle) <= MathF.PI, "early landing takes at most a half-turn recovery without unwinding completed turns");
     }
 
     private static void GravityAndTravel()

@@ -293,6 +293,11 @@ internal static class OverlayDragChecks
                 && capture.Consume(0, false, false, false, 3, out bool release) && !release
                 && capture.SuppressImGuiButton(0, false, 3) && !capture.AnyHeld,
                 "launch may hide its circle before release without leaking the paired release to native UI/camera");
+            Check(capture.Consume(0, true, true, false, 4, out bool second) && second
+                && capture.Consume(0, false, true, false, 4, out _)
+                && capture.Consume(0, true, true, false, 4, out bool third) && third,
+                "release then press authorizes each deliberate combo jump even within one frame");
+            capture.Consume(0, false, false, false, 4, out _);
             Check(!capture.Consume(0, true, false, false, 4, out bool outside) && !outside
                 && !capture.Consume(0, false, true, false, 5, out bool entered) && !entered,
                 "dragging from the world into a somersault circle never creates an action");

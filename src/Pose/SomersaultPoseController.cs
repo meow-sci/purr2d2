@@ -90,7 +90,7 @@ internal sealed class SomersaultPoseController : IDisposable
         _active = active && Eligible && float.IsFinite(rotationRadians) && float.IsFinite(tuck)
             && SomersaultPoseMath.Axis(direction).LengthSquared() > .9f;
         _direction = direction;
-        _radians = _active ? Math.Clamp(rotationRadians, 0, MathF.Tau) : 0;
+        _radians = _active ? Math.Clamp(rotationRadians, 0, SomersaultCombo.MaximumJumps * MathF.Tau) : 0;
         _tuck = _active ? Math.Clamp(tuck, 0, 1) : 0;
         OrderProcessors();
         if (!_active) SetSaberVisualTransform(float4x4.Identity);

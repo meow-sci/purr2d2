@@ -377,7 +377,7 @@ internal sealed partial class SaberRuntime
     private void TryQueueOverlaySomersault(SomersaultDirection direction)
     {
         // Revalidate after drawing: controlled kitten/contact may have changed since that frame.
-        if (!ShowSomersaultButtons || !CanStartSomersault(out _)) return;
+        if (!ShowSomersaultButtons) return;
         QueueSomersault(direction);
     }
 

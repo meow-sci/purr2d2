@@ -24,6 +24,38 @@ internal readonly record struct SomersaultProfile(double Gravity, double Height,
 internal readonly record struct SomersaultLaunch(SomersaultProfile Profile, double3 DeltaVelocityPhys,
     double3 FacingPhys, double3 UpPhys);
 
+/// <summary>Unscaled player press times; one transaction may be pending at a time.</summary>
+internal sealed class SomersaultCombo
+{
+    internal const int MaximumJumps = 3;
+    internal const double PressWindowSeconds = .5;
+    internal int JumpCount { get; private set; }
+    internal bool Pending { get; private set; }
+    private double _lastPress;
+    private bool _closed;
+
+    internal bool CanQueue(double pressTime) => !_closed && !Pending && JumpCount is > 0 and < MaximumJumps
+        && double.IsFinite(pressTime) && pressTime >= _lastPress && pressTime <= _lastPress + PressWindowSeconds;
+
+    internal bool Start(double pressTime)
+    {
+        if (JumpCount != 0 || !double.IsFinite(pressTime)) return false;
+        JumpCount = 1; Pending = true; _lastPress = pressTime;
+        return true;
+    }
+
+    internal bool Queue(double pressTime)
+    {
+        if (!CanQueue(pressTime)) return false;
+        JumpCount++; Pending = true; _lastPress = pressTime;
+        return true;
+    }
+
+    internal void Acknowledge() => Pending = false;
+    internal void Close() { _closed = true; Pending = false; }
+    internal void Reset() { JumpCount = 0; Pending = _closed = false; _lastPress = 0; }
+}
+
 /// <summary>All launch vectors are deltas; planet/frame translation is never replaced.</summary>
 internal static class SomersaultMotion
 {
@@ -36,6 +68,18 @@ internal static class SomersaultMotion
     internal static bool NormalSpeed(double speed) => double.IsFinite(speed) && Math.Abs(speed - 1) < 1e-6;
     internal static bool ValidStep(double dt) => double.IsFinite(dt) && dt > 0 && dt <= MaximumStepSeconds;
     internal static bool Finite(double3 value) => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
+
+    /// <summary>Airborne follow-ups add only surface-up velocity, never cancel existing motion.</summary>
+    internal static bool TryBoost(double3 positionCcf, doubleQuat body2Ccf, doubleQuat body2Phys,
+        double upSpeed, out double3 deltaPhys)
+    {
+        deltaPhys = default;
+        if (!Finite(positionCcf) || positionCcf.LengthSquared() < 1 || !Finite(body2Ccf) || !Finite(body2Phys)
+            || !double.IsFinite(upSpeed) || upSpeed <= 0 || upSpeed > MaximumDeltaSpeed) return false;
+        double3 up = double3.Normalize(positionCcf);
+        deltaPhys = double3.Transform(double3.Transform(up * upSpeed, doubleQuat.Inverse(body2Ccf)), body2Phys);
+        return Finite(deltaPhys);
+    }
 
     internal static bool TryLaunch(double3 positionCcf, double3 velocityCcf, doubleQuat body2Ccf,
         doubleQuat body2Phys, SomersaultDirection direction, double gravity, out SomersaultLaunch launch, out string reason,

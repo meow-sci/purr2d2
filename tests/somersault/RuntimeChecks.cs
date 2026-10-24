@@ -113,6 +113,23 @@ internal sealed partial class SaberRuntime
             "availability is rechecked at handoff and a rejected request is not deferred");
         runtime._somersaultMotion.Available = true;
 
+        Program.PlayerTime = 10;
+        runtime.QueueSomersault(SomersaultDirection.Forward); runtime.UpdateSomersault();
+        runtime._somersaultMotion.FollowupAvailable = true;
+        runtime._somersaultMotion.AllowedUntil = 10.5;
+        Program.PlayerTime = 10.5;
+        runtime.QueueSomersault(SomersaultDirection.Forward);
+        Program.PlayerTime = 10.6;
+        runtime.QueueSomersault(SomersaultDirection.Right);
+        Check(runtime._somersaultRequest is { PressTime: 10.5, Direction: SomersaultDirection.Forward },
+            "a pending duplicate cannot overwrite the deliberate press timestamp or direction");
+        runtime.UpdateSomersault();
+        Check(runtime._somersaultMotion.LastPressTime == 10.5,
+            "production runtime preserves the in-window press through a later settled handoff");
+        runtime._somersaultMotion.FollowupAvailable = false;
+        runtime._somersaultMotion.AllowedUntil = double.PositiveInfinity;
+        runtime._somersaultMotion.Reset();
+
         runtime.QueueSomersault(SomersaultDirection.Forward); runtime.UpdateSomersault();
         runtime._somersaultPose.Eligible = false;
         runtime.UpdateSomersault();

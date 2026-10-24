@@ -15,6 +15,9 @@ internal static class SomersaultWorkerChecks
         RunningLaunchUsesPreparedSpeed();
         PausedBoundaryAndInterruption();
         FinalCopiesAndFailureAtomicity();
+        AirborneComboTransactions();
+        ComboPauseAndLifecycle();
+        InputHandoffAcknowledgement();
         return 0;
     }
 
@@ -22,13 +25,145 @@ internal static class SomersaultWorkerChecks
     {
         Universe.CurrentSystem = new(); Universe.Speed = 1; Universe.Last = Step(0, 0);
         Program.EditorFlag = false;
+        Program.PlayerTime = 0;
         owner = new(); other = new();
         Program.ControlledVehicle = owner;
         Universe.Vehicles = [owner, other];
-        var motion = new SomersaultMotionController();
+        var motion = new SomersaultMotionController(() => Program.PlayerTime);
         motion.Install(new Harmony("purr2d2.motion-fixture." + Guid.NewGuid().ToString("N")));
         Check(motion.CanStart(owner, out var reason), "real Harmony installs the guarded production handoff: " + reason);
         return motion;
+    }
+
+    private static void InputHandoffAcknowledgement()
+    {
+        using var motion = Setup(out var owner, out _);
+        SaberRuntime.RunSomersaultInputChecks(motion, owner);
+    }
+
+    private static void Launch(SomersaultMotionController motion, KittenEva owner)
+    {
+        Check(motion.Request(owner, SomersaultDirection.Backward), "first jump starts a grounded combo");
+        var step = Step(0, .02);
+        Universe.PrepareVehicleWorkers(step); Universe.Apply(step); motion.Update(owner);
+    }
+
+    private static void AirborneComboTransactions()
+    {
+        using var motion = Setup(out var owner, out _);
+        owner.FrameVelocity = new(4200, -1700, 300);
+        owner.Kinematic.VelocityPhys = owner.FrameVelocity;
+        Launch(motion, owner);
+        var firstVelocity = owner.Kinematic.VelocityPhys;
+        double upSpeed = owner.FrameVelocity.Z - firstVelocity.Z;
+        float angle = motion.RotationRadians;
+        Program.PlayerTime = .500001;
+        Check(!motion.Request(owner, SomersaultDirection.Forward), "just outside the first player-time window rejects a boost");
+        Program.PlayerTime = .5;
+        Check(motion.Request(owner, SomersaultDirection.Forward), "exactly 0.5 player seconds accepts a second jump despite stale terrain at launch");
+        Check(!motion.Request(owner, SomersaultDirection.Left) && motion.Direction == SomersaultDirection.Backward,
+            "pending duplicate presses cannot add jumps or change the original rotation direction");
+        Check(owner.Kinematic.VelocityPhys == firstVelocity && motion.RotationRadians == angle,
+            "a second press changes neither live velocity nor current pose before worker acknowledgement");
+        Program.PlayerTime = .8; // Delayed worker may run after the deadline.
+        var boost = Step(.02, .12);
+        Universe.PrepareVehicleWorkers(boost);
+        var boosted = owner.Worker.Kinematic.VelocityPhys;
+        Check((boosted - firstVelocity - new double3(0, 0, -upSpeed)).Length() < 1e-8,
+            "the timed press survives worker delay and adds exactly one upward speed to current ascent");
+        Check(owner.Worker.LocomotionState.LiftoffTime == 0
+            && !owner.Worker.LocomotionState.ContactClearedSinceLiftoff && owner.Worker.LocomotionCommand.JumpImpulse == 0,
+            "follow-up leaves native contact history intact and never arms another native jump impulse");
+        Universe.Apply(boost); motion.Update(owner);
+        motion.Update(owner);
+        Program.PlayerTime = 1;
+        Check(motion.Request(owner, SomersaultDirection.Right), "third press uses the second accepted press time rather than original launch time");
+        // A descending fixture proves the boost adds rather than imposing an
+        // ascent target; horizontal and large moving-frame motion remain intact.
+        owner.Kinematic.VelocityPhys = boosted with { Z = owner.FrameVelocity.Z + 12 };
+        var descending = owner.Kinematic.VelocityPhys;
+        var third = Step(.12, .22);
+        Universe.PrepareVehicleWorkers(third);
+        Check((owner.Worker.Kinematic.VelocityPhys - descending - new double3(0, 0, -upSpeed)).Length() < 1e-8,
+            "third jump adds upward momentum during descent without cancelling remaining descent or horizontal travel");
+        Universe.Apply(third); motion.Update(owner);
+        var finalVelocity = owner.Kinematic.VelocityPhys;
+        Check(!motion.Request(owner, SomersaultDirection.Backward) && !motion.CanStart(owner, out _),
+            "fourth jump is refused within an otherwise valid window");
+        for (int i = 0; i < 10; i++)
+        {
+            var next = Step(.22 + i * .2, .42 + i * .2);
+            Universe.PrepareVehicleWorkers(next);
+            Check(owner.Worker.Kinematic.VelocityPhys == finalVelocity, "later prepared snapshots never replay any accepted impulse");
+            owner.Worker.LocomotionState.ContactClearedSinceLiftoff = true;
+            Universe.Apply(next); motion.Update(owner);
+        }
+        Check(Math.Abs(motion.RotationRadians - 3 * MathF.Tau) < 1e-5,
+            "production controller presents three complete acknowledged rotations");
+        owner.LocomotionState.Mode = owner.Worker.LocomotionState.Mode = LocomotionMode.Grounded;
+        var contact = Step(2.22, 2.42);
+        Universe.PrepareVehicleWorkers(contact); Universe.Apply(contact); motion.Update(owner);
+        Check(!motion.CanStart(owner, out _), "landing immediately closes follow-up eligibility during recovery");
+        var recover = Step(2.42, 2.62);
+        Universe.PrepareVehicleWorkers(recover); Universe.Apply(recover); motion.Update(owner);
+        Check(!motion.Active, "contact-driven recovery releases the complete combo");
+        SetGrounded(owner);
+        Check(motion.Request(owner, SomersaultDirection.Forward), "landing resets the count for a new explicit grounded jump");
+    }
+
+    private static void ComboPauseAndLifecycle()
+    {
+        using var motion = Setup(out var owner, out _);
+        Launch(motion, owner);
+        Program.PlayerTime = .2;
+        Check(motion.Request(owner, SomersaultDirection.Backward), "a follow-up can wait at the pause boundary");
+        var velocity = owner.Kinematic.VelocityPhys;
+        Universe.Speed = 0; motion.Update(owner);
+        Universe.PrepareVehicleWorkers(Step(.02, .02)); Universe.Apply(Step(.02, .02));
+        Universe.Speed = 1; motion.Update(owner);
+        Universe.PrepareVehicleWorkers(Step(.02, .04)); Universe.Apply(Step(.02, .04)); motion.Update(owner);
+        Check(owner.Kinematic.VelocityPhys == velocity && !motion.Request(owner, SomersaultDirection.Backward),
+            "pause cancels an undispatched boost and closes the combo instead of replaying it after resume");
+        motion.Reset(); SetGrounded(owner); Program.PlayerTime = 1;
+        Launch(motion, owner);
+        Program.PlayerTime = 1.2; Check(motion.Request(owner, SomersaultDirection.Backward), "a fresh combo accepts another follow-up");
+        var boost = Step(.02, .04);
+        Universe.PrepareVehicleWorkers(boost); Universe.Apply(boost);
+        var boosted = owner.Kinematic.VelocityPhys;
+        Universe.Speed = 0; motion.Update(owner);
+        for (int i = 0; i < 3; i++)
+        { Universe.PrepareVehicleWorkers(Step(.04, .04)); Universe.Apply(Step(.04, .04)); motion.Update(owner); }
+        Universe.Speed = 1; motion.Update(owner);
+        Universe.PrepareVehicleWorkers(Step(.04, .06)); Universe.Apply(Step(.04, .06)); motion.Update(owner);
+        Check(motion.Active && owner.Kinematic.VelocityPhys == boosted,
+            "a boost applied immediately before pause acknowledges on resume without a duplicate impulse");
+        for (int i = 0; i < 7; i++)
+        {
+            var flight = Step(.06 + i * .2, .26 + i * .2);
+            Universe.PrepareVehicleWorkers(flight); Universe.Apply(flight); motion.Update(owner); motion.Update(owner);
+        }
+        Check(Math.Abs(motion.RotationRadians - 2 * MathF.Tau) < 1e-5
+            && owner.Kinematic.VelocityPhys == boosted,
+            "pause-boundary boost produces exactly one extra full turn across repeated settled ticks");
+        motion.Reset(); SetGrounded(owner); Program.PlayerTime = 2; Launch(motion, owner);
+        Program.PlayerTime = 2.2; motion.Request(owner, SomersaultDirection.Backward);
+        owner.PendingLadderAttach = true;
+        velocity = owner.Kinematic.VelocityPhys;
+        Universe.PrepareVehicleWorkers(Step(.02, .04));
+        Check(!motion.Active && owner.Worker.Kinematic.VelocityPhys == velocity,
+            "final worker failure clears the combo without a half-applied boost");
+        owner.PendingLadderAttach = false; SetGrounded(owner);
+        Check(motion.Request(owner, SomersaultDirection.Forward), "failure reset allows a new grounded command");
+        owner.HasPhysicsBubble = false; motion.Update(owner);
+        Check(!motion.Active && motion.Owner is null, "loss of the native physics area clears pending combo ownership");
+        owner.HasPhysicsBubble = true; SetGrounded(owner); Program.PlayerTime = 3;
+        Launch(motion, owner);
+        Program.PlayerTime = 3.2; motion.Request(owner, SomersaultDirection.Forward);
+        owner.LocomotionState.Mode = owner.Worker.LocomotionState.Mode = LocomotionMode.Grounded;
+        velocity = owner.Kinematic.VelocityPhys;
+        Universe.PrepareVehicleWorkers(Step(.02, .04));
+        Check(!motion.Active && owner.Worker.Kinematic.VelocityPhys == velocity,
+            "landing between press and worker preparation discards the boost without adding momentum");
     }
 
     private static void HookTransformation()
