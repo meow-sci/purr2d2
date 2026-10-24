@@ -31,10 +31,6 @@ internal sealed partial class PartSliceTargeting
         return false;
     }
 
-    // Every caller supplies the visible blade length, including a blade still extending.
-    // Keep this allowance in one place so native hover and fallback rays share its boundary.
-    internal static double SelectionReach(double bladeLength) => bladeLength * 2;
-
     // Old durable fragment templates placed their complete pick mesh on the root.
     // Native Part.RayCastEgo visits only MeshView modules on SubParts. Repair each
     // instance during its constructor, before any PartTree owns the module lists.

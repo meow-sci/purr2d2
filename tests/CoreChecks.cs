@@ -72,6 +72,7 @@ internal static class CoreChecks
             "new preferences use a ten metre Angry Force radius and default control positions");
         Check(defaults.ClutterPickTolerance == .2f, "new preferences allow a twenty centimetre near miss on clutter");
         Check(defaults.ForceCaptureLimit == 128, "new preferences increase the combined Force capture limit to 128");
+        Check(defaults.SliceReachMultiplier == 2, "new preferences preserve the existing two-times assisted slice reach");
         Check(DefaultEffects(defaults.LightEffects, SaberType.Light) && DefaultEffects(defaults.DarkEffects, SaberType.Dark),
             "Light and Dark begin with distinct intentional effect profiles");
         Check(!ReferenceEquals(defaults.LightEffects, defaults.DarkEffects)
@@ -170,6 +171,14 @@ internal static class CoreChecks
             Check(settings.ClutterPickTolerance == expected,
                 "clutter tolerance preserves exact-only and boundary values, clamps extremes and restores nonfinite defaults");
         }
+        foreach (var (value, expected) in new[] { (-1f, 1f), (0f, 1f), (1f, 1f), (2f, 2f), (3.25f, 3.25f),
+            (4f, 4f), (99f, 4f), (float.NaN, 2f), (float.PositiveInfinity, 2f), (float.NegativeInfinity, 2f) })
+        {
+            settings.SliceReachMultiplier = value;
+            settings.Validate();
+            Check(settings.SliceReachMultiplier == expected,
+                "slice grace preserves 1x–4x settings, clamps finite extremes and restores nonfinite defaults");
+        }
 
         string directory = Path.Combine(Path.GetTempPath(), "purr2d2-checks-" + Guid.NewGuid().ToString("N"));
         string path = Path.Combine(directory, "settings.json");
@@ -178,6 +187,8 @@ internal static class CoreChecks
             Directory.CreateDirectory(directory);
             Check(DefaultEffects(SaberSettings.Load(path).DarkEffects, SaberType.Dark),
                 "a missing preferences file starts with Dark defaults");
+            Check(SaberSettings.Load(path).SliceReachMultiplier == 2,
+                "a missing preferences file retains the exact prior assisted selection allowance");
             File.WriteAllText(path, "{\"BladeLength\":0.85,\"GripX\":-13,\"GripY\":-8,\"GripZ\":18,\"AimX\":0.05,\"AimY\":0.8,\"AimZ\":0.6,\"FingerCurl\":0.2}");
             var explicitPreferences = SaberSettings.Load(path);
             Check(explicitPreferences.BladeLength == .85f && explicitPreferences.GripX == -13 && explicitPreferences.GripY == -8
@@ -195,6 +206,14 @@ internal static class CoreChecks
                 "legacy preferences acquire the clutter near-miss default without a migration");
             Check(explicitPreferences.ForceCaptureLimit == 128,
                 "legacy preferences acquire the higher Force capture limit without a migration");
+            Check(explicitPreferences.SliceReachMultiplier == 2
+                && SaberLimits.SliceSelectionReach(explicitPreferences.BladeLength, explicitPreferences.SliceReachMultiplier)
+                    == explicitPreferences.BladeLength * 2.0,
+                "legacy preferences retain exactly twice their saved visible blade length without a migration");
+            File.WriteAllText(path, "{\"SliceReachMultiplier\":9}");
+            Check(SaberSettings.Load(path).SliceReachMultiplier == 4, "loaded finite slice grace clamps to the UI maximum");
+            File.WriteAllText(path, "{\"SliceReachMultiplier\":-9}");
+            Check(SaberSettings.Load(path).SliceReachMultiplier == 1, "loaded finite slice grace clamps to the UI minimum");
             File.WriteAllText(path, "{\"LightEffects\":null,\"DarkEffects\":null}");
             var loaded = SaberSettings.Load(path);
             Check(DefaultEffects(loaded.LightEffects, SaberType.Light) && DefaultEffects(loaded.DarkEffects, SaberType.Dark)
@@ -221,6 +240,7 @@ internal static class CoreChecks
             settings.AngryForceRadius = 32.5f;
             settings.ClutterPickTolerance = .35f;
             settings.ForceCaptureLimit = 256;
+            settings.SliceReachMultiplier = 3.25f;
             settings.ForceControlsOffsetX = -.25f; settings.ForceControlsOffsetY = .125f;
             settings.SaberControlsOffsetX = .5f; settings.SaberControlsOffsetY = -.75f;
             settings.Save(path);
@@ -240,6 +260,7 @@ internal static class CoreChecks
                 "Angry Force radius and both control groups' normalized offsets survive save and reload");
             Check(loaded.ClutterPickTolerance == .35f, "custom clutter aim tolerance survives save and reload");
             Check(loaded.ForceCaptureLimit == 256, "the configured combined Force capture limit survives save and reload");
+            Check(loaded.SliceReachMultiplier == 3.25f, "custom assisted slice grace survives Save preferences and reload");
             using (var saved = JsonDocument.Parse(File.ReadAllText(path)))
                 Check(saved.RootElement.TryGetProperty("LightEffects", out _) && saved.RootElement.TryGetProperty("DarkEffects", out _)
                     && !saved.RootElement.TryGetProperty("ShimmerAmount", out _),

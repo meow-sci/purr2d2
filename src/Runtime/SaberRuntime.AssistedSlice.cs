@@ -21,13 +21,15 @@ internal sealed partial class SaberRuntime
     private string _sliceStatus = "";
     private bool SliceStatusVisible => _sliceStatus.Length > 0
         && (_selectingSlice || _sliceSequence.Active || _playerTime < _sliceMessageUntil);
-    // Targeting applies its 2x allowance to this visible length and the live hilt position.
+    // Hover, fallback selection and stroke-start revalidation share the same assisted allowance.
+    private double SliceReach => SaberLimits.SliceSelectionReach(Length, _settings.SliceReachMultiplier);
+
     private bool TrySliceReach(out double3 baseBody, out double reach, out string reason)
     {
-        baseBody = default; reach = Length;
-        reason = "Keep the lit saber visible to select a surface within twice its blade length.";
+        baseBody = default; reach = SliceReach;
+        reason = "Keep the lit saber visible to select a surface within the configured slice reach.";
         if (!_blade.Equipped || !_blade.TargetOn || !double.IsFinite(reach) || reach <= 0
-            || !_pose.TryGetBladeSegment(reach, out baseBody, out _)) return false;
+            || !_pose.TryGetBladeSegment(Length, out baseBody, out _)) return false;
         reason = "";
         return true;
     }
@@ -108,7 +110,7 @@ internal sealed partial class SaberRuntime
         }
         _slicer.Advance();
         _sliceError ??= _slicer.Error;
-        if (!_targeting.CheckSliceTarget(_owner, _sliceTarget, default, double.PositiveInfinity, out var refusal))
+        if (!_targeting.CheckPendingSliceTarget(_owner, _sliceTarget, out var refusal))
             _sliceError ??= refusal;
         double speed = Universe.GetSimulationSpeed();
         if (!SaberLimits.SupportsSpeed(speed)) return;
@@ -116,7 +118,7 @@ internal sealed partial class SaberRuntime
         if (!_sliceSequence.EndPresented && (!_freshPoseThisTick || !_pose.TryGetBladeSegment(Length, out bladeBaseBody, out _))) return;
         // Ignition or fallback picking may span frames: validate again at the start of the stroke.
         if (!_sliceSequence.Swinging && _sliceSequence.Progress == 0
-            && !_targeting.CheckSliceTarget(_owner, _sliceTarget, bladeBaseBody, Length, out refusal))
+            && !_targeting.CheckSliceTarget(_owner, _sliceTarget, bladeBaseBody, SliceReach, out refusal))
         { CancelAssistedSlice(refusal); _selectingSlice = true; return; }
 
         if (!_sliceSequence.EndPresented && !_sliceTarget.Vehicle.IsDisposed && Program.GetMainCamera() is { } camera)
@@ -164,7 +166,7 @@ internal sealed partial class SaberRuntime
         {
             if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
             // Reach was checked at the click and stroke start. Moving afterward does not undo the cut.
-            var result = _targeting.CommitAssistedSlice(_owner, _sliceTarget, default, double.PositiveInfinity, default);
+            var result = _targeting.CommitAcceptedSlice(_owner, _sliceTarget, default);
             CancelAssistedSlice((result.Success ? "Slice complete: " : "Slice failed: ") + result.Message);
         }
     }

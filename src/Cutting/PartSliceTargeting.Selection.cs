@@ -24,6 +24,7 @@ internal sealed partial class PartSliceTargeting
         public void Dispose() { Steps?.Dispose(); Steps = null; }
     }
 
+    // All selection entry points take the maximum hilt-to-hit distance in metres.
     internal Selection BeginSelection(KittenEva wielder, double3 rayOrigin, double3 rayDirection, double3 baseBody, double reach)
     {
         if (_wielder != wielder) { Reset(); _wielder = wielder; }
@@ -49,7 +50,6 @@ internal sealed partial class PartSliceTargeting
             || !ToPoint(rayOrigin).Finite || !ToPoint(rayDirection).Finite || rayDirection.LengthSquared() < .5
             || !ToPoint(baseBody).Finite || !double.IsFinite(reach) || reach <= 0) yield break;
         var origin = baseBody.Transform(wielder.Body2Ego) + camera.GetPositionEgo(wielder);
-        double selectionReach = SelectionReach(reach);
         double best = double.PositiveInfinity;
         int tests = 0, nodes = 0;
         var meshes = new List<MeshReference>();
@@ -58,7 +58,7 @@ internal sealed partial class PartSliceTargeting
         {
             if (item is not Vehicle vehicle || vehicle == wielder || vehicle is KittenEva || vehicle.IsDisposed || vehicle.IsEditedVehicle
                 || !ReferenceEquals(vehicle.Parent, wielder.Parent)) continue;
-            if ((camera.GetPositionEgo(vehicle) - origin).Length() > vehicle.BoundingSphereRadiusBody + selectionReach) continue;
+            if ((camera.GetPositionEgo(vehicle) - origin).Length() > vehicle.BoundingSphereRadiusBody + reach) continue;
             foreach (var full in vehicle.Parts.Parts.ToArray())
             {
                 if (full.IsAttachedInternal) continue;
@@ -75,7 +75,7 @@ internal sealed partial class PartSliceTargeting
                         if (mesh.PositionsCompare is not { } primitives) continue;
                         // Conservative world-space sphere avoids reading distant triangles.
                         double scale = Math.Max(Math.Abs(part.ScaleTotal.X), Math.Max(Math.Abs(part.ScaleTotal.Y), Math.Abs(part.ScaleTotal.Z)));
-                        if ((origin - double3.Zero.Transform(matrix)).Length() > mesh.BoundingSphereRadius * scale + selectionReach) continue;
+                        if ((origin - double3.Zero.Transform(matrix)).Length() > mesh.BoundingSphereRadius * scale + reach) continue;
                         foreach (var vertices in primitives)
                         {
                             if (vertices == null) continue;
@@ -136,24 +136,39 @@ internal sealed partial class PartSliceTargeting
         void Add(MeshReference? mesh) { if (mesh != null && !meshes.Contains(mesh)) meshes.Add(mesh); }
     }
 
+    // Reach is already the maximum hilt-to-hit distance in metres, including configured grace.
     internal bool CheckSliceTarget(KittenEva wielder, SliceTarget target, double3 baseBody, double reach, out string reason)
+    {
+        if (!CheckPendingSliceTarget(wielder, target, out reason)) return false;
+        var camera = Program.GetMainCamera()!;
+        var origin = baseBody.Transform(double4x4.CreateFromQuaternion(wielder.Body2Ego)) + camera.GetPositionEgo(wielder);
+        var hit = target.HitAssembly.Transform(target.Vehicle.GetMatrixAsmb2Ego(camera));
+        double distance = (hit - origin).Length();
+        if (!double.IsFinite(distance) || !double.IsFinite(reach) || reach <= 0 || distance > reach)
+        { reason = $"Selected point is {distance:F2} m from the hilt; slice reach is {reach:F2} m. Move closer or adjust Blade length or Slice grace / reach in Settings."; return false; }
+        return true;
+    }
+
+    // Accepted strokes may finish after moving out of reach, but never on stale geometry/ownership.
+    internal bool CheckPendingSliceTarget(KittenEva wielder, SliceTarget target, out string reason)
     {
         reason = "The selected part is no longer available.";
         if (_wielder != wielder || target.Vehicle.IsDisposed || target.Part.Tree?.OwningVehicle != target.Vehicle
             || !target.Part.MatrixAsmb2VehicleAsmb.Equals(target.PartTransform)
-            || Program.GetMainCamera() is not { } camera || Program.EditorFlag) return false;
-        var origin = baseBody.Transform(double4x4.CreateFromQuaternion(wielder.Body2Ego)) + camera.GetPositionEgo(wielder);
-        var hit = target.HitAssembly.Transform(target.Vehicle.GetMatrixAsmb2Ego(camera));
-        double distance = (hit - origin).Length();
-        double selectionReach = SelectionReach(reach);
-        if (!double.IsFinite(distance) || double.IsNaN(reach) || reach <= 0 || distance > selectionReach)
-        { reason = $"Selected point is {distance:F2} m from the hilt; slice reach is {selectionReach:F2} m (twice the visible blade length). Move closer or increase blade length."; return false; }
+            || Program.GetMainCamera() is not { } camera || Program.EditorFlag
+            || !ToPoint(target.HitAssembly.Transform(target.Vehicle.GetMatrixAsmb2Ego(camera))).Finite) return false;
         return CanCut(target.Part, out reason);
     }
 
     internal SliceAttempt CommitAssistedSlice(KittenEva wielder, SliceTarget target, double3 baseBody, double reach, SlicePlane plane)
     {
         if (!CheckSliceTarget(wielder, target, baseBody, reach, out string reason)) return new(false, reason);
+        return CommitAcceptedSlice(wielder, target, plane);
+    }
+
+    internal SliceAttempt CommitAcceptedSlice(KittenEva wielder, SliceTarget target, SlicePlane plane)
+    {
+        if (!CheckPendingSliceTarget(wielder, target, out string reason)) return new(false, reason);
         var result = SliceHandler?.Invoke(target.Part, plane) ?? new(false, "Slicing is unavailable.");
         Status = result.Message;
         if (result.Success) SlicedParts++;

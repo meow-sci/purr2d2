@@ -102,19 +102,26 @@ internal sealed partial class SaberRuntime
 
     private void DrawSaberAppearanceSettings()
     {
-        if (!BeginSaberSettingsTable("##SaberAppearance")) return;
+        if (!BeginSaberSettingsTable("##SaberAppearance", "Slice grace / reach")) return;
         bool changed = false;
-        float length = _settings.BladeLength, volume = _settings.Volume;
+        float length = _settings.BladeLength, volume = _settings.Volume, sliceReach = _settings.SliceReachMultiplier;
         try
         {
             SaberSettingsRow("Blade length");
             changed |= ImGui.SliderFloat("##BladeLength", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m");
+            SaberSettingsRow("Slice grace / reach");
+            changed |= ImGui.SliderFloat("##SliceReachMultiplier", ref sliceReach,
+                SaberLimits.MinimumSliceReachMultiplier, SaberLimits.MaximumSliceReachMultiplier, "%.2fx");
+            ShowSaberControlTip("Maximum selection distance = visible blade length x this value; 1x adds no extra grace. Applies to assisted SLICE selection before the stroke starts. Use Save preferences to keep changes.");
+            double visibleLength = _blade.Deployment * length;
+            ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(length, sliceReach):F2} m fully extended.");
             SaberSettingsRow("Sound volume");
             changed |= ImGui.SliderFloat("##SoundVolume", ref volume, 0, 1, "%.2f");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.BladeLength = length;
+        _settings.SliceReachMultiplier = sliceReach;
         _settings.Volume = volume;
         _settings.Validate();
         _preferencesSavedUntil = 0;

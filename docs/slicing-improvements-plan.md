@@ -1,6 +1,6 @@
 # Quiet breakup, repeat slicing, reach settings and manual contact
 
-Research and implementation plan, 2026-10-23. Sections 1 and 2 now have implementation revisions recorded in `docs/ACCEPTANCE.md`; the remaining sections retain their planned scope.
+Research and implementation plan, 2026-10-23. Sections 1, 2 and 3 now have implementation revisions recorded in `docs/ACCEPTANCE.md`; section 4 retains its planned scope.
 
 Baseline: Purr2D2 commit `8919257b3debed0d73092b3b4aadb418a96465ea`; local KSA sources/build `2026.10.19.5638`. Three GPT-6.1-sol / xhigh research agents examined breakup, mesh precision and manual contact. The KSA modding skill supplied lifecycle guidance; member names were checked against the newer local game sources. Existing documentation that says contact cutting is retired describes the old behavior; this request intentionally changes that policy for manual swings.
 
@@ -94,7 +94,9 @@ Additional constraints from the audit:
 
 ### Existing behavior
 
-`src/Cutting/PartSliceTargeting.cs:36` defines `SelectionReach(bladeLength) => bladeLength * 2`. `PartSliceTargeting.Selection.cs:52,148` uses it for both fallback selection and eligibility. `SaberRuntime.AssistedSlice.cs:25–32` supplies deployed, visible length; selection and stroke-start checks use the live hilt and the selected surface point. It is not currently a fixed meter allowance.
+Before this revision, `PartSliceTargeting.SelectionReach(bladeLength)` multiplied the visible length by 2 internally. Native hover, fallback selection and stroke-start checks used the live hilt and selected surface point. The allowance was proportional to deployment rather than a fixed metre offset.
+
+Implemented: `SaberLimits.SliceSelectionReach(visibleLength, multiplier)` now computes the maximum distance once for each runtime check. Targeting accepts that explicit distance in metres for native hover, fallback broadphase and live selected-point validation. Settings persists `SliceReachMultiplier`, defaults to 2× and clamps finite values to 1–4×; nonfinite multipliers recover 2×. The visible Settings row shows current and fully extended reach, applies edits immediately, and uses the existing Save preferences action. An accepted stroke uses explicit ownership/geometry validation without an infinite reach sentinel, and still finishes after movement. Physical contact and Force tolerance are unchanged.
 
 ### Implementation
 
