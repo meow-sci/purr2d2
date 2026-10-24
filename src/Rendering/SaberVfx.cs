@@ -11,7 +11,7 @@ internal readonly record struct SaberVfxTuning(float ShimmerAmount, float Shimme
 {
     internal static SaberVfxTuning Default => new(1, 1, 3, 1, 1, 1, 1);
     internal static SaberVfxTuning LightDefault => new(1.5f, 1.5f, 8, 3, .8f, 2.5f, 1.75f);
-    internal static SaberVfxTuning DarkDefault => new(1.5f, 1.5f, 12, 6, 2.5f, 4, 3);
+    internal static SaberVfxTuning DarkDefault => new(1.5f, 1.5f, 12, 6, 1.45f, 3.5f, 1.9f);
 
     internal static SaberVfxTuning FromEffects(SaberEffectSettings effects, SaberType type) =>
         new SaberVfxTuning(effects.ShimmerAmount, effects.ShimmerSpeed, effects.ArcCount,

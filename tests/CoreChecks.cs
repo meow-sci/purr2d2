@@ -103,8 +103,8 @@ internal static class CoreChecks
         };
         invalidDark.Validate(SaberType.Dark);
         Check(invalidDark.ShimmerAmount == 1.5f && invalidDark.ShimmerSpeed == 1.5f && invalidDark.ArcCount == 0
-            && invalidDark.ArcFrequency == .1f && invalidDark.ArcAmplitude == 2.5f
-            && invalidDark.ArcBrightness == 4 && invalidDark.ArcWidth == 3,
+            && invalidDark.ArcFrequency == .1f && invalidDark.ArcAmplitude == 1.45f
+            && invalidDark.ArcBrightness == 3.5f && invalidDark.ArcWidth == 1.9f,
             "Dark's nonfinite controls recover Dark defaults and zero arc count remains disabled");
         var maximumEffects = new SaberEffectSettings
         {
@@ -209,7 +209,7 @@ internal static class CoreChecks
             Check(DefaultEffects(explicitPreferences.LightEffects, SaberType.Light)
                 && DefaultEffects(explicitPreferences.DarkEffects, SaberType.Dark),
                 "legacy JSON without profiles acquires the distinct Light and Dark defaults");
-            Check(explicitPreferences.DarkEffects.SparkCount == 4 && explicitPreferences.DarkEffects.SparkLifetime == .45f,
+            Check(explicitPreferences.DarkEffects.SparkCount == 8 && explicitPreferences.DarkEffects.SparkLifetime == .25f,
                 "old preferences acquire the new Dark spark defaults");
             Check(explicitPreferences.AngryForceRadius == 10 && explicitPreferences.ForceControlsOffsetX == 0
                 && explicitPreferences.ForceControlsOffsetY == 0 && explicitPreferences.SaberControlsOffsetX == 0
@@ -277,9 +277,9 @@ internal static class CoreChecks
                 && loaded.DarkEffects.SparkLifetime == .6f && loaded.DarkEffects.SparkSpeed == 2.5f,
                 "all six Dark spark controls survive preferences save and reload");
             loaded.DarkEffects.Reset(SaberType.Dark);
-            Check(loaded.DarkEffects.SparkCount == 4 && loaded.DarkEffects.SparkFrequency == 4
-                && loaded.DarkEffects.SparkSize == 1 && loaded.DarkEffects.SparkBrightness == 1
-                && loaded.DarkEffects.SparkLifetime == .45f && loaded.DarkEffects.SparkSpeed == 1,
+            Check(loaded.DarkEffects.SparkCount == 8 && loaded.DarkEffects.SparkFrequency == 7.2f
+                && loaded.DarkEffects.SparkSize == .9f && loaded.DarkEffects.SparkBrightness == 2.1f
+                && loaded.DarkEffects.SparkLifetime == .25f && loaded.DarkEffects.SparkSpeed == 1.35f,
                 "reset Dark effects restores all spark controls");
             Check(loaded.AngryForceRadius == 32.5f && loaded.ForceControlsOffsetX == -.25f && loaded.ForceControlsOffsetY == .125f
                 && loaded.SaberControlsOffsetX == .5f && loaded.SaberControlsOffsetY == -.75f,
@@ -427,7 +427,7 @@ internal static class CoreChecks
 
     private static bool DefaultEffects(SaberEffectSettings settings, SaberType type) => type == SaberType.Dark
         ? settings.ShimmerAmount == 1.5f && settings.ShimmerSpeed == 1.5f && settings.ArcCount == 12
-            && settings.ArcFrequency == 6 && settings.ArcAmplitude == 2.5f && settings.ArcBrightness == 4 && settings.ArcWidth == 3
+            && settings.ArcFrequency == 6 && settings.ArcAmplitude == 1.45f && settings.ArcBrightness == 3.5f && settings.ArcWidth == 1.9f
         : settings.ShimmerAmount == 1.5f && settings.ShimmerSpeed == 1.5f && settings.ArcCount == 8
             && settings.ArcFrequency == 3 && settings.ArcAmplitude == .8f && settings.ArcBrightness == 2.5f && settings.ArcWidth == 1.75f;
 

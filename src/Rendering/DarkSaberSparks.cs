@@ -10,11 +10,11 @@ internal readonly record struct DarkSaberSparkTuning(int Count, float Frequency,
     internal const int MaximumSources = 32;
     internal static DarkSaberSparkTuning FromEffects(SaberEffectSettings effects) => new(
         Math.Clamp(effects.SparkCount, 0, SaberSettings.MaximumSparkCount),
-        SaberVfx.Clamp(effects.SparkFrequency, 0, SaberSettings.MaximumSparkFrequency, 4),
-        SaberVfx.Clamp(effects.SparkSize, .25f, 3, 1),
-        SaberVfx.Clamp(effects.SparkBrightness, 0, 4, 1),
-        SaberVfx.Clamp(effects.SparkLifetime, .1f, .8f, .45f),
-        SaberVfx.Clamp(effects.SparkSpeed, .25f, 3, 1));
+        SaberVfx.Clamp(effects.SparkFrequency, 0, SaberSettings.MaximumSparkFrequency, 7.2f),
+        SaberVfx.Clamp(effects.SparkSize, .25f, 3, .9f),
+        SaberVfx.Clamp(effects.SparkBrightness, 0, 4, 2.1f),
+        SaberVfx.Clamp(effects.SparkLifetime, .1f, .8f, .25f),
+        SaberVfx.Clamp(effects.SparkSpeed, .25f, 3, 1.35f));
 
     internal bool Enabled => Count > 0 && Frequency > 0 && Brightness > 0;
 

@@ -266,13 +266,13 @@ internal static class SaberVfxChecks
     {
         var effects = SaberEffectSettings.Create(SaberType.Dark);
         var tuning = DarkSaberSparkTuning.FromEffects(effects);
-        Check(tuning == new DarkSaberSparkTuning(4, 4, 1, 1, .45f, 1) && tuning.Enabled,
-            "default Dark sparks use four small short-lived embers four times per second");
+        Check(tuning == new DarkSaberSparkTuning(8, 7.2f, .9f, 2.1f, .25f, 1.35f) && tuning.Enabled,
+            "default Dark sparks use eight short-lived embers at 7.2 bursts per second with the configured size, brightness, and speed");
         effects.SparkCount = int.MaxValue; effects.SparkFrequency = float.MaxValue;
         effects.SparkSize = float.NaN; effects.SparkBrightness = -1;
         effects.SparkLifetime = float.PositiveInfinity; effects.SparkSpeed = 99;
         effects.Validate(SaberType.Dark);
-        Check(DarkSaberSparkTuning.FromEffects(effects) == new DarkSaberSparkTuning(8, 12, 1, 0, .45f, 3),
+        Check(DarkSaberSparkTuning.FromEffects(effects) == new DarkSaberSparkTuning(8, 12, .9f, 0, .25f, 3),
             "invalid spark settings cannot exceed the supported emission and size bounds");
         Check(DarkSaberSparkTuning.MaximumBursts * SaberSettings.MaximumSparkCount == 128,
             "all kittens and viewports share a hard ceiling of 128 live sparks");

@@ -38,13 +38,15 @@ public sealed class SaberEffectSettings
         ShimmerSpeed = 1.5f;
         ArcCount = dark ? 12 : 8;
         ArcFrequency = dark ? 6 : 3;
-        ArcAmplitude = dark ? 2.5f : .8f;
-        ArcBrightness = dark ? 4 : 2.5f;
-        ArcWidth = dark ? 3 : 1.75f;
-        SparkCount = 4;
-        SparkFrequency = 4;
-        SparkSize = SparkBrightness = SparkSpeed = 1;
-        SparkLifetime = .45f;
+        ArcAmplitude = dark ? 1.45f : .8f;
+        ArcBrightness = dark ? 3.5f : 2.5f;
+        ArcWidth = dark ? 1.9f : 1.75f;
+        SparkCount = dark ? 8 : 4;
+        SparkFrequency = dark ? 7.2f : 4;
+        SparkSize = dark ? .9f : 1;
+        SparkBrightness = dark ? 2.1f : 1;
+        SparkLifetime = dark ? .25f : .45f;
+        SparkSpeed = dark ? 1.35f : 1;
     }
 
     public void Validate(SaberType type)
@@ -54,15 +56,15 @@ public sealed class SaberEffectSettings
         ShimmerSpeed = Clamp(ShimmerSpeed, 0, 4, 1.5f);
         ArcCount = Math.Clamp(ArcCount, 0, SaberSettings.MaximumArcCount);
         ArcFrequency = Clamp(ArcFrequency, .1f, SaberSettings.MaximumArcFrequency, dark ? 6 : 3);
-        ArcAmplitude = Clamp(ArcAmplitude, 0, 3, dark ? 2.5f : .8f);
-        ArcBrightness = Clamp(ArcBrightness, 0, SaberSettings.MaximumArcBrightness, dark ? 4 : 2.5f);
-        ArcWidth = Clamp(ArcWidth, .25f, SaberSettings.MaximumArcWidth, dark ? 3 : 1.75f);
+        ArcAmplitude = Clamp(ArcAmplitude, 0, 3, dark ? 1.45f : .8f);
+        ArcBrightness = Clamp(ArcBrightness, 0, SaberSettings.MaximumArcBrightness, dark ? 3.5f : 2.5f);
+        ArcWidth = Clamp(ArcWidth, .25f, SaberSettings.MaximumArcWidth, dark ? 1.9f : 1.75f);
         SparkCount = Math.Clamp(SparkCount, 0, SaberSettings.MaximumSparkCount);
-        SparkFrequency = Clamp(SparkFrequency, 0, SaberSettings.MaximumSparkFrequency, 4);
-        SparkSize = Clamp(SparkSize, .25f, 3, 1);
-        SparkBrightness = Clamp(SparkBrightness, 0, 4, 1);
-        SparkLifetime = Clamp(SparkLifetime, .1f, .8f, .45f);
-        SparkSpeed = Clamp(SparkSpeed, .25f, 3, 1);
+        SparkFrequency = Clamp(SparkFrequency, 0, SaberSettings.MaximumSparkFrequency, dark ? 7.2f : 4);
+        SparkSize = Clamp(SparkSize, .25f, 3, dark ? .9f : 1);
+        SparkBrightness = Clamp(SparkBrightness, 0, 4, dark ? 2.1f : 1);
+        SparkLifetime = Clamp(SparkLifetime, .1f, .8f, dark ? .25f : .45f);
+        SparkSpeed = Clamp(SparkSpeed, .25f, 3, dark ? 1.35f : 1);
     }
 
     private static float Clamp(float value, float min, float max, float fallback) =>
