@@ -26,7 +26,7 @@ internal static class SliceGeometryWork
     internal static CpuSlice Calculate(SliceInput input, CancellationToken cancel, Action<SlicePlan> publish)
     {
         cancel.ThrowIfCancellationRequested();
-        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel))
+        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel, input.GeneratedClosedGeometry))
         {
             if (QuietSubpartBreakup.TryBuild(input, out var authored, out var authoredFailure, cancel))
             { publish(new(authored!.Plane)); return authored with { FacetFallback = reason }; }

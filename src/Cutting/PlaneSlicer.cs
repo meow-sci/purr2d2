@@ -63,29 +63,37 @@ internal static class PlaneSlicer
             Require(authoredGroups.Count > 0 && authoredGroups.Count <= 2048, "Authored compound group count exceeds the runtime budget.");
             int triangleCount = authoredGroups.Sum(x => x.Length);
             Require(triangleCount >= 4 && triangleCount <= MaximumSourceFaces, "Compound source triangle count is outside the slicing budget.");
-            var allPoints = authoredGroups.SelectMany(x => x).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
+            // Audit once with each group's own topology policy. Canonical seams
+            // before choosing the one common plane, including carried-through solids.
+            var prepared = new List<(SliceFace[] Faces, List<List<int>> Components, double Epsilon)>();
+            foreach (var group in authoredGroups)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                Require(TryAudit(group, out _, out var components, out var auditFailure),
+                    $"Compound input group {prepared.Count} is not a valid solid: " + auditFailure);
+                prepared.Add((CanonicalPositions(group), components, TopologyTolerance(group)));
+            }
+            var allPoints = prepared.SelectMany(x => x.Faces).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
             Require(allPoints.All(x => x.Finite), "Compound source has nonfinite positions.");
             var min = allPoints.Aggregate(new CutPoint(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity), CutPoint.Min);
             var max = allPoints.Aggregate(new CutPoint(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity), CutPoint.Max);
             double diagonal = (max - min).Length;
             Require(double.IsFinite(diagonal) && diagonal > 1e-7 && diagonal < 1e7, "Compound bounds are outside supported precision.");
-            double epsilon = Math.Max(1e-9, diagonal * 1e-8);
+            double epsilon = Math.Max(Math.Max(1e-9, diagonal * 1e-8), prepared.Max(g => g.Epsilon));
             var effectivePlane = StablePlane(allPoints, plane, epsilon);
             var positive = new List<SliceFace>(); var negative = new List<SliceFace>();
             var positiveSolids = new List<SliceFace[]>(); var negativeSolids = new List<SliceFace[]>();
             double sourceVolume = 0; int contours = 0, holes = 0, solidCount = 0;
-            foreach (var group in authoredGroups)
+            foreach (var (group, boundaryComponents, topologyEpsilon) in prepared)
             {
                 cancellation.ThrowIfCancellationRequested();
-                Require(TryAudit(group, out _, out var auditFailure), "Authored compound group is not a valid solid: " + auditFailure);
-                Audit(group, epsilon, out var boundaryComponents);
                 var shells = boundaryComponents.Select(c => c.Select(i => group[i]).ToArray()).ToArray();
                 var properties = shells.Select(Properties).ToArray();
                 var solids = new List<(List<SliceFace> Faces, double OuterVolume)>();
                 var cavities = new List<int>();
                 for (int i = 0; i < shells.Length; i++)
                 {
-                    Require(Math.Abs(properties[i].Volume) > epsilon * epsilon * epsilon * 100, "Compound contains a zero-volume shell.");
+                    Require(Math.Abs(properties[i].Volume) > topologyEpsilon * topologyEpsilon * topologyEpsilon * 100, "Compound contains a zero-volume shell.");
                     if (properties[i].Volume > 0) solids.Add((shells[i].ToList(), properties[i].Volume));
                     else cavities.Add(i);
                 }
@@ -103,7 +111,7 @@ internal static class PlaneSlicer
                     cancellation.ThrowIfCancellationRequested();
                     Require(++solidCount <= 2048, "Compound contains too many independent closed solids.");
                     var faces = solid.Faces.ToArray(); var props = Properties(faces);
-                    Require(props.Volume > epsilon * epsilon * epsilon * 100, "Compound solid has nonpositive material volume.");
+                    Require(props.Volume > topologyEpsilon * topologyEpsilon * topologyEpsilon * 100, "Compound solid has nonpositive material volume.");
                     sourceVolume += props.Volume;
                     double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
                     foreach (var face in faces)
@@ -116,8 +124,9 @@ internal static class PlaneSlicer
                     else if (hi < 0) { negative.AddRange(faces); negativeSolids.Add(faces); }
                     else
                     {
-                        Require(TrySlice(faces, effectivePlane, out var sliced, out var sliceFailure, capMaterial),
-                            "Closed compound solid cannot be sliced: " + sliceFailure);
+                        PlaneSliceResult sliced;
+                        try { sliced = new Operation(faces, effectivePlane, capMaterial, fixedPlane: true).Run(); }
+                        catch (SliceRejected error) { throw new SliceRejected("Closed compound solid cannot be sliced: " + error.Message); }
                         Require(sliced != null && (sliced.EffectivePlane.Normal - effectivePlane.Normal).Length < 1e-12
                             && Math.Abs(sliced.EffectivePlane.Offset - effectivePlane.Offset) < epsilon,
                             "Compound slice cannot use one consistent cutting plane.");
@@ -159,8 +168,11 @@ internal static class PlaneSlicer
         failure = ""; return double.IsFinite(volume) && volume > 0;
     }
     public static bool TryAudit(IReadOnlyList<SliceFace> faces, out double volume, out string failure)
+        => TryAudit(faces, out volume, out _, out failure);
+
+    private static bool TryAudit(IReadOnlyList<SliceFace> faces, out double volume, out List<List<int>> components, out string failure)
     {
-        volume = 0;
+        volume = 0; components = [];
         try
         {
             Require(faces.Count >= 4 && faces.Count <= MaximumOutputFaces, "Generated mesh triangle count is outside the audit budget.");
@@ -174,25 +186,49 @@ internal static class PlaneSlicer
                 }
             double diagonal = (max - min).Length;
             Require(double.IsFinite(diagonal) && diagonal > 1e-7 && diagonal < 1e7, "Generated bounds are degenerate or outside supported precision.");
-            double epsilon = Math.Max(1e-9, diagonal * 1e-8);
+            double epsilon = TopologyTolerance(faces);
             foreach (var face in faces)
                 Require(CutPoint.Cross(face.B.Position - face.A.Position, face.C.Position - face.A.Position).Length > epsilon * epsilon,
                     "Generated mesh contains degenerate triangles.");
-            Audit(faces, epsilon, out _);
+            Audit(faces, epsilon, out components);
             var properties = Properties(faces);
             Require(properties.Volume > epsilon * epsilon * epsilon * 100, "Generated mesh has nonpositive solid volume.");
+            Require(properties.Inertia.XX > 0 && properties.Inertia.YY > 0 && properties.Inertia.ZZ > 0
+                && double.IsFinite(properties.Inertia.XX + properties.Inertia.YY + properties.Inertia.ZZ), "Generated mesh has invalid inertia.");
+            var shells = components.Select(c => c.Select(i => faces[i]).ToArray()).ToArray();
+            var shellVolumes = shells.Select(s => Properties(s).Volume).ToArray();
+            for (int i = 0; i < shells.Length; i++)
+            {
+                Require(Math.Abs(shellVolumes[i]) > epsilon * epsilon * epsilon * 100, "Generated mesh has a zero-volume shell.");
+                if (shellVolumes[i] < 0)
+                    Require(Enumerable.Range(0, shells.Length).Any(j => shellVolumes[j] > 0 && ContainsSolid(shells[j], shells[i][0].A.Position)),
+                        "Generated inward shell has no enclosing solid.");
+            }
             volume = properties.Volume; failure = ""; return true;
         }
         catch (SliceRejected error) { failure = error.Message; return false; }
+    }
+
+    internal static double TopologyTolerance(IReadOnlyList<SliceFace> faces)
+    {
+        // Radius around the vertex mean is invariant under rotation. Unique,
+        // sorted points also remove tessellation weighting and face-order drift.
+        var points = faces.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct()
+            .OrderBy(p => p.X).ThenBy(p => p.Y).ThenBy(p => p.Z).ToArray();
+        if (points.Length == 0) return 1e-9;
+        var origin = points[0]; var sum = default(CutPoint);
+        foreach (var point in points) sum += point - origin;
+        var center = origin + sum / points.Length;
+        return Math.Max(1e-9, points.Max(p => (p - center).Length) * 2e-8);
     }
 
     /// <summary>Give accepted epsilon-welded seams one exact position before further subdivision.</summary>
     internal static SliceFace[] CanonicalPositions(IReadOnlyList<SliceFace> faces)
     {
         var points = faces.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
-        var min = points.Aggregate(CutPoint.Min); var max = points.Aggregate(CutPoint.Max);
         var positions = new List<CutPoint>();
-        var weld = new PositionWeld(Math.Max(1e-9, (max - min).Length * 1e-8), positions);
+        var weld = new PositionWeld(TopologyTolerance(faces), positions);
+        foreach (var point in points.Distinct().OrderBy(p => p.X).ThenBy(p => p.Y).ThenBy(p => p.Z)) weld.Add(point);
         SliceVertex Convert(SliceVertex vertex) => vertex with { Position = positions[weld.Add(vertex.Position)] };
         return faces.Select(f => new SliceFace(Convert(f.A), Convert(f.B), Convert(f.C), f.Material)).ToArray();
     }
@@ -218,6 +254,7 @@ internal static class PlaneSlicer
         private readonly IReadOnlyList<SliceFace> _input;
         private readonly SlicePlane _requested;
         private readonly int _capMaterial;
+        private readonly bool _fixedPlane;
         private readonly List<IndexedFace> _source = new();
         private readonly List<CutPoint> _positions = new();
         private readonly Dictionary<Edge, int> _intersectionByEdge = new();
@@ -234,8 +271,8 @@ internal static class PlaneSlicer
         private CutPoint _u, _v;
         private SlicePlane _plane;
 
-        public Operation(IReadOnlyList<SliceFace> input, SlicePlane plane, int capMaterial)
-        { _input = input; _requested = plane; _capMaterial = capMaterial; }
+        public Operation(IReadOnlyList<SliceFace> input, SlicePlane plane, int capMaterial, bool fixedPlane = false)
+        { _input = input; _requested = plane; _capMaterial = capMaterial; _fixedPlane = fixedPlane; }
 
         public PlaneSliceResult Run()
         {
@@ -251,8 +288,10 @@ internal static class PlaneSlicer
                 }
             double diagonal = (maximum - minimum).Length;
             Require(double.IsFinite(diagonal) && diagonal > 1e-7 && diagonal < 1e7, "Source bounds are degenerate or outside supported precision.");
-            _epsilon = Math.Max(1e-9, diagonal * 1e-8);
+            _epsilon = TopologyTolerance(_input);
             var weld = new PositionWeld(_epsilon, _positions);
+            foreach (var point in _input.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct()
+                .OrderBy(p => p.X).ThenBy(p => p.Y).ThenBy(p => p.Z)) weld.Add(point);
             foreach (var face in _input)
             {
                 int a = weld.Add(face.A.Position), b = weld.Add(face.B.Position), c = weld.Add(face.C.Position);
@@ -330,7 +369,7 @@ internal static class PlaneSlicer
 
         private void ChoosePlane()
         {
-            _plane = StablePlane(_positions, _requested, _epsilon);
+            _plane = _fixedPlane ? _requested : StablePlane(_positions, _requested, _epsilon);
             var normal = _plane.Normal;
             var reference = Math.Abs(normal.X) < .8 ? new CutPoint(1, 0, 0) : new CutPoint(0, 1, 0);
             _u = CutPoint.Cross(reference, normal).Normalized;
@@ -626,12 +665,14 @@ internal static class PlaneSlicer
     private static void Audit(IReadOnlyList<SliceFace> faces, double epsilon, out List<List<int>> components)
     {
         var positions = new List<CutPoint>(); var weld = new PositionWeld(epsilon, positions);
+        foreach (var point in faces.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).Distinct()
+            .OrderBy(p => p.X).ThenBy(p => p.Y).ThenBy(p => p.Z)) weld.Add(point);
         var edges = new Dictionary<Edge, (int Count, int Direction, int FirstFace)>();
         var adjacency = Enumerable.Range(0, faces.Count).Select(_ => new List<int>()).ToArray();
         for (int i = 0; i < faces.Count; i++)
         {
             var f = faces[i]; int a = weld.Add(f.A.Position), b = weld.Add(f.B.Position), c = weld.Add(f.C.Position);
-            Require(a != b && a != c && b != c, "Mesh contains welded degenerate triangles.");
+            Require(a != b && a != c && b != c, $"Mesh contains welded degenerate triangles (face {i}, tolerance {epsilon:R} m, shortest edge {Math.Min((f.A.Position - f.B.Position).Length, Math.Min((f.B.Position - f.C.Position).Length, (f.C.Position - f.A.Position).Length)):R} m).");
             Add(a, b, i); Add(b, c, i); Add(c, a, i);
         }
         foreach (var edge in edges)

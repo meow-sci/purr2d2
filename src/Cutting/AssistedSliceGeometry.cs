@@ -159,8 +159,7 @@ internal static class FacetedSliceGeometry
     private static SliceFace[] Split(SliceFace[] source, Profile profile, CancellationToken cancel)
     {
         var current = PlaneSlicer.CanonicalPositions(source);
-        var bounds = current.SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
-        double epsilon = Math.Max(1e-9, (bounds.Aggregate(CutPoint.Max) - bounds.Aggregate(CutPoint.Min)).Length * 1e-8);
+        double epsilon = PlaneSlicer.TopologyTolerance(current);
         // One shared intersection position per geometric edge, including UV seams.
         foreach (double knot in profile.Knots.Skip(1).SkipLast(1))
         {

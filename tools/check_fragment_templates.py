@@ -60,7 +60,7 @@ ET.SubElement(items, 'PackageReference', Include='Lib.Harmony', Version='2.4.2')
 ET.SubElement(items, 'PackageReference', Include='Microsoft.Extensions.Logging.Abstractions', Version='10.0.0')
 for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentTopology.cs',
-               'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/SliceShellBuilder.cs',
+               'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/ClosedMeshPreparation.cs', 'src/Cutting/SliceShellBuilder.cs',
                'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs',
                'src/Slicing/QuietSliceQuiescence.cs', 'tests/QuietSliceHooksChecks.cs',
                'src/Slicing/SliceColliderGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',

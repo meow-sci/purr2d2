@@ -39,6 +39,23 @@ internal static class ShellSliceChecks
             && PlaneSlicer.TryAuditCompound(repaired, out _, out _), "float export stitches collapsed edges into a closed surface: " + reason);
         Check(!SliceMeshPrecision.TryPrepare(junctionPiece with { Faces = original.Skip(1).ToArray() }, double4x4.Identity, out _, out _, out _),
             "precision repair refuses a missing surface instead of filling arbitrary holes");
+        Check(SliceShellBuilder.TryPrepare([junction], out var repairedInput, out reason, generatedClosedGeometry: true)
+            && PlaneSlicer.TryAuditCompound(repairedInput, out var repairedVolume, out _) && Math.Abs(repairedVolume - properties.Volume) < 1e-10,
+            "generated input reuses closed-edge repair without adding backing: " + reason);
+        var translated = junction.Select(f => new SliceFace(Move(f.A), Move(f.B), Move(f.C), f.Material)).ToArray();
+        SliceVertex Move(SliceVertex v) => v with { Position = v.Position + new CutPoint(100_000, -200_000, 300_000) };
+        Check(SliceShellBuilder.TryPrepare([translated], out var localRepair, out reason, generatedClosedGeometry: true)
+            && PlaneSlicer.TryAuditCompound(localRepair, out var movedVolume, out _) && Math.Abs(movedVolume - properties.Volume) < 1e-9,
+            "translated generated T-junction repair uses bounded local tolerance and double positions: " + reason);
+        Check(!SliceShellBuilder.TryPrepare([panel], out _, out reason, generatedClosedGeometry: true)
+            && reason.Contains("Generated solid"), "damaged generated geometry is never reinterpreted as an authored panel");
+        foreach (var invalid in new[] { original.Skip(1).ToArray(), original.Concat([original[0]]).ToArray(), original.Concat(original).ToArray() })
+            Check(!SliceShellBuilder.TryPrepare([invalid], out _, out _, generatedClosedGeometry: true),
+                "generated closed-input repair refuses holes, nonmanifold edges and duplicate shells");
+        var collapsed = original.Select(f => new SliceFace(Flatten(f.A), Flatten(f.B), Flatten(f.C), f.Material)).ToArray();
+        SliceVertex Flatten(SliceVertex v) => v with { Position = new(v.Position.X, v.Position.Y, 1e-50 * v.Position.Z) };
+        Check(!SliceMeshPrecision.TryPrepare(junctionPiece with { Faces = collapsed }, double4x4.Identity, out _, out _, out _),
+            "irrecoverable float32 thickness collapse refuses publication");
         var damaged = panel.Select(f => f with { A = f.A with { Position = new(double.NaN, 0, 0) } }).ToArray();
         Check(!SliceShellBuilder.TryPrepare([damaged], out _, out _), "nonfinite art is refused before asset creation");
         Console.WriteLine("PASS: open shell preparation and native mesh precision checks");

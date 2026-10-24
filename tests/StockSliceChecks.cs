@@ -65,24 +65,16 @@ internal static class StockSliceChecks
                 {
                     var reload = Reload(asset) with { Seed = 731 };
                     double beforeVolume = reload.Groups.Sum(s => PlaneSlicer.Properties(s).Volume);
-                    // This stock model has an existing global-weld precision limit,
-                    // reproduced with the committed per-solid exporter as well.
-                    // Classify only that exact production input-audit rejection.
-                    var auditPlane = AssistedSliceGeometry.Candidates(reload.Groups, reload.Axes, reload.Seed).First();
-                    if (!PlaneSlicer.TrySliceCompound(reload.Groups, auditPlane, out _, out var auditFailure)
-                        && auditFailure == "Mesh contains welded degenerate triangles.")
-                    {
-                        Console.WriteLine($"KNOWN LIMITATION: {fixture.Name} reloaded half input audit refuses recut: {auditFailure} (same with legacy per-solid export)");
-                        continue;
-                    }
                     var recut = SliceGeometryWork.Calculate(reload, CancellationToken.None, _ => { });
+                    if (recut.AuthoredSubpartFallback) throw new Exception("Generated fragment recut used authored breakup fallback");
                     double afterVolume = recut.Fragments.Sum(a => Reload(a).Groups.Sum(s => PlaneSlicer.Properties(s).Volume));
                     if (recut.Fragments.Length != 2 || Math.Abs(afterVolume - beforeVolume) > beforeVolume * .0006
                         || Math.Abs(recut.Fragments.Sum(a => a.MassKg) - reload.MassKg) > .001)
                         throw new Exception("Merged service-module reload/recut lost closed-solid volume or mass");
                     completed++;
                 }
-                Console.WriteLine($"INFO: {fixture.Name} merged XML/GLB reload preserved topology; {completed}/2 successful recuts, {2 - completed}/2 known input-audit precision limits");
+                if (completed != 2) throw new Exception("Both exported HeightB halves must recut successfully");
+                Console.WriteLine($"PASS: {fixture.Name} merged XML/GLB reload preserved topology; {completed}/2 successful recuts");
             }
             if (!SliceShellBuilder.TryPrepare(groups, out var solids, out var reason))
                 throw new Exception(fixture.Name + " shell preparation: " + reason);
@@ -154,7 +146,7 @@ internal static class StockSliceChecks
                 foreach (var asset in cpu.Fragments)
                 {
                     var reload = Reload(asset);
-                    if (!SliceShellBuilder.TryPrepare(reload.Groups, out var solids, out string reason)
+                    if (!SliceShellBuilder.TryPrepare(reload.Groups, out var solids, out string reason, generatedClosedGeometry: true)
                         || !PlaneSlicer.TryAuditCompound(solids, out _, out reason))
                         throw new Exception("Generated tank asset is not resliceable after XML/GLB reload: " + reason);
                     next.Add(reload);
@@ -255,7 +247,7 @@ internal static class StockSliceChecks
                 throw new Exception("Reloaded generated tank collider cannot be cooked by the native hull implementation");
             hull.Dispose(pool);
         }
-        return new(groups.ToArray(), [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, asset.MassKg);
+        return new(groups.ToArray(), [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, asset.MassKg) { GeneratedClosedGeometry = true };
         int Offset(JsonElement accessor)
         {
             var view = gltf.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];

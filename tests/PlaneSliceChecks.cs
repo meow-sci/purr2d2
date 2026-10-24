@@ -101,6 +101,7 @@ internal static class PlaneSliceChecks
         SliceVertex Far(SliceVertex v) => v with { Position = v.Position + new CutPoint(3, 0, 0) };
         Check(PlaneSlicer.TrySliceCompound(new[] { box, distant }, new(new(1, 0, 0), .5), out var carry, out _, 99), "compound carries uncut closed solids");
         Near(carry!.Pieces.Single(p => p.PositiveSide).Volume, 1.5, "uncut source component retains its mass on the correct side");
+        MultiscaleChecks(box);
         Check(!PlaneSlicer.TrySliceCompound(new[] { box.Skip(1).ToArray(), shifted }, new(new(0, 0, 1), .5), out _, out _, 99),
             "compound mode never repairs or accepts an open authored group");
         var nearLevels = box.Select(f => new SliceFace(Perturb(f.A), Perturb(f.B), Perturb(f.C), f.Material)).ToArray();
@@ -113,6 +114,40 @@ internal static class PlaneSliceChecks
         Check(!PlaneSlicer.TrySlice(reversed, new(new(0, 0, 1), .5), out _, out _, 99), "inconsistent surface winding rejected");
         Check(!PlaneSlicer.TrySlice(box, new(new(0, 0, 1), 2), out _, out _, 99), "nonintersecting plane produces no replacement");
         Console.WriteLine("PASS: arbitrary plane slicing, holes, components, winding, attributes, volume and inertia");
+    }
+
+    private static void MultiscaleChecks(SliceFace[] box)
+    {
+        // Five-centimetre trim with a 50 nm edge remains valid at its own
+        // topology tolerance; a 100 m companion must not weld that edge away.
+        var tiny = box.Select(f => Map(f, p => new(p.X * 5e-8 + .2, p.Y * .05 + .2, p.Z * .05 + .475))).ToArray();
+        var large = box.Select(f => Map(f, p => p * 100)).ToArray();
+        Check(PlaneSlicer.TryAudit(tiny, out _) && PlaneSlicer.TryAudit(large, out _), "multiscale members each pass their own input topology audit");
+        foreach (double scale in new[] { 1.0, 3.0 })
+        {
+            double angle = .43; var offset = new CutPoint(17, -23, 41);
+            CutPoint Rotate(CutPoint p) => new(p.X * Math.Cos(angle) - p.Y * Math.Sin(angle), p.X * Math.Sin(angle) + p.Y * Math.Cos(angle), p.Z);
+            CutPoint Point(CutPoint p) => Rotate(p * scale) + offset;
+            var members = new[] { tiny.Select(f => Map(f, Point)).ToArray(), large.Select(f => Map(f, Point)).ToArray() };
+            var plane = new SlicePlane(new(0, 0, 1), offset.Z + .5 * scale);
+            Check(PlaneSlicer.TrySliceCompound(members, plane, out var cut, out var failure), "rotated/scaled multiscale compound slices without collapsing trim: " + failure);
+            Check(cut!.Pieces.All(p => p.ClosedSolids!.Length == 2 && PlaneSlicer.TryAuditCompound(p.ClosedSolids, out _, out _)),
+                "small trim and large hull keep independent closed-solid provenance on both sides");
+            Check(cut.EffectivePlane == plane, "every multiscale member uses the exact common plane");
+            var reordered = members.Reverse().Select(m => m.Reverse().ToArray()).ToArray();
+            Check(PlaneSlicer.TrySliceCompound(reordered, plane, out var repeat, out failure)
+                && repeat!.EffectivePlane == cut.EffectivePlane
+                && Math.Abs(repeat.SourceVolume - cut.SourceVolume) <= cut.SourceVolume * 1e-12,
+                "material/group and triangle ordering preserve multiscale acceptance and volume: " + failure);
+        }
+        var seam = box.ToArray();
+        seam[0] = seam[0] with { A = seam[0].A with { Position = seam[0].A.Position + new CutPoint(1e-10, 0, 0) } };
+        var canonical = PlaneSlicer.CanonicalPositions(seam);
+        var reverseCanonical = PlaneSlicer.CanonicalPositions(seam.Reverse().ToArray()).Reverse().ToArray();
+        Check(canonical.SequenceEqual(reverseCanonical), "seam weld representatives are independent of triangle and material batching order");
+
+        static SliceFace Map(SliceFace f, Func<CutPoint, CutPoint> point) => new(
+            f.A with { Position = point(f.A.Position) }, f.B with { Position = point(f.B.Position) }, f.C with { Position = point(f.C.Position) }, f.Material);
     }
 
     private static void FacetedChecks(SliceFace[] box, SliceFace[] tube)

@@ -1,6 +1,6 @@
 # Quiet breakup, repeat slicing, reach settings and manual contact
 
-Research and implementation plan, 2026-10-23. No gameplay implementation is included in this change.
+Research and implementation plan, 2026-10-23. Sections 1 and 2 now have implementation revisions recorded in `docs/ACCEPTANCE.md`; the remaining sections retain their planned scope.
 
 Baseline: Purr2D2 commit `8919257b3debed0d73092b3b4aadb418a96465ea`; local KSA sources/build `2026.10.19.5638`. Three GPT-6.1-sol / xhigh research agents examined breakup, mesh precision and manual contact. The KSA modding skill supplied lifecycle guidance; member names were checked against the newer local game sources. Existing documentation that says contact cutting is retired describes the old behavior; this request intentionally changes that policy for manual swings.
 

@@ -119,7 +119,7 @@ if __name__ == '__main__':
             parser.error(f'could not read installed stock assets (cached fixture preserved): {error}')
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(data)
-    required = [DEFAULT_SOURCE / p for p in ('src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs',
+    required = [DEFAULT_SOURCE / p for p in ('src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/ClosedMeshPreparation.cs',
                 'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentAssetWriter.cs', 'src/Rendering/FragmentTopology.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs', 'src/Slicing/SliceColliderGeometry.cs', 'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'tests/StockSliceChecks.cs')]
     code, log = _run_managed_project(DEFAULT_SOURCE, 'StockSliceChecks', required,
         'internal static class Program { static void Main() => StockSliceChecks.Run(' + json.dumps(str(output)) + '); }')
