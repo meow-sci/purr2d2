@@ -71,7 +71,7 @@ internal sealed partial class SaberRuntime
             if (_overlayDrag.Held)
             {
                 // Overlay-owned buttons never enter ImGui, so its MouseDown is deliberately false.
-                if (!_overlayPointerCapture.IsHeld((int)GlfwMouseButton.Left)) _overlayDrag.Release();
+                if (!_overlayPointerCapture.IsHeld((int)GlfwMouseButton.Left)) ReleaseManualSwing();
                 else _overlayDrag.Move(io.MousePos);
             }
 
@@ -278,7 +278,7 @@ internal sealed partial class SaberRuntime
         if (action == GlfwButtonAction.Release
             && _overlayPointerCapture.Consume((int)button, false, false, false, Program.FrameNumber))
         {
-            if (button == GlfwMouseButton.Left) { _overlayDrag.Release(); _forceDrag.Release(); }
+            if (button == GlfwMouseButton.Left) { ReleaseManualSwing(); _forceDrag.Release(); }
             return true;
         }
         // Native settings/picker gestures belong to ImGui. Consume only the game's route;
@@ -352,6 +352,7 @@ internal sealed partial class SaberRuntime
                 if (OverlayCanStartSwing && _overlayDrag.Begin(pointer, _overlayLayout.SwingTravelRadius,
                     _pose.GripOffsetFromChestCm, _pose.BladeDirectionModel))
                 {
+                    BeginManualSwing();
                     _overlayDragOwner = _owner;
                     _overlayDragPose = _pose;
                 }
@@ -397,7 +398,7 @@ internal sealed partial class SaberRuntime
     {
         if (!_overlayPointerCapture.SuppressImGuiButton((int)button, action == GlfwButtonAction.Press, Program.FrameNumber)) return false;
         if (button == GlfwMouseButton.Left && action == GlfwButtonAction.Release)
-        { _overlayDrag.Release(); _forceDrag.Release(); }
+        { ReleaseManualSwing(); _forceDrag.Release(); }
         return true;
     }
 
@@ -532,33 +533,4 @@ internal sealed partial class SaberRuntime
             if (!_kittenColorPickerOpen) DismissKittenColorPicker();
         }
     }
-
-    private void ApplyOverlaySwing(double playerDt)
-    {
-        if (!OverlayVisible || !OverlayCanSwing || !ReferenceEquals(_overlayDragOwner, _owner)
-            || !ReferenceEquals(_overlayDragPose, _pose))
-        {
-            ResetOverlaySwing();
-            return;
-        }
-        // Preserve the displayed offset while paused or outside supported warp, including a return.
-        if (!_overlayDrag.Advance(SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) ? playerDt : 0,
-            out var grip, out var aim)) return;
-        _pose.GripOffsetFromChestCm = grip;
-        _pose.BladeDirectionModel = aim;
-        if (!_overlayDrag.Active) { _overlayDragOwner = null; _overlayDragPose = null; }
-    }
-
-    private void ResetOverlaySwing()
-    {
-        if (_overlayDrag.Active && _overlayDragPose != null)
-        {
-            _overlayDragPose.GripOffsetFromChestCm = _overlayDrag.OriginalGrip;
-            _overlayDragPose.BladeDirectionModel = _overlayDrag.OriginalAim;
-        }
-        _overlayDrag.Reset();
-        _overlayDragOwner = null;
-        _overlayDragPose = null;
-    }
-
 }

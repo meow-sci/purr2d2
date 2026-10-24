@@ -10,7 +10,7 @@ namespace Purr2D2.Cutting;
 internal readonly record struct SliceAttempt(bool Success, string Message);
 
 /// <summary>Copy on the settled game thread, compute once on a worker, stage native assets,
-/// then commit only after the runtime confirms that the complete swing was presented.</summary>
+/// then commit only after the runtime authorizes the accepted trigger.</summary>
 internal sealed class ArbitrarySlicer : IDisposable
 {
     internal Action<Part, double3, double3, double>? CutSparks;
@@ -50,7 +50,7 @@ internal sealed class ArbitrarySlicer : IDisposable
     }
     internal void Advance()
     {
-        // Called exactly once by UpdateAssistedSlice at the joined physics hook.
+        // Called once by the active assisted/manual coordinator at the joined physics hook.
         // Player/simulation time can stay unchanged on pause; use hook progress.
         _handoff++;
         long started = Stopwatch.GetTimestamp();

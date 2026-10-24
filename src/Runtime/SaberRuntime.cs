@@ -85,6 +85,7 @@ internal sealed partial class SaberRuntime : IDisposable
             RefreshOverlayKittens();
             if (selected != null && !_currentKittens.Contains(selected)) selected = null;
             if (!ReferenceEquals(_owner, selected)) SetControlledKitten(selected);
+            ApplyManualContactReset();
             ApplyKittenSaberRequests();
             UpdateSomersault();
             UpdateForceBeforePhysics(playerDt);
@@ -117,9 +118,10 @@ internal sealed partial class SaberRuntime : IDisposable
             AdvanceKittenSaber(activeSaber, supportedSpeed ? playerDt : 0);
             _freshPoseThisTick = activeSaber.FreshPoseThisTick;
             _consumedPoseGeneration = activeSaber.ConsumedPoseGeneration;
-            // Structural work happens only for the explicit swing. Contact is visual only.
+            // Assisted and intentional manual contact share the settled slice worker.
             if (_sliceSequence.Active) UpdateAssistedSlice(playerDt);
-            if ((!_sliceSequence.Active || _sliceSequence.EndPresented)
+            UpdateManualContact(simulationDt > 0);
+            if (!_overlayDrag.Held && !_manualSliceActive && (!_sliceSequence.Active || _sliceSequence.EndPresented)
                 && _owner != null && _blade.Equipped && simulationDt > 0 && _freshPoseThisTick
                 && _pose.TryGetBladeSegment(Length, out var contactBase, out var contactTip)
                 && _contactProbe.TrySample(_owner, contactBase, contactTip, _playerTime, out var contact))
@@ -155,7 +157,7 @@ internal sealed partial class SaberRuntime : IDisposable
             _renderer.ConfigureVfx(_settings);
             _renderer.Prepare();
             var io = ImGui.GetIO();
-            if ((_sliceSequence.Active || _selectingSlice) && !io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Escape, false)) Queue(Command.CancelSlice);
+            if ((SliceWorkActive || _selectingSlice) && !io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Escape, false)) Queue(Command.CancelSlice);
             if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
                     !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.HasFreshBodyFrame,
@@ -183,6 +185,7 @@ internal sealed partial class SaberRuntime : IDisposable
             {
                 _swingSpeed = saber.SwingSpeed;
                 _sliceSequence.NotifyRendered();
+                PublishManualPose(emitter, tip);
                 _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
             }
             saber.Audio.Update(owner, emitter, saber.Blade.Deployment, saber.Blade.TargetOn,

@@ -108,7 +108,9 @@ Implemented: `SaberLimits.SliceSelectionReach(visibleLength, multiplier)` now co
 
 Extend `tests/CoreChecks.cs` settings default/round-trip cases and `tests/contact/TargetSelectionChecks.cs:42–78` for 1×/2×/4× boundaries, partial deployment, invalid settings, moving hilt, camera-independent distances and hover/fallback agreement.
 
-## 4. Cheap manual-swing contact cutting
+## 4. Cheap manual-swing contact cutting — implemented (2026-10-24)
+
+The implementation uses a dedicated `ManualContactProbe` rather than expanding the cosmetic 20 Hz probe. Real overlay SWING presses own monotonic gesture IDs; a confirmed rendered-triangle sweep accepts at most one shared asynchronous quiet cut without the assisted animation. Discovery, candidate-frame reads, primitive reads, triangle work, candidate storage, subdivisions and query age all have explicit bounds, with a 0.5 ms soft clock and diagnostics for observed work/time, saturation and expiry. Frozen queries survive ordinary solver/render gaps; release/recovery preserves accepted work. Lifecycle/pose/Force invalidation cancels safely in the settled handoff. The current automatic geometry chooser supplies the seam. Final managed validation passes (132 contact/targeting checks and 27 runtime checks), the complete managed/asset/shader suite passes, and Release packaging builds without warnings/errors. Detailed behavior, limitations and pending native measurements are recorded in `research-slicing-physics.md` and `ACCEPTANCE.md`; the findings and design below preserve the original review rationale.
 
 ### Findings
 

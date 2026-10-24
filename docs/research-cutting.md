@@ -8,6 +8,6 @@ Generated fragments put their complete picking mesh on an identity-transform vis
 
 `SaberContactProbe` is a separate read-only visual path. It emits sparks against static, dynamic and glass render meshes, including crewed targets. At 20 Hz it checks a cached contact triangle first, then uses a bounded resumable search of nearby mesh references. Native CPU arrays are read directly, with reusable candidate storage. The probe has no reference to the slicer and no destruction callback.
 
-Autopilot, ring coverage, contact heat, sweep history and automatic connection/failure cutting have been removed. There are no persistent contact scars; only short spark bursts and the actual sliced fragments' cooling cut caps remain.
+Autopilot, ring coverage, contact heat and automatic connection/failure cutting have been removed. Intentional controlled-kitten SWING contacts now use the bounded rendered-surface sweep described in [slicing physics](research-slicing-physics.md); idle and recovery contact stays cosmetic. There are no persistent contact scars; only short spark bursts and the actual sliced fragments' cooling cut caps remain.
 
 Managed validation covers incremental selection and commit guards, nonblocking worker cancellation, final-pose presentation, ready/late results, exactly-once completion, contact sampling limits, multi-primitive search continuation, stale-contact rejection and allocation-free sustained contact. Native rendering, spawning and save/load still require in-game acceptance.

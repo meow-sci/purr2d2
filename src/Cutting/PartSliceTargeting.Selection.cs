@@ -136,6 +136,24 @@ internal sealed partial class PartSliceTargeting
         void Add(MeshReference? mesh) { if (mesh != null && !meshes.Contains(mesh)) meshes.Add(mesh); }
     }
 
+    // Called only after rendered-triangle sweep confirmation. The distance comes
+    // from the confirmed ribbon's blade coordinate, never a collider/bounds hit.
+    // Assisted grace intentionally does not participate in physical contact.
+    internal bool TryContactTarget(KittenEva wielder, Part part, double3 pointLocal, double distanceMeters,
+        double bladeLength, double4x4 sourceTransform, double4x4 partTransform, out SliceTarget? target, out string reason)
+    {
+        target = null; _wielder = wielder;
+        reason = "Contact source is unavailable.";
+        var full = part.StructuralPart;
+        if (!ToPoint(pointLocal).Finite || !double.IsFinite(distanceMeters) || !double.IsFinite(bladeLength)
+            || bladeLength <= 0 || distanceMeters < 0 || distanceMeters > bladeLength
+            || full.Tree?.OwningVehicle is not { } vehicle || !full.MatrixAsmb2VehicleAsmb.Equals(sourceTransform)
+            || !part.MatrixAsmb2VehicleAsmb.Equals(partTransform)) return false;
+        var candidate = new SliceTarget(full, vehicle, pointLocal.Transform(partTransform), sourceTransform);
+        if (!CheckPendingSliceTarget(wielder, candidate, out reason)) return false;
+        target = candidate; return true;
+    }
+
     // Reach is already the maximum hilt-to-hit distance in metres, including configured grace.
     internal bool CheckSliceTarget(KittenEva wielder, SliceTarget target, double3 baseBody, double reach, out string reason)
     {

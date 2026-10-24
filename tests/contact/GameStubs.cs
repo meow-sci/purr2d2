@@ -21,6 +21,8 @@ namespace KSA
     public static class Universe
     {
         public static CelestialSystem? CurrentSystem;
+        public static double SimulationSpeed = 1;
+        public static double GetSimulationSpeed() => SimulationSpeed;
     }
 
     public sealed class CelestialSystem
@@ -73,10 +75,12 @@ namespace KSA
 
     public sealed class KittenEva : Vehicle { }
 
+    public sealed class HostList<T> : List<T> { public int Length => Count; }
+
     public sealed class PartTree(Vehicle owner)
     {
         public Vehicle OwningVehicle = owner;
-        public readonly List<Part> Parts = [];
+        public readonly HostList<Part> Parts = [];
         public Part? Root => Parts.FirstOrDefault();
     }
 
@@ -88,7 +92,7 @@ namespace KSA
         public string DisplayName = "fixture hull";
         public Part? PartParent, TreeParent;
         public PartTree? Tree;
-        public readonly List<Part> TreeChildren = [], SubParts = [];
+        public readonly HostList<Part> TreeChildren = [], SubParts = [];
         public readonly List<Connection> Connections = [];
         public readonly ModuleCollection Modules = new(), SubtreeModules = new();
         public readonly PartTemplate Template = new();

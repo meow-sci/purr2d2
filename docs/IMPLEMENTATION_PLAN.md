@@ -1,6 +1,6 @@
 # Purr2D2 implementation map
 
-The current gameplay is a held EVA lightsaber with cosmetic contact sparks, an ordinary **Swing**, and explicit **Select part to slice**. Contact-triggered cutting, exposure tracking, ring flight and autopilot have been retired at the user's request. Current behavior and evidence are in [README](../README.md) and [acceptance](ACCEPTANCE.md).
+The current gameplay is a held EVA lightsaber with cosmetic contact sparks, an intentional **SWING** contact cut, and assisted **Select part to slice**. A deliberate SWING press can accept one asynchronous quiet cut at a confirmed rendered surface; idle contact and recovery remain cosmetic. Exposure tracking, ring flight and autopilot remain retired. Current behavior and evidence are in [README](../README.md) and [acceptance](ACCEPTANCE.md).
 
 ## Component ownership
 
@@ -22,8 +22,10 @@ The current gameplay is a held EVA lightsaber with cosmetic contact sparks, an o
 4. Revalidate source ownership/geometry and isolate the part at the settled simulation seam. Empty its resources, adopt prepared replacements and conserve dry mass and momentum. Delete the source only after successful replacement. Crew aboard does not block slicing; surviving neighboring branches retain their crew assignments.
 5. Emit sparks and warm the new cut caps. Preserve generated asset files for native saves; refuse new work when budgets are exhausted rather than evicting another save's geometry.
 
-Visual contact uses a separate read-only, throttled, bounded probe. It keeps no progress/heat/sweep history and cannot call the structural transaction. The native collider is an enclosing convex hull, so visible holes/recesses are not collision-exact. Functional modules and attached IVA furnishings do not survive as functional components in wreckage.
+Cosmetic contact uses a separate read-only, throttled probe. Intentional controlled-kitten SWING drags use a bounded surface-sweep probe with frozen target-local endpoint ribbons/cursors, incremental scene discovery and explicit query expiry. Only triangle confirmation can trigger the shared source-capture/worker/upload/isolation/swap transaction. Manual animation is preserved; the automatic cut chooser currently selects the resulting seam. Ordinary release/recovery and transient solver/render gaps retain accepted work; explicit control/owner/world/pose invalidation cancels safely. The native collider is an enclosing convex hull, so visible holes/recesses are not collision-exact. Functional modules and attached IVA furnishings do not survive as functional components in wreckage.
 
 ## Platform boundary
 
 One .NET 10 runtime project targets KSA 2026.10.19.5638, StarMap.API 0.3.6 and Harmony 2.4.2. Game and loader assemblies remain compile-only and are never packaged. Build, geometry and metadata checks do not certify native graphics, physics spawning or save/load; use the native acceptance checklist before claiming those results.
+
+Manual contact implementation is in `src/Rendering/ManualContactProbe.cs`, `src/Cutting/BladeSweep.cs`, `src/Core/ManualContactGesture.cs` and `src/Runtime/SaberRuntime.ManualContact.cs`. Limits are 64 discovery units, 128 candidate-frame reads and 4,096 triangles per update, 128 cached candidates, 256 primitive reads, 16 ribbon subdivisions and 0.15-second frozen-query age. The 0.5 ms clock is a soft stop checked between bounded units. Candidate discovery and query saturation are recorded by counters; cold/warm native timings and the 30/60/144 FPS moving-target matrix still require measurement. No synchronous fleet acceleration build is introduced.

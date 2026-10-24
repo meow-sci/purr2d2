@@ -3,7 +3,7 @@ using KSA;
 
 namespace Purr2D2.Cutting;
 
-/// <summary>Button-triggered geometry selection. No per-frame contact or damage update exists.</summary>
+/// <summary>Assisted selection and confirmed manual-surface target policy.</summary>
 internal sealed partial class PartSliceTargeting
 {
     private const int MaxCandidateSubparts = 32_768;

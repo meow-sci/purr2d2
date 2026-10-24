@@ -151,7 +151,7 @@ internal sealed partial class SaberRuntime
     private void SetControlledKitten(KittenEva? kitten)
     {
         DismissKittenColorPicker();
-        CancelAssistedSlice(_sliceSequence.Active || _selectingSlice ? "Slice cancelled: controlled kitten changed." : "");
+        CancelAssistedSlice(SliceWorkActive || _selectingSlice ? "Slice cancelled: controlled kitten changed." : "");
         ResetOverlaySwing();
         _targeting.Reset(); _contactProbe.Reset();
         _owner = kitten;
@@ -173,7 +173,7 @@ internal sealed partial class SaberRuntime
         {
             if (_fault != null || !_currentKittens.Contains(request.Kitten) || request.Kitten.IsDisposed
                 || !_kittenSabers.TryGetValue(request.Kitten, out var saber)) continue;
-            if (ReferenceEquals(saber, _activeSaber) && (_sliceSequence.Active || _selectingSlice))
+            if (ReferenceEquals(saber, _activeSaber) && (SliceWorkActive || _selectingSlice))
                 CancelAssistedSlice("Slice cancelled by manual control.");
             if (request.Enabled)
             {

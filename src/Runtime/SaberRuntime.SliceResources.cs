@@ -14,7 +14,7 @@ internal sealed partial class SaberRuntime
     private bool _sliceCacheClearPending, _sliceDebrisClearPending;
 
     private bool CanMaintainSliceResources => _ready && !_disposed && _enabled && !Program.EditorFlag
-        && Universe.CurrentSystem != null && !_sliceSequence.Active && !_slicer.Busy
+        && Universe.CurrentSystem != null && !SliceWorkActive && !_manualGesture.CanDetect && !_slicer.Busy
         && _commands.Count == 0 && !ForceHolding && _sliceResourceUsage.ActiveUploadJobs == 0;
 
     private void ApplySliceResourceSettings()

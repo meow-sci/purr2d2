@@ -17,6 +17,7 @@ internal sealed partial class SaberRuntime
     private readonly FakeRenderer _renderer = new();
     private readonly Resettable _targeting = new(), _contactProbe = new();
     private readonly AssistedSliceSequence _sliceSequence = new();
+    private bool SliceWorkActive => _sliceSequence.Active;
     private readonly SaberSettings _settings = new();
     private bool _ready = true, _disposed, _selectingSlice, _freshPoseThisTick, _hasPreviousTip;
     private string? _fault;

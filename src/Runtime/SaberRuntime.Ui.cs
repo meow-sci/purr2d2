@@ -90,7 +90,10 @@ internal sealed partial class SaberRuntime
                 {
                     string diagnostics = $"Purr2D2 {typeof(SaberRuntime).Assembly.GetName().Version}; KSA {typeof(Vehicle).Assembly.GetName().Version}\n"
                         + $"Equipped: {_blade.Equipped}; fresh pose: {_freshPoseThisTick}; pose age: {_pose.FreshnessFrames}\n"
-                        + $"Slice active: {_sliceSequence.Active}; parts sliced: {_targeting.SlicedParts}\n{_sliceStatus}\n{_slicer.Diagnostics}";
+                        + $"Slice active: {SliceWorkActive}; parts sliced: {_targeting.SlicedParts}\n{_sliceStatus}\n{_slicer.Diagnostics}\n"
+                        + $"Manual contact: {_manualProbe.LastUpdateMilliseconds:F3} ms last / {_manualProbe.MaximumUpdateMilliseconds:F3} ms maximum; "
+                        + $"discovery {_manualProbe.DiscoveryUnits}, frames {_manualProbe.FrameReads}, primitives {_manualProbe.PrimitiveReads}, triangles {_manualProbe.TestedTriangles}; "
+                        + $"budget stops {_manualProbe.Saturations}, expired queries {_manualProbe.ExpiredQueries}";
                     ImGui.TextWrapped(diagnostics);
                     if (ImGui.Button("Copy slice diagnostics")) ImGui.SetClipboardText(diagnostics);
                 }

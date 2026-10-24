@@ -605,7 +605,17 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/contact/TargetSelectionChecks.cs",
         source / "tests/contact/ContactEffectsChecks.cs",
         source / "src/Rendering/SaberContactProbe.cs",
+        source / "src/Rendering/ManualContactProbe.cs",
+        source / "src/Cutting/BladeSweep.cs",
+        source / "src/Core/ManualContactGesture.cs",
+        source / "tests/contact/ManualContactChecks.cs",
     ]
+    manual_runtime_sources = [
+        *[path for path in target_sources if path.name not in ("TargetSelectionChecks.cs", "ContactEffectsChecks.cs", "ManualContactChecks.cs", "SaberContactProbe.cs")],
+        source / "src/Core/SaberOverlayDrag.cs",
+        source / "src/Core/AssistedSliceSequence.cs", source / "src/Core/SaberSwing.cs",
+        source / "src/Runtime/SaberRuntime.ManualContact.cs", source / "src/Runtime/SaberRuntime.OverlaySwing.cs",
+        source / "tests/contact/ManualRuntimeChecks.cs", source / "tests/contact/ManualRuntimeHostStubs.cs"]
     core_program = (
         "using System;\n"
         "internal static class Program { private static void Main() { CoreChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
@@ -705,6 +715,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),
         ("TargetSelectionChecks", target_sources, None),
+        ("ManualContactRuntimeChecks", manual_runtime_sources,
+         "internal static class ManualContactRuntimeEntry { static void Main() { Purr2D2.Runtime.SaberRuntime.Run(); } }"),
         ("KittenSaberChecks", kitten_sources, None),
         ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Core/SaberSettings.cs",
                          source / "tests/audio/AudioChecks.cs"], None),

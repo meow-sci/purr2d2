@@ -5,7 +5,7 @@ using Purr2D2.Cutting;
 
 internal static class TargetSelectionChecks
 {
-    private static void Main() { AssistedSliceSelection(); BladeReach(); ConfigurableReach(); HoverPreview(); PointerOcclusion(); IncrementalSelection(); LegacyFragmentPicking(); ContactEffectsChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
+    private static void Main() { AssistedSliceSelection(); BladeReach(); ConfigurableReach(); HoverPreview(); PointerOcclusion(); IncrementalSelection(); LegacyFragmentPicking(); ContactEffectsChecks.Run(); ManualContactChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
     private static double Reach(double visibleLength, float multiplier = SaberLimits.DefaultSliceReachMultiplier) =>
         SaberLimits.SliceSelectionReach(visibleLength, multiplier);
     private static MeshReference NewMesh() => new() { PositionsCompare = [[new(-1, 0, -1), new(1, 0, -1), new(0, 0, 1)]] };

@@ -20,7 +20,7 @@ internal sealed partial class SaberRuntime
     private double _sliceMessageUntil;
     private string _sliceStatus = "";
     private bool SliceStatusVisible => _sliceStatus.Length > 0
-        && (_selectingSlice || _sliceSequence.Active || _playerTime < _sliceMessageUntil);
+        && (_selectingSlice || SliceWorkActive || _playerTime < _sliceMessageUntil);
     // Hover, fallback selection and stroke-start revalidation share the same assisted allowance.
     private double SliceReach => SaberLimits.SliceSelectionReach(Length, _settings.SliceReachMultiplier);
 
@@ -38,7 +38,7 @@ internal sealed partial class SaberRuntime
     {
         CancelForcePicker();
         if (SomersaultActive && !_selectingSlice) return;
-        if (_sliceSequence.Active) return;
+        if (SliceWorkActive) return;
         if (_selectingSlice) { CancelAssistedSlice("Slice selection cancelled."); return; }
         if (_owner == null) return;
         if (_slicer.Busy) { _sliceStatus = "Finishing the previous slice; try again shortly."; _sliceMessageUntil = _playerTime + 5; return; }
@@ -49,7 +49,7 @@ internal sealed partial class SaberRuntime
 
     private void BeginAssistedSlice(SliceTarget? target, Ray? ray)
     {
-        if (SomersaultActive || _sliceSequence.Active || _owner == null || _slicer.Busy) return;
+        if (SomersaultActive || SliceWorkActive || _owner == null || _slicer.Busy) return;
         if (!TrySliceReach(out var baseBody, out var reach, out var reason)
             || (target != null && !_targeting.CheckSliceTarget(_owner, target, baseBody, reach, out reason)))
         { _selectingSlice = true; _sliceStatus = reason; return; }
@@ -72,6 +72,8 @@ internal sealed partial class SaberRuntime
                 : " Detached parts remain separated.";
         _selectingSlice = false; _sliceHover = null;
         _sliceSequence.Cancel();
+        _manualSliceActive = _manualIsolated = false;
+        _manualGesture.Finish(); _manualProbe.Reset(); _manualPoseAvailable = false;
         _sliceSelection?.Dispose(); _sliceSelection = null;
         _slicer.Cancel();
         _sliceTarget = null; _sliceStarted = false; _sliceError = null;
@@ -152,13 +154,8 @@ internal sealed partial class SaberRuntime
         if (cue == SliceCue.Isolate)
         {
             if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
-            var result = _slicer.Isolate(_sliceTarget.Part);
+            var result = IsolateSliceTarget();
             if (!result.Success) { CancelAssistedSlice("Slice failed: " + result.Message); return; }
-            var isolated = _slicer.Isolation!;
-            // The selection's hit is in the original assembly frame. Only our
-            // successful native separation authorizes rebasing this target.
-            _sliceTarget = _sliceTarget with { Vehicle = isolated.Owner, PartTransform = isolated.PartTransform,
-                HitAssembly = _sliceTarget.HitAssembly.Transform(isolated.SourceToIsolated) };
             _sliceStatus = _slicer.Phase;
             return;
         }
