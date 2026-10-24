@@ -534,7 +534,12 @@ internal sealed partial class SaberRuntime
                 SetKittenSaberType(owner, SaberType.Dark);
                 type = SaberType.Dark;
             }
-            ImGui.TextWrapped("This kitten's color and type last for this session.");
+            bool capeEnabled = CapeEnabledFor(owner);
+            if (ImGui.Checkbox("Cape and hood", ref capeEnabled))
+                SetKittenCapeEnabled(owner, capeEnabled);
+            ImGui.TextWrapped("This kitten's color, saber type, and cape option last for this session.");
+            if (CapeStatusFor(owner) is { } capeStatus)
+                ImGui.TextWrapped(capeStatus);
             ImGui.Text("Color");
             ImGui.SetNextItemWidth(Math.Min(220 * scale, ImGui.GetContentRegionAvail().X));
             float3 color = SaberColorFor(owner);

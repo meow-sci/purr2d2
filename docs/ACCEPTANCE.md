@@ -1,5 +1,30 @@
 # Acceptance record
 
+## Optional cape and hood (2026-10-24)
+
+Each EVA kitten starts with **Cape and hood** off in its existing per-kitten settings window. Enabling it supplies brown cloth for Light and black for Dark, independently of ignition and blade color. The option follows the existing session-only per-kitten appearance lifetime. The cape uses an original shoulder-pinned grid with KSA's native parachute cloth solver; the oversized open hood follows the final head pose and uses authored folds. Both use native two-sided skinned PBR materials, prepass and shadows, without changing shared glTF materials or the stock kitten/parachute data.
+
+The 117-node cape uses artificial gravity and bounded surface-relative airflow in every environment. Forward walking lifts it behind the wearer; stopping restores its drape. A conservative back plane prevents the sheet crossing through its wearer. There are no world collision queries or self-collision. The cape and hood together contain 855 vertices / 1,568 triangles and use four shared 256 × 256 maps. `art/cape-cloth-preview.png` is a software asset preview with a display-only helmet guide, **not an in-game screenshot**.
+
+The scheduler selects at most four nearby, recently main-view-visible capes within 25 m. It targets 30 Hz, fairly staggers at most two cloth updates per frame, and discards catch-up work. Each update batches up to four 120 Hz substeps into one native call. Other capes release their native simulation after 1.5 seconds of idle time and use their rest pose; rendering ends at 60 m. Pause freezes cloth, unsupported warp resets once, and secondary views consume the same simulation. Off by default creates no cape controllers, renderables or cloth simulations. Per-kitten failures latch until an off/on retry; an unexpected cape-manager failure cannot suspend saber functionality.
+
+Focused runtime checks pass for default-off and per-kitten intent, near/far visibility, nearest-four selection, the two-call limit and fair scheduling, pause/warp, opt-out, boarding, world teardown and failure recovery. The actual managed KSA/Bepu checks cover standing/forward/backward/sideways motion, stopping, fixed pins, bounded high-speed stretch, non-finite input, reset and disposal. The actual KSA/Brutal glTF loader extracts 118 cape bones and one hood bone; all rest skin matrices have zero measured error and all skin-index slots, including zero-weight slots, map correctly. Asset checks cover geometry, weights, normals, tangents, open-face topology, material references, textures and deterministic regeneration.
+
+Warmed Release cloth-only measurements on this ARM64 development host, with 180 warm-up updates and 600 measured updates per case:
+
+| Capes advanced in one batch | Median | 95th percentile | Managed allocation/update |
+| --- | --- | --- | --- |
+| 1 | 0.223 ms | 0.257 ms | 0 B |
+| 2 (runtime maximum per frame) | 0.414 ms | 0.481 ms | 0 B |
+| 4 (stress measurement) | 0.739 ms | 0.805 ms | 0 B |
+| 8 (stress measurement) | 1.475 ms | 1.581 ms | 0 B |
+
+These are steady cloth CPU timings, excluding initial loading, render submission and GPU work; they are not measured KSA frame times. Evidence: `artifacts/checks/capes-cloth-host.log`. The batched-call optimization reduced repeated solver setup while retaining the same bounded substep count and passing the same behavior tests.
+
+The final Release build passes with zero warnings/errors. The full managed/shader regression suite and source/stage asset validation pass. All 36 archive entries match staging, the staged DLL matches Release, and the ZIP's SHA-256 verifies. Evidence: `artifacts/checks/capes-release.log`, `artifacts/checks/capes-validation.log` and `artifacts/checks/capes-package.log`.
+
+Native acceptance remains pending: inspect shoulder/helmet fit, MMU clearance, cloth lighting and shadows for both styles and multiple kitten rigs; walk, run, stop, move backward/sideways and somersault on Earth and airless bodies; compare pause/warp, camera changes and multiple viewports; test more than four nearby capes and distance transitions; exercise opt-out, boarding, global disable and world reload. Compare game CPU/GPU frame times and memory against all-capes-off, including repeated toggles and stock deployed parachutes.
+
 ## Dark saber welding sparks (2026-10-24)
 
 Dark sabers emit short colored slag streaks from the deployed blade. Each burst retains its small emission offset relative to the kitten and follows the kitten's current translation in each viewport, with the spray orientation fixed at birth. Subsequent paw rotation does not drag existing sparks. Simple analytic spray/fall and quadratic cooling use player time. Orbital velocity is never integrated with that visual clock: sparks stay near the saber on the ground, in orbit, while paused and during time warp. The shader multiplies the saber RGB directly, without a white core. Light sabers do not emit this effect.

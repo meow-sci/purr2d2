@@ -3,6 +3,7 @@ using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
 using Purr2D2.Audio;
+using Purr2D2.Capes;
 using Purr2D2.Core;
 using Purr2D2.Cutting;
 using Purr2D2.Pose;
@@ -59,6 +60,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         GameHooks.Runtime = this;
         GameHooks.Install(harmony);
+        CapeController.Install(harmony);
         _somersaultMotion.Install(harmony);
         InitializeForce(harmony);
         _renderer.Initialize(harmony);
@@ -138,6 +140,7 @@ internal sealed partial class SaberRuntime : IDisposable
                 if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
             }
             UpdateOtherSabers(supportedSpeed ? playerDt : 0);
+            UpdateCapes(playerDt);
             UpdateSliceResources();
         }
         catch (Exception ex)

@@ -19,7 +19,8 @@ namespace KSA
     public static class Universe
     {
         public static CelestialSystem? CurrentSystem;
-        public static double GetSimulationSpeed() => 1;
+        public static double Speed = 1;
+        public static double GetSimulationSpeed() => Speed;
     }
 
     public sealed class CelestialSystem { public readonly HostCollection All = new(); }
@@ -36,10 +37,15 @@ namespace KSA
         public bool IsDisposed;
         public readonly KittenRenderable Renderable = new();
         public readonly LocomotionState LocomotionState = new();
+        public readonly ParentBody Parent = new();
+        public double3 PositionEcl;
+        public double3 SurfaceVelocityCci;
         public float3 CenterOfMassAsmbF => float3.Zero;
         public doubleQuat Body2Cce => doubleQuat.Identity;
-        public double3 GetPositionEcl() => double3.Zero;
+        public double3 GetPositionEcl() => PositionEcl;
+        public double3 GetSurfaceVelocityCci() => SurfaceVelocityCci;
     }
+    public sealed class ParentBody { public doubleQuat GetCci2Cce() => doubleQuat.Identity; }
     public sealed class KittenRenderable
     {
         private readonly CharacterAvatar _characterAvatar = new();
@@ -71,16 +77,88 @@ namespace KSA
         void UpdateSkeleton(float4x4 transform, Skeleton skeleton, float dt);
     }
     public enum ViewportType { Main, Secondary, CharacterPortrait }
-    public interface IViewport { ViewportType Type { get; } Camera GetCamera(); }
+    public interface IViewport { ViewportType Type { get; } bool Visible { get; } Camera GetCamera(); }
     public sealed class Viewport(ViewportType type) : IViewport
     {
         public ViewportType Type => type;
-        public Camera GetCamera() => new();
+        public bool Visible { get; set; } = true;
+        public Camera Camera { get; } = new();
+        public Camera GetCamera() => Camera;
     }
-    public sealed class Camera { public double3 PositionEcl => double3.Zero; }
+    public sealed class Camera { public double3 PositionEcl { get; set; } }
     public static class Double3Ex
     {
         public static double3 Transform(this double3 value, double4x4 matrix) => double3.Transform(value, matrix);
+        public static double3 Transform(this double3 value, doubleQuat rotation) => double3.Transform(value, rotation);
+    }
+}
+
+namespace Purr2D2.Capes
+{
+    // Native model/solver creation is a boundary in this lifecycle harness. The
+    // production manager and update policy still run, while this counter fake
+    // makes their ownership, visibility and scheduling decisions observable.
+    internal sealed class CapeController : IDisposable
+    {
+        internal static string? HookFailure;
+        internal static int SetupAttempts, Constructions, Disposals, DrawCalls, StepCalls, IdleResets, WarpResets;
+        internal static readonly List<string> StepOwners = [];
+        internal static Exception? SetupFailure;
+
+        private float _elapsed;
+        private float _idle;
+        private bool _suspended;
+        internal readonly KSA.KittenEva Owner;
+        internal Purr2D2.Core.SaberType Type;
+        internal string? Failure { get; set; }
+        internal ulong LastMainDrawFrame = ulong.MaxValue;
+        internal bool IsSimulationCandidate;
+        internal bool IsStepDue => CapeUpdatePolicy.IsDue(_elapsed);
+        internal float LastStepDt;
+        internal Brutal.Numerics.float3 LastVelocity;
+
+        internal CapeController(KSA.KittenEva owner, Purr2D2.Core.SaberType type)
+        {
+            SetupAttempts++;
+            if (SetupFailure is { } failure) throw failure;
+            Owner = owner; Type = type; Constructions++;
+        }
+        internal void SetType(Purr2D2.Core.SaberType type) => Type = type;
+        internal bool Draw(KSA.KittenRenderable renderable, KSA.IViewport viewport, Brutal.Numerics.float4x4 bodyToCamera, ulong frame)
+        {
+            DrawCalls++;
+            if (ReferenceEquals(viewport, KSA.Program.MainViewport)) LastMainDrawFrame = frame;
+            return true;
+        }
+        internal void MarkActive(bool supportedSpeed)
+        {
+            _idle = 0;
+            if (supportedSpeed) _suspended = false;
+        }
+        internal void Accumulate(double dt) => CapeUpdatePolicy.Accumulate(ref _elapsed, dt, true);
+        internal float ConsumeStepTime() => CapeUpdatePolicy.Consume(ref _elapsed);
+        internal void ClearAccumulatedTime() => _elapsed = 0;
+        internal void Step(float dt, Brutal.Numerics.float3 velocity)
+        {
+            StepCalls++; StepOwners.Add(Owner.Id); LastStepDt = dt; LastVelocity = velocity;
+        }
+        internal void SuspendForUnsupportedSpeed()
+        {
+            if (_suspended) return;
+            _suspended = true; _elapsed = 0; WarpResets++;
+        }
+        internal void AdvanceIdle(double dt)
+        {
+            _idle += (float)Math.Max(0, dt);
+            if (_idle < CapeUpdatePolicy.ReleaseAfterIdle) return;
+            _idle = 0; _elapsed = 0; IdleResets++;
+        }
+        public void Dispose() { Disposals++; }
+        internal static void ResetMetrics()
+        {
+            HookFailure = null; SetupAttempts = Constructions = Disposals = DrawCalls = StepCalls = IdleResets = WarpResets = 0;
+            StepOwners.Clear(); SetupFailure = null;
+        }
     }
 }
 

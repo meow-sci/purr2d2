@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original Purr2D2 cloth assets. Both GLBs are in meters, +Y up and +Z forward.
+     CapeRoot is the identity skin root; its 117 children are row-major local translations.
+     CapeMesh is a separate identity scene node. HoodRoot is the identity skin root;
+     HoodMesh is a separate identity scene node at the Head_M socket origin. -->
+<Assets>
+  <GltfFile Id="Purr2D2_Cape_Glb">
+    <Source Path="Assets/Models/Purr2D2_Cape.glb" />
+    <Material Name="Purr2D2_Cloth_Light" AssetId="Purr2D2_Cloth_Light" />
+  </GltfFile>
+  <GltfFile Id="Purr2D2_Hood_Glb">
+    <Source Path="Assets/Models/Purr2D2_Hood.glb" />
+    <Material Name="Purr2D2_Cloth_Light" AssetId="Purr2D2_Cloth_Light" />
+  </GltfFile>
+  <PbrMaterial Id="Purr2D2_Cloth_Light">
+    <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png" Category="Default" />
+    <Normal Path="Assets/Textures/Purr2D2_Cloth_Normal.png" Category="Default" />
+    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_ORM.png" Category="Default" />
+  </PbrMaterial>
+  <PbrMaterial Id="Purr2D2_Cloth_Dark">
+    <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png" Category="Default" />
+    <Normal Path="Assets/Textures/Purr2D2_Cloth_Normal.png" Category="Default" />
+    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_ORM.png" Category="Default" />
+  </PbrMaterial>
+</Assets>

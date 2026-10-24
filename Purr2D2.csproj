@@ -37,7 +37,8 @@
       <_StageAsset Include="$(MSBuildProjectDirectory)/Assets/**/*.xml;$(MSBuildProjectDirectory)/Assets/**/*.glb;$(MSBuildProjectDirectory)/Assets/**/*.png;$(MSBuildProjectDirectory)/Assets/**/*.wav;$(MSBuildProjectDirectory)/Assets/**/*.ogg;$(MSBuildProjectDirectory)/Assets/**/*.vert;$(MSBuildProjectDirectory)/Assets/**/*.frag;$(MSBuildProjectDirectory)/Assets/**/*.glsl" />
     </ItemGroup>
     <Error Condition="!Exists('%(_StageFile.Identity)')" Text="Required stage file missing: %(_StageFile.Identity)" />
-    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets/purr2d2.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/Sounds.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/PracticeTargets.xml')" Text="Required model, audio or practice-target asset manifest missing." />
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets/purr2d2.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/Sounds.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/PracticeTargets.xml') or !Exists('$(MSBuildProjectDirectory)/Assets/Capes.xml')" Text="Required model, audio, practice-target or cape asset manifest missing." />
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Assets/Models/Purr2D2_Cape.glb') or !Exists('$(MSBuildProjectDirectory)/Assets/Models/Purr2D2_Hood.glb')" Text="Required cape or hood model missing. Run tools/create_cape_assets.py to regenerate the cloth assets." />
     <PropertyGroup>
       <_ManifestVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/mod.toml')), '(?m)^version\s*=\s*&quot;([^&quot;]+)&quot;\s*$').Groups[1].Value)</_ManifestVersion>
     </PropertyGroup>

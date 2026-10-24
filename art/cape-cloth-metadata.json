@@ -1,0 +1,30 @@
+{
+  "authoring": "original deterministic procedural mesh and texture generator",
+  "preview": "CPU software material render; not captured in-game or in Blender",
+  "cape": {
+    "glb": "Assets/Models/Purr2D2_Cape.glb",
+    "mesh": "CapeMesh",
+    "vertices": 425,
+    "triangles": 768,
+    "skinJoints": 118,
+    "clothJoints": 117,
+    "units": "meters",
+    "origin": "chest"
+  },
+  "hood": {
+    "glb": "Assets/Models/Purr2D2_Hood.glb",
+    "mesh": "HoodMesh",
+    "vertices": 430,
+    "triangles": 800,
+    "skinJoints": 1,
+    "units": "meters",
+    "origin": "Head_M socket center",
+    "openFaceDirection": "+Z"
+  },
+  "textures": {
+    "size": "256x256",
+    "channels": "diffuse RGB, tangent normal, AO/roughness/metalness",
+    "roughness": 0.95,
+    "metalness": 0.0
+  }
+}

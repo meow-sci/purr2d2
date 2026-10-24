@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from check_saber_shaders import SHADER_PAIRS, run_shader_checks
+import check_cape_assets
 
 
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1]
@@ -77,9 +78,9 @@ def _read_manifest(root: Path) -> tuple[dict, str]:
         target = _relative_asset_path(root, item, f"{manifest_path} assets")
         if not target.is_file():
             raise ValidationError(f"{manifest_path}: listed asset manifest is missing: {item}")
-    required_manifests = {"Assets/purr2d2.xml", "Assets/Sounds.xml", "Assets/PracticeTargets.xml"}
+    required_manifests = {"Assets/purr2d2.xml", "Assets/Sounds.xml", "Assets/PracticeTargets.xml", "Assets/Capes.xml"}
     if not required_manifests.issubset(set(assets)) or len(assets) != len(set(assets)):
-        raise ValidationError(f"{manifest_path}: assets must include the saber, sound, and practice-target manifests without duplicates")
+        raise ValidationError(f"{manifest_path}: assets must include the saber, sound, practice-target, and cape manifests without duplicates")
     starmap = manifest.get("StarMap")
     if not isinstance(starmap, dict) or starmap.get("EntryAssembly") != "Purr2D2":
         raise ValidationError(f"{manifest_path}: [StarMap].EntryAssembly must be 'Purr2D2'")
@@ -453,6 +454,17 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
         except ValidationError as exc:
             issues.append(f"{label}: {exc}")
 
+    # The native skinned loader needs a common joint root and valid mappings even
+    # for zero-weight slots. Check that contract in both source and staged assets.
+    try:
+        check_cape_assets.check_xml(root)
+        check_cape_assets.check_textures(root)
+        for kind, name in (("cape", "Purr2D2_Cape.glb"), ("hood", "Purr2D2_Hood.glb")):
+            check_cape_assets.check_glb(root / "Assets/Models" / name,
+                                       check_cape_assets.expected_asset(kind), root)
+    except (OSError, ValueError, KeyError, TypeError, ET.ParseError, check_cape_assets.CheckError, struct.error) as exc:
+        issues.append(f"{label}: cape assets: {exc}")
+
     wave_cache: dict[Path, tuple[int, int]] = {}
     for path in asset_files:
         context = f"{label} {path.relative_to(root).as_posix()}"
@@ -625,6 +637,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",
+        source / "src/Runtime/SaberRuntime.Capes.cs",
+        source / "src/Capes/CapeUpdatePolicy.cs",
         source / "src/Pose/SaberPoseController.cs",
         source / "src/Pose/SaberPoseMath.cs",
         source / "src/Core/BladeState.cs",

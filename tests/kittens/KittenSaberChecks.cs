@@ -1,6 +1,7 @@
 using Brutal.Numerics;
 using KSA;
 using Purr2D2.Audio;
+using Purr2D2.Capes;
 using Purr2D2.Core;
 using Purr2D2.Pose;
 
@@ -19,13 +20,14 @@ internal sealed partial class SaberRuntime
     private readonly AssistedSliceSequence _sliceSequence = new();
     private bool SliceWorkActive => _sliceSequence.Active;
     private readonly SaberSettings _settings = new();
-    private bool _ready = true, _disposed, _selectingSlice, _freshPoseThisTick, _hasPreviousTip;
+    private bool _ready = true, _enabled = true, _disposed, _selectingSlice, _freshPoseThisTick, _hasPreviousTip;
     private string? _fault;
     private float _swingSpeed;
     private ulong _consumedPoseGeneration;
     private KittenEva? _resetGestureOwner;
     private KittenEva? _kittenColorPickerOwner;
     private void DismissKittenColorPicker() => _kittenColorPickerOwner = null;
+    private static void Report(string context, Exception error) { }
 
     private SaberRuntime()
     {
@@ -266,6 +268,174 @@ internal sealed partial class SaberRuntime
         Check(runtime.SaberColorFor(afterReset) == firstPalette && runtime.SaberTypeFor(afterReset) == SaberType.Light,
             "world reset starts a new Light saber session and restarts palette assignment at red");
         runtime.ResetKittenSabers();
+        CheckCapeRuntime();
+    }
+
+    private static void CheckCapeRuntime()
+    {
+        CapeController.ResetMetrics();
+        Universe.Speed = 1;
+        Program.EditorFlag = false;
+        Program.FrameNumber = 100;
+        var main = new Viewport(ViewportType.Main);
+        Program.MainViewport = main;
+
+        var runtime = new SaberRuntime();
+        var kittens = new KittenEva[6];
+        for (int i = 0; i < kittens.Length; i++)
+        {
+            kittens[i] = new KittenEva($"Cape {i}") { PositionEcl = new double3(i == 5 ? 80 : i + 1, 0, 0) };
+        }
+        var system = new CelestialSystem();
+        system.All.Items = kittens;
+        Universe.CurrentSystem = system;
+        runtime.RefreshOverlayKittens();
+        runtime.UpdateCapes(.1);
+        Check(CapeController.Constructions == 0 && kittens.All(k => runtime._kittenSabers[k].Cape is null),
+            "cape-off by default creates no cloth, renderer or per-kitten cape controller");
+
+        runtime.SetKittenSaberType(kittens[0], SaberType.Dark);
+        runtime.SetKittenCapeEnabled(kittens[0], true);
+        Check(runtime.CapeEnabledFor(kittens[0]) && !runtime.CapeEnabledFor(kittens[1])
+            && runtime.SaberTypeFor(kittens[0]) == SaberType.Dark && CapeController.Constructions == 0,
+            "the cape option and Light/Dark style are independent per-kitten session settings");
+        runtime.UpdateCapes(1d / 60d);
+        Check(CapeController.Constructions == 1 && runtime._kittenSabers[kittens[0]].Cape is not null,
+            "enabling one kitten creates its controller only at a settled cape update");
+
+        for (int i = 1; i < 5; i++) runtime.SetKittenCapeEnabled(kittens[i], true);
+        runtime.UpdateCapes(0);
+        Check(CapeController.Constructions == 5 && kittens.Skip(5).All(k => runtime._kittenSabers[k].Cape is null),
+            "only opted-in kittens allocate cape controllers and the independent sixth kitten remains off");
+
+        runtime.SetKittenCapeEnabled(kittens[5], true);
+        runtime.UpdateCapes(0);
+        Check(CapeController.Constructions == 6 && runtime._kittenSabers[kittens[5]].Cape is not null,
+            "an opted-in far kitten owns a lightweight controller without entering simulation or rendering");
+
+        // Only the first five are in render range. The sixth remains off-screen at 80 m.
+        for (int i = 0; i < 6; i++) runtime.DrawCape(kittens[i].Renderable, main, float4x4.Identity);
+        Check(CapeController.DrawCalls == 5 && runtime._kittenSabers[kittens[5]].Cape!.LastMainDrawFrame == ulong.MaxValue,
+            "rendering is limited to nearby game views and leaves distant cape bones untouched");
+        ulong mainFrame = runtime._kittenSabers[kittens[0]].Cape!.LastMainDrawFrame;
+        Program.FrameNumber = 101;
+        var secondary = new Viewport(ViewportType.Secondary);
+        runtime.DrawCape(kittens[0].Renderable, secondary, float4x4.Identity);
+        Check(runtime._kittenSabers[kittens[0]].Cape!.LastMainDrawFrame == mainFrame,
+            "secondary views draw capes without refreshing the main-view simulation visibility latch");
+
+        // Four nearest visible capes enter the active set. Two per-frame budget
+        // plus a rotating cursor gives each one a step every other 60 Hz frame.
+        runtime.UpdateCapes(1d / 60d);
+        Check(CapeController.StepCalls == 0, "cape simulation waits for one 30 Hz time quantum");
+        for (int i = 0; i < 5; i++) runtime.DrawCape(kittens[i].Renderable, main, float4x4.Identity);
+        Program.FrameNumber = 102;
+        runtime.UpdateCapes(1d / 60d);
+        Check(CapeController.StepCalls == 2 && CapeController.StepOwners.SequenceEqual(["Cape 0", "Cape 1"])
+            && runtime._kittenSabers[kittens[0]].Cape!.LastStepDt == CapeUpdatePolicy.SimulationInterval,
+            "each frame runs at most two due cloth steps and drops excess time at a 30 Hz quantum");
+        for (int i = 0; i < 5; i++) runtime.DrawCape(kittens[i].Renderable, main, float4x4.Identity);
+        Program.FrameNumber = 103;
+        runtime.UpdateCapes(1d / 60d);
+        Check(CapeController.StepCalls == 4 && CapeController.StepOwners.SequenceEqual(["Cape 0", "Cape 1", "Cape 2", "Cape 3"]),
+            "round-robin scheduling shares the two-step budget across all four nearest capes");
+        Check(!CapeController.StepOwners.Contains("Cape 4") && !CapeController.StepOwners.Contains("Cape 5"),
+            "visible capes beyond the four-simulation budget remain in the static drape");
+
+        for (int i = 0; i < 5; i++) runtime.DrawCape(kittens[i].Renderable, main, float4x4.Identity);
+        Program.FrameNumber = 104;
+        Universe.Speed = 0;
+        runtime.UpdateCapes(.1);
+        Check(CapeController.StepCalls == 4,
+            "pausing simulation freezes a cape even when its timer is already due");
+
+        for (int i = 0; i < 5; i++) runtime.DrawCape(kittens[i].Renderable, main, float4x4.Identity);
+        Program.FrameNumber = 105;
+        Universe.Speed = 10;
+        runtime.UpdateCapes(.1);
+        int warpResets = CapeController.WarpResets;
+        runtime.DrawCape(kittens[0].Renderable, main, float4x4.Identity);
+        Program.FrameNumber = 106;
+        runtime.UpdateCapes(.1);
+        Check(warpResets == 6 && CapeController.WarpResets == warpResets && CapeController.StepCalls == 4,
+            "unsupported time warp reseeds once per cape and cannot repeat reset work or step cloth");
+
+        runtime.SetKittenCapeEnabled(kittens[0], false);
+        runtime.UpdateCapes(0);
+        Check(runtime._kittenSabers[kittens[0]].Cape is null && CapeController.Disposals == 1,
+            "turning a cape off disposes its renderers and private cloth at the next settled update");
+        kittens[1].IsDisposed = true;
+        system.All.Items = [kittens[0], kittens[2], kittens[3], kittens[4], kittens[5]];
+        runtime.RefreshOverlayKittens();
+        Check(!runtime._kittenSabers.ContainsKey(kittens[1]) && CapeController.Disposals == 2,
+            "boarding or removing a kitten releases its owned cape resources");
+        runtime.ResetKittenSabers();
+        Check(CapeController.Disposals == CapeController.Constructions && runtime._capeControllers.Count == 0,
+            "world reset disposes every remaining cape exactly once");
+
+        CapeController.ResetMetrics();
+        var failureRuntime = new SaberRuntime();
+        var failureKitten = new KittenEva("Cape setup failure");
+        var failureSystem = new CelestialSystem();
+        failureSystem.All.Items = [failureKitten];
+        Universe.CurrentSystem = failureSystem;
+        failureRuntime.RefreshOverlayKittens();
+        CapeController.SetupFailure = new InvalidOperationException("test setup fault");
+        failureRuntime.SetKittenCapeEnabled(failureKitten, true);
+        failureRuntime.UpdateCapes(.016);
+        string? failure = failureRuntime.CapeStatusFor(failureKitten);
+        failureRuntime.UpdateCapes(.016);
+        Check(failureRuntime._kittenSabers[failureKitten].CapeFailureLatched
+            && CapeController.SetupAttempts == 1 && CapeController.Constructions == 0
+            && failure == failureRuntime.CapeStatusFor(failureKitten),
+            "a per-kitten setup failure is shown and latched without retrying or setting the saber fault");
+        failureRuntime.SetKittenCapeEnabled(failureKitten, false);
+        failureRuntime.UpdateCapes(.016);
+        Check(failureRuntime.CapeStatusFor(failureKitten) is null
+            && !failureRuntime._kittenSabers[failureKitten].CapeFailureLatched,
+            "turning the cape off clears its local failure status for a later opt-in");
+        failureRuntime.ResetKittenSabers();
+
+        CheckCapePolicy();
+        Universe.Speed = 1;
+        Program.FrameNumber = 0;
+    }
+
+    private static void CheckCapePolicy()
+    {
+        CapeUpdatePolicy.Candidate[] nearest = new CapeUpdatePolicy.Candidate[4];
+        CapeUpdatePolicy.ClearCandidates(nearest);
+        CapeUpdatePolicy.OfferCandidate(nearest, 5, 10);
+        CapeUpdatePolicy.OfferCandidate(nearest, 4, 2);
+        CapeUpdatePolicy.OfferCandidate(nearest, 3, 3);
+        CapeUpdatePolicy.OfferCandidate(nearest, 2, 1);
+        CapeUpdatePolicy.OfferCandidate(nearest, 1, 4);
+        Check(nearest[0].Index == 2 && nearest[1].Index == 4 && nearest[2].Index == 3 && nearest[3].Index == 1,
+            "allocation-free candidate insertion retains the nearest four in stable order");
+        Check(CapeUpdatePolicy.CanSimulate(true, true, 25)
+            && !CapeUpdatePolicy.CanSimulate(true, false, 2)
+            && !CapeUpdatePolicy.CanSimulate(true, true, 25.01f)
+            && CapeUpdatePolicy.CanRender(60) && !CapeUpdatePolicy.CanRender(60.01f),
+            "simulation requires recent main-view visibility within 25 m and render culling ends at 60 m");
+
+        bool[] due = [true, true, true, true];
+        int[] selected = new int[2];
+        int cursor = 0;
+        int first = CapeUpdatePolicy.SelectDue(due, selected, ref cursor);
+        bool firstPair = first == 2 && selected[0] == 0 && selected[1] == 1;
+        int second = CapeUpdatePolicy.SelectDue(due, selected, ref cursor);
+        Check(firstPair && second == 2 && selected[0] == 2 && selected[1] == 3,
+            "the frame scheduler never exceeds two calls and rotates through every due cape");
+
+        float elapsed = 0;
+        CapeUpdatePolicy.Accumulate(ref elapsed, 1d / 60d, true);
+        float partial = elapsed;
+        CapeUpdatePolicy.Accumulate(ref elapsed, .2, false);
+        bool paused = elapsed == partial && !CapeUpdatePolicy.IsDue(elapsed);
+        CapeUpdatePolicy.Accumulate(ref elapsed, .2, true);
+        float quantum = CapeUpdatePolicy.Consume(ref elapsed);
+        Check(paused && quantum == CapeUpdatePolicy.SimulationInterval && elapsed == 0,
+            "the per-cape clock freezes while paused and drops backlog after one consumed quantum");
     }
 
     private static void CheckToggleReversals(SaberRuntime runtime, KittenEva first, KittenEva second)

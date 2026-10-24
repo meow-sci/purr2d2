@@ -1,6 +1,7 @@
 using Brutal.Numerics;
 using KSA;
 using Purr2D2.Audio;
+using Purr2D2.Capes;
 using Purr2D2.Core;
 using Purr2D2.Pose;
 
@@ -40,6 +41,11 @@ internal sealed partial class SaberRuntime
         internal float3 Color = new(.12f, .75f, 1);
         internal SaberType Type = SaberType.Light;
         internal SaberTogglePhase TogglePhase;
+        internal bool CapeEnabled;
+        internal CapeController? Cape;
+        internal string? CapeFailure;
+        internal bool CapeFailureLogged;
+        internal bool CapeFailureLatched;
 
         internal KittenSaber(Action<KittenEva, IViewport, float4x4>? draw = null) => Pose = new(draw);
 
@@ -48,6 +54,8 @@ internal sealed partial class SaberRuntime
             Cleanup(Audio.Shutdown, "Kitten audio");
             Cleanup(Audio.Dispose, "Kitten audio");
             Cleanup(Pose.Dispose, "Kitten pose");
+            if (Cape is { } cape) Cleanup(cape.Dispose, "Kitten cape");
+            Cape = null;
             Blade.Reset();
             TogglePhase = SaberTogglePhase.None;
         }
@@ -130,6 +138,7 @@ internal sealed partial class SaberRuntime
             var saber = _kittenSabers[kitten];
             if (ReferenceEquals(kitten, _kittenColorPickerOwner)) DismissKittenColorPicker();
             if (ReferenceEquals(saber, _activeSaber)) SetControlledKitten(null);
+            DisposeKittenCape(kitten, saber, clearFailure: true);
             saber.Dispose();
             _kittenSabers.Remove(kitten);
             _renderer.RemoveEmitter(kitten);
@@ -270,7 +279,14 @@ internal sealed partial class SaberRuntime
     private void ResetKittenSabers()
     {
         DismissKittenColorPicker();
-        foreach (var saber in _kittenSabers.Values) saber.Dispose();
+        foreach (var pair in _kittenSabers)
+        {
+            DisposeKittenCape(pair.Key, pair.Value, clearFailure: true);
+            pair.Value.Dispose();
+        }
+        _capeControllers.Clear();
+        _capeRuntimeFaulted = _capeRuntimeFaultLogged = false;
+        _capeRoundRobinCursor = 0;
         _kittenSabers.Clear(); _kittenSaberRequests.Clear(); _overlayKittens.Clear();
         _currentKittens.Clear(); _removedKittens.Clear(); _activeSaber = null;
         _nextKittenColor = 0;

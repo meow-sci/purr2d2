@@ -4,6 +4,16 @@ Lightsabers and Force control for Kitten Space Agency: an authored hilt held in 
 
 Targets **KSA 2026.10.19.5638**, **StarMap.API 0.3.6**, and the loader's **Harmony 2.4.2**. This is an initial implementation with managed build/asset checks; native in-game acceptance is tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
+## Optional capes
+
+Open a kitten's settings with its colored overlay button and enable **Cape and hood**. This option starts **off for every kitten** and lasts for that EVA kitten's current session, like its saber color/type. **Light** selects brown woven cloth; **Dark** selects black. The cape stays equipped when the saber is stowed. An oversized open hood follows the head over the helmet.
+
+The hanging cape reuses KSA's parachute cloth solver with its own shoulder-pinned mesh. Artificial Earth-like gravity and airflow make it trail during movement and settle when stopped, including on airless bodies. It has no effect on vessel physics. The hood's folds are modeled rather than simulated, and a simple back-clearance boundary keeps the cape behind its wearer; there are no terrain or vessel collision queries.
+
+Cloth work targets 30 Hz for at most four nearby, recently visible capes, with at most two cape updates in any frame and no backlog catch-up. Beyond 25 m or outside that budget, capes use a static drape after a short idle period; beyond 60 m they are not drawn. Pausing freezes the cloth, and unsupported time warp restores its rest pose. No cape renderables or cloth simulations are created while the option is off. See [the source research and asset contract](docs/research-capes.md) for the native integration and performance limits. Helmet fit, final appearance and game frame times still require in-game acceptance.
+
+The deterministic asset generator is `python3 tools/create_cape_assets.py`. Focused checks are `python3 tools/check_cape_assets.py` and `python3 tools/check_cape_cloth.py`; the latter exercises the actual managed KSA/Bepu solver and reports warmed CPU timings and allocation counts.
+
 ## Controls
 
 Purr2D2 starts **disabled** each session. Open **Purr2D2 → Enabled** in the global game menu to activate it and show the overlay. Turning it off hides its UI and releases sabers, Force captures and pending actions at the next safe simulation update. Enablement is never saved with preferences.
