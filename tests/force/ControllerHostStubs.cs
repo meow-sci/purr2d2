@@ -125,6 +125,8 @@ namespace KSA
         internal int PlanWrites;
         internal int FailPlanWrite;
         internal double3[] BreakupOffsets = [];
+        internal double3[] BreakupGeometryOffsets = [];
+        internal int BreakupOutputCountOverride;
         internal bool FailBreakupPreparation, FailBreakupCommit, Drained;
         internal int BreakupCommits, BreakupPreparationSteps = 1, BreakupPlanDisposedAtWaitCount = -1;
         internal Vehicle(CelestialSystem system, IParentBody parent, string id, double3 position, double3 velocity)
@@ -175,42 +177,85 @@ namespace Purr2D2.Force
     using KSA;
     // The controller runs unchanged; native mesh/template construction is checked
     // separately against real KSA. This boundary models irreversible replacement.
-    internal sealed class ForceVehicleBreakup(Vehicle source) : IDisposable
+    internal sealed class ForceVehicleBreakup : IDisposable
     {
-        private readonly double3[] _offsets = source.BreakupOffsets.ToArray();
-        private readonly Part[] _parts = source.Parts.Items.ToArray();
-        private int _remainingPreparationSteps = Math.Max(1, source.BreakupPreparationSteps);
+        internal const int DefaultMaximumPieces = 50;
+        private readonly Vehicle _source;
+        private readonly double3[] _offsets;
+        private readonly Part[] _parts;
+        private readonly int _maximumPieces;
+        private double3[][] _groups = [];
+        private int _remainingPreparationSteps;
         private bool _captureComplete, _ready, _failed, _disposed;
+
+        internal ForceVehicleBreakup(Vehicle source) : this(source, DefaultMaximumPieces) { }
+
+        internal ForceVehicleBreakup(Vehicle source, int maximumPieces)
+        {
+            if (maximumPieces is < 2 or > DefaultMaximumPieces)
+                throw new ArgumentOutOfRangeException(nameof(maximumPieces), "Fixture breakup quota must be between 2 and 50.");
+            _source = source;
+            _offsets = source.BreakupOffsets.ToArray();
+            _parts = source.Parts.Items.ToArray();
+            _maximumPieces = maximumPieces;
+            _remainingPreparationSteps = Math.Max(1, source.BreakupPreparationSteps);
+        }
+
         internal bool CaptureComplete => _captureComplete;
         internal bool Failed => _failed;
         internal string? Error => _failed ? "fixture breakup preparation failed" : null;
         internal bool Ready => _ready && !_disposed;
         internal static bool NeedsBreakup(Vehicle vehicle) => vehicle.BreakupOffsets.Length > 1;
-        internal int Count => _captureComplete ? _offsets.Length : 0;
-        internal bool IsCurrent() => !_disposed && !source.IsDisposed && source.Parts.Items.SequenceEqual(_parts);
+        internal int Count => _captureComplete ? _groups.Length : 0;
+        internal bool IsCurrent() => !_disposed && !_source.IsDisposed && _source.Parts.Items.SequenceEqual(_parts);
         internal void AdvancePreparation(double budgetMilliseconds = 1.5)
         {
             if (_disposed || _ready || _failed) return;
             if (!double.IsFinite(budgetMilliseconds) || budgetMilliseconds <= 0) return;
-            if (!_captureComplete) { _captureComplete = true; return; }
-            if (source.FailBreakupPreparation) { _failed = true; return; }
+            if (!_captureComplete)
+            {
+                _groups = GroupOffsets(_offsets, _maximumPieces, _source.BreakupOutputCountOverride);
+                _captureComplete = true;
+                return;
+            }
+            if (_source.FailBreakupPreparation) { _failed = true; return; }
             _ready = --_remainingPreparationSteps <= 0;
         }
         internal Vehicle[] Commit()
         {
             if (!Ready || !IsCurrent()) throw new InvalidOperationException("fixture plan is not ready/current");
-            if (source.FailBreakupCommit) throw new InvalidOperationException("fixture breakup commit failed");
-            source.BreakupCommits++;
-            var pieces = _offsets.Select((offset, i) => new Vehicle(source.System, source.Parent,
-                source.Id + "_piece" + i, source.GetPositionCci() + offset.Transform(source.GetBody2Cci()), source.GetVelocityCci())
-                { Body2Cce = source.GetBody2Cci(), BodyRates = source.BodyRates }).ToArray();
-            source.Drained = source.IsDisposed = true;
-            source.System.All.Items.Remove(source);
+            if (_source.FailBreakupCommit) throw new InvalidOperationException("fixture breakup commit failed");
+            _source.BreakupCommits++;
+            var pieces = _groups.Select((group, i) =>
+            {
+                var center = group.Aggregate(double3.Zero, static (sum, offset) => sum + offset) / group.Length;
+                return new Vehicle(_source.System, _source.Parent, _source.Id + "_piece" + i,
+                    _source.GetPositionCci() + center.Transform(_source.GetBody2Cci()), _source.GetVelocityCci())
+                {
+                    Body2Cce = _source.GetBody2Cci(), BodyRates = _source.BodyRates,
+                    BreakupGeometryOffsets = group.ToArray()
+                };
+            }).ToArray();
+            _source.Drained = _source.IsDisposed = true;
+            _source.System.All.Items.Remove(_source);
             return pieces;
+        }
+        private static double3[][] GroupOffsets(double3[] offsets, int maximumPieces, int outputCountOverride)
+        {
+            if (offsets.Length < 2) throw new InvalidOperationException("Fixture breakup needs at least two geometry nodes.");
+            int count = outputCountOverride > 0 ? outputCountOverride : Math.Min(maximumPieces, offsets.Length);
+            var groups = new double3[count][];
+            for (int i = 0; i < count; i++)
+            {
+                int start = (int)((long)i * offsets.Length / count);
+                int end = (int)((long)(i + 1) * offsets.Length / count);
+                groups[i] = offsets[start..end];
+            }
+            return groups;
         }
         public void Dispose()
         {
-            if (!_disposed) source.BreakupPlanDisposedAtWaitCount = JobSystems.VehicleSolver.Waits;
+            if (!_disposed) _source.BreakupPlanDisposedAtWaitCount = JobSystems.VehicleSolver.Waits;
             _disposed = true;
         }
     }

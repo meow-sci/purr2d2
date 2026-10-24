@@ -17,6 +17,7 @@ internal static class ForceControllerChecks
         GroupSpreadAroundCentroid();
         BreakupKeepsMixedHold();
         BreakupPreflightAndPartialFailure();
+        BreakupPieceBudgets();
         IncrementalBreakupCommitsAtLateReadiness();
         BreakupOwnershipCancellation();
         ConfigurableAngryRadius();
@@ -110,12 +111,11 @@ internal static class ForceControllerChecks
                 && controller.StatusSeverity == ForceStatusSeverity.Warning,
                 "all sources remain intact when any peer fails native preparation");
             second.FailBreakupPreparation = false;
-            target.BreakupOffsets = new double3[ForceCaptureLimits.Maximum + 1];
-            Check(controller.BeginBreakup(owner), "capacity preflight can be retried after preparation failure");
-            AdvanceUntilTerminal(controller, owner);
-            Check(!target.Drained && !second.Drained && controller.Status.Contains("exceed"),
-                "the complete replacement count is bounded before any irreversible operation");
-            target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
+            Check(controller.BeginBreakup(owner), "native preparation failure can be retried with intact sources");
+            PrepareBreakup(controller, owner);
+            Check(controller.BreakupPrepared && !target.Drained && !second.Drained,
+                "a complete peer preflight succeeds before any source is drained");
+            controller.CancelBreakup();
             second.FailBreakupCommit = true;
             Check(controller.BeginBreakup(owner), "valid counts retry before a partial commit test");
             PrepareBreakup(controller, owner);
@@ -131,6 +131,131 @@ internal static class ForceControllerChecks
             controller.Release(false);
         }
     }
+
+    private static void BreakupPieceBudgets()
+    {
+        var (controller, owner, target) = Setup("breakup-budget-single-large");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            Check(controller.Capture(owner, Pick(target), false), "a source with more than 512 visual nodes captures intact");
+            Check(controller.BeginBreakup(owner), "a large single source receives a coarsened plan");
+            var result = AdvanceUntilTerminal(controller, owner);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && !result.Failed && target.Drained && pieces.Length == 50
+                && controller.CapturedCount == 50,
+                "one oversized source commits at the 50 replacement vehicle action cap");
+            Check(pieces.Sum(piece => piece.BreakupGeometryOffsets.Length) == 700,
+                "coarsening retains every source geometry node in the fixture plan");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-multiple");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            var second = new Vehicle(owner.System, owner.Parent, "second", new(2.1, 0, 0), double3.Zero)
+                { BreakupOffsets = FixtureBreakupOffsets(800) };
+            Check(controller.Capture(owner, Pick(target), true, angryRadius: 10), "multiple large breakup sources capture together");
+            Check(controller.BeginBreakup(owner), "multiple sources receive a shared action budget");
+            var result = AdvanceUntilTerminal(controller, owner);
+            var firstPieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
+            var secondPieces = owner.System.All.Items.Where(v => v.Id.StartsWith("second_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && !result.Failed && firstPieces.Length + secondPieces.Length == 50 && firstPieces.Length == 25
+                && secondPieces.Length == 25 && controller.CapturedCount == 50,
+                "two sources share 50 total replacement slots instead of receiving 50 apiece");
+            Check(firstPieces.Sum(piece => piece.BreakupGeometryOffsets.Length) == 700
+                && secondPieces.Sum(piece => piece.BreakupGeometryOffsets.Length) == 800,
+                "each source retains all geometry while sharing the action-wide budget");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-near-limit");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            var clutter = Enumerable.Range(0, ForceCaptureLimits.Maximum - 5)
+                .Select(i => new ClutterForceTarget(owner, $"near-limit-{i:000}", new(2.001 + i * .001, 0, 0), double3.Zero))
+                .ToArray();
+            ClutterForceTargets.Candidates = clutter;
+            Check(controller.Capture(owner, Pick(target), true, angryRadius: 10, captureLimit: ForceCaptureLimits.Maximum)
+                && controller.CapturedCount == ForceCaptureLimits.Maximum - 4,
+                "a mixed hold can approach the 512-object ceiling before breakup");
+            Check(controller.BeginBreakup(owner), "a near-limit source receives only the available growth budget");
+            var result = AdvanceUntilTerminal(controller, owner);
+            var pieces = owner.System.All.Items.Where(v => v.Id.StartsWith("object_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && !result.Failed && pieces.Length == 5
+                && controller.CapturedCount == ForceCaptureLimits.Maximum,
+                "near-limit breakup coarsens to five replacements and fills, but never exceeds, the hold cap");
+            Check(pieces.Sum(piece => piece.BreakupGeometryOffsets.Length) == 700,
+                "capacity-driven coarsening still retains every visual node");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-full");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            var clutter = Enumerable.Range(0, ForceCaptureLimits.Maximum - 1)
+                .Select(i => new ClutterForceTarget(owner, $"full-limit-{i:000}", new(2.001 + i * .001, 0, 0), double3.Zero))
+                .ToArray();
+            ClutterForceTargets.Candidates = clutter;
+            Check(controller.Capture(owner, Pick(target), true, angryRadius: 10, captureLimit: ForceCaptureLimits.Maximum)
+                && controller.CapturedCount == ForceCaptureLimits.Maximum,
+                "the safety hold can be full before a breakup request");
+            Check(!controller.BeginBreakup(owner) && !controller.BreakupActive && !target.Drained
+                && controller.CapturedCount == ForceCaptureLimits.Maximum
+                && controller.Status.Contains("capacity is full", StringComparison.OrdinalIgnoreCase),
+                "a full hold refuses the gesture harmlessly and preserves every captured object");
+            controller.Update(owner);
+            Check(controller.CapturedCount == ForceCaptureLimits.Maximum && !target.Drained
+                && controller.Status.Contains("capacity is full", StringComparison.OrdinalIgnoreCase),
+                "the full-capacity status persists while all held objects remain intact");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-many");
+        using (controller)
+        {
+            var candidates = new List<Vehicle> { target };
+            target.BreakupOffsets = FixtureBreakupOffsets(6);
+            for (int i = 1; i < 30; i++)
+                candidates.Add(new Vehicle(owner.System, owner.Parent, $"eligible-{i:00}", new(2 + i * .001, 0, 0), double3.Zero)
+                    { BreakupOffsets = FixtureBreakupOffsets(6) });
+            Check(controller.Capture(owner, Pick(target), true, angryRadius: 10, captureLimit: ForceCaptureLimits.Maximum)
+                && controller.CapturedCount == 30,
+                "many eligible vehicles can be held for one breakup action");
+            Check(controller.BeginBreakup(owner), "the controller starts a bounded subset when candidates exceed the source cap");
+            Check(controller.Status.Contains("25 of 30", StringComparison.Ordinal),
+                "status reports the selected subset and leaves excess sources held");
+            var result = AdvanceUntilTerminal(controller, owner);
+            int committedSources = candidates.Count(source => source.Drained);
+            int retainedSources = candidates.Count(source => !source.Drained && !source.IsDisposed);
+            var allPieces = owner.System.All.Items.Where(vehicle => vehicle.Id.Contains("_piece", StringComparison.Ordinal)).ToArray();
+            Check(result.Completed && !result.Failed && committedSources == 25 && retainedSources == 5
+                && allPieces.Length == 50 && controller.CapturedCount == 55,
+                "only 25 of 30 sources commit, leaving five intact and the action at exactly 50 new vehicles");
+            controller.Release(false);
+        }
+
+        (controller, owner, target) = Setup("breakup-budget-backend-overrun");
+        using (controller)
+        {
+            target.BreakupOffsets = FixtureBreakupOffsets(700);
+            target.BreakupOutputCountOverride = ForceVehicleBreakup.DefaultMaximumPieces + 1;
+            Check(controller.Capture(owner, Pick(target), false), "a source captures before testing a backend quota violation");
+            Check(controller.BeginBreakup(owner), "a source with a backend quota violation enters normal preflight");
+            var result = AdvanceUntilTerminal(controller, owner);
+            Check(result.Failed && !target.Drained && controller.CapturedCount == 1
+                && controller.Status.Contains("51 replacement vehicles", StringComparison.Ordinal)
+                && controller.Status.Contains("50-piece allocation", StringComparison.Ordinal),
+                "a backend quota overrun fails clearly before draining or losing the held source");
+            controller.Release(false);
+        }
+    }
+
+    private static double3[] FixtureBreakupOffsets(int count) => Enumerable.Range(0, count)
+        .Select(i => new double3(i * .001, (i % 7) * .001, (i % 11) * .001)).ToArray();
 
     private static void PrepareBreakup(ForceController controller, KittenEva owner)
     {

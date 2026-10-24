@@ -12,7 +12,9 @@ internal sealed partial class ForceController
     private bool _breakupRefused;
     private int _breakupPrepareIndex, _breakupCommitIndex;
 
-    private sealed record BreakupEntry(Held Held, ForceVehicleBreakup Plan);
+    private sealed record BreakupEntry(Held Held, ForceVehicleBreakup Plan, int MaximumPieces);
+
+    private const int MinimumBreakupPieces = 2;
 
     internal bool CanBreakup => HasCapture && _breakupEligible;
     internal bool BreakupActive => _breakupActive;
@@ -27,18 +29,45 @@ internal sealed partial class ForceController
         var plans = new List<BreakupEntry>();
         try
         {
+            int availableGrowth = ForceCaptureLimits.Maximum - CapturedCount;
+            if (availableGrowth < 1)
+            {
+                _breakupRefused = true;
+                SetStatus($"Held capacity is full ({ForceCaptureLimits.Maximum} objects); breakup needs room for at least one more.",
+                    ForceStatusSeverity.Warning);
+                return false;
+            }
+
             JoinOrbitReaders();
+            var candidates = new List<(Held Held, Vehicle Source)>();
             foreach (var held in _held)
                 if (held.Source is { } source && ForceVehicleBreakup.NeedsBreakup(source))
-                    plans.Add(new(held, new ForceVehicleBreakup(source)));
-            if (plans.Count == 0)
+                    candidates.Add((held, source));
+            int selectedCount = Math.Min(candidates.Count,
+                Math.Min(ForceVehicleBreakup.DefaultMaximumPieces / MinimumBreakupPieces, availableGrowth));
+            if (selectedCount == 0)
             {
                 RefreshBreakupEligibility();
                 return false;
             }
+
+            int totalPieceBudget = Math.Min(ForceVehicleBreakup.DefaultMaximumPieces, selectedCount + availableGrowth);
+            int baseQuota = totalPieceBudget / selectedCount;
+            int extraPieces = totalPieceBudget % selectedCount;
+            for (int i = 0; i < selectedCount; i++)
+            {
+                int quota = baseQuota + (i < extraPieces ? 1 : 0);
+                var (held, source) = candidates[i];
+                plans.Add(new(held, new ForceVehicleBreakup(source, quota), quota));
+            }
+
             _breakupPlans.AddRange(plans);
             plans.Clear();
             _breakupActive = true;
+            string selection = selectedCount < candidates.Count
+                ? $"Breaking up {selectedCount} of {candidates.Count} eligible vehicles; the rest stay held."
+                : $"Breaking up {selectedCount} held vehicle{(selectedCount == 1 ? "" : "s")}.";
+            SetStatus(selection, ForceStatusSeverity.None);
             return true;
         }
         catch (Exception error)
@@ -124,8 +153,10 @@ internal sealed partial class ForceController
         long resultingCount = _held.Count - _breakupPlans.Count;
         foreach (var entry in _breakupPlans)
         {
-            if (!entry.Plan.Ready || entry.Plan.Count < 1 || !entry.Plan.IsCurrent())
+            if (!entry.Plan.Ready || entry.Plan.Count < MinimumBreakupPieces || !entry.Plan.IsCurrent())
                 throw new InvalidOperationException("Every held vehicle must finish current preparation before breakup can commit.");
+            if (entry.Plan.Count > entry.MaximumPieces)
+                throw new InvalidOperationException($"Breakup produced {entry.Plan.Count} replacement vehicles for a {entry.MaximumPieces}-piece allocation.");
             resultingCount += entry.Plan.Count;
         }
         if (resultingCount > ForceCaptureLimits.Maximum)
@@ -139,8 +170,10 @@ internal sealed partial class ForceController
         long resultingCount = _held.Count - _breakupPlans.Count;
         foreach (var entry in _breakupPlans)
         {
-            if (!entry.Plan.CaptureComplete || entry.Plan.Count < 1)
+            if (!entry.Plan.CaptureComplete || entry.Plan.Count < MinimumBreakupPieces)
                 throw new InvalidOperationException("Every held vehicle must finish source capture before breakup can proceed.");
+            if (entry.Plan.Count > entry.MaximumPieces)
+                throw new InvalidOperationException($"Breakup produced {entry.Plan.Count} replacement vehicles for a {entry.MaximumPieces}-piece allocation.");
             resultingCount += entry.Plan.Count;
         }
         if (resultingCount > ForceCaptureLimits.Maximum)
