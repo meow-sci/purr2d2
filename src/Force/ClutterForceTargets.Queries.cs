@@ -103,12 +103,12 @@ internal static partial class ClutterForceTargets
 
     private struct NearQuery(PhysicsBubble bubble, CelestialSystem system, List<ClutterForceTarget> destination, int maximum) : ISweepHitHandler
     {
-        internal bool Exceeded, Unsupported;
+        internal bool Exceeded, CaptureLimitExceeded, Unsupported;
         private int _candidates, _children;
         private readonly HashSet<ClutterForceIdentity> _seen = [];
         public bool AllowTest(CollidableReference collidable)
         {
-            if (Exceeded || Unsupported) return false;
+            if (Exceeded || CaptureLimitExceeded || Unsupported) return false;
             var native = bubble.GroundClutterStatics;
             bool clutter = collidable.Mobility == CollidableMobility.Static
                 ? native.IsClutterStatic(collidable.StaticHandle) : native.IsClutterBody(collidable.BodyHandle);
@@ -124,7 +124,7 @@ internal static partial class ClutterForceTargets
         public bool AllowTest(CollidableReference collidable, int childIndex)
         {
             if (++_children > MaximumChildTests) Exceeded = true;
-            return !Exceeded && !Unsupported;
+            return !Exceeded && !CaptureLimitExceeded && !Unsupported;
         }
         public void OnHit(ref float maximumT, float t, Vector3 hitLocation, Vector3 hitNormal, CollidableReference collidable)
         {
@@ -133,10 +133,10 @@ internal static partial class ClutterForceTargets
         public void OnHitAtZeroT(ref float maximumT, CollidableReference collidable) => Offer(collidable);
         private void Offer(CollidableReference collidable)
         {
-            if (Exceeded || Unsupported) return;
+            if (Exceeded || CaptureLimitExceeded || Unsupported) return;
             if (!TryTarget(bubble, system, collidable, out var target)) { Unsupported = true; return; }
             if (!_seen.Add(target!.StableKey)) return;
-            if (destination.Count == maximum) { Exceeded = true; return; }
+            if (destination.Count >= maximum) { CaptureLimitExceeded = true; return; }
             destination.Add(target);
         }
     }

@@ -1,6 +1,7 @@
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Force;
 
 internal static class ForceControllerChecks
@@ -15,9 +16,10 @@ internal static class ForceControllerChecks
         MixedAngryEitherPrimary();
         ConfigurableAngryRadius();
         CombinedLimitPreflight();
+        InvalidCaptureLimits();
         MixedRollbackAndInvalidation();
         MixedImmediateOffsetAndLocalBubble();
-        Console.WriteLine($"Force controller checks passed ({_checks} assertions: rigid mixed groups, configurable exact surface radius, deduplication, combined 32 limit, once-only release/throw, rollback and world/key cleanup).");
+        Console.WriteLine($"Force controller checks passed ({_checks} assertions: rigid mixed groups, configurable exact surface radius and combined capture limit, deduplication, once-only release/throw, rollback and world/key cleanup).");
     }
 
     private static (ForceController Controller, KittenEva Owner, Vehicle Target) Setup(string id)
@@ -193,27 +195,64 @@ internal static class ForceControllerChecks
 
     private static void CombinedLimitPreflight()
     {
-        var (controller, owner, target) = Setup("limit");
-        using (controller)
+        Check(ForceCaptureLimits.Default == 128, "the default group limit increases from 32 to 128 objects");
+        foreach (int limit in new[] { 1, 32, ForceCaptureLimits.Default, ForceCaptureLimits.Maximum })
+        foreach (int vesselCount in new[] { 0, limit / 2, limit }.Distinct())
+        foreach (bool clutterPrimary in new[] { false, true })
         {
-            var vessels = new List<Vehicle> { target };
-            for (int i = 1; i < 16; i++) vessels.Add(new(owner.System, owner.Parent, "vessel-" + i, new(2, 0, 0), double3.Zero));
-            var clutter = Enumerable.Range(0, 17).Select(i => new ClutterForceTarget(owner, "clutter-" + i,
-                new(2, 0, 0), double3.Zero)).ToArray();
-            ClutterForceTargets.Candidates = clutter;
-            Check(!controller.Capture(owner, Pick(target), true) && !controller.HasCapture,
-                "33 mixed candidates reject the complete operation");
-            Check(vessels.All(v => v.PlanWrites == 0 && v.HasPhysicsBubble) && clutter.All(c => c.Captures == 0),
-                "combined overflow rejects before any vessel detach or native promotion");
-            ClutterForceTargets.Candidates = clutter[..16];
-            Check(controller.Capture(owner, Pick(target), true) && controller.CapturedCount == 32,
-                "exactly 32 mixed candidates can be captured");
-            controller.Release(false);
-            Check(clutter[..16].All(c => c.Captures == 1 && c.Releases == 1), "every accepted native peer restores once");
-            ClutterForceTargets.QueryFails = true;
-            int writes = target.PlanWrites;
-            Check(!controller.Capture(owner, Pick(target), true) && target.PlanWrites == writes,
-                "a native query refusal cannot partially capture the already gathered vessels");
+            int clutterCount = limit - vesselCount;
+            if (clutterPrimary ? clutterCount == 0 : vesselCount == 0) continue;
+            var (controller, owner, target) = Setup($"limit-{limit}-{vesselCount}-{clutterPrimary}");
+            using (controller)
+            {
+                var vessels = new List<Vehicle>();
+                if (vesselCount > 0) vessels.Add(target);
+                else owner.System.All.Items.Remove(target);
+                for (int i = 1; i < vesselCount; i++) vessels.Add(new(owner.System, owner.Parent, "vessel-" + i, new(2, 0, 0), double3.Zero));
+                var clutter = Enumerable.Range(0, clutterCount).Select(i => new ClutterForceTarget(owner, "clutter-" + i,
+                    new(2, 0, 0), double3.Zero)).ToArray();
+                var pick = clutterPrimary ? new ForcePick(clutter[0], new(2, 0, 0)) : Pick(target);
+                Vehicle? extraVessel = null;
+                var extraClutter = new ClutterForceTarget(owner, "extra-clutter", new(2, 0, 0), double3.Zero);
+                if (clutterCount == 0)
+                    extraVessel = new(owner.System, owner.Parent, "extra-vessel", new(2, 0, 0), double3.Zero);
+                ClutterForceTargets.Candidates = clutterCount == 0 ? clutter : [.. clutter, extraClutter];
+                Check(!controller.Capture(owner, pick, true, captureLimit: limit) && !controller.HasCapture
+                    && controller.Status.Contains(limit.ToString()), $"{limit + 1} candidates refuse the complete operation and name the {limit}-object limit");
+                Check(vessels.All(v => v.PlanWrites == 0 && v.HasPhysicsBubble) && clutter.All(c => c.Captures == 0),
+                    "combined overflow rejects before any vessel detach or native promotion");
+                Check(extraClutter.Captures == 0 && (extraVessel == null || extraVessel.PlanWrites == 0),
+                    "the overflow object also remains untouched");
+                if (extraVessel != null) owner.System.All.Items.Remove(extraVessel);
+                // A repeated native identity, including the selected primary, consumes no second slot.
+                ClutterForceTargets.Candidates = clutterCount == 0 ? clutter : [.. clutter, clutter[0]];
+                bool captured = limit == ForceCaptureLimits.Default ? controller.Capture(owner, pick, true)
+                    : controller.Capture(owner, pick, true, captureLimit: limit);
+                Check(captured && controller.CapturedCount == limit,
+                    $"exactly {limit} vessel, clutter or mixed candidates can be captured from either available primary");
+                controller.Release(false);
+                Check(clutter.All(c => c.Captures == 1 && c.Releases == 1), "every accepted native peer restores once");
+                ClutterForceTargets.QueryFails = true;
+                int writes = target.PlanWrites;
+                Check(!controller.Capture(owner, pick, true, captureLimit: limit) && target.PlanWrites == writes,
+                    "a native query refusal cannot partially capture the already gathered vessels");
+            }
+        }
+    }
+
+    private static void InvalidCaptureLimits()
+    {
+        var (controller, owner, target) = Setup("invalid-limit");
+        using (controller)
+        foreach (int invalid in new[] { int.MinValue, 0, ForceCaptureLimits.Maximum + 1, int.MaxValue })
+        foreach (bool angry in new[] { false, true })
+        {
+            var gathered = new List<ForceTarget>();
+            Check(!ForceTargeting.Gather(owner, Pick(target), angry, gathered, out _, captureLimit: invalid)
+                && gathered.Count == 0, "invalid capture limits reject proximity gathering before adding candidates");
+            Check(!controller.Capture(owner, Pick(target), angry, captureLimit: invalid)
+                && target.PlanWrites == 0 && !controller.HasCapture,
+                "invalid capture limits cannot allocate an unbounded group or mutate a source");
         }
     }
 

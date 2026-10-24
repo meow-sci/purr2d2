@@ -1,5 +1,6 @@
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Core;
 
 namespace Purr2D2.Force;
 
@@ -12,11 +13,13 @@ internal static partial class ForceTargeting
     /// Clutter uses collider surface distance, which can differ from its visible mesh. Nothing mutates until all queries pass.
     /// </summary>
     internal static bool Gather(KittenEva owner, ForcePick pick, bool angry, List<ForceTarget> destination, out string reason,
-        double angryRadius = ForceMath.DefaultAngryRadius)
+        double angryRadius = ForceMath.DefaultAngryRadius, int captureLimit = ForceCaptureLimits.Default)
     {
         destination.Clear();
         reason = "The selected object changed; pick again.";
         if (!Valid(owner, pick)) return false;
+        if (!ForceCaptureLimits.Valid(captureLimit))
+        { reason = "The Force capture limit must be between 1 and 512 objects; nothing was captured."; return false; }
         if (angry && !ForceMath.ValidAngryRadius(angryRadius))
         { reason = "Angry Force radius must be between 1 and 50 m; nothing was captured."; return false; }
         var vesselIds = new HashSet<string>(StringComparer.Ordinal);
@@ -49,8 +52,8 @@ internal static partial class ForceTargeting
             if (triangles > MaximumProximityTriangles || parts > MaximumParts)
             { reason = "Nearby geometry exceeds the Angry Force surface budget; nothing was captured."; return false; }
             if (!found) continue;
-            if (destination.Count >= ForceController.MaximumCaptured)
-            { reason = $"More than 32 objects are within {angryRadius:0.#} m; nothing was captured."; return false; }
+            if (destination.Count >= captureLimit)
+            { reason = CaptureLimitReason(captureLimit, angryRadius); return false; }
             destination.Add(new(vehicle));
             vesselIds.Add(vehicle.Id);
 
@@ -79,19 +82,22 @@ internal static partial class ForceTargeting
         }
         var clutterTargets = new List<ClutterForceTarget>();
         if (!ClutterForceTargets.GatherNear(owner, hit, angryRadius, clutterTargets,
-            ForceController.MaximumCaptured, out reason)) return false;
+            captureLimit, out reason)) return false;
         foreach (var clutter in clutterTargets)
         {
             if (!clutter.IsValid || !clutter.IsLocalTo(owner) || !ReferenceEquals(clutter.Parent, pick.Parent)
                 || !ReferenceEquals(clutter.System, pick.System))
             { reason = "A nearby physical ground object changed; nothing was captured."; return false; }
             if (!clutterIds.Add(clutter.StableKey)) continue;
-            if (destination.Count >= ForceController.MaximumCaptured)
-            { reason = $"More than 32 objects are within {angryRadius:0.#} m; nothing was captured."; return false; }
+            if (destination.Count >= captureLimit)
+            { reason = CaptureLimitReason(captureLimit, angryRadius); return false; }
             destination.Add(new(clutter));
         }
         return true;
     }
+
+    private static string CaptureLimitReason(int captureLimit, double radius) =>
+        $"More than {captureLimit} objects are within {radius:0.#} m. Raise the Force capture limit in Settings or reduce the radius; nothing was captured.";
 
     private static void Collect(Part part, List<MeshReference> meshes)
     {

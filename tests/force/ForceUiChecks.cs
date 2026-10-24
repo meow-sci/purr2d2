@@ -13,7 +13,11 @@ internal sealed partial class SaberRuntime
     private bool _ready = true, _disposed = false, _selectingSlice = false;
     private bool OverlayVisible = true, KittenColorPickerVisible = false, _overlayLayoutAvailable = false;
     private SaberOverlayLayout _overlayLayout = default;
-    private sealed class TestSettings { internal float AngryForceRadius = 10, ClutterPickTolerance = .2f; }
+    private sealed class TestSettings
+    {
+        internal float AngryForceRadius = 10, ClutterPickTolerance = .2f;
+        internal int ForceCaptureLimit = ForceCaptureLimits.Default;
+    }
     private readonly TestSettings _settings = new();
     private double _playerTime = 0;
     private KittenEva? _owner;
@@ -45,6 +49,7 @@ internal sealed partial class SaberRuntime
         var runtime = new SaberRuntime { _selectingSlice = true };
         runtime._settings.AngryForceRadius = 14;
         runtime._settings.ClutterPickTolerance = .375f;
+        runtime._settings.ForceCaptureLimit = 256;
         runtime.BeginForcePicker(true);
         Check(runtime._forceStatus.Contains("14 m"), "the Angry Force instruction displays the configured radius");
         Check(runtime._sliceCancellations == 1 && runtime._selectingSlice,
@@ -59,6 +64,7 @@ internal sealed partial class SaberRuntime
             "the fresh frame camera snapshots the click without reading live physics bodies");
         runtime._settings.AngryForceRadius = 25;
         runtime._settings.ClutterPickTolerance = 0;
+        runtime._settings.ForceCaptureLimit = 1;
         Program.MainViewport.Camera.Generation = 8;
         runtime.UpdateForceFrame();
         runtime.UpdateForceBeforePhysics(.016);
@@ -67,6 +73,8 @@ internal sealed partial class SaberRuntime
             "the original click ray is queried and captured once at the settled handoff");
         Check(ForceTargeting.LastTolerance == .375,
             "the immutable click query keeps its tolerance if settings change before resolution");
+        Check(runtime._force.CapturedLimit == 256,
+            "the immutable click keeps its configured capture limit through the settled request if settings change");
 
         Check(!runtime._forceDrag.Held && runtime.ScrollForcePointer(1) && runtime.ScrollForcePointer(2),
             "wheel depth works without pressing the move circle and accepts consecutive events");

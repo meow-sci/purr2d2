@@ -178,12 +178,16 @@ internal sealed partial class SaberRuntime
     {
         if (!BeginSaberSettingsTable("##ForceSettings", "Clutter aim tolerance")) return;
         float radius = _settings.AngryForceRadius, tolerance = _settings.ClutterPickTolerance;
+        int captureLimit = _settings.ForceCaptureLimit;
         bool changed;
         try
         {
             SaberSettingsRow("Angry Force radius");
             changed = ImGui.SliderFloat("##AngryForceRadius", ref radius, 1, 50, "%.1f m");
             ShowSaberControlTip("Capture nearby objects within this distance of the selected surface point.");
+            SaberSettingsRow("Force capture limit");
+            changed |= ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
+            ShowSaberControlTip($"Maximum total vessels, debris and physical ground objects in one Angry Force capture (default {ForceCaptureLimits.Default}). Higher counts cost more physics work. Groups above the limit are refused without capturing any objects. Applies to the next capture.");
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
             ShowSaberControlTip("After exact picking misses, a small sphere of this radius catches near misses on physical clutter. Exact hits take priority; 0 uses exact hits only.");
@@ -191,6 +195,7 @@ internal sealed partial class SaberRuntime
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.AngryForceRadius = radius;
+        _settings.ForceCaptureLimit = captureLimit;
         _settings.ClutterPickTolerance = tolerance;
         _settings.Validate();
         _preferencesSavedUntil = 0;

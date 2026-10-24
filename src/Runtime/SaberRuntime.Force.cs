@@ -26,9 +26,9 @@ internal sealed partial class SaberRuntime
     private string _forceStatus = "";
     private enum ForceAction { Capture, Release, Throw }
     private readonly record struct ForceRequest(KittenEva Owner, ForceAction Action, ForcePick? Target = null,
-        bool Angry = false, double AngryRadius = 10);
+        bool Angry = false, double AngryRadius = 10, int CaptureLimit = ForceCaptureLimits.Default);
     private readonly record struct ForceQuery(KittenEva Owner, ForcePickRay Ray, bool Capture, bool Angry,
-        double AngryRadius, double ClutterTolerance = .2);
+        double AngryRadius, double ClutterTolerance = .2, int CaptureLimit = ForceCaptureLimits.Default);
 
     internal bool ForceHolding => !_forceDisposed && _force.HasCapture;
     internal KittenEva? ForceOwner => !_forceDisposed ? _force.Owner : null;
@@ -64,7 +64,7 @@ internal sealed partial class SaberRuntime
                 }
                 if (request.Action == ForceAction.Capture && request.Target is { } pick)
                 {
-                    if (_force.Capture(request.Owner, pick, request.Angry, request.AngryRadius))
+                    if (_force.Capture(request.Owner, pick, request.Angry, request.AngryRadius, request.CaptureLimit))
                     {
                         _forceDrag.Reset(); _forceMovePending = false; _forceMoveOwner = null;
                     }
@@ -106,7 +106,7 @@ internal sealed partial class SaberRuntime
                 : reason;
             if (pending.Capture && _forceHover != null && _forceRequests.Count < 32)
             {
-                _forceRequests.Enqueue(new(pending.Owner, ForceAction.Capture, _forceHover, pending.Angry, pending.AngryRadius));
+                _forceRequests.Enqueue(new(pending.Owner, ForceAction.Capture, _forceHover, pending.Angry, pending.AngryRadius, pending.CaptureLimit));
                 _forceStatus = "Capturing " + _forceHover.DisplayName + "...";
                 CancelForcePicker();
             }
@@ -166,7 +166,7 @@ internal sealed partial class SaberRuntime
         if (ForceTargeting.TrySnapshotRay(_owner!, ray, out var snapshot))
         {
             _forceQuery = new(_owner!, snapshot, _forceClickPending, _angryForce, _settings.AngryForceRadius,
-                _settings.ClutterPickTolerance);
+                _settings.ClutterPickTolerance, _settings.ForceCaptureLimit);
         }
         else { _forceQuery = null; _forceHover = null; }
         _forceClickPending = false;

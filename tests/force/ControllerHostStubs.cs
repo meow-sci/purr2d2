@@ -246,10 +246,12 @@ namespace Purr2D2.Force
         {
             destination.Clear(); reason = "fixture native query refused";
             if (QueryFails) return false;
+            var seen = new HashSet<ClutterForceIdentity>();
             foreach (var target in Candidates)
-                if ((target.State.Position - center).LengthSquared() <= radius * radius + 1e-9)
+                if ((target.State.Position - center).LengthSquared() <= radius * radius + 1e-9 && seen.Add(target.StableKey))
                 {
-                    if (destination.Count >= maximum) return false;
+                    if (destination.Count >= maximum)
+                    { destination.Clear(); reason = $"More than {maximum} nearby ground objects; nothing was captured."; return false; }
                     destination.Add(target);
                 }
             return true;

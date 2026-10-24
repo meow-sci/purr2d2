@@ -71,6 +71,7 @@ internal static class CoreChecks
             && defaults.SaberControlsOffsetX == 0 && defaults.SaberControlsOffsetY == 0,
             "new preferences use a ten metre Angry Force radius and default control positions");
         Check(defaults.ClutterPickTolerance == .2f, "new preferences allow a twenty centimetre near miss on clutter");
+        Check(defaults.ForceCaptureLimit == 128, "new preferences increase the combined Force capture limit to 128");
         Check(DefaultEffects(defaults.LightEffects, SaberType.Light) && DefaultEffects(defaults.DarkEffects, SaberType.Dark),
             "Light and Dark begin with distinct intentional effect profiles");
         Check(!ReferenceEquals(defaults.LightEffects, defaults.DarkEffects)
@@ -155,6 +156,12 @@ internal static class CoreChecks
         settings.AngryForceRadius = float.NaN;
         settings.Validate();
         Check(settings.AngryForceRadius == 10, "a nonfinite Angry Force radius recovers the default");
+        foreach (var (value, expected) in new[] { (int.MinValue, 1), (0, 1), (1, 1), (32, 32), (128, 128), (512, 512), (int.MaxValue, 512) })
+        {
+            settings.ForceCaptureLimit = value;
+            settings.Validate();
+            Check(settings.ForceCaptureLimit == expected, "Force capture limits preserve supported values and clamp extreme integers");
+        }
         foreach (var (value, expected) in new[] { (-1f, 0f), (2f, .5f), (0f, 0f), (.5f, .5f),
             (float.NaN, .2f), (float.PositiveInfinity, .2f), (float.NegativeInfinity, .2f) })
         {
@@ -186,6 +193,8 @@ internal static class CoreChecks
                 "legacy preferences acquire the new radius and control position defaults");
             Check(explicitPreferences.ClutterPickTolerance == .2f,
                 "legacy preferences acquire the clutter near-miss default without a migration");
+            Check(explicitPreferences.ForceCaptureLimit == 128,
+                "legacy preferences acquire the higher Force capture limit without a migration");
             File.WriteAllText(path, "{\"LightEffects\":null,\"DarkEffects\":null}");
             var loaded = SaberSettings.Load(path);
             Check(DefaultEffects(loaded.LightEffects, SaberType.Light) && DefaultEffects(loaded.DarkEffects, SaberType.Dark)
@@ -211,6 +220,7 @@ internal static class CoreChecks
             SetEffects(settings.DarkEffects, 0, 0, 0, .25f, 0, 0, .25f);
             settings.AngryForceRadius = 32.5f;
             settings.ClutterPickTolerance = .35f;
+            settings.ForceCaptureLimit = 256;
             settings.ForceControlsOffsetX = -.25f; settings.ForceControlsOffsetY = .125f;
             settings.SaberControlsOffsetX = .5f; settings.SaberControlsOffsetY = -.75f;
             settings.Save(path);
@@ -229,6 +239,7 @@ internal static class CoreChecks
                 && loaded.SaberControlsOffsetX == .5f && loaded.SaberControlsOffsetY == -.75f,
                 "Angry Force radius and both control groups' normalized offsets survive save and reload");
             Check(loaded.ClutterPickTolerance == .35f, "custom clutter aim tolerance survives save and reload");
+            Check(loaded.ForceCaptureLimit == 256, "the configured combined Force capture limit survives save and reload");
             using (var saved = JsonDocument.Parse(File.ReadAllText(path)))
                 Check(saved.RootElement.TryGetProperty("LightEffects", out _) && saved.RootElement.TryGetProperty("DarkEffects", out _)
                     && !saved.RootElement.TryGetProperty("ShimmerAmount", out _),

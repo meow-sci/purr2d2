@@ -73,6 +73,7 @@ public sealed class SaberSettings
     public float FingerCurl { get; set; } = .12f;
     public bool HideMmu { get; set; } = true;
     public float AngryForceRadius { get; set; } = 10;
+    public int ForceCaptureLimit { get; set; } = ForceCaptureLimits.Default;
     public float ClutterPickTolerance { get; set; } = .2f;
     public float ForceControlsOffsetX { get; set; }
     public float ForceControlsOffsetY { get; set; }
@@ -106,6 +107,7 @@ public sealed class SaberSettings
         if (AimX * AimX + AimY * AimY + AimZ * AimZ < .0001f) { AimX = .22f; AimY = .45f; AimZ = .6f; }
         FingerCurl = Clamp(FingerCurl, 0, .5f, .12f);
         AngryForceRadius = Clamp(AngryForceRadius, 1, 50, 10);
+        ForceCaptureLimit = Math.Clamp(ForceCaptureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
         ClutterPickTolerance = Clamp(ClutterPickTolerance, 0, .5f, .2f);
         ForceControlsOffsetX = Clamp(ForceControlsOffsetX, -1, 1, 0);
         ForceControlsOffsetY = Clamp(ForceControlsOffsetY, -1, 1, 0);

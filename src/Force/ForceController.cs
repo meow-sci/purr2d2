@@ -1,14 +1,14 @@
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
+using Purr2D2.Core;
 
 namespace Purr2D2.Force;
 
 /// <summary>One controlled kitten's transient Force hold. Mutations run only in the settled handoff.</summary>
 internal sealed partial class ForceController : IDisposable
 {
-    internal const int MaximumCaptured = 32;
-    private readonly List<Held> _held = new(MaximumCaptured);
+    private readonly List<Held> _held = new(ForceCaptureLimits.Default);
     private Harmony? _harmony;
     private bool _available, _disposed, _hasFrame, _offsetDirty;
     private CelestialSystem? _system;
@@ -52,16 +52,19 @@ internal sealed partial class ForceController : IDisposable
         }
     }
 
-    internal bool Capture(KittenEva owner, ForcePick target, bool angry, double angryRadius = ForceMath.DefaultAngryRadius)
+    internal bool Capture(KittenEva owner, ForcePick target, bool angry, double angryRadius = ForceMath.DefaultAngryRadius,
+        int captureLimit = ForceCaptureLimits.Default)
     {
         if (!_available || _disposed) { Status = "Force physics is unavailable."; return false; }
         if (HasCapture) { Status = "Release the held objects before another capture."; return false; }
-        var candidates = new List<ForceTarget>(MaximumCaptured);
+        if (!ForceCaptureLimits.Valid(captureLimit))
+        { Status = "The Force capture limit must be between 1 and 512 objects; nothing was captured."; return false; }
+        var candidates = new List<ForceTarget>(captureLimit);
         try
         {
-            if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal, angryRadius)) { Status = refusal; return false; }
-            if (candidates.Count is < 1 or > MaximumCaptured)
-            { Status = "The Force target group exceeds the capture limit; nothing was captured."; return false; }
+            if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal, angryRadius, captureLimit)) { Status = refusal; return false; }
+            if (candidates.Count < 1 || candidates.Count > captureLimit)
+            { Status = $"The Force target group exceeds the {captureLimit}-object capture limit; nothing was captured."; return false; }
         }
         catch (Exception ex) { Status = "Force target query failed: " + ex.Message; return false; }
         try

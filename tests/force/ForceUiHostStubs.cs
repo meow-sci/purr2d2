@@ -98,6 +98,7 @@ namespace Purr2D2.Force
     {
         internal bool HasCapture, Disposed, FailUpdate;
         internal int CaptureCalls;
+        internal int CapturedLimit;
         internal double CapturedRadius;
         internal int CapturedCount => HasCapture ? 1 : 0;
         internal KSA.KittenEva? Owner;
@@ -105,9 +106,10 @@ namespace Purr2D2.Force
         internal string Status = "";
         internal readonly List<string> Events = [];
         internal void Install(HarmonyLib.Harmony harmony) { }
-        internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry, double angryRadius = 10)
+        internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry, double angryRadius = 10,
+            int captureLimit = Purr2D2.Core.ForceCaptureLimits.Default)
         {
-            CaptureCalls++; CapturedRadius = angryRadius; Events.Add("Capture");
+            CaptureCalls++; CapturedRadius = angryRadius; CapturedLimit = captureLimit; Events.Add("Capture");
             if (!pick.Live) { Status = "Stale target"; return false; }
             HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; Status = "Holding"; return true;
         }

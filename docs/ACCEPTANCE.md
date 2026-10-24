@@ -1,5 +1,32 @@
 # Acceptance record
 
+## Configurable Force capture count (2026-10-23)
+
+The combined Force capture limit now defaults to 128 vessels, debris and physical
+ground objects, increased from 32. Settings exposes **Force capture limit** from
+1–512 and saves it with the other preferences. A clicked capture retains its
+chosen limit through the settled handoff. Changing the setting affects subsequent
+captures and does not release an existing hold. Count overflow still refuses the
+whole group before any vessel detach or native clutter promotion. Count refusals
+name the configured limit and point to Settings; native proximity traversal
+budget refusals now report geometry separately.
+
+Core preference checks, Force UI checks and the mixed Force controller fixture
+pass. The controller fixture has 205 assertions, including exact limits and
+overflow at 1, 32, 128 and 512, vessel-only, clutter-only and mixed groups, either
+available primary, duplicate native identities, invalid limits and rollback.
+Preference checks cover legacy files, bounds and save/reload; UI checks preserve
+the clicked limit when preferences change before resolution. Actual KSA/Bepu
+host checks pass. The Release build has zero warnings/errors, and source and
+staged asset validation pass.
+
+Native acceptance remains pending: test crowded ground scenes with 128 held
+objects and increase toward 512 as appropriate for frame times. Confirm the
+Settings control and save/reload, exact-count acceptance and over-count refusal,
+release and throw with each primary type. The independent native query and
+geometry traversal budgets are unchanged; raising the capture count does not
+bypass them.
+
 ## Stable Force targeting and slice resource controls (2026-10-23)
 
 Force and Angry Force now display CANCEL while selecting; pressing the active

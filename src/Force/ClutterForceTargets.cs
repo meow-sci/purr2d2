@@ -192,10 +192,13 @@ internal static partial class ClutterForceTargets
         // Explicit convergence settings avoid the convenience overload's division by zero for zero speed.
         bubble.ConstraintSim!.Simulation.Sweep(new Sphere((float)radius), in pose, in velocity, 0,
             bubble.ConstraintSim.BufferPool, ref query, .0001f, .00001f, 32);
-        if (query.Exceeded || query.Unsupported)
+        if (query.Exceeded || query.CaptureLimitExceeded || query.Unsupported)
         {
             destination.Clear(); reason = query.Unsupported ? "A nearby ground collider cannot be queried safely."
-                : "Too many nearby ground objects for a safe Force capture."; return false;
+                : query.CaptureLimitExceeded
+                    ? $"More than {maximum} nearby ground objects. Raise the Force capture limit in Settings or reduce the radius; nothing was captured."
+                    : "Nearby ground geometry exceeds the Force proximity query budget; nothing was captured.";
+            return false;
         }
         reason = ""; return true;
     }
