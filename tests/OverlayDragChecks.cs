@@ -169,11 +169,17 @@ internal static class OverlayDragChecks
                 && layout.IgniteCenter.X > layout.SliceCenter.X && layout.IgniteCenter.Y > layout.SliceCenter.Y
                 && (layout.IgniteCenter - layout.SliceCenter).Length() < 64 * layout.Scale,
                 "seven separate circular hit regions fit; ignite tucks below and closer to slice");
-            Check(layout.Hit((layout.SettingsMin + layout.SettingsMax) * .5f) == SaberOverlayHit.Settings
-                && layout.SettingsMin.Y > layout.ListBodyTop + layout.ListBodyHeight
-                && layout.SettingsMax.Y < layout.ListMax.Y && layout.SettingsMin.X > layout.ListMin.X
-                && layout.SettingsMax.X < layout.ListMax.X,
-                "the settings button has its own hit region below the scrollable kitten rows");
+            foreach (bool listVisible in new[] { false, true })
+            foreach (bool controlsVisible in new[] { false, true })
+            {
+                var visible = layout with { ShowKittenList = listVisible, ShowLightsaberControls = controlsVisible };
+                Check(visible.Hit((layout.ListMin + layout.ListMax) * .5f)
+                        == (listVisible ? SaberOverlayHit.Kittens : SaberOverlayHit.None)
+                    && visible.Hit(layout.SwingCenter) == (controlsVisible ? SaberOverlayHit.Swing : SaberOverlayHit.None)
+                    && visible.Hit(layout.SliceCenter) == (controlsVisible ? SaberOverlayHit.Slice : SaberOverlayHit.None)
+                    && visible.Hit(layout.IgniteCenter) == (controlsVisible ? SaberOverlayHit.Ignite : SaberOverlayHit.None),
+                    "list and lightsaber visibility independently remove hidden controls from pointer hit testing");
+            }
             foreach (var direction in new[] { new float2(1, 0), new float2(0, 1), new float2(-1, 0), new float2(0, -1),
                 SaberOverlayDrag.ClampDisk(new(1, 1)) })
             {
@@ -270,10 +276,9 @@ internal static class OverlayDragChecks
                     && moved.SwingRadius == layout.SwingRadius && moved.Scale == layout.Scale,
                     "saber, movement buttons and status translate rigidly without changing scale or spacing");
                 Check(moved.ListMin == layout.ListMin && moved.ListMax == layout.ListMax
-                    && moved.ListBodyTop == layout.ListBodyTop && moved.SettingsMin == layout.SettingsMin
-                    && moved.SettingsMax == layout.SettingsMax
+                    && moved.ListBodyTop == layout.ListBodyTop
                     && moved.ColorSwatchMin(0, 0) == layout.ColorSwatchMin(0, 0),
-                    "moving action controls leaves the kitten list, swatches and Settings anchored");
+                    "moving action controls leaves the kitten list and swatches anchored");
                 Check(moved.Hit(moved.SwingCenter) == SaberOverlayHit.Swing
                     && moved.Hit(moved.SliceCenter) == SaberOverlayHit.Slice
                     && moved.Hit(moved.IgniteCenter) == SaberOverlayHit.Ignite

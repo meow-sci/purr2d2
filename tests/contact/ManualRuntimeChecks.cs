@@ -13,6 +13,8 @@ internal sealed partial class SaberRuntime
     private KittenEva? _owner;
     private string? _fault;
     private bool OverlayVisible = true, SomersaultActive, ForceHolding, ForcePicking, _freshPoseThisTick = true, _selectingSlice;
+    private bool _lightsaberUiEnabled = true;
+    private bool LightsaberUiVisible => OverlayVisible && _lightsaberUiEnabled;
     private readonly FakeBlade _blade = new();
     private readonly FakePose _pose = new();
     private readonly FakeRenderer _renderer = new();
@@ -174,6 +176,9 @@ internal sealed partial class SaberRuntime
             "Force capture conflict cancels contact and the held gesture without rearming");
         r = Scene(); r.Begin(); r.Tick(-.1, 4); r.Tick(.1, 4.02); r.OverlayVisible = false; r.Tick(.1, 4.04);
         Check(!r._manualSliceActive, "hidden controls cancel pending manual cut");
+        r = Scene(); r.Begin(); r.Tick(-.1, 4); r.Tick(.1, 4.02); r._lightsaberUiEnabled = false; r.Tick(.1, 4.04);
+        Check(r.OverlayVisible && !r._manualSliceActive && !r._manualGesture.Held,
+            "hiding only the lightsaber UI cancels manual slicing while the other overlay controls stay visible");
         r = Scene(); r.Begin(); r.Tick(-.1, 5); r.Tick(.1, 5.02); r._blade.TargetOn = false; r.Tick(.1, 5.04);
         Check(!r._manualSliceActive, "retraction cancels pending manual cut");
         r = Scene(); r.Begin(); r._sliceSequence.Start(); r.Tick(-.1, 6); r.Tick(.1, 6.02);

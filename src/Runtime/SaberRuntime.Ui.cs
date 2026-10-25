@@ -24,6 +24,14 @@ internal sealed partial class SaberRuntime
         {
             ((IGameViewportLifecycle)Program.HoveredViewport).SetMenuBarInUse(true);
             if (ImGui.MenuItem("Enabled", default(ImString), _enabled, _ready)) SetEnabled(!_enabled);
+            if (ImGui.MenuItem("Kitten List UI", default(ImString), _settings.KittenListUiEnabled))
+                SetKittenListUiVisible(!_settings.KittenListUiEnabled);
+            if (ImGui.MenuItem("The Furce UI", default(ImString), _settings.ForceUiEnabled))
+                SetForceUiVisible(!_settings.ForceUiEnabled);
+            if (ImGui.MenuItem("Lightsaber UI", default(ImString), _settings.LightsaberUiEnabled))
+                SetLightsaberUiVisible(!_settings.LightsaberUiEnabled);
+            ImGui.Separator();
+            if (ImGui.MenuItem("Settings", default(ImString), _windowVisible, _enabled)) ToggleSettingsWindow();
         }
         finally { ImGui.EndMenu(); }
     }

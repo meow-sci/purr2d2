@@ -33,7 +33,7 @@ internal sealed partial class SaberRuntime
     private int _overlayUiButtons;
     private ulong _overlayUiEventFrame = ulong.MaxValue;
 
-    private bool KittenColorPickerVisible => OverlayVisible && (_kittenColorPickerRequested || _kittenColorPickerOpen)
+    private bool KittenColorPickerVisible => KittenListVisible && (_kittenColorPickerRequested || _kittenColorPickerOpen)
         && _kittenColorPickerOwner is { IsDisposed: false } kitten && _currentKittens.Contains(kitten);
 
     private bool KittenColorPickerContainsPointer(float2 pointer) => KittenColorPickerVisible
@@ -42,6 +42,9 @@ internal sealed partial class SaberRuntime
 
     private bool OverlayVisible => _enabled && _showSaberOverlay && _ready && !_disposed && Program.DrawUI
         && !Program.EditorFlag && Universe.CurrentSystem != null && Program.MainViewport.Visible;
+    private bool KittenListVisible => OverlayVisible && _settings.KittenListUiEnabled;
+    private bool LightsaberUiVisible => OverlayVisible && _settings.LightsaberUiEnabled;
+    private bool ForceUiVisible => OverlayVisible && _settings.ForceUiEnabled;
     private bool OverlayCanSwing => _fault == null && _owner is { IsDisposed: false }
         && ReferenceEquals(_owner, Program.ControlledVehicle) && _blade.Equipped && _pose.Eligible
         && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
@@ -61,6 +64,26 @@ internal sealed partial class SaberRuntime
         _showSaberOverlay = visible;
         _overlayLayoutAvailable = false;
         if (!visible) { ResetOverlaySwing(); ResetForceGestures(); DismissKittenColorPicker(); }
+    }
+
+    private void SetKittenListUiVisible(bool visible)
+    {
+        _settings.KittenListUiEnabled = visible;
+        _overlayLayout = _overlayLayout with { ShowKittenList = visible };
+        if (!visible) DismissKittenColorPicker();
+    }
+
+    private void SetLightsaberUiVisible(bool visible)
+    {
+        _settings.LightsaberUiEnabled = visible;
+        _overlayLayout = _overlayLayout with { ShowLightsaberControls = visible };
+        if (!visible) ResetOverlaySwing();
+    }
+
+    private void SetForceUiVisible(bool visible)
+    {
+        _settings.ForceUiEnabled = visible;
+        if (!visible) ResetForceGestures();
     }
 
     private void DrawSaberOverlay()
@@ -88,7 +111,11 @@ internal sealed partial class SaberRuntime
             var kittens = OverlayKittens;
             float menuInset = OverlayMenuBarInset(viewport);
             var baseLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(), kittens.Count,
-                menuInset, ShowSomersaultButtons && SomersaultOverlayControlsEnabled);
+                menuInset, ShowSomersaultButtons && SomersaultOverlayControlsEnabled) with
+            {
+                ShowKittenList = KittenListVisible,
+                ShowLightsaberControls = LightsaberUiVisible,
+            };
             _overlayLayout = baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
                 new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset);
             _overlayLayoutAvailable = _overlayLayout.Valid;
@@ -98,7 +125,7 @@ internal sealed partial class SaberRuntime
                 ImGui.GetFontSize(), ImGui.CalcTextSize("200 m/s").X)
                 .WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
                     new(_settings.ForceControlsOffsetX, _settings.ForceControlsOffsetY), menuInset);
-            _forceLayoutAvailable = _forceLayout.Valid;
+            _forceLayoutAvailable = ForceUiVisible && _forceLayout.Valid;
             bool canSomersault = CanStartSomersault(out var somersaultReason);
             float fontSize = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
             _overlayListScroll = Math.Clamp(_overlayListScroll, 0, Math.Max(0, kittens.Count * layout.RowHeight - layout.ListBodyHeight));
@@ -116,88 +143,90 @@ internal sealed partial class SaberRuntime
                 try
                 {
                     DrawForceOverlay(draw);
-                    // List/swing/slice retain 50% alpha; blue action buttons use 25% below.
-                    draw.AddRectFilled(layout.ListMin, layout.ListMax, new ImColor8(0, 0, 0, 128));
-                    draw.AddText(layout.ListMin + new float2(layout.Padding, layout.Padding), white, "EVA lightsabers");
-                    if (kittens.Count == 0)
-                        draw.AddText(new float2(layout.ListMin.X + layout.Padding, layout.ListBodyTop), muted, "No EVA kittens");
-                    draw.PushClipRect(new(layout.ListMin.X, layout.ListBodyTop), new(layout.ListMax.X, layout.ListBodyTop + layout.ListBodyHeight), true);
-                    try
+                    if (layout.ShowKittenList)
                     {
-                        int first = Math.Max(0, (int)(_overlayListScroll / layout.RowHeight));
-                        int last = Math.Min(kittens.Count, first + (int)MathF.Ceiling(layout.ListBodyHeight / layout.RowHeight) + 1);
-                        for (int index = first; index < last; index++)
+                        // List/swing/slice retain 50% alpha; blue action buttons use 25% below.
+                        draw.AddRectFilled(layout.ListMin, layout.ListMax, new ImColor8(0, 0, 0, 128));
+                        draw.AddText(layout.ListMin + new float2(layout.Padding, layout.Padding), white, "EVA lightsabers");
+                        if (kittens.Count == 0)
+                            draw.AddText(new float2(layout.ListMin.X + layout.Padding, layout.ListBodyTop), muted, "No EVA kittens");
+                        draw.PushClipRect(new(layout.ListMin.X, layout.ListBodyTop), new(layout.ListMax.X, layout.ListBodyTop + layout.ListBodyHeight), true);
+                        try
                         {
-                            var kitten = kittens[index];
-                            if (kitten.IsDisposed) continue;
-                            float y = layout.ListBodyTop + index * layout.RowHeight - _overlayListScroll;
-                            var checkMin = new float2(layout.ListMin.X + layout.Padding, y + layout.RowHeight * .18f);
-                            float box = layout.RowHeight * .62f;
-                            draw.AddRect(checkMin, checkMin + new float2(box), muted, 0, ImDrawFlags.None, 1);
-                            if (SaberEnabledFor(kitten))
+                            int first = Math.Max(0, (int)(_overlayListScroll / layout.RowHeight));
+                            int last = Math.Min(kittens.Count, first + (int)MathF.Ceiling(layout.ListBodyHeight / layout.RowHeight) + 1);
+                            for (int index = first; index < last; index++)
                             {
-                                draw.AddLine(checkMin + new float2(box * .18f, box * .52f), checkMin + new float2(box * .42f, box * .76f), white, 2);
-                                draw.AddLine(checkMin + new float2(box * .42f, box * .76f), checkMin + new float2(box * .85f, box * .20f), white, 2);
+                                var kitten = kittens[index];
+                                if (kitten.IsDisposed) continue;
+                                float y = layout.ListBodyTop + index * layout.RowHeight - _overlayListScroll;
+                                var checkMin = new float2(layout.ListMin.X + layout.Padding, y + layout.RowHeight * .18f);
+                                float box = layout.RowHeight * .62f;
+                                draw.AddRect(checkMin, checkMin + new float2(box), muted, 0, ImDrawFlags.None, 1);
+                                if (SaberEnabledFor(kitten))
+                                {
+                                    draw.AddLine(checkMin + new float2(box * .18f, box * .52f), checkMin + new float2(box * .42f, box * .76f), white, 2);
+                                    draw.AddLine(checkMin + new float2(box * .42f, box * .76f), checkMin + new float2(box * .85f, box * .20f), white, 2);
+                                }
+                                var swatch = layout.ColorSwatchMin(index, _overlayListScroll);
+                                draw.PushClipRect(new(checkMin.X + box + layout.Padding, y), new(swatch.X - layout.Padding, y + layout.RowHeight), true);
+                                try
+                                {
+                                    draw.AddText(new(checkMin.X + box + layout.Padding, y + layout.RowHeight * .12f),
+                                        ReferenceEquals(kitten, Program.ControlledVehicle) ? white : muted, KittenLabel(kitten));
+                                }
+                                finally { draw.PopClipRect(); }
+                                var color = SaberColorFor(kitten);
+                                draw.AddRectFilled(swatch, swatch + new float2(layout.ColorSwatchSize),
+                                    new ImColor8((byte)(color.X * 255), (byte)(color.Y * 255), (byte)(color.Z * 255), 255));
+                                bool selected = KittenColorPickerVisible && ReferenceEquals(_kittenColorPickerOwner, kitten);
+                                draw.AddRect(swatch, swatch + new float2(layout.ColorSwatchSize), selected ? white : muted,
+                                    0, ImDrawFlags.None, selected ? 2 : 1);
+                                var cue = color.X * .2126f + color.Y * .7152f + color.Z * .0722f > .55f
+                                    ? new ImColor8(10, 10, 15, 255) : white;
+                                float size = layout.ColorSwatchSize;
+                                CenterOverlayText(draw, swatch + new float2(size * .5f), cue,
+                                    SaberTypeFor(kitten) == SaberType.Dark ? "D" : "L", size * .8f, size * .65f);
                             }
-                            var swatch = layout.ColorSwatchMin(index, _overlayListScroll);
-                            draw.PushClipRect(new(checkMin.X + box + layout.Padding, y), new(swatch.X - layout.Padding, y + layout.RowHeight), true);
-                            try
-                            {
-                                draw.AddText(new(checkMin.X + box + layout.Padding, y + layout.RowHeight * .12f),
-                                    ReferenceEquals(kitten, Program.ControlledVehicle) ? white : muted, KittenLabel(kitten));
-                            }
-                            finally { draw.PopClipRect(); }
-                            var color = SaberColorFor(kitten);
-                            draw.AddRectFilled(swatch, swatch + new float2(layout.ColorSwatchSize),
-                                new ImColor8((byte)(color.X * 255), (byte)(color.Y * 255), (byte)(color.Z * 255), 255));
-                            bool selected = KittenColorPickerVisible && ReferenceEquals(_kittenColorPickerOwner, kitten);
-                            draw.AddRect(swatch, swatch + new float2(layout.ColorSwatchSize), selected ? white : muted,
-                                0, ImDrawFlags.None, selected ? 2 : 1);
-                            var cue = color.X * .2126f + color.Y * .7152f + color.Z * .0722f > .55f
-                                ? new ImColor8(10, 10, 15, 255) : white;
-                            float size = layout.ColorSwatchSize;
-                            CenterOverlayText(draw, swatch + new float2(size * .5f), cue,
-                                SaberTypeFor(kitten) == SaberType.Dark ? "D" : "L", size * .8f, size * .65f);
                         }
+                        finally { draw.PopClipRect(); }
+                        if (layout.ListFooterHeight > layout.Padding)
+                            draw.AddText(new(layout.ListMin.X + layout.Padding, layout.ListBodyTop + layout.ListBodyHeight), muted, "Scroll for more kittens");
                     }
-                    finally { draw.PopClipRect(); }
-                    if (layout.ListFooterHeight > layout.SettingsFooterHeight)
-                        draw.AddText(new(layout.ListMin.X + layout.Padding, layout.ListBodyTop + layout.ListBodyHeight), muted, "Scroll for more kittens");
-                    draw.AddRectFilled(layout.SettingsMin, layout.SettingsMax, new ImColor8(45, 50, 60, 210));
-                    draw.AddRect(layout.SettingsMin, layout.SettingsMax, _windowVisible ? white : muted);
-                    CenterOverlayText(draw, (layout.SettingsMin + layout.SettingsMax) * .5f, white, "Settings",
-                        layout.SettingsMax.X - layout.SettingsMin.X - layout.Padding * 2, fontSize);
 
-                    draw.AddCircleFilled(layout.SwingCenter, layout.SwingRadius, new ImColor8(0, 0, 0, 128), 64);
-                    draw.AddCircle(layout.SwingCenter, layout.SwingRadius, new ImColor8(255, 255, 255, 64), 64,
-                        Math.Max(.5f, layout.Scale));
-                    draw.AddCircleFilled(layout.SliceCenter, layout.SliceRadius, new ImColor8(224, 24, 24, 128), 48);
-                    draw.AddCircleFilled(layout.IgniteCenter, layout.IgniteRadius, MovementButtonFill, 48);
-                    var toggleKitten = AppearanceKitten;
-                    var toggleText = toggleKitten != null && _fault == null
-                        ? MovementButtonText : MovementButtonDisabledText;
-                    draw.AddCircle(layout.IgniteCenter, layout.IgniteRadius, new ImColor8(255, 255, 255, 64), 48,
-                        Math.Max(.5f, layout.Scale));
-                    CenterOverlayText(draw, layout.IgniteCenter, toggleText,
-                        toggleKitten != null && SaberEnabledFor(toggleKitten) ? "RETRACT" : "IGNITE", layout.IgniteRadius * 1.6f);
-                    var swingText = OverlayCanStartSwing ? dragCircleWhite : dragCircleMuted;
-                    CenterOverlayText(draw, layout.SwingCenter - new float2(0, fontSize * .55f), swingText, "SWING", layout.SwingRadius * 1.6f, fontSize);
-                    CenterOverlayText(draw, layout.SwingCenter + new float2(0, fontSize * .65f), swingText, "hold + drag", layout.SwingRadius * 1.6f, fontSize);
-                    CenterOverlayText(draw, layout.SliceCenter, SomersaultActive && !_selectingSlice ? muted : white,
-                        _selectingSlice ? "CANCEL" : "SLICE", layout.SliceRadius * 1.6f);
-                    // Temporarily hidden while somersaults use Space + arrow keys.
-                    // Set SomersaultOverlayControlsEnabled to true and uncomment to restore.
-                    // DrawSomersaultButtons(draw, layout, canSomersault);
-                    // The small reticle moves inside the fixed circle; the control itself never moves.
-                    if (_overlayDrag.Active)
+                    if (layout.ShowLightsaberControls)
                     {
-                        var point = layout.SwingIndicator(_overlayDrag.Offset);
-                        draw.AddCircle(point, layout.SwingMarkerRadius, white, 16, 1.5f);
+                        draw.AddCircleFilled(layout.SwingCenter, layout.SwingRadius, new ImColor8(0, 0, 0, 128), 64);
+                        draw.AddCircle(layout.SwingCenter, layout.SwingRadius, new ImColor8(255, 255, 255, 64), 64,
+                            Math.Max(.5f, layout.Scale));
+                        draw.AddCircleFilled(layout.SliceCenter, layout.SliceRadius, new ImColor8(224, 24, 24, 128), 48);
+                        draw.AddCircleFilled(layout.IgniteCenter, layout.IgniteRadius, MovementButtonFill, 48);
+                        var toggleKitten = AppearanceKitten;
+                        var toggleText = toggleKitten != null && _fault == null
+                            ? MovementButtonText : MovementButtonDisabledText;
+                        draw.AddCircle(layout.IgniteCenter, layout.IgniteRadius, new ImColor8(255, 255, 255, 64), 48,
+                            Math.Max(.5f, layout.Scale));
+                        CenterOverlayText(draw, layout.IgniteCenter, toggleText,
+                            toggleKitten != null && SaberEnabledFor(toggleKitten) ? "RETRACT" : "IGNITE", layout.IgniteRadius * 1.6f);
+                        var swingText = OverlayCanStartSwing ? dragCircleWhite : dragCircleMuted;
+                        CenterOverlayText(draw, layout.SwingCenter - new float2(0, fontSize * .55f), swingText, "SWING", layout.SwingRadius * 1.6f, fontSize);
+                        CenterOverlayText(draw, layout.SwingCenter + new float2(0, fontSize * .65f), swingText, "hold + drag", layout.SwingRadius * 1.6f, fontSize);
+                        CenterOverlayText(draw, layout.SliceCenter, SomersaultActive && !_selectingSlice ? muted : white,
+                            _selectingSlice ? "CANCEL" : "SLICE", layout.SliceRadius * 1.6f);
+                        // Temporarily hidden while somersaults use Space + arrow keys.
+                        // Set SomersaultOverlayControlsEnabled to true and uncomment to restore.
+                        // DrawSomersaultButtons(draw, layout, canSomersault);
+                        // The small reticle moves inside the fixed circle; the control itself never moves.
+                        if (_overlayDrag.Active)
+                        {
+                            var point = layout.SwingIndicator(_overlayDrag.Offset);
+                            draw.AddCircle(point, layout.SwingMarkerRadius, white, 16, 1.5f);
+                        }
+                        string status = SliceStatusVisible ? _sliceStatus
+                            : layout.ShowSomersaultButtons && !canSomersault ? somersaultReason : "";
+                        if (!string.IsNullOrWhiteSpace(status))
+                            DrawCenteredOverlayStatus(draw, status, layout.StatusMin, layout.StatusMax, fontSize, layout.Scale);
                     }
-                    string status = SliceStatusVisible ? _sliceStatus
-                        : layout.ShowSomersaultButtons && !canSomersault ? somersaultReason : "";
-                    if (!string.IsNullOrWhiteSpace(status))
-                        DrawCenteredOverlayStatus(draw, status, layout.StatusMin, layout.StatusMax, fontSize, layout.Scale);
                 }
                 finally { draw.PopClipRect(); }
             }
@@ -312,9 +341,6 @@ internal sealed partial class SaberRuntime
 
         switch (hit)
         {
-            case OverlayHit.Settings:
-                ToggleSettingsWindow();
-                break;
             case OverlayHit.Kittens:
                 if (_fault != null || pointer.Y < _overlayLayout.ListBodyTop
                     || pointer.Y >= _overlayLayout.ListBodyTop + _overlayLayout.ListBodyHeight) break;
@@ -376,7 +402,7 @@ internal sealed partial class SaberRuntime
     {
         if (_forceThrowDrag.Held)
         {
-            if (!OverlayVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
+            if (!ForceUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
                 || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner))
                 CancelForceThrowDrag();
             else MoveForcePointer(OverlayPointer(window));
@@ -424,7 +450,7 @@ internal sealed partial class SaberRuntime
     {
         if (window == Program.GetWindow() && _forceThrowDrag.Held)
         {
-            if (!OverlayVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
+            if (!ForceUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
                 || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner))
                 CancelForceThrowDrag();
             return true;
@@ -433,7 +459,7 @@ internal sealed partial class SaberRuntime
         if (window == Program.GetWindow() && !_overlayPointerCapture.AnyHeld
             && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return true;
         if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse) return false;
-        if (window == Program.GetWindow() && OverlayVisible && !Program.IsModalOpen()
+        if (window == Program.GetWindow() && ForceUiVisible && !Program.IsModalOpen()
             && !Program.HasMouseInputLatch && double.IsFinite(offset.Y)
             && (_forceDrag.Held || (!_overlayPointerCapture.AnyHeld && _overlayLayoutAvailable && _forceLayoutAvailable
                 && _overlayLayout.Hit(OverlayPointer(window)) == OverlayHit.None
@@ -488,7 +514,7 @@ internal sealed partial class SaberRuntime
     private void DrawKittenColorPicker()
     {
         _kittenColorPickerBoundsAvailable = false;
-        bool valid = OverlayVisible && _kittenColorPickerOwner is { IsDisposed: false } kitten && _currentKittens.Contains(kitten);
+        bool valid = KittenListVisible && _kittenColorPickerOwner is { IsDisposed: false } kitten && _currentKittens.Contains(kitten);
         if (!valid) { DismissKittenColorPicker(); return; }
         if (_kittenColorPickerRequested)
         {

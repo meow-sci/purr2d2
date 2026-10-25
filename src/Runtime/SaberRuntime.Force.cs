@@ -47,7 +47,7 @@ internal sealed partial class SaberRuntime
 
     internal bool ForceHolding => !_forceDisposed && _force.HasCapture;
     internal KittenEva? ForceOwner => !_forceDisposed ? _force.Owner : null;
-    private bool ForcePicking => _selectingForce && OverlayVisible;
+    private bool ForcePicking => _selectingForce && ForceUiVisible;
     private bool ForceCanUse => _ready && !_disposed && !_forceDisposed && !Program.EditorFlag
         && _owner is { IsDisposed: false } && ReferenceEquals(_owner, Program.ControlledVehicle);
 
@@ -335,7 +335,7 @@ internal sealed partial class SaberRuntime
     {
         if (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner))
             SetForceStatus("Force selection cancelled: the controlled kitten changed.", ForceStatusSeverity.None);
-        if (!OverlayVisible || Program.IsModalOpen() || !ForceCanUse
+        if (!ForceUiVisible || Program.IsModalOpen() || !ForceCanUse
             || (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner)))
             ResetForceGestures();
         if (_forceDrag.Held && !ReferenceEquals(_forceMoveOwner, _owner)) _forceDrag.Release();
@@ -511,7 +511,7 @@ internal sealed partial class SaberRuntime
     private bool CompleteForceThrowSlider(float2 pointer)
     {
         if (!_forceThrowDrag.Held) return false;
-        bool valid = OverlayVisible && !Program.IsModalOpen() && !Program.HasMouseInputLatch
+        bool valid = ForceUiVisible && !Program.IsModalOpen() && !Program.HasMouseInputLatch
             && !ImGui.GetIO().AppFocusLost && ForceCanUse && ForceHolding
             && _forceLayoutAvailable && _forceThrowDrag.Matches(_forceLayout)
             && ReferenceEquals(_forceThrowOwner, _owner) && ReferenceEquals(_force.Owner, _owner);

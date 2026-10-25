@@ -2,7 +2,7 @@ using Brutal.Numerics;
 
 namespace Purr2D2.Core;
 
-public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite, Settings }
+public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite }
 
 /// <summary>Viewport-relative geometry shared by drawing and exact pointer hit testing.</summary>
 public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax, float ListBodyTop,
@@ -11,6 +11,8 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     float2 ForwardCenter, float2 BackwardCenter, float2 LeftCenter, float2 RightCenter,
     float2 StatusMin, float2 StatusMax, bool ShowSomersaultButtons)
 {
+    public bool ShowKittenList { get; init; } = true;
+    public bool ShowLightsaberControls { get; init; } = true;
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
     public float IgniteRadius => SliceRadius;
     public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
@@ -20,9 +22,6 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public float SwingTravelRadius => SwingRadius - SwingMarkerRadius;
     public float2 SwingIndicator(float2 offset) => SwingCenter + SaberOverlayDrag.ClampDisk(offset) * SwingTravelRadius;
     public float SomersaultRadius => SliceRadius;
-    public float SettingsFooterHeight => 50 * Scale;
-    public float2 SettingsMax => ListMax - new float2(Padding);
-    public float2 SettingsMin => new(ListMin.X + Padding, SettingsMax.Y - 30 * Scale);
     public float ColorSwatchSize => RowHeight * .62f;
     public float2 ColorSwatchMin(int row, float scroll) => new(ListMax.X - Padding - ColorSwatchSize,
         ListBodyTop + row * RowHeight - scroll + RowHeight * .18f);
@@ -60,7 +59,7 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     }
     public bool IsColorSwatch(float2 point, int row, float scroll)
     {
-        if (!Valid || row < 0 || !float.IsFinite(scroll) || !float.IsFinite(point.X) || !float.IsFinite(point.Y)
+        if (!Valid || !ShowKittenList || row < 0 || !float.IsFinite(scroll) || !float.IsFinite(point.X) || !float.IsFinite(point.Y)
             || point.Y < ListBodyTop || point.Y >= ListBodyTop + ListBodyHeight) return false;
         var min = ColorSwatchMin(row, scroll);
         return point.X >= min.X && point.X <= min.X + ColorSwatchSize
@@ -69,20 +68,21 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public SaberOverlayHit Hit(float2 point)
     {
         if (!Valid) return SaberOverlayHit.None;
-        if (SaberOverlayDrag.ContainsCircle(point, SwingCenter, SwingRadius)) return SaberOverlayHit.Swing;
-        if (SaberOverlayDrag.ContainsCircle(point, SliceCenter, SliceRadius)) return SaberOverlayHit.Slice;
-        if (SaberOverlayDrag.ContainsCircle(point, IgniteCenter, IgniteRadius)) return SaberOverlayHit.Ignite;
-        if (ShowSomersaultButtons)
+        if (ShowLightsaberControls)
         {
-            if (SaberOverlayDrag.ContainsCircle(point, ForwardCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultForward;
-            if (SaberOverlayDrag.ContainsCircle(point, BackwardCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultBackward;
-            if (SaberOverlayDrag.ContainsCircle(point, LeftCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultLeft;
-            if (SaberOverlayDrag.ContainsCircle(point, RightCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultRight;
+            if (SaberOverlayDrag.ContainsCircle(point, SwingCenter, SwingRadius)) return SaberOverlayHit.Swing;
+            if (SaberOverlayDrag.ContainsCircle(point, SliceCenter, SliceRadius)) return SaberOverlayHit.Slice;
+            if (SaberOverlayDrag.ContainsCircle(point, IgniteCenter, IgniteRadius)) return SaberOverlayHit.Ignite;
+            if (ShowSomersaultButtons)
+            {
+                if (SaberOverlayDrag.ContainsCircle(point, ForwardCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultForward;
+                if (SaberOverlayDrag.ContainsCircle(point, BackwardCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultBackward;
+                if (SaberOverlayDrag.ContainsCircle(point, LeftCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultLeft;
+                if (SaberOverlayDrag.ContainsCircle(point, RightCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultRight;
+            }
         }
         // Actions draw after the fixed list, including when custom offsets place them over it.
-        if (point.X >= SettingsMin.X && point.X <= SettingsMax.X && point.Y >= SettingsMin.Y && point.Y <= SettingsMax.Y)
-            return SaberOverlayHit.Settings;
-        return point.X >= ListMin.X && point.X <= ListMax.X && point.Y >= ListMin.Y && point.Y <= ListMax.Y
+        return ShowKittenList && point.X >= ListMin.X && point.X <= ListMax.X && point.Y >= ListMin.Y && point.Y <= ListMax.Y
             ? SaberOverlayHit.Kittens : SaberOverlayHit.None;
     }
 
@@ -119,9 +119,9 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         var min = new float2(origin.X + size.X - margin - 296 * scale, listTop);
         float header = 38 * scale;
         float maximumHeight = Math.Min(size.Y * .34f, swing.Y - radius - min.Y - 16 * scale);
-        float desiredHeight = header + Math.Max(1, kittenCount) * row + 50 * scale;
+        float desiredHeight = header + Math.Max(1, kittenCount) * row + pad;
         bool scroll = desiredHeight > maximumHeight;
-        float footer = (50 + (scroll ? 22 : 0)) * scale;
+        float footer = pad + (scroll ? 22 * scale : 0);
         float height = Math.Max(header + row + footer, Math.Min(desiredHeight, maximumHeight));
         var forward = new float2(swing.X, swing.Y + forwardOffset);
         var backward = forward + new float2(0, step * 2);

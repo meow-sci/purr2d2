@@ -8,7 +8,7 @@ internal sealed partial class SaberRuntime
     private void ApplyOverlaySwing(double playerDt)
     {
         if (!_overlayDrag.Active) return;
-        if (!OverlayVisible || !OverlayCanSwing || !ReferenceEquals(_overlayDragOwner, _owner)
+        if (!LightsaberUiVisible || !OverlayCanSwing || !ReferenceEquals(_overlayDragOwner, _owner)
             || !ReferenceEquals(_overlayDragPose, _pose))
         {
             ResetOverlaySwing();

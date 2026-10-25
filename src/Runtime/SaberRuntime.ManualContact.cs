@@ -69,7 +69,7 @@ internal sealed partial class SaberRuntime
 
     private void UpdateManualContact(bool simulationAdvancing)
     {
-        bool eligible = _fault == null && _owner is { IsDisposed: false } && OverlayVisible
+        bool eligible = _fault == null && _owner is { IsDisposed: false } && LightsaberUiVisible
             && _blade.Equipped && _blade.TargetOn && _blade.Deployment >= .99f && _pose.Eligible
             && !SomersaultActive && !ForceHolding && !ForcePicking;
         if (_manualSliceActive)

@@ -159,7 +159,7 @@ internal sealed partial class SaberRuntime : IDisposable
         if (!_enabled || !_ready || _disposed) return;
         try
         {
-            if (!OverlayVisible) DismissKittenColorPicker();
+            if (!KittenListVisible) DismissKittenColorPicker();
             UpdateForceVisibility();
             _renderer.ConfigureVfx(_settings);
             _renderer.Prepare();

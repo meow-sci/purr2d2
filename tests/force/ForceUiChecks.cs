@@ -15,9 +15,11 @@ internal sealed partial class SaberRuntime
     private static readonly ImColor8 MovementButtonDisabledText = new(135, 145, 165, 255);
     private bool _ready = true, _disposed = false, _selectingSlice = false;
     private bool OverlayVisible = true, KittenColorPickerVisible = false, _overlayLayoutAvailable = false;
+    private bool ForceUiVisible => OverlayVisible && _settings.ForceUiEnabled;
     private SaberOverlayLayout _overlayLayout = default;
     private sealed class TestSettings
     {
+        internal bool ForceUiEnabled = true;
         internal float AngryForceRadius = 10, ClutterPickTolerance = .2f;
         internal float ForceBreakupGroanPixels = 6, ForceBreakupSplitPixels = 18, Volume = .55f;
         internal float ForceMaximumSpread = 20;
@@ -258,6 +260,12 @@ internal sealed partial class SaberRuntime
         Check(ForceTargeting.Picks == 2, "hover refreshes after the preview interval at the settled handoff");
         runtime.OverlayVisible = false; runtime.UpdateForceVisibility();
         Check(!runtime._selectingForce && !runtime._forceDrag.Held, "HUD hiding cancels selection and gesture state");
+
+        runtime = new(); runtime.BeginForcePicker(false);
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        runtime._settings.ForceUiEnabled = false; runtime.UpdateForceVisibility();
+        Check(runtime.OverlayVisible && runtime.ForceHolding && !runtime._selectingForce && !runtime._forceLayoutAvailable,
+            "hiding only the Furce UI cancels its picker without releasing held objects or hiding other controls");
 
         runtime = new(); runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
         runtime._forceSpreadTarget = .4; runtime._force.GroupSpread = .5;
