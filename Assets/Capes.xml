@@ -14,8 +14,8 @@
   </GltfFile>
   <PbrMaterial Id="Purr2D2_Cloth_Light">
     <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png" Category="Default" />
-    <Normal Path="Assets/Textures/Purr2D2_Cloth_Normal.png" Category="Default" />
-    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_ORM.png" Category="Default" />
+    <Normal Path="Assets/Textures/Purr2D2_Cloth_Light_Normal.png" Category="Default" />
+    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_Light_ORM.png" Category="Default" />
   </PbrMaterial>
   <PbrMaterial Id="Purr2D2_Cloth_Dark">
     <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png" Category="Default" />

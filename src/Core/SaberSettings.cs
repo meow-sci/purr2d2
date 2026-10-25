@@ -98,6 +98,7 @@ public sealed class SaberSettings
     public float FingerCurl { get; set; } = .12f;
     public float JumpComboIntervalSeconds { get; set; } = .75f;
     public bool SpaceSomersaultEnabled { get; set; } = true;
+    // Legacy JSON property retained for compatibility; overlay-wide MMU hiding supersedes it.
     public bool HideMmu { get; set; } = true;
     public float AngryForceRadius { get; set; } = 10;
     public int ForceCaptureLimit { get; set; } = ForceCaptureLimits.Default;

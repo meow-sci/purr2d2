@@ -331,7 +331,7 @@ internal sealed partial class SaberRuntime
         var aim = new float3(_settings.AimX, _settings.AimY, _settings.AimZ);
         float curl = _settings.FingerCurl, jumpComboInterval = _settings.JumpComboIntervalSeconds;
         bool spaceSomersaultEnabled = _settings.SpaceSomersaultEnabled;
-        bool hideMmu = _settings.HideMmu, changed = false;
+        bool changed = false;
         try
         {
             SaberSettingsRow("Grip position");
@@ -348,16 +348,13 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Space-bar somersaults");
             changed |= ImGui.Checkbox("##SpaceSomersaultEnabled", ref spaceSomersaultEnabled);
             ShowSaberControlTip("Bare Space starts a forward somersault; arrow keys choose the direction. Turn this off to keep Space's usual jump behavior.");
-            SaberSettingsRow("Equipment");
-            changed |= ImGui.Checkbox("Hide MMU controllers", ref hideMmu);
-            ShowSaberControlTip("Hides standard MMU hand controllers while the lightsaber is equipped.");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.GripX = grip.X; _settings.GripY = grip.Y; _settings.GripZ = grip.Z;
         _settings.AimX = aim.X; _settings.AimY = aim.Y; _settings.AimZ = aim.Z;
         _settings.FingerCurl = curl; _settings.JumpComboIntervalSeconds = jumpComboInterval;
-        _settings.SpaceSomersaultEnabled = spaceSomersaultEnabled; _settings.HideMmu = hideMmu;
+        _settings.SpaceSomersaultEnabled = spaceSomersaultEnabled;
         _settings.Validate();
     }
 

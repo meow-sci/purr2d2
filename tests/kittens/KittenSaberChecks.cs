@@ -62,13 +62,28 @@ internal sealed partial class SaberRuntime
         CheckLocomotionTransitions();
         var runtime = new SaberRuntime();
         KittenEva first = new("First"), second = new("Second");
+        second.Renderable.Avatar.Attachments.Mmu.Enabled = false;
+        Program.ControlledVehicle = new object();
         var system = new CelestialSystem();
         system.All.Items = [first, second]; Universe.CurrentSystem = system;
         runtime.RefreshOverlayKittens();
         Check(runtime.OverlayKittens.Count == 2 && runtime._kittenSabers.Count == 2
             && first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
-            && second.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0,
-            "settled fleet snapshot seeds EVA color records without attaching poses");
+            && second.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
+            && !first.Renderable.Avatar.Attachments.Mmu.Enabled && !second.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "settled fleet snapshot hides MMUs for equipped and uncontrolled EVA records without attaching poses");
+        first.Renderable.Avatar.Attachments.Mmu.Enabled = true;
+        runtime.RefreshOverlayKittens();
+        Check(!first.Renderable.Avatar.Attachments.Mmu.Enabled && !second.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "the active overlay lease re-hides an MMU enabled by native or other mod code");
+        runtime.RefreshOverlayKittens(); // Warm the stable two-kitten snapshot and avatar leases.
+        int scansBeforeRefreshLoop = HostCollection.SnapshotReads;
+        long allocatedBeforeRefreshLoop = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 128; i++) runtime.RefreshOverlayKittens();
+        long refreshAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeRefreshLoop;
+        int refreshFleetScans = HostCollection.SnapshotReads - scansBeforeRefreshLoop;
+        Check(refreshAllocatedBytes == 0 && refreshFleetScans == 128,
+            "warmed overlay MMU refreshes allocate 0 bytes and perform only one existing fleet scan each");
         var firstPalette = new float3(143 / 255f, 16 / 255f, 16 / 255f);
         var secondPalette = new float3(13 / 255f, 81 / 255f, 1 / 255f);
         Check(runtime.SaberColorFor(first) == firstPalette && runtime.SaberColorFor(second) == secondPalette,
@@ -119,6 +134,37 @@ internal sealed partial class SaberRuntime
         runtime.SetKittenSaberColor(third, new(float.NaN, 12, -2));
         Check(runtime.SaberColorFor(third) == new float3(.12f, 1, 0), "session colors reject nonfinite values and clamp every channel");
         system.All.Items = [first, second]; runtime.RefreshOverlayKittens();
+
+        KittenEva discoveredWhileDisabled = new("Discovered while disabled");
+        system.All.Items = [first, second, discoveredWhileDisabled];
+        runtime._enabled = false;
+        runtime.RefreshOverlayKittens();
+        Check(first.Renderable.Avatar.Attachments.Mmu.Enabled && !second.Renderable.Avatar.Attachments.Mmu.Enabled
+            && discoveredWhileDisabled.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "a disabled overlay restores existing originals and leaves newly seen EVA MMUs unchanged");
+        runtime._enabled = true;
+        runtime.RefreshOverlayKittens();
+        Check(!first.Renderable.Avatar.Attachments.Mmu.Enabled && !second.Renderable.Avatar.Attachments.Mmu.Enabled
+            && !discoveredWhileDisabled.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "quick overlay reactivation reacquires one hidden MMU lease for every current EVA");
+        runtime._enabled = false;
+        runtime.RefreshOverlayKittens();
+        Check(first.Renderable.Avatar.Attachments.Mmu.Enabled && !second.Renderable.Avatar.Attachments.Mmu.Enabled
+            && discoveredWhileDisabled.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "quick overlay deactivation restores true and originally false MMU states exactly");
+        runtime._enabled = true;
+        system.All.Items = [first, second]; runtime.RefreshOverlayKittens();
+        runtime._fault = "simulated runtime fault";
+        runtime.RefreshOverlayKittens();
+        Check(first.Renderable.Avatar.Attachments.Mmu.Enabled && !second.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "fault cleanup restores each EVA's original MMU state");
+        runtime.RefreshOverlayKittens();
+        Check(first.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "a faulted runtime does not reacquire MMU visibility leases");
+        runtime._fault = null;
+        runtime.RefreshOverlayKittens();
+        Check(!first.Renderable.Avatar.Attachments.Mmu.Enabled && !second.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "clearing a fault allows the enabled overlay to reacquire its MMU leases");
 
         runtime.QueueKittenSaber(first, true);
         Check(first.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
@@ -190,7 +236,10 @@ internal sealed partial class SaberRuntime
         Program.FrameNumber = 10;
         Check(!firstSaber.Pose.HasFreshBodyFrame, "noncontrolled poses retain the same stale-frame rejection");
 
-        first.Renderable.Avatar.Attachments.Mmu.Enabled = false;
+        first.Renderable.Avatar.Attachments.Mmu.Enabled = true;
+        runtime.RefreshOverlayKittens();
+        Check(!first.Renderable.Avatar.Attachments.Mmu.Enabled,
+            "a native MMU re-enable is corrected before saber stow begins");
         int stopsBeforeDisable = firstSaber.Audio.Stops;
         runtime.QueueKittenSaber(first, false); runtime.ApplyKittenSaberRequests();
         Check(firstSaber.Blade.Equipped && !firstSaber.Blade.TargetOn && firstSaber.Blade.Deployment == 1
@@ -216,7 +265,7 @@ internal sealed partial class SaberRuntime
         Check(firstSaber.Pose.Blend > 0 && firstSaber.Pose.Blend < 1 && firstSaber.Blade.Equipped
             && firstModel.AnimProcessors.Count == 1 && !first.Renderable.Avatar.Attachments.Mmu.Enabled
             && firstSaber.Audio.Stops == stopsBeforeDisable,
-            "unequipping lowers the arm while retaining its hilt, MMU override and audio channels");
+            "unequipping lowers the arm while the overlay-wide MMU lease and audio channels remain active");
         float loweringBlend = firstSaber.Pose.Blend;
         runtime.UpdateOtherSabers(0);
         Check(firstSaber.Pose.Blend == loweringBlend && firstSaber.Blade.Equipped,
@@ -226,8 +275,8 @@ internal sealed partial class SaberRuntime
         Check(firstSaber.Pose.HasFreshBodyFrame, "the lowering hilt still publishes a fresh hand transform");
         runtime.UpdateOtherSabers(.1); runtime.UpdateOtherSabers(.05);
         Check(!firstSaber.Blade.Equipped && firstModel.AnimProcessors.Count == 0
-            && first.Renderable.Avatar.Attachments.Mmu.Enabled && firstSaber.Audio.Stops > stopsBeforeDisable,
-            "only a fully lowered arm releases the hilt, processor, MMU override and audio");
+            && !first.Renderable.Avatar.Attachments.Mmu.Enabled && firstSaber.Audio.Stops > stopsBeforeDisable,
+            "stowing the saber releases its pose but leaves the overlay-wide MMU lease active");
 
         CheckToggleReversals(runtime, first, second);
         CheckControlledToggle(runtime, first, second);
@@ -261,8 +310,9 @@ internal sealed partial class SaberRuntime
             && runtime.OverlayKittens.Count == 0 && runtime._activeSaber == null
             && ReferenceEquals(runtime._pose, runtime._idleSaber.Pose)
             && second.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0
+            && !second.Renderable.Avatar.Attachments.Mmu.Enabled
             && secondSaber.Audio.Shutdowns == 1 && secondSaber.Audio.Disposals == 1,
-            "world reset disposes every remaining kitten, clears queued UI work and restores idle aliases");
+            "world reset disposes every remaining kitten, restores original MMU state, clears queued UI work and restores idle aliases");
         KittenEva afterReset = new("After reset");
         system.All.Items = [afterReset]; runtime.RefreshOverlayKittens();
         Check(runtime.SaberColorFor(afterReset) == firstPalette && runtime.SaberTypeFor(afterReset) == SaberType.Light,

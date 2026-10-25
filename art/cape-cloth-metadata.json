@@ -21,14 +21,20 @@
     "origin": "native helmet attachment frame",
     "openFaceDirection": "+Z",
     "fit": {
-      "openingHalfAngleRadians": 1.25,
-      "topRingY": 0.75,
-      "apexY": 0.765,
+      "hemOpeningHalfAngleRadians": 1.25,
+      "browOpeningHalfAngleRadians": 0.0,
+      "topRingY": 0.72,
+      "apexY": 0.755,
+      "apexX": 0.022,
+      "apexZ": -0.05,
       "bottomY": -0.18,
       "neckJoinY": -0.085,
-      "mainHalfWidth": 0.41,
-      "mainHalfDepth": 0.4,
-      "topCrownRoundnessRadius": 0.03,
+      "mainHalfWidth": 0.435,
+      "mainHalfDepth": 0.43,
+      "topHalfWidth": 0.15,
+      "topHalfDepth": 0.16,
+      "crownTransition": 0.5,
+      "asymmetricSideHang": 0.05,
       "bottomHalfWidth": 0.34,
       "bottomHalfDepth": 0.235
     }
@@ -86,7 +92,26 @@
   "textures": {
     "size": "256x256",
     "channels": "diffuse RGB, tangent normal, AO/roughness/metalness",
-    "roughness": 0.95,
+    "brownSwatch": "art/brown-cloth-preview.png",
+    "lightMaps": {
+      "diffuse": "Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png",
+      "normal": "Assets/Textures/Purr2D2_Cloth_Light_Normal.png",
+      "aoRoughMetal": "Assets/Textures/Purr2D2_Cloth_Light_ORM.png",
+      "finish": "muted dusty brown fabric; worn edges and hem; irregular short fibers; matte"
+    },
+    "darkMaps": {
+      "diffuse": "Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png",
+      "normal": "Assets/Textures/Purr2D2_Cloth_Normal.png",
+      "aoRoughMetal": "Assets/Textures/Purr2D2_Cloth_ORM.png",
+      "finish": "existing dark-side cloth maps, unchanged"
+    },
+    "roughness": {
+      "lightRange": [
+        0.95,
+        0.98
+      ],
+      "dark": 0.95
+    },
     "metalness": 0.0
   }
 }

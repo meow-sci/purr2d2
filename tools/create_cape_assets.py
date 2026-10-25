@@ -26,14 +26,26 @@ TAU = math.tau
 TEX_SIZE = 256
 LIGHT_MATERIAL = "Purr2D2_Cloth_Light"
 HOOD_OPEN_HALF_ANGLE = 1.25
-HOOD_TOP_RING_Y = 0.75
-HOOD_APEX_Y = 0.765
+HOOD_BROW_OPEN_HALF_ANGLE = 0.0
+HOOD_POSITIVE_OPEN_PROFILE = ((0.0, 0.0), (1.0 / 6.0, 0.0),
+                              (0.25, 0.0), (1.0 / 3.0, 0.61),
+                              (5.0 / 12.0, HOOD_OPEN_HALF_ANGLE), (1.0, HOOD_OPEN_HALF_ANGLE))
+HOOD_NEGATIVE_OPEN_PROFILE = ((0.0, 0.0), (1.0 / 6.0, 0.0),
+                              (0.25, 0.0), (1.0 / 3.0, 0.67),
+                              (5.0 / 12.0, HOOD_OPEN_HALF_ANGLE), (1.0, HOOD_OPEN_HALF_ANGLE))
+HOOD_TOP_RING_Y = 0.72
+HOOD_APEX_Y = 0.755
+HOOD_APEX_X = 0.022
+HOOD_APEX_Z = -0.050
 HOOD_BOTTOM_Y = -0.18
 HOOD_CENTER_Z = -0.02
 HOOD_NECK_JOIN_Y = -0.085
-HOOD_MAIN_HALF_WIDTH = 0.410
-HOOD_MAIN_HALF_DEPTH = 0.400
-HOOD_TOP_EXTRA_RADIUS = 0.030
+HOOD_MAIN_HALF_WIDTH = 0.435
+HOOD_MAIN_HALF_DEPTH = 0.430
+HOOD_TOP_HALF_WIDTH = 0.150
+HOOD_TOP_HALF_DEPTH = 0.160
+HOOD_CROWN_TRANSITION = 0.50
+HOOD_SIDE_HANG = 0.050
 HOOD_BOTTOM_HALF_WIDTH = 0.34
 HOOD_BOTTOM_HALF_DEPTH = 0.235
 
@@ -159,6 +171,82 @@ def noise(x, y, salt):
     return (value & 0xFFFF) / 32767.5 - 1.0
 
 
+def smooth_noise(x, y, size, cells_x, cells_y, salt):
+    """Sample deterministic, tileable value noise at one octave."""
+    grid_x = x * cells_x / size
+    grid_y = y * cells_y / size
+    ix, iy = math.floor(grid_x), math.floor(grid_y)
+    fx, fy = grid_x - ix, grid_y - iy
+    fx = fx * fx * (3.0 - 2.0 * fx)
+    fy = fy * fy * (3.0 - 2.0 * fy)
+
+    def sample(px, py):
+        return noise(px % cells_x, py % cells_y, salt)
+
+    top = sample(ix, iy) * (1.0 - fx) + sample(ix + 1, iy) * fx
+    bottom = sample(ix, iy + 1) * (1.0 - fx) + sample(ix + 1, iy + 1) * fx
+    return top * (1.0 - fy) + bottom * fy
+
+
+def micro_fibers(x, y, size):
+    """Return sparse short, softly sampled cloth fibers without a grid pattern."""
+    cells = 72
+    cell_size = size / cells
+    px, py = x + 0.5, y + 0.5
+    cell_x, cell_y = math.floor(px / cell_size), math.floor(py / cell_size)
+    field = 0.0
+
+    for cy in range(cell_y - 1, cell_y + 2):
+        for cx in range(cell_x - 1, cell_x + 2):
+            wrapped_x, wrapped_y = cx % cells, cy % cells
+            if noise(wrapped_x, wrapped_y, 0xA099) < -0.28:
+                continue
+            start_x = (cx + 0.12 + 0.76 * (noise(wrapped_x, wrapped_y, 0xA0A7) + 1.0) * 0.5) * cell_size
+            start_y = (cy + 0.12 + 0.76 * (noise(wrapped_x, wrapped_y, 0xA0B5) + 1.0) * 0.5) * cell_size
+            angle = noise(wrapped_x, wrapped_y, 0xA0C3) * 0.42
+            direction_x, direction_y = math.sin(angle), math.cos(angle)
+            half_length = 0.60 + 0.95 * (noise(wrapped_x, wrapped_y, 0xA0D1) + 1.0) * 0.5
+            offset_x, offset_y = px - start_x, py - start_y
+            along = max(-half_length, min(half_length,
+                                          offset_x * direction_x + offset_y * direction_y))
+            distance = math.hypot(offset_x - along * direction_x,
+                                  offset_y - along * direction_y)
+            if distance < 1.25:
+                coverage = (1.0 - distance / 1.25) ** 2
+                polarity = 1.0 if noise(wrapped_x, wrapped_y, 0xA0DF) >= 0.0 else -1.0
+                strength = 0.65 + 0.35 * abs(noise(wrapped_x, wrapped_y, 0xA0ED))
+                field += polarity * strength * coverage
+    return max(-1.0, min(1.0, field))
+
+
+def light_fabric_fields(x, y, size):
+    """Muted, irregular color/height fields for the worn Light-side cloth."""
+    broad = (0.52 * smooth_noise(x, y, size, 3, 4, 0xA01D)
+             + 0.31 * smooth_noise(x, y, size, 7, 9, 0xA02B)
+             + 0.17 * smooth_noise(x, y, size, 15, 18, 0xA039))
+    mottle = (0.62 * smooth_noise(x, y, size, 23, 29, 0xA047)
+              + 0.38 * smooth_noise(x, y, size, 39, 47, 0xA055))
+    fiber = smooth_noise(x, y, size, 57, 73, 0xA063)
+    grain = noise(x, y, 0xA071)
+    strands = micro_fibers(x, y, size)
+    temperature = (0.65 * smooth_noise(x, y, size, 5, 6, 0xA07F)
+                   + 0.35 * smooth_noise(x, y, size, 13, 11, 0xA08D))
+    return broad, mottle, fiber, grain, temperature, strands
+
+
+def soft_ramp(value, start, end):
+    t = max(0.0, min(1.0, (value - start) / (end - start)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def light_height(x, y, size):
+    broad, mottle, fiber, grain, _temperature, strands = light_fabric_fields(x, y, size)
+    # Very shallow, non-periodic relief: only enough to keep fibers from reading
+    # as a perfectly smooth surface when lit, with no raised seam or woven grid.
+    return (0.00018 * broad + 0.00020 * mottle
+            + 0.00060 * fiber + 0.000060 * grain + 0.00010 * strands)
+
+
 def seam(x, y, size):
     edge = min(x, size - 1 - x)
     edge_line = max(0.0, 1.0 - abs(edge - 7.0) / 2.4)
@@ -184,19 +272,38 @@ def weave_height(x, y, size):
 
 
 def make_textures():
-    for label, base, salt in (
-        ("Light", (102, 66, 42), 0xCA9E),
-        ("Dark", (31, 34, 39), 0xD4A1),
-    ):
-        def diffuse(x, y, size, base=base, salt=salt):
-            pattern = (0.012 * math.sin(TAU * x / 7.0)
-                       + 0.010 * math.cos(TAU * y / 7.0)
-                       + 0.006 * math.sin(TAU * (x + y) / 14.0))
-            variation = 0.012 * noise(x, y, salt)
-            amount = 1.0 + pattern + variation - seam(x, y, size) * 0.20 + stitches(x, y, size) * 0.13
-            return tuple(max(0, min(255, round(channel * amount))) for channel in base) + (255,)
+    # Retain the Dark-side map formula exactly: its generated pixels are a
+    # compatibility contract while the Light cloth receives a separate finish.
+    def dark_diffuse(x, y, size):
+        base, salt = (31, 34, 39), 0xD4A1
+        pattern = (0.012 * math.sin(TAU * x / 7.0)
+                   + 0.010 * math.cos(TAU * y / 7.0)
+                   + 0.006 * math.sin(TAU * (x + y) / 14.0))
+        variation = 0.012 * noise(x, y, salt)
+        amount = 1.0 + pattern + variation - seam(x, y, size) * 0.20 + stitches(x, y, size) * 0.13
+        return tuple(max(0, min(255, round(channel * amount))) for channel in base) + (255,)
 
-        write_png(TEXTURES / f"Purr2D2_Cloth_{label}_Diffuse.png", diffuse)
+    def light_diffuse(x, y, size):
+        base = (92.0, 72.0, 55.0)
+        broad, mottle, fiber, grain, temperature, strands = light_fabric_fields(x, y, size)
+        luma = (0.12 * broad + 0.045 * mottle + 0.018 * fiber
+                + 0.005 * grain + 0.075 * strands)
+        # Subtle warm/cool drift keeps aged cloth from looking like a flat color
+        # wash while preserving the original subdued brown value.
+        warmth = 0.018 * temperature
+        edge = min(x, size - 1 - x)
+        side_wear = (1.0 - soft_ramp(edge, 1.0, 19.0))
+        bottom_edge = soft_ramp(y, size - 38.0, size - 5.0)
+        abrasion = side_wear * (0.014 + 0.018 * max(0.0, mottle))
+        lower_grime = bottom_edge * (0.038 + 0.018 * max(0.0, -mottle + 0.25 * grain))
+        amount = 1.0 + luma + abrasion - lower_grime
+        channels = (base[0] * (amount + warmth * 0.62),
+                    base[1] * (amount + warmth * 0.08),
+                    base[2] * (amount - warmth * 0.72))
+        return tuple(max(0, min(255, round(channel))) for channel in channels) + (255,)
+
+    write_png(TEXTURES / "Purr2D2_Cloth_Light_Diffuse.png", light_diffuse)
+    write_png(TEXTURES / "Purr2D2_Cloth_Dark_Diffuse.png", dark_diffuse)
 
     def normal(x, y, size):
         dx = weave_height(min(size - 1, x + 1), y, size) - weave_height(max(0, x - 1), y, size)
@@ -209,8 +316,25 @@ def make_textures():
         roughness = 242 + round(noise(x, y, 0xB347) * 2)
         return ao, max(0, min(255, roughness)), 0, 255
 
+    def light_normal(x, y, size):
+        dx = light_height(min(size - 1, x + 1), y, size) - light_height(max(0, x - 1), y, size)
+        dy = light_height(x, min(size - 1, y + 1), size) - light_height(x, max(0, y - 1), size)
+        n = unit((-dx * 36.0, dy * 36.0, 1.0))
+        return tuple(round((component * 0.5 + 0.5) * 255) for component in n) + (255,)
+
+    def light_orm(x, y, size):
+        broad, mottle, fiber, grain, _temperature, strands = light_fabric_fields(x, y, size)
+        bottom_edge = soft_ramp(y, size - 38.0, size - 5.0)
+        ao = 255 - round(2.0 * max(0.0, -broad) + 2.0 * bottom_edge
+                         + 1.5 * max(0.0, -mottle))
+        roughness = round(246.0 + 2.8 * broad + 2.4 * mottle
+                          + 1.0 * fiber + 0.6 * grain + 0.7 * strands)
+        return max(0, min(255, ao)), max(0, min(255, roughness)), 0, 255
+
     write_png(TEXTURES / "Purr2D2_Cloth_Normal.png", normal)
     write_png(TEXTURES / "Purr2D2_Cloth_ORM.png", orm)
+    write_png(TEXTURES / "Purr2D2_Cloth_Light_Normal.png", light_normal)
+    write_png(TEXTURES / "Purr2D2_Cloth_Light_ORM.png", light_orm)
 
 
 def cape_position(u, t):
@@ -311,24 +435,53 @@ def make_cape():
 
 
 def hood_position(u, v):
-    # Native helmet-attachment frame in meters. The aperture clears the full
-    # measured visor; below the helmet shell the cowl narrows into the neck.
-    theta = HOOD_OPEN_HALF_ANGLE + u * (TAU - 2.0 * HOOD_OPEN_HALF_ANGLE)
-    crown = math.sin(min(1.0, v / 0.44) * math.pi / 2.0)
+    # Native helmet-attachment frame in meters. The brow narrows the +Z gap
+    # only above the central face, while the lower opening stays broad.
+    def smoothstep01(value):
+        value = min(1.0, max(0.0, value))
+        return value * value * (3.0 - 2.0 * value)
+
+    def opening(profile):
+        for index in range(len(profile) - 1):
+            start_v, start_angle = profile[index]
+            end_v, end_angle = profile[index + 1]
+            if v <= end_v:
+                amount = smoothstep01((v - start_v) / (end_v - start_v))
+                return start_angle + (end_angle - start_angle) * amount
+        return profile[-1][1]
+
+    positive_open = opening(HOOD_POSITIVE_OPEN_PROFILE)
+    negative_open = opening(HOOD_NEGATIVE_OPEN_PROFILE)
+    theta = positive_open + u * (TAU - positive_open - negative_open)
+    if positive_open == 0.0 and negative_open == 0.0 and u == 1.0:
+        theta = 0.0
+    # A nonlinear remap gives the crown a rounded shoulder instead of a
+    # straight-sided cone, with a small non-centered top to suggest slumped cloth.
+    crown = math.sin(min(1.0, (v / HOOD_CROWN_TRANSITION) ** 0.72) * math.pi / 2.0)
     neck_start = (HOOD_TOP_RING_Y - HOOD_NECK_JOIN_Y) / (HOOD_TOP_RING_Y - HOOD_BOTTOM_Y)
     lower = min(1.0, max(0.0, (v - neck_start) / (1.0 - neck_start)))
     lower = lower * lower * (3.0 - 2.0 * lower)
     # The helmet envelope stays full-size through its lowest point. Only the
     # short free section below that shell tapers toward the neck/shoulders.
-    width = (0.025 + HOOD_MAIN_HALF_WIDTH * crown
-             + HOOD_TOP_EXTRA_RADIUS * (1.0 - crown))
-    depth = (0.030 + HOOD_MAIN_HALF_DEPTH * crown
-             + HOOD_TOP_EXTRA_RADIUS * (1.0 - crown))
+    width = HOOD_TOP_HALF_WIDTH + (HOOD_MAIN_HALF_WIDTH - HOOD_TOP_HALF_WIDTH) * crown
+    depth = HOOD_TOP_HALF_DEPTH + (HOOD_MAIN_HALF_DEPTH - HOOD_TOP_HALF_DEPTH) * crown
     width += (HOOD_BOTTOM_HALF_WIDTH - width) * lower
     depth += (HOOD_BOTTOM_HALF_DEPTH - depth) * lower
     y = HOOD_TOP_RING_Y - (HOOD_TOP_RING_Y - HOOD_BOTTOM_Y) * v
-    x = width * math.sin(theta)
-    z = HOOD_CENTER_Z + depth * math.cos(theta) + 0.012 * math.sin(theta * 3.0) * math.sin(v * math.pi)
+    side_hang = max(0.0, math.sin(theta)) ** 1.5
+    y -= HOOD_SIDE_HANG * side_hang * smoothstep01((v - 0.58) / 0.42)
+
+    # Three broad, unequal raised folds. Their vanishing envelope preserves the
+    # exact lower rear overlap point and keeps surface detail low frequency.
+    fold_envelope = math.sin(math.pi * v) ** 0.8
+    fold_a = math.exp(-((theta - 1.78) / 0.42) ** 2)
+    fold_b = math.exp(-((theta - 2.86) / 0.53) ** 2)
+    fold_c = math.exp(-((theta - 4.95) / 0.42) ** 2)
+    radial_fold = fold_envelope * (0.014 * fold_a + 0.024 * fold_b + 0.030 * fold_c)
+    tangential_fold = fold_envelope * 0.012 * fold_a
+    x = (width + radial_fold) * math.sin(theta) + tangential_fold * math.cos(theta)
+    z = (HOOD_CENTER_Z + (depth + radial_fold) * math.cos(theta)
+         - tangential_fold * math.sin(theta))
     return (x, y, z)
 
 
@@ -342,24 +495,11 @@ def make_hood():
             positions.append(hood_position(u, v))
             uvs.append((u, v))
     apex = len(positions)
-    positions.append((0.0, HOOD_APEX_Y, HOOD_CENTER_Z))
+    positions.append((HOOD_APEX_X, HOOD_APEX_Y, HOOD_APEX_Z))
     uvs.append((0.5, 0.0))
 
     def at(row, col):
         return positions[row * cols + col]
-
-    normals, tangents = [], []
-    for row in range(rows):
-        for col in range(cols):
-            du = sub(at(row, min(cols - 1, col + 1)), at(row, max(0, col - 1)))
-            dv = sub(at(min(rows - 1, row + 1), col), at(max(0, row - 1), col))
-            normal = unit(cross(dv, du))
-            tangent = unit(sub(du, mul(normal, dot(normal, du))))
-            w = -1.0 if dot(cross(normal, tangent), dv) < 0.0 else 1.0
-            normals.append(normal)
-            tangents.append((*tangent, w))
-    normals.append((0.0, 1.0, 0.0))
-    tangents.append((1.0, 0.0, 0.0, -1.0))
 
     indices = []
     for row in range(rows - 1):
@@ -367,9 +507,58 @@ def make_hood():
             a = row * cols + col
             b, d = a + 1, a + cols
             c = d + 1
-            indices.extend((a, d, c, a, c, b))
+            # At the positive-X opening transition, choose the other quad
+            # diagonal on the first two warped edge cells. This avoids one
+            # skewed long triangle without adding vertices.
+            if row in (3, 4) and col == 0:
+                indices.extend((a, d, b, b, d, c))
+            else:
+                indices.extend((a, d, c, a, c, b))
     for col in range(cols - 1):
         indices.extend((apex, col, col + 1))
+
+    # Corner-angle weighting avoids letting the larger back/crown triangles
+    # dominate normals at the sharply warped, coarse-grid opening transition.
+    # The exact emitted triangles remain the source of both winding and normals.
+    normal_sums = [(0.0, 0.0, 0.0) for _ in positions]
+    for tri in range(0, len(indices), 3):
+        face = indices[tri:tri + 3]
+        face_normal = unit(cross(sub(positions[face[1]], positions[face[0]]),
+                                 sub(positions[face[2]], positions[face[0]])))
+        for corner, vertex in enumerate(face):
+            edge_a = unit(sub(positions[face[(corner + 1) % 3]], positions[vertex]))
+            edge_b = unit(sub(positions[face[(corner + 2) % 3]], positions[vertex]))
+            corner_angle = math.acos(max(-1.0, min(1.0, dot(edge_a, edge_b))))
+            normal_sums[vertex] = add(normal_sums[vertex], mul(face_normal, corner_angle))
+    normals = [unit(normal) for normal in normal_sums]
+    coincident_seams = []
+    for row in range(rows):
+        left, right = row * cols, row * cols + cols - 1
+        if math.dist(positions[left], positions[right]) <= 1e-8:
+            seam_normal = unit(add(normal_sums[left], normal_sums[right]))
+            normals[left] = normals[right] = seam_normal
+            coincident_seams.append((left, right))
+    tangents = []
+    for row in range(rows):
+        for col in range(cols):
+            du = sub(at(row, min(cols - 1, col + 1)), at(row, max(0, col - 1)))
+            dv = sub(at(min(rows - 1, row + 1), col), at(max(0, row - 1), col))
+            normal = normals[row * cols + col]
+            tangent = unit(sub(du, mul(normal, dot(normal, du))))
+            w = -1.0 if dot(cross(normal, tangent), dv) < 0.0 else 1.0
+            tangents.append((*tangent, w))
+    for left, right in coincident_seams:
+        normal = normals[left]
+        tangent_sum = add(tangents[left][:3], tangents[right][:3])
+        tangent = unit(sub(tangent_sum, mul(normal, dot(normal, tangent_sum))))
+        handedness = -1.0 if tangents[left][3] + tangents[right][3] < 0.0 else 1.0
+        tangents[left] = tangents[right] = (*tangent, handedness)
+    apex_du = sub(at(0, 1), at(0, 0))
+    apex_dv = sub(at(0, cols // 2), positions[apex])
+    apex_normal = normals[apex]
+    apex_tangent = unit(sub(apex_du, mul(apex_normal, dot(apex_normal, apex_du))))
+    apex_w = -1.0 if dot(cross(apex_normal, apex_tangent), apex_dv) < 0.0 else 1.0
+    tangents.append((*apex_tangent, apex_w))
     return {
         "name": "Purr2D2_Hood",
         "node_name": "HoodMesh",
@@ -384,11 +573,16 @@ def make_hood():
             "units": "meters",
             "coordinateFrame": "+X left, +Y up, +Z kitten forward",
             "origin": "native helmet attachment frame; vertices are authored in meters",
-            "design": "rounded oversized hood over helmet shell; open visor aperture; tapered neck cowl",
+            "design": "rounded slumped hood with a forward brow, asymmetric broad side folds, clear central face, and tapered neck cowl",
             "hoodFitProfile": {
                 "openingHalfAngleRadians": HOOD_OPEN_HALF_ANGLE,
+                "browOpeningHalfAngleRadians": HOOD_BROW_OPEN_HALF_ANGLE,
+                "positiveXOpenHalfAngleProfile": [list(point) for point in HOOD_POSITIVE_OPEN_PROFILE],
+                "negativeXOpenHalfAngleProfile": [list(point) for point in HOOD_NEGATIVE_OPEN_PROFILE],
                 "topRingY": HOOD_TOP_RING_Y,
                 "apexY": HOOD_APEX_Y,
+                "apexX": HOOD_APEX_X,
+                "apexZ": HOOD_APEX_Z,
                 "bottomY": HOOD_BOTTOM_Y,
                 "centerZ": HOOD_CENTER_Z,
                 "neckJoinY": HOOD_NECK_JOIN_Y,
@@ -396,8 +590,12 @@ def make_hood():
                 "neckHalfDepth": HOOD_BOTTOM_HALF_DEPTH,
                 "mainHalfWidth": HOOD_MAIN_HALF_WIDTH,
                 "mainHalfDepth": HOOD_MAIN_HALF_DEPTH,
+                "topHalfWidth": HOOD_TOP_HALF_WIDTH,
+                "topHalfDepth": HOOD_TOP_HALF_DEPTH,
+                "crownTransition": HOOD_CROWN_TRANSITION,
+                "asymmetricSideHang": HOOD_SIDE_HANG,
             },
-            "faceOpening": "theta 1.25 rad on either side of +Z, measured against stock visor vertices",
+            "faceOpening": "variable by height: upper brow closes over the forehead, then asymmetrically widens to 1.25 rad below; central visor face remains clear",
         },
     }
 
@@ -487,8 +685,8 @@ def write_assets(cape, hood):
   </GltfFile>
   <PbrMaterial Id="Purr2D2_Cloth_Light">
     <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png" Category="Default" />
-    <Normal Path="Assets/Textures/Purr2D2_Cloth_Normal.png" Category="Default" />
-    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_ORM.png" Category="Default" />
+    <Normal Path="Assets/Textures/Purr2D2_Cloth_Light_Normal.png" Category="Default" />
+    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_Light_ORM.png" Category="Default" />
   </PbrMaterial>
   <PbrMaterial Id="Purr2D2_Cloth_Dark">
     <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png" Category="Default" />
@@ -695,8 +893,8 @@ def make_preview(cape, hood):
     left, right = (40, 118, 670, 710), (690, 118, 1320, 710)
     for box in (left, right):
         draw.rounded_rectangle(box, radius=14, outline=(43, 58, 67), width=2, fill=(16, 23, 29))
-    draw.text((65, 132), "CAPE + HOOD  /  ATTACHMENT FRAME", fill=(213, 194, 160), font=label)
-    draw.text((715, 132), "HOOD FIT  /  OPEN VISOR", fill=(195, 202, 207), font=label)
+    draw.text((65, 132), "FRONT THREE-QUARTER  /  CAPE + HOOD", fill=(213, 194, 160), font=label)
+    draw.text((715, 132), "HOOD FIT  /  BROW + SIDE DRAPE", fill=(195, 202, 207), font=label)
     light = Image.open(TEXTURES / "Purr2D2_Cloth_Light_Diffuse.png").convert("RGB")
     head_from_chest = HEAD_FROM_CHEST_METERS
     torso = torso_proxy_mesh()
@@ -706,7 +904,7 @@ def make_preview(cape, hood):
     combined_parts = [cape, torso, combined_head, combined_visor, combined_hood]
     combined_rect = (70, 185, 640, 665)
     combined_target = (0.0, -0.03, -0.06)
-    combined_eye = (1.10, 0.18, -1.30)
+    combined_eye = (0.95, 0.18, 1.45)
     combined_projection = projection_for(combined_projection_mesh(combined_parts),
                                          combined_rect, combined_target, combined_eye)
     combined_depth = [float("inf")] * ((combined_rect[2] - combined_rect[0])
@@ -721,25 +919,67 @@ def make_preview(cape, hood):
                 flat_color=(83, 132, 154), zbuffer=combined_depth, projection=combined_projection)
     render_mesh(image, combined_hood, light, combined_rect, combined_target, combined_eye,
                 zbuffer=combined_depth, projection=combined_projection)
-    hood_rect = (715, 185, 1295, 665)
     hood_target = (0.0, 0.30, HOOD_CENTER_Z)
-    hood_eye = (0.45, 0.10, 1.25)
-    hood_projection = projection_for(hood, hood_rect, hood_target, hood_eye)
-    hood_depth = [float("inf")] * ((hood_rect[2] - hood_rect[0]) * (hood_rect[3] - hood_rect[1]))
-    render_mesh(image, helmet_proxy_mesh(), None, hood_rect,
-                hood_target, hood_eye, flat_color=(49, 67, 78),
-                zbuffer=hood_depth, projection=hood_projection)
-    render_mesh(image, visor_proxy_mesh(), None, hood_rect,
-                hood_target, hood_eye, flat_color=(83, 132, 154),
-                zbuffer=hood_depth, projection=hood_projection)
-    render_mesh(image, hood, light, hood_rect,
-                hood_target, hood_eye, zbuffer=hood_depth, projection=hood_projection)
+    front_rect = (715, 185, 1002, 665)
+    front_eye = (0.40, 0.10, 1.35)
+    front_projection = projection_for(hood, front_rect, hood_target, front_eye)
+    front_depth = [float("inf")] * ((front_rect[2] - front_rect[0])
+                                    * (front_rect[3] - front_rect[1]))
+    render_mesh(image, helmet_proxy_mesh(), None, front_rect,
+                hood_target, front_eye, flat_color=(49, 67, 78),
+                zbuffer=front_depth, projection=front_projection)
+    render_mesh(image, visor_proxy_mesh(), None, front_rect,
+                hood_target, front_eye, flat_color=(83, 132, 154),
+                zbuffer=front_depth, projection=front_projection)
+    render_mesh(image, hood, light, front_rect,
+                hood_target, front_eye, zbuffer=front_depth, projection=front_projection)
+
+    side_rect = (1015, 185, 1295, 665)
+    side_eye = (1.35, 0.10, 0.02)
+    side_projection = projection_for(hood, side_rect, hood_target, side_eye)
+    side_depth = [float("inf")] * ((side_rect[2] - side_rect[0])
+                                   * (side_rect[3] - side_rect[1]))
+    render_mesh(image, helmet_proxy_mesh(), None, side_rect,
+                hood_target, side_eye, flat_color=(49, 67, 78),
+                zbuffer=side_depth, projection=side_projection)
+    render_mesh(image, visor_proxy_mesh(), None, side_rect,
+                hood_target, side_eye, flat_color=(83, 132, 154),
+                zbuffer=side_depth, projection=side_projection)
+    render_mesh(image, hood, light, side_rect,
+                hood_target, side_eye, zbuffer=side_depth, projection=side_projection)
+    draw.text((730, 643), "FRONT 3/4", fill=(173, 190, 198), font=small)
+    draw.text((1030, 643), "SIDE PROFILE", fill=(173, 190, 198), font=small)
     draw.text((70, 681), "Measured torso profile • helmet offset +0.109m Y / +0.0096m Z",
               fill=(144, 160, 166), font=small)
-    draw.text((715, 681), "Measured-size original helmet/visor proxy • not stock geometry or a game capture",
+    draw.text((715, 681), "Measured-size original helmet/visor proxies • software preview, not game",
               fill=(144, 160, 166), font=small)
     ART.mkdir(parents=True, exist_ok=True)
     image.save(ART / "cape-cloth-preview.png")
+    return True
+
+
+def make_brown_cloth_preview():
+    """Write a deterministic 1:1 cloth swatch and an unfiltered fiber close-up."""
+    if Image is None:
+        return False
+    texture = Image.open(TEXTURES / "Purr2D2_Cloth_Light_Diffuse.png").convert("RGB")
+    image = Image.new("RGB", (640, 384), (34, 39, 42))
+    draw = ImageDraw.Draw(image)
+    try:
+        title = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 16)
+        small = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 12)
+    except OSError:
+        title = small = ImageFont.load_default()
+    draw.text((20, 14), "Light cloth | dusty aged brown", fill=(221, 224, 218), font=title)
+    draw.text((20, 38), "whole texture · 1:1", fill=(167, 177, 174), font=small)
+    draw.text((336, 38), "fiber detail · 4× pixel zoom", fill=(167, 177, 174), font=small)
+    image.paste(texture, (20, 60))
+    detail = texture.crop((96, 96, 160, 160)).resize((256, 256), Image.Resampling.NEAREST)
+    image.paste(detail, (336, 60))
+    draw.text((20, 332), "Original deterministic procedural texture; no game lighting",
+              fill=(167, 177, 174), font=small)
+    ART.mkdir(parents=True, exist_ok=True)
+    image.save(ART / "brown-cloth-preview.png")
     return True
 
 
@@ -750,6 +990,7 @@ def main():
     cape, hood = make_cape(), make_hood()
     write_assets(cape, hood)
     preview = make_preview(cape, hood)
+    brown_swatch = make_brown_cloth_preview()
     metadata = {
         "authoring": "original deterministic procedural mesh and texture generator",
         "preview": "CPU software render with original measured-size helmet/visor proxy; not in-game" if preview
@@ -762,12 +1003,17 @@ def main():
                  "skinJoints": 1, "units": "meters",
                  "origin": "native helmet attachment frame",
                  "openFaceDirection": "+Z",
-                 "fit": {"openingHalfAngleRadians": HOOD_OPEN_HALF_ANGLE,
+                 "fit": {"hemOpeningHalfAngleRadians": HOOD_OPEN_HALF_ANGLE,
+                         "browOpeningHalfAngleRadians": HOOD_BROW_OPEN_HALF_ANGLE,
                          "topRingY": HOOD_TOP_RING_Y, "apexY": HOOD_APEX_Y,
+                         "apexX": HOOD_APEX_X, "apexZ": HOOD_APEX_Z,
                          "bottomY": HOOD_BOTTOM_Y, "neckJoinY": HOOD_NECK_JOIN_Y,
                          "mainHalfWidth": HOOD_MAIN_HALF_WIDTH,
                          "mainHalfDepth": HOOD_MAIN_HALF_DEPTH,
-                         "topCrownRoundnessRadius": HOOD_TOP_EXTRA_RADIUS,
+                         "topHalfWidth": HOOD_TOP_HALF_WIDTH,
+                         "topHalfDepth": HOOD_TOP_HALF_DEPTH,
+                         "crownTransition": HOOD_CROWN_TRANSITION,
+                         "asymmetricSideHang": HOOD_SIDE_HANG,
                          "bottomHalfWidth": HOOD_BOTTOM_HALF_WIDTH,
                          "bottomHalfDepth": HOOD_BOTTOM_HALF_DEPTH}},
         "previewProxy": {
@@ -779,11 +1025,26 @@ def main():
         },
         "textures": {"size": f"{TEX_SIZE}x{TEX_SIZE}",
                      "channels": "diffuse RGB, tangent normal, AO/roughness/metalness",
-                     "roughness": 0.95, "metalness": 0.0},
+                     "brownSwatch": "art/brown-cloth-preview.png" if brown_swatch else None,
+                     "lightMaps": {"diffuse": "Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png",
+                                   "normal": "Assets/Textures/Purr2D2_Cloth_Light_Normal.png",
+                                   "aoRoughMetal": "Assets/Textures/Purr2D2_Cloth_Light_ORM.png",
+                                   "finish": "muted dusty brown fabric; worn edges and hem; irregular short fibers; matte"},
+                     "darkMaps": {"diffuse": "Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png",
+                                  "normal": "Assets/Textures/Purr2D2_Cloth_Normal.png",
+                                  "aoRoughMetal": "Assets/Textures/Purr2D2_Cloth_ORM.png",
+                                  "finish": "existing dark-side cloth maps, unchanged"},
+                     "roughness": {"lightRange": [0.95, 0.98], "dark": 0.95},
+                     "metalness": 0.0},
     }
     (ART / "cape-cloth-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
-    print("Wrote cape/hood GLBs, four 256px cloth maps, and Assets/Capes.xml" +
-          (", plus art/cape-cloth-preview.png." if preview else "."))
+    suffix = []
+    if preview:
+        suffix.append("art/cape-cloth-preview.png")
+    if brown_swatch:
+        suffix.append("art/brown-cloth-preview.png")
+    print("Wrote cape/hood GLBs, six 256px cloth maps, and Assets/Capes.xml" +
+          (f", plus {', '.join(suffix)}." if suffix else "."))
     print(f"Cape: {len(cape['positions'])} vertices / {len(cape['indices']) // 3} triangles / 117 cloth joints")
     print(f"Hood: {len(hood['positions'])} vertices / {len(hood['indices']) // 3} triangles / open +Z face")
 

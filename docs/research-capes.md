@@ -24,7 +24,7 @@ The coffer articles on attaching props to kitten bones and the existing saber po
 
 ## Intended behavior and asset contract
 
-Each EVA kitten has its own session-only opt-in, initially false, in the existing per-kitten settings window. Its selected Light/Dark saber type determines brown/black cloth independently of blade color or ignition. The hood accompanies the cape and leaves the helmet visor opening exposed. World reset, boarding, mod disable and disposal release owned resources.
+Each EVA kitten has its own session-only opt-in, initially false, in the existing per-kitten settings window. Its selected Light/Dark saber type determines brown/black cloth independently of blade color or ignition. The hood accompanies the cape and leaves the central face visible through the helmet visor. World reset, boarding, mod disable and disposal release owned resources.
 
 The cape uses an original 9 × 13 grid (117 nodes), with the top row pinned. It has a curved 48 cm shoulder seam, an 86 cm flared hem and a 50 cm authored drop. The renderer maps `Cape_000` through `Cape_116` by name. Mesh coordinates are metres, +Y up and +Z toward the kitten's front, with the origin at the chest. The hood uses a separate `HoodRoot` rig in the native helmet attachment frame. Native two-sided materials provide cloth visibility and lighting from either side.
 
@@ -38,11 +38,33 @@ Fit measurements now use local stock `KSA_Cat`, `KSA_Cat_Helmet` and `KSA_Cat_Vi
 
 `CharacterAssets.xml` assigns the stock helmet to `Head_M` with no extra transform. `KittenRenderable.UpdateRenderData` publishes the final helmet matrix after animation and per-viewport placement. The hood now uses that exact matrix, preceded by a 100× metres-to-centimetres conversion. This preserves the helmet's socket orientation, translation and scale. The existing head-socket frame remains a fallback when no helmet is equipped. No extra skeleton traversal or physics pass is needed.
 
-The revised hood extends to Y 0.765 m, holds its full shell width through the helmet's lower edge, then narrows to a 0.34 m half-width / 0.235 m rear depth at Y −0.18 m. Its open face clears the stock visor, and its lower rear edge overlaps the cape near the neck. The cape's curved top seam moves inward toward the shoulders; its static hem is about 3 cm above the soles. A local lower bound stops simulated nodes at sole height without terrain queries.
+The first fit correction raised the hood to Y 0.765 m, held its full shell width through the helmet's lower edge, and narrowed to a 0.34 m half-width / 0.235 m rear depth at Y −0.18 m. The lower rear edge overlaps the cape near the neck. The cape's curved top seam moves inward toward the shoulders; its static hem is about 3 cm above the soles. A local lower bound stops simulated nodes at sole height without terrain queries. The following visual refinement changes the hood crown and opening while preserving that neck overlap and the cape geometry.
 
 The body-clearance profile is cached once with the rest pose. Central nodes retain the −0.22 m rear limit; outboard shoulder nodes retain their authored rear position where the old flat limit would stretch short links away from the fixed pins. The closest dynamic bound is −0.19667 m at X ±0.25583 m, beyond the measured upper-body half-width of about 0.205 m. It is still 4.97 mm behind even the body's globally rearmost vertex. First-row nodes within that body width have at least 18.7 mm clearance from the same plane. There are no additional simulation passes, per-cape arrays or collision queries. Airflow uses half the bounded movement velocity, and lift is capped at 5.5 m/s² so the cloth always retains downward pull.
 
 `tools/check_cape_fit.py` takes local helmet and visor GLTF paths and checks the generated hood against their actual vertices. It is an offline authoring check, never runtime work. The checked-in `art/cape-cloth-preview.png` uses original measurement-based proxies and is a software preview, not an in-game capture. Native acceptance must still cover animation, other character rigs and MMU equipment.
+
+## Forward hood drape
+
+The second fit refinement rounds and offsets the crown, closes the upper front shell over the forehead and widens the opening below the brow. Unequal broad side folds, a 50 mm difference in side hem height and a 3.44° difference between brow edges break the old symmetry. The rear neck point remains (0, −0.180, −0.255) m in the helmet frame, preserving the cowl/cape overlap. The hood remains 430 vertices, 800 triangles and one bone; the cape model and runtime attachment code are unchanged.
+
+The final stock-mesh check finds 372 of 376 sampled forehead vertices under the hood, with all 77 central-face visor samples visible and a 6.7° opening margin. Covered helmet vertices have at least 33.5 mm radial shell clearance; the 13 covered visor vertices have at least 46.7 mm. These are same-height radial measurements, not minimum Euclidean distances. At measured forehead heights of Y 0.50–0.62 m, the front shell reaches 217–258 mm farther forward than the first corrected hood. The apex sits 117.5 mm above the helmet crown. Clearance and visibility use actual horizontal triangle sections, including the closed upper rings; no stock geometry is included in the mod.
+
+The offline fit checker and original-proxy software preview support authoring checks. The local native-mesh calibration preview is kept under ignored artifacts. In-game checks still need to confirm the silhouette, lighting and motion.
+
+## Worn Light-side cloth
+
+The second visual review replaced the Light cloth's regular grid, embossed weave and large stitched seam with a desaturated dusty brown, broad fading, gentle hem grime, worn edges and irregular fine fibers. Its diffuse base is RGB (92, 72, 55). Light has separate near-flat normal and matte AO/roughness/metalness maps; all three original Dark-side maps remain byte-identical. The six shared maps stay at 256 × 256 pixels. This adds no material instances, draw calls, shader samples or simulation work.
+
+The deterministic generator recreates the textures and `art/brown-cloth-preview.png`. Texture checks enforce non-metallic matte cloth and a maximum 2.5° tangent-normal tilt; measured Light tilt is about 2.03°. Final game lighting still needs native acceptance.
+
+## Overlay-wide backpack visibility
+
+The next in-game review confirmed that the resting cape overlaps the EVA backpack. Backpack visibility now belongs to the mod's enabled session, independently of cape and saber equipment. `CharacterAvatar.Attachments.Mmu.Enabled` gates the native MMU attachment's animation and drawing in `KittenRenderable`; it does not control flight physics or RCS input.
+
+Each existing per-kitten runtime record caches its avatar reference once, captures the attachment's original enabled state and keeps it hidden during the existing settled fleet refresh. Disabling the mod, boarding/removal, world reset, faults and disposal restore that state. The record releases its visibility ownership after disposing the saber pose, so stowing or changing hand poses cannot reveal the backpack. Originally hidden attachments stay hidden. Temporary HUD, focus and viewport visibility changes do not control the lease. The old `HideMmu` preference remains readable for compatibility but no longer changes this behavior; its equipment-only checkbox has been removed.
+
+This adds no fleet scan, render hook or physics work. The warmed 128-refresh check retains one existing fleet scan per refresh and allocates zero managed bytes. Cape simulation still requires a per-kitten opt-in.
 
 ## Performance requirements
 

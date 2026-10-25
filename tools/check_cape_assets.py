@@ -137,22 +137,55 @@ def cape_rest(u, t):
 
 def hood_rest(u, v):
     theta_open = 1.25
-    top_y, bottom_y, center_z = 0.75, -0.18, -0.02
+    brow_open = 0.0
+    top_y, bottom_y, center_z = 0.72, -0.18, -0.02
     neck_join_y = -0.085
-    main_half_width, main_half_depth = 0.410, 0.400
+    main_half_width, main_half_depth = 0.435, 0.430
+    top_half_width, top_half_depth = 0.150, 0.160
+    crown_transition, side_hang = 0.50, 0.050
+    positive_profile = ((0.0, 0.0), (1.0 / 6.0, 0.0), (0.25, 0.0),
+                        (1.0 / 3.0, 0.61), (5.0 / 12.0, theta_open), (1.0, theta_open))
+    negative_profile = ((0.0, 0.0), (1.0 / 6.0, 0.0), (0.25, 0.0),
+                        (1.0 / 3.0, 0.67), (5.0 / 12.0, theta_open), (1.0, theta_open))
     bottom_half_width, bottom_half_depth = 0.34, 0.235
-    theta = theta_open + u * (math.tau - 2.0 * theta_open)
-    crown = math.sin(min(1.0, v / 0.44) * math.pi / 2.0)
+
+    def smoothstep01(value):
+        value = min(1.0, max(0.0, value))
+        return value * value * (3.0 - 2.0 * value)
+
+    def opening(profile):
+        for index in range(len(profile) - 1):
+            start_v, start_angle = profile[index]
+            end_v, end_angle = profile[index + 1]
+            if v <= end_v:
+                amount = smoothstep01((v - start_v) / (end_v - start_v))
+                return start_angle + (end_angle - start_angle) * amount
+        return profile[-1][1]
+
+    positive_open = opening(positive_profile)
+    negative_open = opening(negative_profile)
+    theta = positive_open + u * (math.tau - positive_open - negative_open)
+    if positive_open == 0.0 and negative_open == 0.0 and u == 1.0:
+        theta = 0.0
+    crown = math.sin(min(1.0, (v / crown_transition) ** 0.72) * math.pi / 2.0)
     neck_start = (top_y - neck_join_y) / (top_y - bottom_y)
     lower = min(1.0, max(0.0, (v - neck_start) / (1.0 - neck_start)))
     lower = lower * lower * (3.0 - 2.0 * lower)
-    width = 0.025 + main_half_width * crown + 0.030 * (1.0 - crown)
-    depth = 0.030 + main_half_depth * crown + 0.030 * (1.0 - crown)
+    width = top_half_width + (main_half_width - top_half_width) * crown
+    depth = top_half_depth + (main_half_depth - top_half_depth) * crown
     width += (bottom_half_width - width) * lower
     depth += (bottom_half_depth - depth) * lower
     y = top_y - (top_y - bottom_y) * v
-    return (width * math.sin(theta), y,
-            center_z + depth * math.cos(theta) + 0.012 * math.sin(theta * 3.0) * math.sin(v * math.pi))
+    y -= side_hang * max(0.0, math.sin(theta)) ** 1.5 * smoothstep01((v - 0.58) / 0.42)
+    fold_envelope = math.sin(math.pi * v) ** 0.8
+    fold_a = math.exp(-((theta - 1.78) / 0.42) ** 2)
+    fold_b = math.exp(-((theta - 2.86) / 0.53) ** 2)
+    fold_c = math.exp(-((theta - 4.95) / 0.42) ** 2)
+    radial_fold = fold_envelope * (0.014 * fold_a + 0.024 * fold_b + 0.030 * fold_c)
+    tangential_fold = fold_envelope * 0.012 * fold_a
+    return ((width + radial_fold) * math.sin(theta) + tangential_fold * math.cos(theta),
+            y,
+            center_z + (depth + radial_fold) * math.cos(theta) - tangential_fold * math.sin(theta))
 
 
 def expected_weights(u, t):
@@ -310,7 +343,7 @@ def check_glb(path, expected, root):
                     for weight in weight_values), f"{context}: hood weights must be 100% HoodRoot")
         minimum = [min(p[i] for p in pos) for i in range(3)]
         maximum = [max(p[i] for p in pos) for i in range(3)]
-        expected_bounds = [(-0.435, 0.435), (-0.18, 0.765), (-0.452, 0.125)]
+        expected_bounds = [(-0.460, 0.447), (-0.230, 0.755), (-0.469, 0.361)]
         require(all(expected_bounds[i][0] - 1e-5 <= minimum[i] <= expected_bounds[i][0] + 0.012
                     and expected_bounds[i][1] - 0.012 <= maximum[i] <= expected_bounds[i][1] + 1e-5
                     for i in range(3)), f"{context}: hood dimensions differ from the socket-local design")
@@ -321,8 +354,17 @@ def check_glb(path, expected, root):
                 actual_position = pos[row * 33 + col]
                 require(all(close(a, b, 1e-6) for a, b in zip(actual_position, expected_position)),
                         f"{context}: hood grid vertex row={row}, col={col} differs from the fit profile")
-        require(all(close(a, b, 1e-6) for a, b in zip(pos[429], (0.0, 0.765, -0.02))),
-                f"{context}: hood crown apex differs from the native helmet frame contract")
+            left, right = row * 33, row * 33 + 32
+            seam_distance = math.sqrt(sum((pos[left][axis] - pos[right][axis]) ** 2 for axis in range(3)))
+            if seam_distance <= 1e-7:
+                require(all(close(a, b, 1e-7) for a, b in zip(pos[left], pos[right])),
+                        f"{context}: closed front seam row={row} does not share a position")
+                require(all(close(a, b, 1e-5) for a, b in zip(normals[left], normals[right])),
+                        f"{context}: closed front seam row={row} normals are not smoothed together")
+                require(all(close(a, b, 1e-5) for a, b in zip(tangents[left], tangents[right])),
+                        f"{context}: closed front seam row={row} tangents are not smoothed together")
+        require(all(close(a, b, 1e-6) for a, b in zip(pos[429], (0.022, 0.755, -0.050))),
+                f"{context}: slumped hood crown apex differs from the native helmet frame contract")
         # The opening is a gap in the angular UV strip: triangles never bridge u=0 to u=1.
         for tri in range(0, len(indices), 3):
             face = indices[tri:tri + 3]
@@ -363,26 +405,77 @@ def read_rgba_png(path, expected_size=256):
 
 def check_textures(root):
     paths = {
-        "light": root / "Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png",
-        "dark": root / "Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png",
-        "normal": root / "Assets/Textures/Purr2D2_Cloth_Normal.png",
-        "orm": root / "Assets/Textures/Purr2D2_Cloth_ORM.png",
+        "light_diffuse": root / "Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png",
+        "dark_diffuse": root / "Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png",
+        "dark_normal": root / "Assets/Textures/Purr2D2_Cloth_Normal.png",
+        "dark_orm": root / "Assets/Textures/Purr2D2_Cloth_ORM.png",
+        "light_normal": root / "Assets/Textures/Purr2D2_Cloth_Light_Normal.png",
+        "light_orm": root / "Assets/Textures/Purr2D2_Cloth_Light_ORM.png",
     }
     images = {key: read_rgba_png(path) for key, path in paths.items()}
-    orm_pixels = images["orm"][2]
-    rough = []
-    metal = []
-    ao = []
-    for row in orm_pixels:
+    for key in ("dark_orm", "light_orm"):
+        rough = []
+        metal = []
+        ao = []
+        for row in images[key][2]:
+            for x in range(0, len(row), 4):
+                ao.append(row[x])
+                rough.append(row[x + 1])
+                metal.append(row[x + 2])
+        require(max(metal) == 0, f"{key}: cloth metalness channel must be zero")
+        require(min(ao) >= 230 and max(ao) == 255, f"{key}: cloth AO channel must stay near white")
+        if key == "dark_orm":
+            require(min(rough) >= 240 and max(rough) <= 245,
+                    "Dark cloth ORM roughness must stay near 0.95")
+        else:
+            require(min(rough) >= 238 and max(rough) <= 254 and max(rough) - min(rough) >= 8,
+                    "Light cloth ORM must be high, matte, and spatially varied")
+
+    normal_rows = images["light_normal"][2]
+    max_tilt_degrees = 0.0
+    for row in normal_rows:
         for x in range(0, len(row), 4):
-            ao.append(row[x])
-            rough.append(row[x + 1])
-            metal.append(row[x + 2])
-    require(min(rough) >= 240 and max(rough) <= 245, "cloth ORM roughness must stay near 0.95")
-    require(max(metal) == 0, "cloth ORM metalness channel must be zero")
-    require(min(ao) >= 230 and max(ao) == 255, "cloth AO channel must be near white")
-    require(paths["light"].stat().st_size > 2048 and paths["dark"].stat().st_size > 2048,
+            nx, ny, nz = (row[x + channel] / 127.5 - 1.0 for channel in range(3))
+            length = math.sqrt(nx * nx + ny * ny + nz * nz)
+            require(math.isfinite(length) and 0.99 <= length <= 1.01 and nz > 0.99,
+                    "Light normal map must contain finite near-flat tangent normals")
+            tilt = math.degrees(math.acos(max(-1.0, min(1.0, nz / length))))
+            max_tilt_degrees = max(max_tilt_degrees, tilt)
+    require(max_tilt_degrees <= 2.5,
+            f"Light normal map fiber relief exceeds the 2.5-degree limit ({max_tilt_degrees:.2f}°)")
+
+    require(paths["light_diffuse"].stat().st_size > 2048
+            and paths["dark_diffuse"].stat().st_size > 2048,
             "diffuse maps do not contain texture detail")
+    require(images["light_normal"][2] != images["dark_normal"][2]
+            and images["light_orm"][2] != images["dark_orm"][2],
+            "Light maps must have their own restrained surface finish")
+
+    metadata_path = root / "art/cape-cloth-metadata.json"
+    if metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        texture_metadata = metadata.get("textures", {})
+        require(texture_metadata.get("size") == "256x256",
+                "cape texture metadata must keep cloth maps at 256x256")
+        require(texture_metadata.get("lightMaps") == {
+            "diffuse": "Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png",
+            "normal": "Assets/Textures/Purr2D2_Cloth_Light_Normal.png",
+            "aoRoughMetal": "Assets/Textures/Purr2D2_Cloth_Light_ORM.png",
+            "finish": "muted dusty brown fabric; worn edges and hem; irregular short fibers; matte",
+        }, "cape texture metadata must describe the Light-side cloth finish/maps")
+        require(texture_metadata.get("darkMaps") == {
+            "diffuse": "Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png",
+            "normal": "Assets/Textures/Purr2D2_Cloth_Normal.png",
+            "aoRoughMetal": "Assets/Textures/Purr2D2_Cloth_ORM.png",
+            "finish": "existing dark-side cloth maps, unchanged",
+        }, "cape texture metadata must preserve the Dark-side map contract")
+        roughness_metadata = texture_metadata.get("roughness", {})
+        light_range = roughness_metadata.get("lightRange")
+        require(roughness_metadata.get("dark") == 0.95 and light_range == [0.95, 0.98],
+                "cape texture metadata must report the high matte roughness ranges")
+        swatch = texture_metadata.get("brownSwatch")
+        require(swatch is None or (root / swatch).is_file(),
+                "cape texture metadata swatch path must exist when emitted")
 
 
 def check_xml(root):
@@ -416,6 +509,23 @@ def check_xml(root):
         ref = ids[glb_id].find("Material")
         require(ref is not None and ref.get("Name") == material_name and ref.get("AssetId") == material_name,
                 f"Assets/Capes.xml: {glb_id} must map its default glTF slot to {material_name}")
+    expected_material_maps = {
+        "Purr2D2_Cloth_Light": {
+            "Diffuse": "Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png",
+            "Normal": "Assets/Textures/Purr2D2_Cloth_Light_Normal.png",
+            "AoRoughMetal": "Assets/Textures/Purr2D2_Cloth_Light_ORM.png",
+        },
+        "Purr2D2_Cloth_Dark": {
+            "Diffuse": "Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png",
+            "Normal": "Assets/Textures/Purr2D2_Cloth_Normal.png",
+            "AoRoughMetal": "Assets/Textures/Purr2D2_Cloth_ORM.png",
+        },
+    }
+    for material_id, expected_maps in expected_material_maps.items():
+        material = ids[material_id]
+        actual_maps = {channel.tag: channel.get("Path") for channel in material}
+        require(actual_maps == expected_maps,
+                f"Assets/Capes.xml: {material_id} texture mapping does not match the cloth map contract")
     return ids
 
 
@@ -461,7 +571,7 @@ def main():
         print("PASS: cape rig has 117 named cloth joints, row-major binds, and normalized weights")
         print("PASS: hood is a single-bone open-front shell with a separate mesh node")
         print("PASS: normals, tangents, UVs, indices, GLB material slots, and inverse binds")
-        print("PASS: 256px brown/black cloth maps and matte non-metal ORM values")
+        print("PASS: six 256px cloth maps, near-flat Light normals, and varied matte non-metal ORM values")
         print("PASS: Assets/Capes.xml IDs, material mappings, and texture/model paths")
         for kind, (vertices, triangles) in results:
             print(f"  {kind}: {vertices} vertices, {triangles} triangles")

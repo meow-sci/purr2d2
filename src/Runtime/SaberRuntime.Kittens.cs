@@ -4,6 +4,7 @@ using Purr2D2.Audio;
 using Purr2D2.Capes;
 using Purr2D2.Core;
 using Purr2D2.Pose;
+using System.Reflection;
 
 namespace Purr2D2.Runtime;
 
@@ -27,6 +28,8 @@ internal sealed partial class SaberRuntime
 
     private readonly record struct KittenSaberRequest(KittenEva Kitten, bool Enabled);
     private enum SaberTogglePhase { None, Equipping, Retracting, Unequipping }
+    private static readonly FieldInfo? MmuAvatarField = typeof(KittenRenderable).GetField(
+        "_characterAvatar", BindingFlags.Instance | BindingFlags.NonPublic);
 
     private sealed class KittenSaber
     {
@@ -47,6 +50,9 @@ internal sealed partial class SaberRuntime
         internal string? CapeFailure;
         internal bool CapeFailureLogged;
         internal bool CapeFailureLatched;
+        internal CharacterAvatar? MmuAvatar;
+        internal bool MmuAvatarResolved, MmuAvatarLookupFailed;
+        internal bool MmuLeaseActive, MmuWasEnabled;
 
         internal KittenSaber(Action<KittenEva, IViewport, float4x4>? draw = null) => Pose = new(draw);
 
@@ -55,6 +61,7 @@ internal sealed partial class SaberRuntime
             Cleanup(Audio.Shutdown, "Kitten audio");
             Cleanup(Audio.Dispose, "Kitten audio");
             Cleanup(Pose.Dispose, "Kitten pose");
+            ReleaseOverlayMmu(this);
             if (Cape is { } cape) Cleanup(cape.Dispose, "Kitten cape");
             Cape = null; CapeNeedsSetup = false;
             Blade.Reset();
@@ -126,7 +133,7 @@ internal sealed partial class SaberRuntime
                     _overlayKittens.Add(kitten);
                     _currentKittens.Add(kitten);
                     // Seed color at first sight, without equipping or binding a pose.
-                    GetKittenSaber(kitten);
+                    RefreshOverlayMmu(kitten, GetKittenSaber(kitten));
                 }
 
         _removedKittens.Clear();
@@ -209,7 +216,72 @@ internal sealed partial class SaberRuntime
         pose.GripOffsetFromChestCm = new(_settings.GripX, _settings.GripY, _settings.GripZ);
         pose.BladeDirectionModel = new(_settings.AimX, _settings.AimY, _settings.AimZ);
         pose.FingerCurlRadians = _settings.FingerCurl;
-        pose.HideMmuWhenEquipped = _settings.HideMmu;
+        // The runtime-level lease hides all EVA MMUs while enabled. Keep pose
+        // ownership off so stowing one saber cannot restore the shared attachment.
+        pose.HideMmuWhenEquipped = false;
+    }
+
+    private void RefreshOverlayMmu(KittenEva kitten, KittenSaber saber)
+    {
+        // The overlay toggle, not HUD visibility, focus or viewport state, owns
+        // this cosmetic lease. Faulted/disposed runtimes must not reacquire it.
+        if (!_enabled || _disposed || _fault != null)
+        {
+            ReleaseOverlayMmu(saber);
+            return;
+        }
+
+        if (!saber.MmuAvatarResolved)
+        {
+            saber.MmuAvatarResolved = true;
+            try
+            {
+                saber.MmuAvatar = MmuAvatarField?.GetValue(kitten.Renderable) as CharacterAvatar;
+                saber.MmuAvatarLookupFailed = saber.MmuAvatar is null;
+            }
+            catch
+            {
+                // A changed private field or inaccessible avatar is isolated to
+                // this record and is not retried on every settled frame.
+                saber.MmuAvatarLookupFailed = true;
+            }
+        }
+
+        if (saber.MmuAvatarLookupFailed || saber.MmuAvatar is not { } avatar) return;
+        try
+        {
+            if (!saber.MmuLeaseActive)
+            {
+                saber.MmuWasEnabled = avatar.Attachments.Mmu.Enabled;
+                saber.MmuLeaseActive = true;
+            }
+            // Reassert the cosmetic state if native or another mod re-enables it.
+            if (avatar.Attachments.Mmu.Enabled) avatar.Attachments.Mmu.Enabled = false;
+        }
+        catch (Exception ex)
+        {
+            saber.MmuAvatarLookupFailed = true;
+            ReleaseOverlayMmu(saber);
+            Report("Could not hide an EVA MMU", ex);
+        }
+    }
+
+    private static void ReleaseOverlayMmu(KittenSaber saber)
+    {
+        if (!saber.MmuLeaseActive) return;
+        try
+        {
+            if (saber.MmuAvatar is { } avatar)
+                avatar.Attachments.Mmu.Enabled = saber.MmuWasEnabled;
+        }
+        catch (Exception ex)
+        {
+            Report("Could not restore an EVA MMU", ex);
+        }
+        finally
+        {
+            saber.MmuLeaseActive = false;
+        }
     }
 
     // Shared by controlled and background kittens. Each completed stage is
