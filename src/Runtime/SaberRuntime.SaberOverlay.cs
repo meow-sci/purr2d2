@@ -336,7 +336,7 @@ internal sealed partial class SaberRuntime
         if (ForcePicking && button == GlfwMouseButton.Right)
         { HandleForcePickerPress(button, pointer); return true; }
         if (forcePick) { HandleForcePickerPress(button, pointer); return true; }
-        if (button != GlfwMouseButton.Left) return true;
+        if (button != GlfwMouseButton.Left && (button != GlfwMouseButton.Right || hit != OverlayHit.Kittens)) return true;
         if (forceHit != ForceOverlayHit.None) return HandleForceOverlayPress(forceHit, pointer);
 
         switch (hit)
@@ -348,7 +348,14 @@ internal sealed partial class SaberRuntime
                 var kittens = OverlayKittens;
                 if ((uint)row < (uint)kittens.Count && !kittens[row].IsDisposed)
                 {
-                    if (_overlayLayout.IsColorSwatch(pointer, row, _overlayListScroll))
+                    if (button == GlfwMouseButton.Right)
+                    {
+                        float nameMinX = _overlayLayout.ListMin.X + _overlayLayout.Padding * 2 + _overlayLayout.ColorSwatchSize;
+                        float nameMaxX = _overlayLayout.ColorSwatchMin(row, _overlayListScroll).X - _overlayLayout.Padding;
+                        // Match the name's drawing clip; use the native Universe > Vessels action.
+                        if (pointer.X >= nameMinX && pointer.X < nameMaxX) Universe.MoveCameraTo(kittens[row]);
+                    }
+                    else if (_overlayLayout.IsColorSwatch(pointer, row, _overlayListScroll))
                     {
                         if (KittenColorPickerVisible && ReferenceEquals(_kittenColorPickerOwner, kittens[row]))
                             DismissKittenColorPicker();
