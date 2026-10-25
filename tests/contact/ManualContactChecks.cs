@@ -14,15 +14,21 @@ internal static class ManualContactChecks
     {
         var wall = new CutTriangle(new(0, -.2, -.2), new(0, .2, -.2), new(0, 0, .2));
         var sweep = new BladeSweep(new(-.1, -1, 0), new(-.1, 1, 0), new(.1, -1, 0), new(.1, 1, 0));
-        Check(sweep.TryHit(wall, out var hit, out double along) && Math.Abs(hit.X) < 1e-8 && along >= 0 && along <= 1,
-            "swept blade detects a thin surface missed by both endpoint segments");
+        Check(sweep.TryHit(wall, out var hit, out double along, out double time)
+            && Math.Abs(hit.X) < 1e-8 && Math.Abs(along - .45) < 1e-7 && Math.Abs(time - .5) < 1e-8,
+            "swept blade reports earliest time and lowest blade position on a thin surface");
         Check(!BladeSweep.Segment(sweep.Base0, sweep.Tip0, wall, out _) && !BladeSweep.Segment(sweep.Base1, sweep.Tip1, wall, out _),
             "thin-surface fixture really requires swept detection");
         var coplanar = new CutTriangle(new(-.02, -.1, 0), new(.02, -.1, 0), new(0, .1, 0));
-        Check(sweep.TryHit(coplanar, out _, out _), "coplanar ribbon confirms contained surface triangles");
+        Check(sweep.TryHit(coplanar, out _, out _, out time) && Math.Abs(time - .4) < 1e-7,
+            "coplanar ribbon reports its earliest overlap endpoint");
+        var endpoint = new BladeSweep(new(0, -1, 0), new(0, 1, 0), new(.1, -1, 0), new(.1, 1, 0));
+        Check(endpoint.TryHit(wall, out _, out _, out time) && Math.Abs(time) < 1e-8,
+            "sweep includes the initial endpoint contact at time zero");
         Check(BladeSweep.Segment(new(-1, .2, -.2), new(1, .2, -.2), wall, out _), "triangle vertex graze is inclusive");
-        Check(new BladeSweep(new(-2, 0, 0), new(-1, 0, 0), new(1, 0, 0), new(2, 0, 0)).TryHit(wall, out _, out _),
-            "axial thrust confirms a crossing even when ribbon triangles are degenerate");
+        Check(new BladeSweep(new(-2, 0, 0), new(-1, 0, 0), new(1, 0, 0), new(2, 0, 0))
+            .TryHit(wall, out _, out along, out time) && Math.Abs(time - 1d / 3) < 1e-8 && along == 1,
+            "axial thrust reports its earliest tip crossing when ribbon triangles are degenerate");
         Check(new BladeSweep(new(0, 0, 0), new(0, 2, 0), new(.3, 0, 0), new(1.5, 1.5, 0)).Subdivisions == 1,
             "large planar rotation does not exhaust the nonplanarity budget");
         Check(new BladeSweep(default, new(0, 1, 0), new(1, 0, 0), new(1, 1, .05)).Subdivisions > 1,
@@ -62,18 +68,42 @@ internal static class ManualContactChecks
         return (owner, vessel, part, mesh);
     }
     private static ManualContactProbe.Sample Pose(double x, double time, float drag = 0, ulong gesture = 1) => new(gesture, time, new(x, -1, 0), new(x, 1, 0), new(drag, 0));
+    private static double3[] TriangleAt(double x) => [new(x, -.2, -.2), new(x, .2, -.2), new(x, 0, .2)];
+    private static void PlaceTriangle(double3[] vertices, int triangle, double x) => Array.Copy(TriangleAt(x), 0, vertices, triangle * 3, 3);
+    private static double LayeredContactX(bool reverse, ManualContactProbe probe, double time)
+    {
+        var scene = Scene(); var vertices = new double3[6];
+        PlaceTriangle(vertices, reverse ? 0 : 1, .05);
+        PlaceTriangle(vertices, reverse ? 1 : 0, -.05);
+        scene.Mesh.PositionsCompare = [vertices];
+        probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, time), out _);
+        return probe.Advance(scene.Owner, Pose(.1, time + .02, .1f), out var contact) ? contact.PointLocal.X : double.NaN;
+    }
     private static void Probe()
     {
         var scene = Scene(); var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity };
         Check(!probe.Advance(scene.Owner, Pose(-.1, 0), out _), "first pose only seeds the target-relative baseline");
         Check(probe.Advance(scene.Owner, Pose(.1, .02, .1f), out var contact) && contact.Part == scene.Part,
             "production probe confirms manual thin-surface sweep");
+        Check((contact.BladeDirectionLocal - new double3(0, 2, 0)).LengthSquared() < 1e-10
+            && (contact.MotionLocal - new double3(.2, 0, 0)).LengthSquared() < 1e-10,
+            "contact carries local blade direction and hit-point motion vectors");
+        scene = Scene(); probe.Reset();
+        probe.Advance(scene.Owner, new(1, .03, new(0, 0, 0), new(0, .5, 0), default), out _);
+        Check(probe.Advance(scene.Owner, new(1, .05, new(0, 0, 0), new(0, 0, .5), new(.1f, 0)), out contact)
+            && contact.MotionLocal.LengthSquared() > 1e-8,
+            "fixed hilt contact uses the moving blade endpoint as its motion fallback");
         var targeting = new PartSliceTargeting();
         Check(targeting.TryContactTarget(scene.Owner, contact.Part, contact.PointLocal, contact.DistanceMeters, contact.BladeLength,
             contact.SourceTransform, contact.PartTransform, out var target, out _) && target!.Part == scene.Part,
             "confirmed physical contact resolves its structural slice target without assisted grace");
         Check(!targeting.TryContactTarget(scene.Owner, contact.Part, contact.PointLocal, 2.01, 2,
             contact.SourceTransform, contact.PartTransform, out _, out _), "contact beyond actual physical length refuses");
+        double forward = LayeredContactX(false, probe, .1);
+        double reversed = LayeredContactX(true, probe, .2);
+        Check(Math.Abs(forward + .05) < 1e-8 && Math.Abs(reversed + .05) < 1e-8,
+            "entry contact wins over the later exit regardless of triangle order");
+        scene = Scene();
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, .1), out _);
         Check(!probe.Advance(scene.Owner, Pose(.1, .12), out _), "body/target movement with an unmoved SWING control does not cut");
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, .2), out _);
@@ -96,6 +126,40 @@ internal static class ManualContactChecks
             "triangle work stops at its hard per-update limit");
         Check(probe.Advance(scene.Owner, Pose(.5, 1.04, .3f), out _) && probe.TestedTriangles == 8,
             "deferred query resumes its frozen ribbon instead of replacing it with the latest pose");
+        // The first batch finds a later exit surface. A later batch contains the entry;
+        // best-so-far survives continuation and the dense query publishes on its bounded
+        // second refinement update while still fresh.
+        scene = Scene();
+        int denseCount = ManualContactProbe.TriangleBudget * 4;
+        var dense = new double3[denseCount * 3];
+        for (int i = 0; i < denseCount; i++) PlaceTriangle(dense, i, 5);
+        PlaceTriangle(dense, 0, .05);
+        PlaceTriangle(dense, ManualContactProbe.TriangleBudget, -.05);
+        scene.Mesh.PositionsCompare = [dense];
+        probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 1.2), out _);
+        Check(!probe.Advance(scene.Owner, Pose(.1, 1.22, .1f), out _) && probe.Pending
+            && probe.TestedTriangles == ManualContactProbe.TriangleBudget,
+            "dense contact query defers its first candidate at the triangle budget");
+        Check(!probe.Advance(scene.Owner, Pose(.5, 1.24, .3f), out _) && probe.Pending
+            && probe.TestedTriangles == ManualContactProbe.TriangleBudget,
+            "first continuation improves the retained contact while the query continues");
+        Check(probe.Advance(scene.Owner, Pose(.6, 1.26, .4f), out contact) && !probe.Pending
+            && probe.TestedTriangles == ManualContactProbe.TriangleBudget && Math.Abs(contact.PointLocal.X + .05) < 1e-8,
+            "dense mesh publishes its best confirmed entry after two bounded refinements");
+        // A hit first discovered in the last 50 ms of the existing age window publishes
+        // at that update's budget boundary instead of expiring before refinements can run.
+        scene = Scene(); denseCount = ManualContactProbe.TriangleBudget * 3;
+        dense = new double3[denseCount * 3];
+        for (int i = 0; i < denseCount; i++) PlaceTriangle(dense, i, 5);
+        PlaceTriangle(dense, ManualContactProbe.TriangleBudget, -.05);
+        scene.Mesh.PositionsCompare = [dense];
+        probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 1.4), out _);
+        Check(!probe.Advance(scene.Owner, Pose(.1, 1.42, .1f), out _) && probe.Pending
+            && probe.TestedTriangles == ManualContactProbe.TriangleBudget,
+            "late-hit fixture first consumes a bounded miss batch");
+        Check(probe.Advance(scene.Owner, Pose(.5, 1.54, .3f), out contact) && !probe.Pending
+            && probe.TestedTriangles == ManualContactProbe.TriangleBudget && Math.Abs(contact.PointLocal.X + .05) < 1e-8,
+            "late first hit publishes while still current in the final age window");
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 2), out _); probe.Advance(scene.Owner, Pose(.1, 2.02, .1f), out _);
         Check(!probe.Advance(scene.Owner, Pose(.5, 2.3, .3f), out _) && probe.ExpiredQueries > 0, "old frozen queries explicitly expire");
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 3), out _); probe.Advance(scene.Owner, Pose(.1, 3.02, .1f), out _);

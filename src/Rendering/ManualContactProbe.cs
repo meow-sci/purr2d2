@@ -11,9 +11,15 @@ internal sealed class ManualContactProbe
 {
     internal const int TriangleBudget = 4096, DiscoveryBudget = 64, FrameBudget = 128, CandidateLimit = 128, PrimitiveBudget = 256;
     internal const double UpdateMilliseconds = .5, MaximumAge = .15, MaximumEndpointTravel = 1;
+    internal const int RefinementUpdates = 2;
+    internal const double RefinementSeconds = .05;
     internal readonly record struct Sample(ulong Gesture, double Time, double3 BaseBody, double3 TipBody, float2 Drag);
     internal readonly record struct Contact(Part Part, double3 PointLocal, double3 NormalLocal,
-        double DistanceMeters, double BladeLength, double4x4 SourceTransform, double4x4 PartTransform);
+        double DistanceMeters, double BladeLength, double4x4 SourceTransform, double4x4 PartTransform)
+    {
+        internal double3 BladeDirectionLocal { get; init; }
+        internal double3 MotionLocal { get; init; }
+    }
     private sealed class Candidate(Part part, Vehicle vehicle, MeshReference mesh)
     {
         internal readonly Part Part = part;
@@ -34,6 +40,10 @@ internal sealed class ManualContactProbe
         internal readonly double4x4 PartTransform = partTransform;
         internal readonly double3[][] Primitives = primitives;
         internal int Primitive, Triangle;
+        internal bool HasBest;
+        internal CutPoint BestPoint, BestNormal;
+        internal double BestTime, BestAlong, FirstHitTime;
+        internal int RefinementUpdates, LastCountedAdvance;
     }
     private readonly List<Candidate> _candidates = new(CandidateLimit);
     private IEnumerator<int>? _discovery;
@@ -41,6 +51,7 @@ internal sealed class ManualContactProbe
     private object? _system;
     private ulong _gesture;
     private int _candidate, _replace;
+    private int _advanceSerial;
     private Query? _query;
     private Sample _sample;
     internal double LastUpdateMilliseconds { get; private set; }
@@ -59,7 +70,7 @@ internal sealed class ManualContactProbe
     {
         _discovery?.Dispose(); _discovery = null;
         _candidates.Clear(); _query = null; _owner = null; _system = null; _gesture = 0;
-        _candidate = _replace = 0;
+        _candidate = _replace = _advanceSerial = 0;
     }
 
     internal bool Advance(KittenEva owner, Sample sample, out Contact contact)
@@ -74,6 +85,7 @@ internal sealed class ManualContactProbe
     }
     private bool AdvanceCore(KittenEva owner, Sample sample, out Contact contact)
     {
+        _advanceSerial++;
         contact = default; TestedTriangles = DiscoveryUnits = FrameReads = PrimitiveReads = 0;
         if (sample.Gesture == 0 || !double.IsFinite(sample.Time) || !Point(sample.BaseBody).Finite || !Point(sample.TipBody).Finite
             || owner.IsDisposed || Program.EditorFlag || Program.GetMainCamera() == null || Universe.CurrentSystem == null)
@@ -98,8 +110,13 @@ internal sealed class ManualContactProbe
             }
             catch (InvalidOperationException) { _discovery?.Dispose(); _discovery = null; } // Native collection changed: restart bounded discovery.
         }
+        if (_query != null && _query.HasBest && _query.LastCountedAdvance != _advanceSerial)
+        {
+            _query.RefinementUpdates++;
+            _query.LastCountedAdvance = _advanceSerial;
+        }
         if (_query != null && !Current(_query, owner, sample.Time)) { _query = null; ExpiredQueries++; }
-        while (WithinBudget(started) && TestedTriangles < TriangleBudget)
+        while (WithinBudget(started))
         {
             if (_query != null)
             {
@@ -108,22 +125,43 @@ internal sealed class ManualContactProbe
                 {
                     if (query.Triangle == 0)
                     {
-                        if (PrimitiveReads >= PrimitiveBudget) { Saturations++; return false; }
+                        if (PrimitiveReads >= PrimitiveBudget)
+                        { Saturations++; return TryFallback(query, sample.Time, out contact); }
                         PrimitiveReads++;
                     }
                     var vertices = query.Primitives[query.Primitive];
                     if (vertices == null || query.Triangle + 2 >= vertices.Length)
-                    { query.Primitive++; query.Triangle = 0; if (!WithinBudget(started)) { Saturations++; return false; } continue; }
+                    {
+                        query.Primitive++; query.Triangle = 0;
+                        if (!WithinBudget(started))
+                        { Saturations++; return TryFallback(query, sample.Time, out contact); }
+                        continue;
+                    }
+                    if (TestedTriangles >= TriangleBudget)
+                    { Saturations++; return TryFallback(query, sample.Time, out contact); }
                     int index = query.Triangle; query.Triangle += 3; TestedTriangles++;
                     var triangle = new CutTriangle(Point(vertices[index]), Point(vertices[index + 1]), Point(vertices[index + 2]));
-                    if (query.Sweep.TryHit(triangle, out var hit, out double along))
+                    if (query.Sweep.TryHit(triangle, out var hit, out double along, out double time) && Better(query, hit, triangle.Normal, time, along))
                     {
-                        contact = new(query.Source.Part, Game(hit), Game(triangle.Normal), along * query.Length,
-                            query.Length, query.SourceTransform, query.PartTransform);
-                        _query = null; return true;
+                        if (!query.HasBest)
+                        {
+                            query.FirstHitTime = sample.Time;
+                            query.LastCountedAdvance = _advanceSerial;
+                        }
+                        query.HasBest = true; query.BestPoint = hit; query.BestNormal = triangle.Normal;
+                        query.BestTime = time; query.BestAlong = along;
                     }
-                    if (TestedTriangles >= TriangleBudget || !WithinBudget(started))
-                    { Saturations++; return false; }
+                    // Advance past a primitive after its final complete triangle. This
+                    // lets an exactly-full triangle budget finish without another read.
+                    if (query.Triangle + 2 >= vertices.Length) { query.Primitive++; query.Triangle = 0; }
+                    if (query.Primitive >= query.Primitives.Length) break;
+                    if (!WithinBudget(started))
+                    { Saturations++; return TryFallback(query, sample.Time, out contact); }
+                }
+                if (query.HasBest)
+                {
+                    contact = MakeContact(query);
+                    _query = null; return true;
                 }
                 _query = null;
             }
@@ -155,9 +193,64 @@ internal sealed class ManualContactProbe
             if (motion && BoundsCouldHit(sweep, entry.Mesh.BoundingSphereRadius) && entry.Mesh.PositionsCompare is { } primitives)
                 _query = new(entry, sweep, sample, length, sourceTransform, partTransform, primitives);
         }
+        if (_query != null && TryFallback(_query, sample.Time, out contact))
+        { Saturations++; return true; }
         if (!WithinBudget(started) || _query != null || DiscoveryUnits == DiscoveryBudget || FrameReads == FrameBudget) Saturations++;
         return false;
     }
+
+    private static bool Better(Query query, CutPoint point, CutPoint normal, double time, double along)
+    {
+        const double epsilon = 1e-10;
+        if (!query.HasBest || time < query.BestTime - epsilon) return true;
+        if (Math.Abs(time - query.BestTime) > epsilon) return false;
+        if (along < query.BestAlong - epsilon) return true;
+        if (Math.Abs(along - query.BestAlong) > epsilon) return false;
+        int pointOrder = Compare(point, query.BestPoint);
+        return pointOrder < 0 || pointOrder == 0 && Compare(normal, query.BestNormal) < 0;
+    }
+
+    // Full scans publish the exact mesh minimum. Dense meshes may exceed the existing
+    // per-update work limit; after two refinement updates, 50 ms, or entry into the
+    // final 50 ms of the age window, publish the best confirmed triangle while current.
+    private bool TryFallback(Query query, double now, out Contact contact)
+    {
+        contact = default;
+        double age = now - query.Sample.Time;
+        bool refinementLimit = query.RefinementUpdates >= RefinementUpdates || now - query.FirstHitTime >= RefinementSeconds;
+        bool finalAgeWindow = age >= MaximumAge - RefinementSeconds;
+        if (!query.HasBest || age < 0 || age > MaximumAge || !refinementLimit && !finalAgeWindow) return false;
+        contact = MakeContact(query);
+        _query = null;
+        return true;
+    }
+
+    private static Contact MakeContact(Query query)
+    {
+        var blade0 = query.Sweep.Tip0 - query.Sweep.Base0;
+        var blade1 = query.Sweep.Tip1 - query.Sweep.Base1;
+        var blade = Lerp(blade0, blade1, query.BestTime);
+        var baseMotion = query.Sweep.Base1 - query.Sweep.Base0;
+        var tipMotion = query.Sweep.Tip1 - query.Sweep.Tip0;
+        var motion = Lerp(baseMotion, tipMotion, query.BestAlong);
+        double baseTravelSquared = baseMotion.LengthSquared, tipTravelSquared = tipMotion.LengthSquared;
+        if (motion.LengthSquared <= Math.Max(baseTravelSquared, tipTravelSquared) * 1e-12)
+            motion = baseTravelSquared >= tipTravelSquared ? baseMotion : tipMotion;
+        return new(query.Source.Part, Game(query.BestPoint), Game(query.BestNormal), query.BestAlong * query.Length,
+            query.Length, query.SourceTransform, query.PartTransform)
+        {
+            BladeDirectionLocal = Game(blade),
+            MotionLocal = Game(motion)
+        };
+    }
+
+    private static int Compare(CutPoint a, CutPoint b)
+    {
+        int x = a.X.CompareTo(b.X); if (x != 0) return x;
+        int y = a.Y.CompareTo(b.Y); return y != 0 ? y : a.Z.CompareTo(b.Z);
+    }
+
+    private static CutPoint Lerp(CutPoint a, CutPoint b, double t) => a + (b - a) * t;
     private bool WithinBudget(long started, double fraction = 1) => Stopwatch.GetElapsedTime(started).TotalMilliseconds < SoftBudgetMilliseconds * fraction;
     private static bool Current(Query query, KittenEva owner, double now) => now >= query.Sample.Time && now - query.Sample.Time <= MaximumAge
         && !query.Source.Vehicle.IsDisposed && ReferenceEquals(query.Source.Vehicle.Parent, owner.Parent)

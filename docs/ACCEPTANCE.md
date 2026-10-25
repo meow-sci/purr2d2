@@ -1,5 +1,28 @@
 # Acceptance record
 
+## Manual cuts at the blade contact (2026-10-24)
+
+Manual SWING detection retains the earliest confirmed contact on its approximated blade ribbon within the struck mesh, with deterministic ties and a frozen cursor across budgeted updates. Dense meshes use the best confirmed hit after two further updates, 50 ms of refinement, or entry into the final 50 ms of the existing 150 ms query lifetime. Invalidated or expired queries cannot publish. The existing 4,096-triangle, discovery, primitive and frame-read limits and 0.5 ms soft budget remain in force. Detection does not order contacts globally across every nearby mesh.
+
+The contact point and swing-plane normal travel through capture into the worker in the original vehicle assembly frame. Manual clipping tries that plane first, four cardinal tilts at 0.06 radians, then four diagonal tilts at 0.18 radians. All nine planes pass through the same hit. The existing microscopic topology adjustment still applies; an impossible contact cut is refused. Assisted clipping retains its previous candidate policy. A stationary blade pivot and axial thrust have deterministic orientation fallbacks.
+
+Focused regressions pass for entry/exit ordering with reversed triangles, coplanar contact, thrust, stationary pivots, deferred refinement, late first hits, expiry, moving/scaled targets, reflected subpart forwarding, cooldown/lifecycle behavior, anchored exported fragments and unchanged assisted slicing. The full managed/shader suite passes; the worker checks were rerun after the final candidate-angle adjustment. The Release build passes with zero warnings/errors. Evidence: `artifacts/checks/contact-target-focused.log`, `contact-runtime-focused.log`, `contact-worker-final.log`, `contact-anchored-validation.log` and `contact-anchored-build-final.log`.
+
+Two actual surface contacts on each of six cached stock fixtures (tank, capsule and service modules A–D) produce **12/12 successful cuts**, with 35 total worker candidate attempts. All 12 exported cap checks pass; the largest cap-vertex distance from the output plane is **6.75e-8 m**, and every output plane passes through its requested hit. Evidence: `artifacts/checks/ContactStockChecks/symmetric-policy-results.txt`. The isolated tested candidate helper is byte-identical to production. These fixtures do not guarantee every contact or topology can be sliced.
+
+Warmed Release comparisons against the previous implementation used the actual probe with the same host stubs, tiering disabled, and median times from nine batches of 200 updates:
+
+| Fixture, with the 0.5 ms soft budget | Previous ms/update | Updated ms/update |
+| --- | ---: | ---: |
+| 24 triangles, early hit | 0.0008 | 0.0018 |
+| 4,096 triangles, late hit with bounds-rejectable misses | 0.3196 | 0.1182 |
+| 8,192 triangles, early hit followed by refinement | 0.0008 | 0.0799 |
+| 4,096 overlapping triangle bounds, no hit | 0.4531 | 0.4424 |
+
+Triangle intersection tests allocate 0 B. The retained query adds 88 B of fixed state, with no allocation per tested triangle. Earlier acceptance can now wait for bounded refinement. These synthetic CPU measurements exclude native scene access, rendering and GPU cost; they are not an in-game frame-time guarantee. Evidence: `artifacts/checks/contact-performance-final.log`.
+
+Native acceptance remains pending: swing across visibly different points on the practice billet, tank and previously cut fragments; verify that opening starts at the touched area and follows the swing. Check dense meshes, moving/rotated/scaled targets, release/regrab and sustained manual swings, and compare frame times with the previous build.
+
 ## Cape and hood fit correction (2026-10-24)
 
 The in-game screenshots showed the original hood mostly hidden inside the helmet and a cape extending below the feet. The replacement hood follows the current native helmet attachment matrix, with an explicit metres-to-centimetres conversion and the existing head-socket fallback. Its crown is taller, the open face clears the visor, and the lower cowl tapers into the cape. The cape now has a curved 48 cm shoulder seam, 86 cm hem width and 50 cm authored drop, placing its static hem about 3 cm above the stock soles.

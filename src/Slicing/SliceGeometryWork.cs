@@ -10,6 +10,7 @@ internal sealed record SliceInput(SliceFace[][] Groups, CutPoint[] Axes,
     IReadOnlyDictionary<int, SliceMaterialData> Materials, float MassKg, uint Seed = 0)
 {
     internal bool GeneratedClosedGeometry { get; init; }
+    internal ContactSlice? Contact { get; init; }
 }
 internal sealed record SlicePlan(SlicePlane Plane);
 internal sealed record CpuFragment(SlicePiece Piece, PrincipalFragment Frame, SliceFace[][] Solids, double3 Extents, float MassKg);
@@ -28,16 +29,30 @@ internal static class SliceGeometryWork
         cancel.ThrowIfCancellationRequested();
         if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel, input.GeneratedClosedGeometry))
         {
+            if (input.Contact is not null) throw new InvalidDataException("Cannot slice at contact: " + reason);
             if (QuietSubpartBreakup.TryBuild(input, out var authored, out var authoredFailure, cancel))
             { publish(new(authored!.Plane)); return authored with { FacetFallback = reason }; }
             throw new InvalidDataException(reason + " Authored-subpart fallback: " + authoredFailure);
         }
-        string failure = "No broad section could be found.";
-        var candidates = AssistedSliceGeometry.Candidates(source, input.Axes, input.Seed).ToArray();
+        IEnumerable<(SlicePlane Plane, bool Faceted, int Index)> attemptsToTry;
+        if (input.Contact is { } contact)
+        {
+            if (!ContactSliceGeometry.TryCandidates(contact, out var contactCandidates, out var contactReason))
+                throw new InvalidDataException("Cannot slice at contact: " + contactReason);
+            attemptsToTry = contactCandidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i));
+        }
+        else
+        {
+            var candidates = AssistedSliceGeometry.Candidates(source, input.Axes, input.Seed).ToArray();
+            attemptsToTry = candidates.Take(3).Select((plane, i) => (Plane: plane, Faceted: true, Index: i))
+                .Concat(candidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i)));
+        }
+
+        string failure = input.Contact is null ? "No broad section could be found." : "No valid section passed through the contact point.";
         string facetFailure = ""; int attempts = 0;
-        // Three coarse facet attempts, then the bounded oblique/axis plane fallbacks.
-        foreach (var attempt in candidates.Take(3).Select((plane, i) => (Plane: plane, Faceted: true, Index: i))
-            .Concat(candidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i))))
+        // Manual cuts use only the bounded anchored planes; assisted cuts retain
+        // their existing three faceted attempts followed by the oblique/axis fallbacks.
+        foreach (var attempt in attemptsToTry)
         {
             var candidate = attempt.Plane; attempts++;
             cancel.ThrowIfCancellationRequested();
@@ -48,7 +63,11 @@ internal static class SliceGeometryWork
             if (!sliced) { if (attempt.Faceted) facetFailure = failure; continue; }
             var prepared = new List<CpuFragment>();
             double volume = result!.Pieces.Sum(p => p.Volume);
-            if (result.Pieces.Length is < 2 or > 8 || !double.IsFinite(volume) || volume <= 0) continue;
+            if (result.Pieces.Length is < 2 or > 8 || !double.IsFinite(volume) || volume <= 0)
+            {
+                if (input.Contact is not null) failure = "The anchored plane did not produce two valid fragments.";
+                continue;
+            }
             foreach (var piece in result.Pieces)
             {
                 cancel.ThrowIfCancellationRequested();
@@ -87,11 +106,16 @@ internal static class SliceGeometryWork
             publish(new(result.EffectivePlane));
             return new(result.EffectivePlane, assets) { Faceted = attempt.Faceted, Attempts = attempts, FacetFallback = attempt.Faceted ? "" : facetFailure };
         }
-        if (QuietSubpartBreakup.TryBuild(input, out var fallback, out var fallbackFailure, cancel))
+        if (input.Contact is null)
         {
-            publish(new(fallback!.Plane));
-            return fallback with { Attempts = attempts, FacetFallback = failure };
+            if (QuietSubpartBreakup.TryBuild(input, out var fallback, out var fallbackFailure, cancel))
+            {
+                publish(new(fallback!.Plane));
+                return fallback with { Attempts = attempts, FacetFallback = failure };
+            }
+            throw new InvalidDataException("This part could not be sliced: " + failure + " Authored-subpart fallback: " + fallbackFailure);
         }
-        throw new InvalidDataException("This part could not be sliced: " + failure + " Authored-subpart fallback: " + fallbackFailure);
+        if (string.IsNullOrWhiteSpace(failure)) failure = "The anchored plane did not produce exportable fragments.";
+        throw new InvalidDataException("Cannot slice at contact: " + failure);
     }
 }

@@ -103,11 +103,17 @@ internal sealed partial class SaberRuntime
         if (!_targeting.TryContactTarget(_owner!, contact.Part, contact.PointLocal, contact.DistanceMeters,
             contact.BladeLength, contact.SourceTransform, contact.PartTransform, out var target, out var reason))
         { CancelAssistedSlice(reason, manualAttemptCompleted: true); return; }
+        var confirmedTarget = target!;
+        var assemblyBlade = double3.TransformNormal(contact.BladeDirectionLocal, contact.PartTransform);
+        var assemblyMotion = double3.TransformNormal(contact.MotionLocal, contact.PartTransform);
+        if (!ContactSliceGeometry.TryCreate(Point(confirmedTarget.HitAssembly), Point(assemblyBlade), Point(assemblyMotion),
+            out var contactSlice, out reason))
+        { CancelAssistedSlice("Cannot contact slice: " + reason, manualAttemptCompleted: true); return; }
         _manualSliceActive = true; _manualIsolated = false;
-        _sliceTarget = target; _sliceStarted = true; _sliceError = null;
-        try { _slicer.Begin(target!.Part); }
+        _sliceTarget = confirmedTarget; _sliceStarted = true; _sliceError = null;
+        try { _slicer.Begin(confirmedTarget.Part, contactSlice); }
         catch (Exception error) { _sliceError = error.Message; }
-        _sliceStatus = "Contact slicing " + target!.Part.DisplayName + "...";
+        _sliceStatus = "Contact slicing " + confirmedTarget.Part.DisplayName + "...";
     }
 
     private void UpdateManualSlice(bool permitNative)
@@ -141,4 +147,6 @@ internal sealed partial class SaberRuntime
             HitAssembly = _sliceTarget.HitAssembly.Transform(isolated.SourceToIsolated) };
         return result;
     }
+
+    private static CutPoint Point(double3 value) => new(value.X, value.Y, value.Z);
 }

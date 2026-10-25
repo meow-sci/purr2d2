@@ -38,14 +38,14 @@ internal sealed class ArbitrarySlicer : IDisposable
         : _capture is { Done: false } ? "Reading nearby part..."
         : _upload != null ? "Preparing the pieces..." : "Preparing the cut...";
 
-    internal void Begin(Part part)
+    internal void Begin(Part part, ContactSlice? contact = null)
     {
         if (Busy || _capture != null) throw new InvalidOperationException("The previous slice is finishing cleanup; try again shortly.");
         Error = null; _workerMs = _maxMainMs = _commitMs = _isolationMs = 0;
         _isolationPhases = ""; _isolatedAtHandoff = -1;
         _slowestStep = "none"; _slowestStepMs = 0; _commitPhases = "";
         SliceJitWarmup.Start(); // Fallback if startup was bypassed; never waits for compilation.
-        _capture = new(part);
+        _capture = new(part, contact);
         SliceFrameDiagnostics.Arm();
     }
     internal void Advance()

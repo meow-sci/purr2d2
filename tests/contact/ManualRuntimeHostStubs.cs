@@ -9,7 +9,10 @@ internal sealed class ArbitrarySlicer
     internal string Phase => "Preparing";
     internal Isolated? Isolation;
     internal sealed record Isolated(Vehicle Owner, double4x4 PartTransform, double4x4 SourceToIsolated);
-    internal void Begin(Part part) { Begins++; Ready = false; }
+    internal ContactSlice? LastContact;
+    internal Part? LastPart;
+    internal void Begin(Part part, ContactSlice? contact = null)
+    { Begins++; LastPart = part; LastContact = contact; Ready = false; }
     internal void Advance() => Advances++;
     internal SliceAttempt Isolate(Part part)
     {

@@ -17,7 +17,12 @@ internal sealed partial class SaberRuntime
     private readonly FakePose _pose = new();
     private readonly FakeRenderer _renderer = new();
     private sealed class FakeRenderer
-    { internal int Sparks; internal void AddCutSparks(Part part, double3 point, double3 normal, double now) => Sparks++; }
+    {
+        internal int Sparks;
+        internal double3 LastPoint, LastNormal;
+        internal void AddCutSparks(Part part, double3 point, double3 normal, double now)
+        { Sparks++; LastPoint = point; LastNormal = normal; }
+    }
     private readonly SaberOverlayDrag _overlayDrag = new();
     private readonly AssistedSliceSequence _sliceSequence = new();
     private readonly ArbitrarySlicer _slicer = new();
@@ -63,12 +68,40 @@ internal sealed partial class SaberRuntime
         _overlayDragOwner = _owner; _overlayDragPose = _pose; ApplyManualContactReset();
     }
     private void Tick(double x, double time, bool advancing = true, bool fresh = true, bool move = true, float? pointerX = null)
+        => TickPose(new(x, -1, 0), new(x, 1, 0), time, advancing, fresh, move, pointerX);
+    private void TickPose(double3 emitter, double3 tip, double time, bool advancing = true, bool fresh = true,
+        bool move = true, float? pointerX = null)
     {
         _playerTime = time; _freshPoseThisTick = fresh;
         if (move) { _overlayDrag.Move(new(pointerX ?? (float)(time * 200), 0)); _overlayDrag.Advance(.02, out _, out _); }
         ApplyOverlaySwing(.02);
-        if (fresh) PublishManualPose(new(x, -1, 0), new(x, 1, 0));
+        if (fresh) PublishManualPose(emitter, tip);
         ApplyManualContactReset(); UpdateManualContact(advancing);
+    }
+    private static SaberRuntime SceneWithTransformedSubpart(out Part root, out double4x4 subpartTransform)
+    {
+        var runtime = new SaberRuntime { _owner = new() };
+        var vessel = new Vehicle { Parent = runtime._owner.Parent };
+        root = new Part { Tree = vessel.Parts };
+        var subpart = new Part
+        {
+            PartParent = root,
+            Scale = new(2, .5, -1.5),
+            Asmb2ParentAsmb = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .61),
+            PositionParentAsmb = new(1.2, -.7, .4)
+        };
+        subpartTransform = subpart.MatrixAsmb2VehicleAsmb;
+        var mesh = new MeshReference
+        {
+            BoundingSphereRadius = 10,
+            PositionsCompare = [[new(0, -1, -1), new(0, 1, -1), new(0, 0, 1)]]
+        };
+        subpart.Modules.Add(new MeshViewModule(mesh)); root.SubParts.Add(subpart); vessel.Parts.Parts.Add(root);
+        Universe.CurrentSystem = new(); Universe.CurrentSystem.All.Items = [runtime._owner, vessel];
+        KSA.Program.EditorFlag = false; KSA.Program.Camera = new();
+        runtime._manualProbe.SoftBudgetMilliseconds = double.PositiveInfinity;
+        runtime._targeting.SliceHandler = (target, _) => runtime._slicer.Commit(target);
+        return runtime;
     }
     internal static void Run()
     {
@@ -149,6 +182,27 @@ internal sealed partial class SaberRuntime
         Check(!r._manualSliceActive && r._slicer.Commits == 0, "changed source geometry cancels asynchronous manual completion");
         r = Scene(); r.Begin(); r.Tick(-.1, 8); r.Tick(.1, 8.02); r._owner!.IsDisposed = true; r.Tick(.1, 8.04);
         Check(!r._manualSliceActive, "disposed or boarded owner cannot retain an accepted transaction");
+        r = SceneWithTransformedSubpart(out var contactRoot, out var contactTransform);
+        r.Begin();
+        var base0 = new double3(-.1, -.5, -.05).Transform(contactTransform);
+        var tip0 = new double3(-.1, .5, .15).Transform(contactTransform);
+        var base1 = new double3(.1, -.4, .05).Transform(contactTransform);
+        var tip1 = new double3(.1, .6, .25).Transform(contactTransform);
+        r.TickPose(base0, tip0, 9.1, pointerX: 20);
+        r.TickPose(base1, tip1, 9.12, pointerX: 24);
+        Check(r._slicer.Begins == 1 && r._slicer.LastPart == contactRoot && r._slicer.LastContact.HasValue,
+            "manual runtime sends its confirmed subpart hit to the slicer as a contact cut");
+        var forwarded = r._slicer.LastContact!.Value;
+        var assemblyHit = r._renderer.LastPoint.Transform(contactTransform);
+        var forwardedHit = new double3(forwarded.Point.X, forwarded.Point.Y, forwarded.Point.Z);
+        var expectedBlade = double3.TransformNormal(new(0, 1, .2), contactTransform).NormalizeOrZero();
+        var expectedMotion = double3.TransformNormal(new(.2, .1, .1), contactTransform).NormalizeOrZero();
+        var expectedNormal = double3.NormalizeOrZero(double3.Cross(expectedBlade, expectedMotion));
+        var forwardedNormal = double3.NormalizeOrZero(new(forwarded.Normal.X, forwarded.Normal.Y, forwarded.Normal.Z));
+        Check((forwardedHit - assemblyHit).Length() < 1e-8,
+            "manual slicer receives the actual hit point transformed from the rotated reflected subpart");
+        Check(Math.Abs(double3.Dot(forwardedNormal, expectedNormal)) > .99999,
+            "manual cut normal comes from blade and motion vectors after nonuniform reflected assembly transforms");
         r = Scene(); r.Begin(); var vessel = (Vehicle)Universe.CurrentSystem!.All.Items[1]; vessel.HasPhysicsBubble = false;
         r.Tick(-.1, 9, pointerX: -20); r.Tick(.1, 9.02, pointerX: -20); string refusal = r._sliceStatus;
         r.Tick(-.1, 9.04, pointerX: -20); r.Tick(.1, 9.06, pointerX: -20);
