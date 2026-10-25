@@ -51,7 +51,8 @@ internal sealed partial class SaberRuntime
     internal bool OverlayCapturesPointer => OverlayVisible && (ForcePicking || KittenColorPickerContainsPointer(ImGui.GetIO().MousePos) || SettingsContainsPointer(ImGui.GetIO().MousePos) || _overlayUiButtons != 0
         || _overlayUiEventFrame == Program.FrameNumber || _overlayPointerCapture.AnyHeld
         || _overlayPointerCapture.EventFrame == Program.FrameNumber
-        || (_overlayLayoutAvailable && ImGui.GetIO().MouseHoveredViewport == ImGui.GetMainViewport().ID
+        || (_overlayLayoutAvailable && !ImGui.GetIO().WantCaptureMouse
+            && ImGui.GetIO().MouseHoveredViewport == ImGui.GetMainViewport().ID
             && (_overlayLayout.Hit(ImGui.GetIO().MousePos) != OverlayHit.None
                 || (_forceLayoutAvailable && _forceLayout.Hit(ImGui.GetIO().MousePos) != ForceOverlayHit.None))));
 
@@ -102,7 +103,8 @@ internal sealed partial class SaberRuntime
             float fontSize = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
             _overlayListScroll = Math.Clamp(_overlayListScroll, 0, Math.Max(0, kittens.Count * layout.RowHeight - layout.ListBodyHeight));
             DrawKittenColorPicker();
-            var draw = ImGui.GetForegroundDrawList(viewport);
+            // The viewport background stays above the scene and below every ImGui window.
+            var draw = ImGui.GetBackgroundDrawList(viewport);
             var white = new ImColor8(255, 255, 255, 255);
             var muted = new ImColor8(195, 200, 210, 255);
             var dragCircleWhite = new ImColor8(255, 255, 255, 204);
@@ -199,25 +201,7 @@ internal sealed partial class SaberRuntime
                 }
                 finally { draw.PopClipRect(); }
             }
-            var viewportMax = viewport.WorkPos + viewport.WorkSize;
-            // Foreground controls must leave native windows unobscured.
-            void DrawUncovered(float2 clipMin, float2 clipMax, int window)
-            {
-                if (clipMin.X >= clipMax.X || clipMin.Y >= clipMax.Y) return;
-                if (window == 2) { DrawControls(clipMin, clipMax); return; }
-                bool visible = window == 0 ? _kittenColorPickerBoundsAvailable : _settingsWindowBoundsAvailable && _windowVisible;
-                var min = window == 0 ? _kittenColorPickerMin : _settingsWindowMin;
-                var max = window == 0 ? _kittenColorPickerMax : _settingsWindowMax;
-                min = new(Math.Max(min.X, clipMin.X), Math.Max(min.Y, clipMin.Y));
-                max = new(Math.Min(max.X, clipMax.X), Math.Min(max.Y, clipMax.Y));
-                if (!visible || min.X >= max.X || min.Y >= max.Y)
-                { DrawUncovered(clipMin, clipMax, window + 1); return; }
-                DrawUncovered(clipMin, new(clipMax.X, min.Y), window + 1);
-                DrawUncovered(new(clipMin.X, max.Y), clipMax, window + 1);
-                DrawUncovered(new(clipMin.X, min.Y), new(min.X, max.Y), window + 1);
-                DrawUncovered(new(max.X, min.Y), new(clipMax.X, max.Y), window + 1);
-            }
-            DrawUncovered(viewport.WorkPos, viewportMax, 0);
+            DrawControls(viewport.WorkPos, viewport.WorkPos + viewport.WorkSize);
         }
         catch (Exception error)
         {
@@ -305,6 +289,8 @@ internal sealed partial class SaberRuntime
         }
         if (action != GlfwButtonAction.Press || window != Program.GetWindow() || !OverlayVisible || !_overlayLayoutAvailable
             || Program.IsModalOpen() || Program.HasMouseInputLatch) return false;
+        // Native windows cover these controls. Keep an existing overlay drag paired through release.
+        if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse) return false;
         var pointer = OverlayPointer(window);
         var hit = _overlayLayout.Hit(pointer);
         // Saber/list controls are drawn after Force and take priority if custom positions overlap.
@@ -411,7 +397,7 @@ internal sealed partial class SaberRuntime
         return true;
     }
 
-    /// <summary>Called before the backend queues a button that would activate a covered ImGui widget.</summary>
+    /// <summary>Keep overlay-owned gestures out of ImGui, even after moving over a window.</summary>
     internal bool SuppressOverlayImGuiMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action)
     {
         if (!_overlayPointerCapture.SuppressImGuiButton((int)button, action == GlfwButtonAction.Press, Program.FrameNumber)) return false;
@@ -446,6 +432,7 @@ internal sealed partial class SaberRuntime
         if (Program.HasMouseInputLatch) return false;
         if (window == Program.GetWindow() && !_overlayPointerCapture.AnyHeld
             && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return true;
+        if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse) return false;
         if (window == Program.GetWindow() && OverlayVisible && !Program.IsModalOpen()
             && !Program.HasMouseInputLatch && double.IsFinite(offset.Y)
             && (_forceDrag.Held || (!_overlayPointerCapture.AnyHeld && _overlayLayoutAvailable && _forceLayoutAvailable
@@ -472,6 +459,7 @@ internal sealed partial class SaberRuntime
         if (Program.HasMouseInputLatch) return false;
         if (!_overlayPointerCapture.AnyHeld
             && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return false;
+        if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse) return false;
         if (window != Program.GetWindow() || !OverlayVisible || !_overlayLayoutAvailable || Program.IsModalOpen()) return false;
         hit = _overlayLayout.Hit(OverlayPointer(window));
         return _overlayPointerCapture.OwnsScroll(ForcePicking || hit != OverlayHit.None
