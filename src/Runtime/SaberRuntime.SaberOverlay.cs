@@ -568,8 +568,9 @@ internal sealed partial class SaberRuntime
             ImGui.Text("Color");
             ImGui.SetNextItemWidth(Math.Min(220 * scale, ImGui.GetContentRegionAvail().X));
             float3 color = SaberColorFor(owner);
-            if (ImGui.ColorPicker3("##SaberColor", ref color, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoAlpha
-                | ImGuiColorEditFlags.NoOptions | ImGuiColorEditFlags.PickerHueWheel | ImGuiColorEditFlags.InputRGB))
+            if (ImGui.ColorPicker3("##SaberColor", ref color, ImGuiColorEditFlags.NoAlpha | ImGuiColorEditFlags.NoOptions
+                | ImGuiColorEditFlags.PickerHueWheel | ImGuiColorEditFlags.DisplayRGB | ImGuiColorEditFlags.InputRGB
+                | ImGuiColorEditFlags.Uint8))
                 SetKittenSaberColor(owner, color);
             DrawSaberEffectsSettings(type);
             ImGui.Separator();
