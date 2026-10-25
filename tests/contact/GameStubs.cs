@@ -203,3 +203,11 @@ namespace Purr2D2.Cutting
     // Defined beside the engine-dependent arbitrary slicer in the production build.
     internal readonly record struct SliceAttempt(bool Success, string Message);
 }
+
+namespace Purr2D2.Slicing
+{
+    internal static class NativeSlicePhysics
+    {
+        internal static int VehicleLimit { get; set; } = Purr2D2.Core.SliceResourceLimits.DefaultPhysicsVehicleLimit;
+    }
+}

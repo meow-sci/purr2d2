@@ -1,5 +1,6 @@
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Slicing;
 
 namespace Purr2D2.Cutting;
 
@@ -25,7 +26,8 @@ internal sealed partial class PartSliceTargeting
         if (owner == null || owner.IsDisposed || owner is KittenEva) return false;
         if (!owner.HasPhysicsBubble) reason = "Slicing requires a physics bubble";
         else if (!ReferenceEquals(owner.Parent, _wielder?.Parent)) reason = "Slicing requires the same parent body";
-        else if (owner.BubbleVehicleCount >= PartFailure.MaximumVehiclesPerBubble) reason = "Debris budget reached";
+        else if (owner.BubbleVehicleCount >= NativeSlicePhysics.VehicleLimit)
+            reason = $"Physics vehicle limit reached ({NativeSlicePhysics.VehicleLimit} local vehicles). Raise the limit or remove generated debris in Settings.";
         else if (full.IsAttachedInternal) reason = "Internal parts cannot be selected independently";
         else { reason = ""; return true; }
         return false;
