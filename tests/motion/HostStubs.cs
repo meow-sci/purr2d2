@@ -202,6 +202,8 @@ internal sealed class VehicleUpdateState
 {
     internal readonly Vehicle ReadOnlyVehicle;
     internal readonly VehicleUpdateData UpdateData;
+    internal bool IsKitten;
+    internal object? PartFailureEvent, DestructionEvent;
     internal LocomotionState LocomotionState;
     internal LocomotionCommand LocomotionCommand;
     internal ManualControlInputs ManualControlInputs;
@@ -215,6 +217,7 @@ internal sealed class VehicleUpdateState
     internal ReadOnlyPhysicsStates GetReadOnlyStates() => new(Kinematic, ReadOnlyVehicle.Environment, ReadOnlyVehicle.FrameVelocity);
     internal void PrepareFromVehicle(bool highFidelity, ManualControlInputs inputs)
     {
+        IsKitten = ReadOnlyVehicle is KittenEva;
         BubbleOrigin origin = default;
         UpdateData.Prepare(in origin, in ReadOnlyVehicle.Kinematic, ReadOnlyVehicle.FlightComputer);
         ManualControlInputs = inputs;

@@ -830,10 +830,14 @@ internal sealed partial class SaberRuntime
         Draw();
         ImGui.Io.MousePos = runtime._forceLayout.MoveCenter;
         Draw();
-        Check(DrawnLabels.Any(label => label.Text == "drag + [shift] wheel")
-            && DrawnLabels.Any(label => label.Center == runtime._forceLayout.MoveCenter && label.Text == "THE FURCE")
+        Check(DrawnLabels.Any(label => label.Text == "drag + [shift] wheel"
+                && label.Center.X == runtime._forceLayout.MoveCenter.X
+                && label.Center.Y > runtime._forceLayout.MoveCenter.Y)
+            && DrawnLabels.Any(label => label.Text == "THE FURCE"
+                && label.Center.X == runtime._forceLayout.MoveCenter.X
+                && label.Center.Y < runtime._forceLayout.MoveCenter.Y)
             && ImGui.Tooltip == "",
-            "the Move Force circle shows its updated label without a hover tooltip");
+            "the Move Force circle centers its title above its hint without a hover tooltip");
         ImGui.Io.MousePos = new(300, 200);
         var idleForce = Fill(forceCenter);
         var idleAngry = Fill(angryCenter);

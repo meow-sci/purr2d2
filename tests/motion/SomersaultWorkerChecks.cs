@@ -8,6 +8,7 @@ using Purr2D2.Runtime;
 
 internal static class SomersaultWorkerChecks
 {
+    private static KittenEva? _vesselModeOwner;
     private static int Main()
     {
         HookTransformation();
@@ -16,6 +17,7 @@ internal static class SomersaultWorkerChecks
         RunningLaunchUsesPreparedSpeed();
         PausedBoundaryAndInterruption();
         FinalCopiesAndFailureAtomicity();
+        VesselModeHandoff();
         AirborneComboTransactions();
         ComboPauseAndLifecycle();
         InputHandoffAcknowledgement();
@@ -194,6 +196,71 @@ internal static class SomersaultWorkerChecks
         Universe.PrepareVehicleWorkers(Step(.02, .04));
         Check(!motion.Active && owner.Worker.Kinematic.VelocityPhys == velocity,
             "landing between press and worker preparation discards the boost without adding momentum");
+    }
+
+    private static void VesselModeHandoff()
+    {
+        foreach (bool launched in new[] { false, true })
+        {
+            using var motion = Setup(out var owner, out var other);
+            owner.Inputs = new() { ThrusterCommandFlags = ThrusterMapFlags.TranslateForward | ThrusterMapFlags.TranslateUp,
+                GrabHeld = true, EngineOn = true, EngineThrottle = .65f };
+            if (launched) Launch(motion, owner);
+            else Check(motion.Request(owner, SomersaultDirection.Forward), "a request can precede a switch to vessel physics");
+            var foreign = new Harmony("purr2d2.motion-fixture.vessel-mode." + Guid.NewGuid().ToString("N"));
+            try
+            {
+                // Iron Man classifies the prepared worker in this same native postfix.
+                _vesselModeOwner = owner;
+                foreign.Patch(AccessTools.Method(typeof(VehicleUpdateState), nameof(VehicleUpdateState.PrepareFromVehicle)),
+                    postfix: new HarmonyMethod(typeof(SomersaultWorkerChecks), nameof(UseVesselPhysics)));
+                var step = Step(.02, .04);
+                owner.Worker.PartFailureEvent = new();
+                owner.Worker.DestructionEvent = new();
+                owner.PrepareWorker(step);
+                var expectedKinematic = owner.Worker.Kinematic;
+                var expectedProps = owner.Worker.UpdateData.NewVehicleProperties;
+                var expectedState = owner.Worker.LocomotionState;
+                var expectedCommand = owner.Worker.LocomotionCommand;
+                var expectedInputs = owner.Worker.ManualControlInputs;
+                var expectedCharacter = owner.Worker.CharacterControlInputs;
+                var expectedLadder = owner.Worker.LadderWorkerInputs;
+                int expectedNodes = owner.Worker.LadderNodeCount;
+                var expectedFailure = owner.Worker.PartFailureEvent;
+                var expectedDestruction = owner.Worker.DestructionEvent;
+                Universe.PrepareVehicleWorkers(step);
+                Check(!owner.Worker.IsKitten && !motion.Active && motion.Owner is null,
+                    launched ? "vessel mode releases an active somersault" : "vessel mode cancels a queued somersault");
+                Check(owner.Worker.Kinematic.Equals(expectedKinematic)
+                    && Nullable.Equals(owner.Worker.UpdateData.NewVehicleProperties, expectedProps)
+                    && owner.Worker.UpdateData.NewLocomotionState is null,
+                    "foreign vehicle physics and pending outputs survive the handoff unchanged");
+                Check(owner.Worker.LocomotionState.Equals(expectedState) && owner.Worker.LocomotionCommand.Equals(expectedCommand)
+                    && owner.Worker.ManualControlInputs.Equals(expectedInputs)
+                    && owner.Worker.CharacterControlInputs.Equals(expectedCharacter)
+                    && owner.Worker.LadderWorkerInputs.Equals(expectedLadder) && owner.Worker.LadderNodeCount == expectedNodes,
+                    "foreign movement, jump, engine and grab inputs survive without suppression");
+                Check(ReferenceEquals(owner.Worker.PartFailureEvent, expectedFailure)
+                    && ReferenceEquals(owner.Worker.DestructionEvent, expectedDestruction) && other.Worker.IsKitten,
+                    "failure events and another character worker remain untouched");
+                _vesselModeOwner = null;
+                SetGrounded(owner);
+                Check(motion.Request(owner, SomersaultDirection.Forward), "returning to character physics permits a fresh explicit request");
+                Universe.PrepareVehicleWorkers(Step(.04, .06));
+                Check(owner.Worker.IsKitten && motion.Active && owner.Worker.Kinematic.VelocityPhys != owner.Kinematic.VelocityPhys,
+                    "ordinary character physics still receives its once-only launch");
+            }
+            finally
+            {
+                _vesselModeOwner = null;
+                foreign.UnpatchAll(foreign.Id);
+            }
+        }
+    }
+
+    private static void UseVesselPhysics(VehicleUpdateState __instance)
+    {
+        if (ReferenceEquals(__instance.ReadOnlyVehicle, _vesselModeOwner)) __instance.IsKitten = false;
     }
 
     private static void HookTransformation()

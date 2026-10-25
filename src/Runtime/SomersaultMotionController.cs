@@ -228,6 +228,10 @@ internal sealed class SomersaultMotionController : IDisposable
         var worker = WorkerField!.GetValue(owner) as VehicleUpdateState;
         if (worker is null || !ReferenceEquals(worker.ReadOnlyVehicle, owner))
         { Release("The native kitten worker is unavailable."); return; }
+        // Rocket modes may retain KittenEva while selecting ordinary vessel physics.
+        // Release our intent before touching that mode's prepared motion or inputs.
+        if (!worker.IsKitten)
+        { Release("Somersault cancelled: vehicle physics owns this kitten."); return; }
         if (owned)
         {
             if (!ReferenceEquals(_system, Universe.CurrentSystem) || !SomersaultMotion.NormalSpeed(Universe.GetSimulationSpeed())

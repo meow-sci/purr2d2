@@ -14,12 +14,12 @@ The authority for this build is the supplied `ksa-game-assemblies/current` snaps
 | Component | Engine surface | Compatibility behavior |
 |---|---|---|
 | Entry | StarMapMod, ImmediateLoad(KSA.Mod), AllModsLoaded(), AfterGui(double), Unload() | Attribute signatures validated against supplied API |
-| Safe mutation | Private `Program.PrepareFrame(double,double)` IL, after `InputEvents.ApplyInputEvents()` | Requires unique ordered applied-solver/input/dispatch calls; refuses incompatible layout |
+| Safe mutation | Private `Program.PrepareFrame(double,double)` IL, after `InputEvents.ApplyInputEvents()` | Requires unique ordered applied-solver/input/dispatch calls; refuses incompatible layout; runs after optional Harmony owner `MeowSci.Unscience` so its original-call validation precedes Purr2D2 wrappers |
 | Input/preparation | `Program.OnFrameEditor(double)` postfix | Inside ImGui frame, runs while HUD hidden |
 | EVA target selection | `Vehicle.Target`, `Vehicle.SetTarget(IOrbiter)` | Mod dropdown queues changes through the settled handoff; scopes the explicit slice without requiring stock EVA flight-computer buttons |
 | Slice marker | Private `Program.OnDrawUiThreadSafe(double)` postfix; main camera `EgoToScreen` | Uses the current frame's native pick for hover and locked-part markers |
 | Saved fragment hover | `Part(string, PartTemplate, PartInstance, Part)` constructor postfix | Adds legacy root picking meshes to identity visual children before tree ownership; new exports use native subpart picking directly |
-| World reset | `Universe.DeserializeSave(UniverseData)` prefix and `Program.OnGameLoaded()` postfix | Discards queued commands, old owners, channels, slice requests and sparks |
+| World reset | `Universe.DeserializeSave(UniverseData)` last-priority prefix and `Program.OnGameLoaded()` postfix | Skipped originals do not clear state; actual loads join all native jobs before discarding queued commands, old owners, channels, slice requests and sparks; post-load cleanup remains idempotent |
 | Shutdown | `Program.Dispose()` prefix | Releases owned resources before FMOD/Vulkan teardown; StarMap unload is idempotent |
 | Avatar access | `KittenEva.Renderable`, private `KittenRenderable._characterAvatar` | Cached reflection; missing field/rig disables equip with status |
 | Pose | `CharacterModel.AnimProcessors`, `IAnimProcessor` local/skeleton callbacks | Updates arm only; removes only its own processor |
@@ -40,6 +40,23 @@ Full path/symbol evidence and caveats are in the `research-*.md` documents, incl
 ## Ownership and time
 
 Simulation commands are applied after the preceding worker results and game input are committed, before the next nearest-orbit/physics workers start. UI and render callbacks never split vessels. The injected callback does not replace `GetJobSimStep`, avoiding the specific handoff seam used by Unscience. Future changes to the engine or another transpiler may still require compatibility review.
+
+Purr2D2 orders its frame transformation after Unscience's exact Harmony owner, with no assembly
+dependency. This lets Unscience validate the untouched native solver calls before Purr2D2 wraps
+them, including when an older Unscience installer uses normal transpiler priority. The separate
+last-priority `BeforeDeserializeSave(bool __runOriginal)` prefix observes a deferring prefix's
+decision: a direct `Universe.DeserializeSave` call skipped by Unscience does not clear Purr2D2's
+current session. Replay joins `JobSystems.WaitAll()` before cleanup and native reconstruction;
+a failed join propagates and aborts reconstruction. File loads already defer at
+`UncompressedSave.Load`, so their initial request never reaches the deserialize prefix. Their
+existing `Program.OnGameLoaded` cleanup runs again after reconstruction with cleared ownership.
+No native/sidecar format, preference or generated-asset policy changes.
+
+For a shared kitten in Unscience Iron Man mode, its first-priority keyboard prefix owns vessel
+input before Purr2D2's effectful Space prefix. Purr2D2 also checks the final prepared worker's
+`IsKitten` flag and releases queued/active somersault ownership before writing any motion or input
+fields when another mode selects vessel physics. This needs no cross-assembly mode lookup and
+preserves normal EVA behavior. See [somersault ownership](somersault.md) for regression boundaries.
 
 The blade consumes each applied simulation timestamp once, suspends when paused or above 5x, and rejects large step gaps. The explicit swing advances in player time only with a fresh visible pose and a valid applied simulation step. Pose snapshots are captured from the main game view, in the kitten's body frame. Camera-relative floats are used only at final rendering submission. Audio uses the same body-space emitter plus the engine camera's spatial transform.
 

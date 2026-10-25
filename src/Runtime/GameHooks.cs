@@ -24,7 +24,12 @@ internal static class GameHooks
         harmony.Patch(Require(typeof(Program), nameof(Program.DrawProgramMenusHook)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(Menu)));
         harmony.Patch(Require(typeof(Program), "PrepareFrame", typeof(double), typeof(double)),
-            transpiler: new HarmonyMethod(typeof(GameHooks), nameof(InsertSettledUpdate)));
+            transpiler: new HarmonyMethod(typeof(GameHooks), nameof(InsertSettledUpdate))
+            {
+                // Unscience validates original solver calls before our wrappers replace them.
+                // The owner constraint is optional when Unscience is not installed.
+                after = ["MeowSci.Unscience"]
+            });
         harmony.Patch(Require(typeof(Program), "OnFrameEditor", typeof(double)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(Frame)));
         // Native PartPicker is populated by Universe.OnDrawUi in this method.
@@ -58,7 +63,7 @@ internal static class GameHooks
         harmony.Patch(Require(typeof(Program), nameof(Program.OnGameLoaded)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(WorldChanged)));
         harmony.Patch(Require(typeof(Universe), nameof(Universe.DeserializeSave), typeof(UniverseData)),
-            prefix: new HarmonyMethod(typeof(GameHooks), nameof(WorldChanged)));
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(BeforeDeserializeSave)) { priority = Priority.Last });
         harmony.Patch(Require(typeof(Program), nameof(Program.Dispose)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(Shutdown)));
         SliceWorkerHooks.Install(harmony);
@@ -224,6 +229,20 @@ internal static class GameHooks
         try { PartSliceTargeting.RepairLegacyFragmentPicker(__instance); }
         catch (Exception ex) { SaberRuntime.Report("Legacy fragment picker repair failed", ex); }
     }
+    private static void BeforeDeserializeSave(bool __runOriginal)
+    {
+        // Another mod can defer a direct call by skipping its original. A void
+        // prefix still runs in that case: leave the current world intact until replay.
+        if (!__runOriginal) return;
+        try { JobSystems.WaitAll(); }
+        catch (Exception ex)
+        {
+            SaberRuntime.Report("World reset could not join native jobs", ex);
+            throw; // Never clean up or reconstruct while a worker can still own the world.
+        }
+        WorldChanged();
+    }
+
     private static void WorldChanged()
     {
         SliceFrameDiagnostics.Reset();

@@ -20,7 +20,7 @@ The reported `CoreFuelTankA_Prefab_LF1WHalfHB` uses 3,168 authored triangles. Tw
 
 Small-tank meshes come from the local private asset snapshot identifying build 2026.10.10.5554. Its tank asset XML is byte-identical to the configured current reference, and all six overlapping extracted fixtures exactly match the existing cached stock baseline. The generated small-tank fixture and proprietary assets remain ignored and unpackaged. Evidence: `artifacts/checks/contact-small-tank-original.log`, `contact-small-tank-axis-probe.log`, `contact-small-tank-stock-final.log`, `contact-contour-stock-all.log`, `contact-contour-fragments-final.log`, `contact-contour-core.log`, `contact-contour-build-final.log` and `contact-contour-assets-final.log`. Release build and final source/stage validation pass with zero compiler warnings/errors.
 
-The irrecoverable small-tank contact also has a permanent no-publication regression. Production JIT warmup passes for all 1,303 selected bodies, including cancellation checks, using the locally installed MathNet.Numerics 5.0 dependency omitted from the reference DLL snapshot (`contact-contour-warmup-final.log`). The broader managed/shader run records 1,815 PASS lines but remains unsuccessful on the existing Force UI label/tooltip assertion in `tests/force/ForceUiChecks.cs:833`; an isolated recheck repeats that failure. Evidence: `contact-contour-validation.log` and `contact-contour-force-ui-followup.log`. This is not a fully green repository-wide validation run.
+The irrecoverable small-tank contact also has a permanent no-publication regression. Production JIT warmup passes for all 1,303 selected bodies, including cancellation checks, using the locally installed MathNet.Numerics 5.0 dependency omitted from the reference DLL snapshot (`contact-contour-warmup-final.log`). The broader managed/shader run recorded 1,815 PASS lines but remained unsuccessful on the existing Force UI label/tooltip assertion in `tests/force/ForceUiChecks.cs:833`; an isolated recheck repeated that failure. Evidence: `contact-contour-validation.log` and `contact-contour-force-ui-followup.log`. That historical run was not fully green. The October 2026 Unscience compatibility follow-up corrects the stale test expectation: the existing two-line layout places `THE FURCE` above the circle center and its hint below, with both horizontally centered and no hover tooltip. No runtime UI behavior changed.
 
 Native acceptance remains pending: sweep the small Gemini7 tank at varied positions and directions, inspect reported axis-adjusted seams, release/regrab during preparation, verify refusal preserves the source, and inspect quiet replacement, motion and save/load of the resulting fragments. The extra attempts run on the existing background worker; native frame time and worst-case preparation latency have not been measured.
 
@@ -615,3 +615,41 @@ Managed fixtures cover exact/just-outside/decimal-roundoff boundaries, the chain
 Validation passes on projects regenerated from the current `tools/validate.py` source lists: **628 CoreChecks**, **110 SomersaultWorkerChecks**, **52 SomersaultPoseChecks** and **534 ForcePoseChecks PASS lines**, plus the production somersault runtime arbitration suite. There are no C# compiler warnings/errors in these runs. The Release build against KSA 2026.10.19.5638 passes with zero warnings/errors and rebuilds the installable folder and ZIP. Source/stage validation passes; the ZIP has one `purr2d2/` root, only the mod DLL, byte-identical staged contents and a valid SHA256 checksum. Logs: `artifacts/checks/multi-final-affected.log`, individual `multi-final-<suite>.log` files, `multi-final-build.log` and `multi-final-package.log`. No unrelated full regression suite or native gameplay run was performed for this revision.
 
 Native acceptance remains pending on Earth and Luna: all four initial directions from standing/running; deliberate second/third presses near each half-second boundary; late/fourth presses and held buttons; mixed direction buttons; ascent/descent boosts; low frame rates; early contact, slopes and tumbling landings; pause before/after boost dispatch and resume; manual saber drags, assisted slicing and Force composition; control/owner/world changes, RCS, unsupported warp, disable, boarding and unload. Observe every full turn, momentum addition and input release in the real game. Managed checks do not establish native animation appearance, landing behavior or frame time.
+
+## Unscience co-load compatibility (2026-10-25)
+
+The stale Force UI assertion described above is corrected without changing the runtime layout.
+The focused `ForceUiChecks` project passes with the exact title/hint text, both labels horizontally
+centered on opposite sides of the circle center, and no hover tooltip. Full validation is tracked
+separately; this focused result does not replace the historical evidence.
+
+The paired compatibility revision passes the complete `tools/validate.py --run-tests` check,
+including source/staged shader compilation, after that test-only correction. Purr2D2 and Unscience
+Release builds have zero warnings/errors; Unscience's 18 managed suites and the source-linked
+frame/save interoperability harness pass. The harness reproduces the original conflicts and tests
+both corrected installation orders, deferral/rejection/replay and removal. Its host/runtime are
+fixtures; these results do not establish native physics, GPU lifetime or optimized-JIT acceptance.
+
+Native acceptance remains pending. Record KSA, StarMap, Harmony and both mod revisions, manifest
+order and observed diagnostics for each run:
+
+- [ ] Start with both mod load orders. Confirm frame hooks install without patch failures and
+  Purr2D2's settled update, Unscience's queued mutations and native physics each advance normally.
+- [ ] Exercise Garry's Torch weld movement and Dent Wizard launches while Purr2D2 is enabled,
+  including paused/resumed simulation, F2 and active orbit-hover work. Check following, motion and
+  cleanup without duplicate updates, worker faults or hangs.
+- [ ] Save and repeatedly reload generated Purr2D2 fragments alongside Unscience scene setups.
+  Preserve `Generated/Slices/`; confirm native fragments and Unscience records restore, while
+  Purr2D2's session-owned equipment/holds and queued actions clear. Repeat with a vanilla save and
+  a new system; no old-world action should affect reconstructed objects.
+- [ ] Submit a direct `Universe.DeserializeSave` request that Unscience preflight rejects. Confirm
+  the native scene and Purr2D2 equipment, colors, capes and holds remain intact. Then perform a
+  valid direct load; old ownership clears at replay before reconstruction and later updates work.
+- [ ] Press and hold Space with an ordinary vessel, an unowned EVA and the active Purr2D2
+  somersault owner. Native jump input must remain available to unowned targets; owned somersault
+  requests must execute once. Repeat while typing in ImGui/console, changing control, disabling
+  Purr2D2 and loading a scene; no consumed input or pending boost should leak to another vehicle.
+- [ ] Switch a kitten with a queued or active somersault into Unscience Iron Man mode. Space must
+  reach vessel controls and Purr2D2 must leave the non-character worker's motion/inputs untouched.
+  Return to EVA mode and verify a fresh explicit somersault request works; other kittens retain
+  their existing behavior.

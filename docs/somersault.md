@@ -31,11 +31,22 @@ Keyboard requests use the same ground, rig, speed, RCS, swing/slice and combo el
 
 The input hook runs at `KittenEva.OnKey`, after the game's settings, popup, console, ImGui, editor, camera and active-controller input routes. Other vehicles and non-jump EVA modes retain normal Space behavior. Disabling the setting restores stock Space input and discards a pending keyboard request; it does not change a pending button request or an already launched custom jump. Pending keyboard intent is actor-bound and cancelled on focus loss, world reset or invalid control changes. No physics mutation occurs in the key callback.
 
+With Unscience's Iron Man mode active, its first-priority key prefix owns vessel input, including
+Space, before the ordinary EVA somersault prefix. Disabling rocket mode restores normal Purr2D2
+Space handling for that kitten; other kittens keep their existing controls.
+
 Automated checks cover all 16 arrow combinations, default-on/legacy preferences, false autosave/reload, keyboard arbitration and lifecycle, native event routing, and unchanged button behavior. In-game acceptance should confirm bare Space, mixed arrows, deliberate double/triple presses, held Space through landing, GUI text/menu focus, disabling/re-enabling, control switching, and the existing buttons with the option off.
 
 ## Physics ownership
 
 `SomersaultMotionController` validates and patches the sole virtual `Vehicle.PrepareWorker(SimStep)` call in `Universe.PrepareVehicleWorkers`. Its wrapper calls the native preparation first, including derived EVA character/ladder snapshots, then modifies only the requested kitten's prepared worker state. It applies a bounded, surface-relative velocity delta once, takes the prepared body off rails, and initializes native airborne state without leaving a second stock jump impulse armed. Public vehicle state is updated through the game's normal solver results.
+
+The final prepared worker must still have `IsKitten = true`. Rocket modes can retain the same
+`KittenEva` object while selecting ordinary vessel physics. If that happens after a request or
+during a somersault, Purr2D2 cancels/releases its own pending move, active combo and held-jump guard
+before changing any prepared velocity, physics outputs, locomotion, input or failure event. It
+does not rewrite the other mode's worker. This guard uses the native classification and requires
+no Unscience assembly reference. Returning to character physics permits a fresh explicit jump.
 
 The queued request remains associated with its original kitten. Each launch/boost is consumed once in the final prepared worker and acknowledged through applied native jump timestamps before its visual turn advances. Follow-ups add only a current surface-up velocity delta and preserve the original native liftoff/contact history. KSA owns trajectory integration, gravity and collisions. There are no repeated position writes or intentional physical body rotations. Each turn contributes its own smooth angle on top of existing progress; accepting another turn never resets an already completed fraction. The pose adapter supports all three full turns.
 
@@ -56,6 +67,12 @@ The ordered local pose is native animation → optional tuck → saber grip → 
 ## Validation and limits
 
 Managed checks cover profile scaling with gravity, directional frame conversions, exact/expired/chained press windows, the three-jump limit, additive vertical boosts, preserved horizontal/frame velocity, delayed dispatch, once-only worker handoff, native launch/boost acknowledgement, held-jump behavior, pause and ownership changes, continuous double/triple turns and rendered pose angles beyond one turn, bone-length preservation, fallback rigs, explicit pose ordering, main/secondary view publication, responsive circular hit regions and release/press input capture. Host inspection validates the actual KSA 2026.10.19.5638 metadata and worker-call ordering. These checks do not execute the game's native terrain solver or render a real kitten.
+
+The production worker checks also switch a queued and an active move into vessel classification
+through a real Harmony preparation postfix. They verify that velocity, pending physics outputs,
+movement/jump/engine/grab inputs and failure events remain unchanged, another character worker is
+untouched, and returning to character mode allows a fresh once-only launch. The new regression
+fails without the final-worker classification guard. No preference or save payload changes.
 
 In-game acceptance remains necessary on Earth and Luna: all four moves from standing and walking; double/triple jumps at each window boundary, mixed direction buttons and refused fourth/late presses; ascent and descent boosts; RCS rejection; held jump and repeated clicks; early contact, slopes, vessel impacts and tumbling landings; pause before/after a boost dispatch and resume; saber equipped/stowed and checkbox transitions; follow camera, portraits and secondary viewports; and switching kittens, boarding, save/load, disabling or unloading during a combo. Exact stock-rig tuck support and appearance must be observed in the game. Vessel-deck launches, swimming, ladder launches, unrelated free-flight flips and near-zero gravity are not supported.
 
