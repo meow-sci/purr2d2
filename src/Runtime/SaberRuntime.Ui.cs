@@ -77,6 +77,7 @@ internal sealed partial class SaberRuntime
                 if (_preferencesSaveError != null) ImGui.TextWrapped(_preferencesSaveError);
 
                 if (ImGui.CollapsingHeader("Global lightsaber settings")) DrawSaberAppearanceSettings();
+                if (ImGui.CollapsingHeader("Cape settings")) DrawCapeSettings();
                 if (ImGui.CollapsingHeader("Force settings")) DrawForceSettings();
                 if (ImGui.CollapsingHeader("Overlay UI Positions")) DrawControlPositionSettings();
                 if (ImGui.CollapsingHeader("Character & grip")) DrawSaberCharacterSettings();
@@ -149,6 +150,24 @@ internal sealed partial class SaberRuntime
         _settings.BladeLength = length;
         _settings.SliceReachMultiplier = sliceReach;
         _settings.Volume = volume;
+        _settings.Validate();
+    }
+
+    private void DrawCapeSettings()
+    {
+        if (!BeginSaberSettingsTable("##CapeSettings", "Maximum simulated capes")) return;
+        int simulationLimit = _settings.CapeSimulationLimit;
+        bool changed = false;
+        try
+        {
+            SaberSettingsRow("Maximum simulated capes");
+            changed |= ImGui.SliderInt("##CapeSimulationLimit", ref simulationLimit,
+                SaberSettings.MinimumCapeSimulationLimit, SaberSettings.MaximumCapeSimulationLimit);
+            ShowSaberControlTip("Among enabled capes visible within 25 m, the nearest up to this many receive cloth simulation. A value of 0 keeps the cape and hood visible with cloth motion off. Default: 4.\n\nAt most two capes update per frame, so higher limits share the same update budget and refresh motion less often.");
+        }
+        finally { ImGui.EndTable(); }
+        if (!changed) return;
+        _settings.CapeSimulationLimit = simulationLimit;
         _settings.Validate();
     }
 

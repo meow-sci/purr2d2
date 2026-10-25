@@ -42,6 +42,7 @@ internal sealed partial class SaberRuntime
         internal SaberType Type = SaberType.Light;
         internal SaberTogglePhase TogglePhase;
         internal bool CapeEnabled;
+        internal bool CapeNeedsSetup;
         internal CapeController? Cape;
         internal string? CapeFailure;
         internal bool CapeFailureLogged;
@@ -55,7 +56,7 @@ internal sealed partial class SaberRuntime
             Cleanup(Audio.Dispose, "Kitten audio");
             Cleanup(Pose.Dispose, "Kitten pose");
             if (Cape is { } cape) Cleanup(cape.Dispose, "Kitten cape");
-            Cape = null;
+            Cape = null; CapeNeedsSetup = false;
             Blade.Reset();
             TogglePhase = SaberTogglePhase.None;
         }
@@ -136,6 +137,7 @@ internal sealed partial class SaberRuntime
             // Boarding destroys/deregisters the EVA object. Release its processor,
             // MMU override and owned channels even if it was not being controlled.
             var saber = _kittenSabers[kitten];
+            RemoveCapeOwner(kitten);
             if (ReferenceEquals(kitten, _kittenColorPickerOwner)) DismissKittenColorPicker();
             if (ReferenceEquals(saber, _activeSaber)) SetControlledKitten(null);
             DisposeKittenCape(kitten, saber, clearFailure: true);
@@ -285,7 +287,10 @@ internal sealed partial class SaberRuntime
             pair.Value.Dispose();
         }
         _capeControllers.Clear();
+        _capeOwners.Clear();
+        _capePendingCreationCount = 0;
         _capeRuntimeFaulted = _capeRuntimeFaultLogged = false;
+        _capeFaultCleanupPending = _capePendingCleanup = false;
         _capeRoundRobinCursor = 0;
         _kittenSabers.Clear(); _kittenSaberRequests.Clear(); _overlayKittens.Clear();
         _currentKittens.Clear(); _removedKittens.Clear(); _activeSaber = null;

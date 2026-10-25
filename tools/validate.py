@@ -761,6 +761,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Audio/ForceBreakupAudio.cs", source / "src/Core/SaberSettings.cs",
                          source / "tests/audio/AudioChecks.cs"], None),
         ("ForceBreakupSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "tests/ForceBreakupSettingsChecks.cs"], None),
+        ("CapeSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "src/Core/SaberSettingsAutosaver.cs",
+            source / "tests/CapeSettingsChecks.cs"], None),
         ("ForceSpreadSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "src/Core/SaberSettingsAutosaver.cs",
             source / "src/Core/SaberLimits.cs", source / "src/Core/ForceCaptureLimits.cs", source / "src/Core/ForceBreakupLimits.cs",
             source / "src/Core/SliceResourceLimits.cs", source / "tests/ForceSpreadSettingsChecks.cs"], None),

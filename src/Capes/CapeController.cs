@@ -35,6 +35,8 @@ internal sealed class CapeController : IDisposable
     private float _stepAccumulator;
     private float _idleSeconds;
     private bool _unsupportedSpeed;
+    private bool _idleReleased;
+    private bool _simulationSuspended;
     private bool _disposed;
     private floatQuat _bodyToCape = floatQuat.Identity;
 
@@ -72,7 +74,12 @@ internal sealed class CapeController : IDisposable
 
     private static void RenderPostfix(KittenRenderable __instance, IViewport viewport, float4x4 transform)
     {
-        try { GameHooks.Runtime?.DrawCape(__instance, viewport, transform); }
+        try
+        {
+            SaberRuntime? runtime = GameHooks.Runtime;
+            if (runtime is null || !runtime.HasCapeRenderers) return;
+            runtime.DrawCape(__instance, viewport, transform);
+        }
         catch (Exception error)
         {
             try { SaberRuntime.Report("Cape render hook failed", error); }
@@ -222,27 +229,50 @@ internal sealed class CapeController : IDisposable
 
     internal void MarkActive(bool supportedSpeed)
     {
+        if (_disposed) return;
         _idleSeconds = 0f;
-        if (supportedSpeed) _unsupportedSpeed = false;
+        if (supportedSpeed)
+        {
+            _idleReleased = false;
+            _unsupportedSpeed = false;
+            _simulationSuspended = false;
+        }
     }
 
     internal void SuspendForUnsupportedSpeed()
     {
+        if (_disposed) return;
         if (_unsupportedSpeed) return;
         _unsupportedSpeed = true;
+        _idleReleased = true;
+        _simulationSuspended = true;
         _stepAccumulator = 0f;
         _idleSeconds = 0f;
-        _cloth.Reset();
+        if (_cloth.Failure is null) _cloth.Reset();
+    }
+
+    internal void SuspendSimulation()
+    {
+        if (_disposed) return;
+        _stepAccumulator = 0f;
+        _idleSeconds = 0f;
+        _idleReleased = true;
+        if (_simulationSuspended) return;
+        _simulationSuspended = true;
+        // A failed cloth remains failed until the runtime's explicit failure recovery path.
+        if (_cloth.Failure is null) _cloth.Reset();
     }
 
     internal void AdvanceIdle(double playerDt)
     {
-        if (_disposed || !double.IsFinite(playerDt) || playerDt <= 0d) return;
+        if (_disposed || _idleReleased || !double.IsFinite(playerDt) || playerDt <= 0d) return;
         _idleSeconds = MathF.Min(IdleReleaseSeconds, _idleSeconds + (float)Math.Min(playerDt, .1d));
         if (_idleSeconds < IdleReleaseSeconds) return;
-        _idleSeconds = 0f;
+        _idleReleased = true;
+        _simulationSuspended = true;
         _stepAccumulator = 0f;
-        _cloth.Reset(); // Drops the private Bepu world; the next near frame starts from a light rest pose.
+        if (_cloth.Failure is null)
+            _cloth.Reset(); // Drops the private Bepu world; the next near frame starts from a light rest pose.
     }
 
     public void Dispose()
@@ -250,9 +280,12 @@ internal sealed class CapeController : IDisposable
         if (_disposed) return;
         _disposed = true;
         _stepAccumulator = 0f;
-        _cape.Dispose();
-        _hood.Dispose();
-        _cloth.Dispose();
+        try { _cape.Dispose(); }
+        finally
+        {
+            try { _hood.Dispose(); }
+            finally { _cloth.Dispose(); }
+        }
     }
 
     private static int FindBone(Skeleton skeleton, string name)
@@ -290,7 +323,6 @@ internal sealed class CapeController : IDisposable
         private readonly CapeCloth _cloth;
         private readonly int _root;
         private readonly int[] _bones = new int[CapeGeometry.NodeCount];
-        private readonly float4x4[] _inverseRestFrames = new float4x4[CapeGeometry.NodeCount];
 
         public float Priority => 1f;
         public bool ShouldUpdate { get; set; } = true;
@@ -308,28 +340,18 @@ internal sealed class CapeController : IDisposable
                 _bones[node] = FindBone(skeleton, $"Cape_{node:000}");
                 if (_bones[node] < 0) throw new InvalidOperationException($"The cape asset is missing Cape_{node:000}.");
             }
-
-            Span<float3> rest = stackalloc float3[CapeGeometry.NodeCount];
-            for (int node = 0; node < CapeGeometry.NodeCount; node++)
-                rest[node] = CapeGeometry.RestPosition(node);
-            for (int node = 0; node < CapeGeometry.NodeCount; node++)
-            {
-                float4x4 frame = SurfaceFrame(rest, node);
-                if (!float4x4.Invert(frame, out _inverseRestFrames[node]))
-                    throw new InvalidOperationException("The cape bind surface contains a degenerate node frame.");
-            }
         }
 
         public void UpdateLocalPose(float4x4 transform, Skeleton skeleton, Span<TransformTRS> localPose, float dt)
         {
             if (!ShouldUpdate || skeleton.BoneCount != localPose.Length || _root >= localPose.Length) return;
-            ReadOnlySpan<float3> positions = _cloth.Positions;
+            _poseCache.Update(_cloth.Positions, _cloth.PoseRevision);
             SetPose(localPose, _root, float3.Zero, floatQuat.Identity);
+            ReadOnlySpan<CapeNodePose> poses = _poseCache.Poses;
             for (int node = 0; node < CapeGeometry.NodeCount; node++)
             {
-                float4x4 currentFrame = SurfaceFrame(positions, node);
-                float4x4 delta = _inverseRestFrames[node] * currentFrame;
-                SetPose(localPose, _bones[node], positions[node], floatQuat.CreateFromRotationMatrix(delta));
+                CapeNodePose pose = poses[node];
+                SetPose(localPose, _bones[node], pose.Translation, pose.Rotation);
             }
         }
 
@@ -344,26 +366,6 @@ internal sealed class CapeController : IDisposable
 
         public void UpdateSkeleton(float4x4 transform, Skeleton skeleton, float dt) { }
 
-        private static float4x4 SurfaceFrame(ReadOnlySpan<float3> positions, int index)
-        {
-            int row = index / CapeGeometry.Columns;
-            int column = index % CapeGeometry.Columns;
-            int left = Math.Max(column - 1, 0);
-            int right = Math.Min(column + 1, CapeGeometry.Columns - 1);
-            int above = Math.Max(row - 1, 0);
-            int below = Math.Min(row + 1, CapeGeometry.Rows - 1);
-            float3 across = positions[row * CapeGeometry.Columns + right] - positions[row * CapeGeometry.Columns + left];
-            float3 upward = positions[above * CapeGeometry.Columns + column] - positions[below * CapeGeometry.Columns + column];
-            float3 x = Normalize(across, float3.UnitX);
-            float3 y = upward - x * float3.Dot(upward, x);
-            y = Normalize(y, float3.UnitY);
-            float3 z = Normalize(float3.Cross(x, y), float3.UnitZ);
-            y = Normalize(float3.Cross(z, x), y);
-            return new float4x4(
-                x.X, x.Y, x.Z, 0f,
-                y.X, y.Y, y.Z, 0f,
-                z.X, z.Y, z.Z, 0f,
-                0f, 0f, 0f, 1f);
-        }
+        private readonly CapePoseCache _poseCache = new();
     }
 }

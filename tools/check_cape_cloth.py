@@ -58,6 +58,7 @@ for key, value in {"OutputType": "Exe", "TargetFramework": "net10.0", "ImplicitU
 items = ET.SubElement(project, "ItemGroup")
 for source in [
     "src/Capes/CapeGeometry.cs",
+    "src/Capes/CapePoseCache.cs",
     "src/Capes/CapeCloth.cs",
     "tests/capes/ClothChecks.cs",
     "tests/capes/AssetHostChecks.cs",

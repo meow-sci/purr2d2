@@ -8,7 +8,9 @@ internal static class ClothChecks
 
     public static void Main()
     {
+        BenchmarkFirstSolverSteps();
         GeometryAndRestPose();
+        PoseRevisionAndCache();
         SettlingAndMotion();
         ReverseSidewaysAndFastMotion();
         SafeInputsResetAndDispose();
@@ -17,7 +19,32 @@ internal static class ClothChecks
         Benchmark(2);
         Benchmark(4);
         Benchmark(8);
+        BenchmarkPoseCache();
         Console.WriteLine("Cape cloth checks passed against the current KSA and Bepu managed assemblies.");
+    }
+
+    private static void BenchmarkFirstSolverSteps()
+    {
+        var firstEverCape = new CapeCloth();
+        long start = Stopwatch.GetTimestamp();
+        firstEverCape.Step(UpdateDt, new float3(0, 0, 5));
+        double firstEverMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        Check(firstEverCape.Failure is null, "the first native cape setup and step succeeds");
+        firstEverCape.Dispose();
+
+        var jittedCape = new CapeCloth();
+        jittedCape.Step(UpdateDt, new float3(0, 0, 5));
+        jittedCape.Dispose();
+
+        var subsequentCape = new CapeCloth();
+        start = Stopwatch.GetTimestamp();
+        subsequentCape.Step(UpdateDt, new float3(0, 0, 5));
+        double subsequentMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        Check(subsequentCape.Failure is null, "a new cape can set up and step after native JIT warmup");
+        subsequentCape.Dispose();
+
+        Console.WriteLine($"Cape first-step setup timing: first-ever={firstEverMs:F3} ms; " +
+            $"new cape after JIT warmup={subsequentMs:F3} ms (descriptive only)");
     }
 
     private static void GeometryAndRestPose()
@@ -76,6 +103,50 @@ internal static class ClothChecks
         EnsureFinite(moving.Positions, "stopped cloth remains finite");
         CheckBehindWearer(moving.Positions, "stopped cloth stays behind the wearer");
         Check(moving.Failure is null && still.Failure is null, "steady simulation does not report a failure");
+    }
+
+    private static void PoseRevisionAndCache()
+    {
+        using var cape = new CapeCloth();
+        var cache = new CapePoseCache();
+        Check(cape.PoseRevision == 0, "a new cloth starts at its baseline pose revision");
+        Check(cache.Update(cape.Positions, cape.PoseRevision), "a new pose cache calculates its first pose");
+        CompareWithOriginalPoseMath(cape.Positions, cache.Poses, "initial rest pose");
+        Check(!cache.Update(cape.Positions, cape.PoseRevision), "a repeated rest revision reuses the cached pose");
+
+        cape.Step(double.NaN, new float3(0, 0, 5));
+        cape.Step(double.PositiveInfinity, new float3(0, 0, 5));
+        cape.Step(-1d, new float3(0, 0, 5));
+        cape.Step(1d / 1000d, new float3(0, 0, 5));
+        cape.Step(1d / 1000d, new float3(0, 0, 5));
+        Check(cape.PoseRevision == 0, "invalid and undersized dt do not dirty the pose cache");
+        Check(!cache.Update(cape.Positions, cape.PoseRevision), "invalid and undersized dt leave the cache reusable");
+
+        cape.Step(UpdateDt, new float3(0, 0, 4));
+        Check(cape.Failure is null && cape.PoseRevision > 0, "a valid native solver result advances the pose revision");
+        Check(cache.Update(cape.Positions, cape.PoseRevision), "a new cloth revision recalculates the pose");
+        CompareWithOriginalPoseMath(cape.Positions, cache.Poses, "moving pose");
+        Check(!cache.Update(cape.Positions, cape.PoseRevision), "the same moving revision reuses its cached pose");
+
+        // A newly created renderable (for example after a material/style change) has
+        // a cold cache and must calculate from the current cloth pose, not from live bones.
+        var styleCache = new CapePoseCache();
+        Check(styleCache.Update(cape.Positions, cape.PoseRevision), "a newly created style cache calculates the current pose");
+        CompareWithOriginalPoseMath(cape.Positions, styleCache.Poses, "new style cache");
+
+        ulong movedRevision = cape.PoseRevision;
+        cape.Reset();
+        Check(cape.PoseRevision > movedRevision, "restoring a changed cloth pose advances its revision");
+        Check(cache.Update(cape.Positions, cape.PoseRevision), "reset pose invalidates the moving cache");
+        CompareWithOriginalPoseMath(cape.Positions, cache.Poses, "reset rest pose");
+        ulong resetRevision = cape.PoseRevision;
+        cape.Reset();
+        Check(cape.PoseRevision == resetRevision, "repeated reset at rest does not dirty the pose cache");
+        Check(!cache.Update(cape.Positions, cape.PoseRevision), "repeated reset preserves the cached rest pose");
+
+        cape.Step(UpdateDt, new float3(0, 0, 4));
+        Check(cape.Failure is null && cape.PoseRevision > resetRevision,
+            "a fresh native solver step recovers after reset");
     }
 
     private static void ReverseSidewaysAndFastMotion()
@@ -196,6 +267,106 @@ internal static class ClothChecks
             $"warmup={warmupUpdates}, measured={measuredUpdates}, median/update={median:F3} ms, p95/update={p95:F3} ms, " +
             $"allocated/update={allocatedPerUpdate:F1} B");
         Check(allocatedBytes == 0, $"warmed {capeCount}-cape Step updates allocate no managed memory ({allocatedBytes} bytes total)");
+    }
+
+    private static void BenchmarkPoseCache()
+    {
+        using var cape = new CapeCloth();
+        cape.Step(UpdateDt, new float3(0, 0, 5));
+        ReadOnlySpan<float3> positions = cape.Positions;
+        const int iterations = 1000;
+        var recompute = new CapePoseCache();
+        recompute.Update(positions, 0);
+        for (int i = 1; i < 10; i++) recompute.Update(positions, (ulong)i);
+
+        var timer = Stopwatch.StartNew();
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (ulong revision = 10; revision < 10 + iterations; revision++)
+            recompute.Update(positions, revision);
+        long recomputeAllocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        timer.Stop();
+        double recomputeMs = timer.Elapsed.TotalMilliseconds;
+
+        var reuse = new CapePoseCache();
+        reuse.Update(positions, 42);
+        var copiedPose = new CapeNodePose[CapeGeometry.NodeCount];
+        timer.Restart();
+        allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < iterations; i++)
+        {
+            reuse.Update(positions, 42);
+            reuse.Poses.CopyTo(copiedPose);
+        }
+        long reuseAllocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        timer.Stop();
+        double reuseMs = timer.Elapsed.TotalMilliseconds;
+
+        Console.WriteLine($"Cape pose-cache calculation check (no native skinning or GPU): iterations={iterations}, " +
+            $"recompute={recomputeMs:F3} ms/{recomputeAllocated} B; " +
+            $"revision check + cached 117-node copy={reuseMs:F3} ms/{reuseAllocated} B (descriptive timing)");
+        Check(recomputeAllocated == 0, $"pose recomputation allocates no managed memory ({recomputeAllocated} bytes total)");
+        Check(reuseAllocated == 0, $"warmed pose-cache reuse allocates no managed memory ({reuseAllocated} bytes total)");
+    }
+
+    private static void CompareWithOriginalPoseMath(
+        ReadOnlySpan<float3> positions,
+        ReadOnlySpan<CapeNodePose> actual,
+        string context)
+    {
+        Check(positions.Length == CapeGeometry.NodeCount && actual.Length == CapeGeometry.NodeCount,
+            context + " has all 117 cached node poses");
+        Span<float4x4> inverseRest = stackalloc float4x4[CapeGeometry.NodeCount];
+        ReadOnlySpan<float3> rest = CapeRestPose.All;
+        for (int node = 0; node < CapeGeometry.NodeCount; node++)
+        {
+            Check(float4x4.Invert(ReferenceSurfaceFrame(rest, node), out inverseRest[node]),
+                context + " reference rest frame inverts at node " + node);
+        }
+        for (int node = 0; node < CapeGeometry.NodeCount; node++)
+        {
+            floatQuat expected = floatQuat.CreateFromRotationMatrix(inverseRest[node] * ReferenceSurfaceFrame(positions, node));
+            Check(Distance(actual[node].Translation, positions[node]) < 1e-6f,
+                context + " preserves node translation at " + node);
+            Check(QuaternionDistance(actual[node].Rotation, expected) < 1e-5f,
+                context + " preserves authored rest-frame rotation at " + node);
+        }
+    }
+
+    private static float4x4 ReferenceSurfaceFrame(ReadOnlySpan<float3> positions, int index)
+    {
+        int row = index / CapeGeometry.Columns;
+        int column = index % CapeGeometry.Columns;
+        int left = Math.Max(column - 1, 0);
+        int right = Math.Min(column + 1, CapeGeometry.Columns - 1);
+        int above = Math.Max(row - 1, 0);
+        int below = Math.Min(row + 1, CapeGeometry.Rows - 1);
+        float3 across = positions[row * CapeGeometry.Columns + right] - positions[row * CapeGeometry.Columns + left];
+        float3 upward = positions[above * CapeGeometry.Columns + column] - positions[below * CapeGeometry.Columns + column];
+        float3 x = Normalize(across, float3.UnitX);
+        float3 y = upward - x * float3.Dot(upward, x);
+        y = Normalize(y, float3.UnitY);
+        float3 z = Normalize(float3.Cross(x, y), float3.UnitZ);
+        y = Normalize(float3.Cross(z, x), y);
+        return new float4x4(
+            x.X, x.Y, x.Z, 0f,
+            y.X, y.Y, y.Z, 0f,
+            z.X, z.Y, z.Z, 0f,
+            0f, 0f, 0f, 1f);
+    }
+
+    private static float3 Normalize(float3 value, float3 fallback)
+    {
+        float lengthSquared = value.LengthSquared();
+        return float.IsFinite(lengthSquared) && lengthSquared > 1e-10f
+            ? value / MathF.Sqrt(lengthSquared)
+            : fallback;
+    }
+
+    private static float QuaternionDistance(floatQuat a, floatQuat b)
+    {
+        float same = MathF.Abs(a.X - b.X) + MathF.Abs(a.Y - b.Y) + MathF.Abs(a.Z - b.Z) + MathF.Abs(a.W - b.W);
+        float opposite = MathF.Abs(a.X + b.X) + MathF.Abs(a.Y + b.Y) + MathF.Abs(a.Z + b.Z) + MathF.Abs(a.W + b.W);
+        return MathF.Min(same, opposite);
     }
 
     private static float MeanRowY(ReadOnlySpan<float3> positions, int row)

@@ -24,6 +24,7 @@ public sealed class CapeCloth : IDisposable
     private readonly ChuteClothTopology _topology;
     private readonly ChuteClothState _state;
     private float _accumulator;
+    private ulong _poseRevision;
     private bool _disposed;
 
     public CapeCloth()
@@ -33,6 +34,9 @@ public sealed class CapeCloth : IDisposable
     }
 
     public ReadOnlySpan<float3> Positions => _state.Positions;
+
+    /// <summary>Changes only when a solver result or rest restore changes the rendered pose.</summary>
+    public ulong PoseRevision => _poseRevision;
 
     public string? Failure { get; private set; }
 
@@ -85,6 +89,8 @@ public sealed class CapeCloth : IDisposable
                 Fail("KSA's cloth solver produced a non-finite cape position.");
                 return;
             }
+
+            AdvancePoseRevision();
         }
 
         // Drop backlog instead of carrying a spiral of catch-up work into later frames.
@@ -98,20 +104,21 @@ public sealed class CapeCloth : IDisposable
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _state.Bepu?.Dispose();
-        _state.Bepu = null;
-        _accumulator = 0f;
-        Failure = null;
-        RestoreRestPose();
+        try { ReleaseSimulation(); }
+        finally
+        {
+            _accumulator = 0f;
+            Failure = null;
+            RestoreRestPose();
+        }
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _state.Bepu?.Dispose();
-        _state.Bepu = null;
-        _accumulator = 0f;
+        try { ReleaseSimulation(); }
+        finally { _accumulator = 0f; }
     }
 
     private bool ProjectSafeBounds()
@@ -151,25 +158,47 @@ public sealed class CapeCloth : IDisposable
     private void Fail(string message)
     {
         Failure = string.IsNullOrWhiteSpace(message) ? "Cape cloth simulation failed." : message;
-        _state.Bepu?.Dispose();
+        try { ReleaseSimulation(); }
+        finally
+        {
+            _accumulator = 0f;
+            RestoreRestPose();
+        }
+    }
+
+    private void ReleaseSimulation()
+    {
+        ChuteBepuClothState? simulation = _state.Bepu;
         _state.Bepu = null;
-        _accumulator = 0f;
-        RestoreRestPose();
+        simulation?.Dispose();
     }
 
     private void RestoreRestPose()
     {
+        bool poseChanged = false;
         for (int i = 0; i < CapeGeometry.NodeCount; i++)
         {
-            float3 rest = CapeGeometry.RestPosition(i);
+            float3 rest = CapeRestPose.Position(i);
+            float3 position = _state.Positions[i];
+            if (position.X != rest.X || position.Y != rest.Y || position.Z != rest.Z)
+                poseChanged = true;
             _state.Positions[i] = rest;
             _state.AttractorTargets[i] = rest;
             _state.Velocities[i] = float3.Zero;
         }
-        _state.PositionsDirty = true;
+        if (poseChanged)
+        {
+            _state.PositionsDirty = true;
+            AdvancePoseRevision();
+        }
         _state.AirVelocityLocal = float3.Zero;
         _state.GravityLocal = new float3(0f, -9.81f, 0f);
         _state.QLocal = 0f;
+    }
+
+    private void AdvancePoseRevision()
+    {
+        if (_poseRevision < ulong.MaxValue) _poseRevision++;
     }
 
     private static ChuteClothState CreateState(ChuteClothTopology topology)
@@ -198,7 +227,7 @@ public sealed class CapeCloth : IDisposable
 
         for (int i = 0; i < CapeGeometry.NodeCount; i++)
         {
-            float3 rest = CapeGeometry.RestPosition(i);
+            float3 rest = CapeRestPose.Position(i);
             state.Positions[i] = rest;
             state.AttractorTargets[i] = rest;
             state.InvMass[i] = i / CapeGeometry.Columns == 0 ? 0f : 1f;
@@ -271,7 +300,7 @@ public sealed class CapeCloth : IDisposable
             bool bPinned = b / CapeGeometry.Columns == 0;
             if (aPinned && bPinned) return;
 
-            float3 delta = CapeGeometry.RestPosition(a) - CapeGeometry.RestPosition(b);
+            float3 delta = CapeRestPose.Position(a) - CapeRestPose.Position(b);
             aNodes[count] = a;
             bNodes[count] = b;
             restNormalized[count] = delta.Length(); // BakedDiameter is one metre.

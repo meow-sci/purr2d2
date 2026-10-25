@@ -12,7 +12,16 @@ namespace KSA
         public static bool EditorFlag;
         public static object? ControlledVehicle;
         public static ulong FrameNumber;
-        public static IViewport MainViewport = new Viewport(ViewportType.Main);
+        private static IViewport _mainViewport = new Viewport(ViewportType.Main);
+        public static IViewport MainViewport
+        {
+            get => _mainViewport;
+            set
+            {
+                _mainViewport = value;
+                if (value is IGameViewport gameViewport) ViewportRegistry.SetGameViews(gameViewport);
+            }
+        }
         public static IViewport RenderedViewport = MainViewport;
     }
 
@@ -20,14 +29,22 @@ namespace KSA
     {
         public static CelestialSystem? CurrentSystem;
         public static double Speed = 1;
-        public static double GetSimulationSpeed() => Speed;
+        public static int SpeedReads;
+        public static Exception? SpeedFailure;
+        public static double GetSimulationSpeed()
+        {
+            SpeedReads++;
+            if (SpeedFailure is { } failure) throw failure;
+            return Speed;
+        }
     }
 
     public sealed class CelestialSystem { public readonly HostCollection All = new(); }
     public sealed class HostCollection
     {
+        public static int SnapshotReads;
         public object[] Items = [];
-        public ReadOnlySpan<object> AsSpan() => Items;
+        public ReadOnlySpan<object> AsSpan() { SnapshotReads++; return Items; }
     }
     public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder, Tumbling, Rightening, Swimming }
     public sealed class LocomotionState { public LocomotionMode Mode = LocomotionMode.Grounded; }
@@ -40,10 +57,11 @@ namespace KSA
         public readonly ParentBody Parent = new();
         public double3 PositionEcl;
         public double3 SurfaceVelocityCci;
+        public int PositionReads, VelocityReads;
         public float3 CenterOfMassAsmbF => float3.Zero;
         public doubleQuat Body2Cce => doubleQuat.Identity;
-        public double3 GetPositionEcl() => PositionEcl;
-        public double3 GetSurfaceVelocityCci() => SurfaceVelocityCci;
+        public double3 GetPositionEcl() { PositionReads++; return PositionEcl; }
+        public double3 GetSurfaceVelocityCci() { VelocityReads++; return SurfaceVelocityCci; }
     }
     public sealed class ParentBody { public doubleQuat GetCci2Cce() => doubleQuat.Identity; }
     public sealed class KittenRenderable
@@ -78,12 +96,28 @@ namespace KSA
     }
     public enum ViewportType { Main, Secondary, CharacterPortrait }
     public interface IViewport { ViewportType Type { get; } bool Visible { get; } Camera GetCamera(); }
-    public sealed class Viewport(ViewportType type) : IViewport
+    public interface IGameViewport : IViewport { }
+    public static class ViewportRegistry
     {
+        public const int MAX_VIEWPORTS = 8;
+        private static IGameViewport[] _gameViews = [];
+        public static int GameViewReads;
+        public static ReadOnlySpan<IGameViewport> GameViews { get { GameViewReads++; return _gameViews; } }
+        public static void SetGameViews(params IGameViewport[] views) => _gameViews = views;
+    }
+    public sealed class Viewport(ViewportType type) : IGameViewport
+    {
+        public static int CameraReads;
         public ViewportType Type => type;
         public bool Visible { get; set; } = true;
         public Camera Camera { get; } = new();
-        public Camera GetCamera() => Camera;
+        public Exception? CameraFailure;
+        public Camera GetCamera()
+        {
+            CameraReads++;
+            if (CameraFailure is { } failure) throw failure;
+            return Camera;
+        }
     }
     public sealed class Camera { public double3 PositionEcl { get; set; } }
     public static class Double3Ex
@@ -102,12 +136,13 @@ namespace Purr2D2.Capes
     {
         internal static string? HookFailure;
         internal static int SetupAttempts, Constructions, Disposals, DrawCalls, StepCalls, IdleResets, WarpResets;
+        internal static int SuspendCalls, SuspendReleases;
         internal static readonly List<string> StepOwners = [];
         internal static Exception? SetupFailure;
 
         private float _elapsed;
         private float _idle;
-        private bool _suspended;
+        private bool _suspended, _unsupportedSpeed;
         internal readonly KSA.KittenEva Owner;
         internal Purr2D2.Core.SaberType Type;
         internal string? Failure { get; set; }
@@ -133,7 +168,7 @@ namespace Purr2D2.Capes
         internal void MarkActive(bool supportedSpeed)
         {
             _idle = 0;
-            if (supportedSpeed) _suspended = false;
+            if (supportedSpeed) _suspended = _unsupportedSpeed = false;
         }
         internal void Accumulate(double dt) => CapeUpdatePolicy.Accumulate(ref _elapsed, dt, true);
         internal float ConsumeStepTime() => CapeUpdatePolicy.Consume(ref _elapsed);
@@ -144,8 +179,17 @@ namespace Purr2D2.Capes
         }
         internal void SuspendForUnsupportedSpeed()
         {
+            if (_unsupportedSpeed) return;
+            _unsupportedSpeed = _suspended = true; _elapsed = 0; WarpResets++;
+        }
+        internal void SuspendSimulation()
+        {
+            SuspendCalls++;
             if (_suspended) return;
-            _suspended = true; _elapsed = 0; WarpResets++;
+            _suspended = true;
+            _elapsed = 0;
+            _idle = 0;
+            SuspendReleases++;
         }
         internal void AdvanceIdle(double dt)
         {
@@ -157,6 +201,7 @@ namespace Purr2D2.Capes
         internal static void ResetMetrics()
         {
             HookFailure = null; SetupAttempts = Constructions = Disposals = DrawCalls = StepCalls = IdleResets = WarpResets = 0;
+            SuspendCalls = SuspendReleases = 0;
             StepOwners.Clear(); SetupFailure = null;
         }
     }

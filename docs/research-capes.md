@@ -16,7 +16,7 @@ The useful lower layer accepts custom topology and state. `ChuteBepuClothState.C
 | `ChuteBepuClothSolver.cs` | Native integration, finite-state recovery and bounded substeps. |
 | `ChuteClothForcePass.cs`, `ChuteClothForces.cs` | Gravity, damping and relative-air drag are caller-supplied; pressure and radial canopy aerodynamics can be disabled. |
 | `ChuteRenderable.cs`, `ChuteCanopyPose.cs` | Two-sided skinned PBR rendering, shadows, per-instance materials and simulation-driven bones. The stock canopy's bone mapping is not reusable. |
-| `AnimatedRenderable.cs` | Custom material handles are captured on construction; local skinning can be shared across viewports within a frame. |
+| `AnimatedRenderable.cs` | Custom material handles are captured on construction; local skinning can be shared across viewports within a frame. Every new frame restores the animation pose before calling processors, so cached cloth transforms must still be copied into that pose. Skinning allocation indices cannot be reused across frames. |
 | `KittenRenderable.cs` | Final skeleton is available after `UpdateRenderData`; sockets can follow all native and mod animation, including full-body flips. |
 | `Vehicle.cs`, `GetSurfaceVelocityCci` | Subtracts the body's rotational surface velocity. This avoids treating a stationary landed kitten's orbital velocity as airflow. |
 
@@ -32,11 +32,13 @@ Artificial gravity and bounded drag deliberately ignore atmospheric density and 
 
 ## Performance requirements
 
-- Default-off creates no cape controller, cloth simulation or renderable. Native assets are requested lazily when a cape is used.
-- At most four nearby, recently drawn capes receive cloth updates. Other capes use a static drape.
-- Updates target 30 Hz, with at most two capes advanced per frame, four 1/120-second native substeps per cape, and no backlog catch-up. A rotating schedule avoids starving the later capes.
+- Default-off creates no cape controller, cloth simulation or renderable. Native assets are requested lazily when a cape is used. An explicit registry tracks opted-in kittens and pending cleanup; the empty-registry path returns in constant time without scanning all kittens. The installed render hook takes a cheap gate before any cape lookup or drawing.
+- A never-rendered enabled cape defers controller/model allocation until it is within 60 m of a visible main or secondary game camera. Camera positions for setup are captured once per settled pass in bounded stack storage, only when a missing controller needs them. Existing controllers are retained outside range to avoid repeated GPU resource creation; their idle cloth simulation is released separately.
+- The persisted global `CapeSimulationLimit` defaults to four and is clamped to 0–16. The nearest eligible capes within 25 m receive cloth updates. Zero releases simulations at the next settled handoff, even while paused, while preserving cape/hood rendering in the authored rest pose. Other capes release simulation after 1.5 seconds idle and use a static drape.
+- Updates target 30 Hz, with at most two capes advanced per frame, four 1/120-second native substeps per cape, and no backlog catch-up. A rotating schedule follows stable owner indices within the nearest set, so changes in distance rank cannot starve a cape. Raising the global limit does not raise the per-frame work budget; more capes share those two updates. Candidate storage is fixed at the validated maximum and only the selected span is used.
 - Each cloth update enters the native solver once for its batch of substeps, avoiding repeated constraint/environment setup.
 - Simulation happens once per settled game update, never once per viewport. Rendering only consumes its result.
+- Cloth poses carry a revision. Surface frames and rotations are recomputed only when cloth changes; rendering copies cached transforms into the native animation pose. Rest restoration and idle release are idempotent, avoiding repeated work for static capes.
 - Arrays, constraints and native resources are reused. Disable self-collision and world collision queries; use a small local body clearance proxy.
 - Distance limits, bounded airflow, pause/warp handling and failure containment keep visual work bounded.
 - Do not modify stock parachute tuning, shaders, pools, physics jobs or the global Bepu simulation.

@@ -79,6 +79,9 @@ public sealed class SaberSettings
     public const float MaximumArcWidth = 4;
     public const int MaximumSparkCount = 8;
     public const float MaximumSparkFrequency = 12;
+    public const int MinimumCapeSimulationLimit = 0;
+    public const int MaximumCapeSimulationLimit = 16;
+    public const int DefaultCapeSimulationLimit = 4;
 
     public float BladeLength { get; set; } = 1.4f;
     public float SliceReachMultiplier { get; set; } = SaberLimits.DefaultSliceReachMultiplier;
@@ -115,6 +118,7 @@ public sealed class SaberSettings
     public int SliceAssetDiskMiB { get; set; } = SliceResourceLimits.DefaultAssetDiskMiB;
     public int SliceAssetEntryLimit { get; set; } = SliceResourceLimits.DefaultAssetEntryLimit;
     public int SlicePhysicsVehicleLimit { get; set; } = SliceResourceLimits.DefaultPhysicsVehicleLimit;
+    public int CapeSimulationLimit { get; set; } = DefaultCapeSimulationLimit;
     [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public SaberEffectSettings LightEffects { get; set; } = SaberEffectSettings.Create(SaberType.Light);
     [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
@@ -160,6 +164,7 @@ public sealed class SaberSettings
         SliceAssetDiskMiB = Math.Clamp(SliceAssetDiskMiB, SliceResourceLimits.MinimumAssetDiskMiB, SliceResourceLimits.MaximumAssetDiskMiB);
         SliceAssetEntryLimit = Math.Clamp(SliceAssetEntryLimit, SliceResourceLimits.MinimumAssetEntryLimit, SliceResourceLimits.MaximumAssetEntryLimit);
         SlicePhysicsVehicleLimit = Math.Clamp(SlicePhysicsVehicleLimit, SliceResourceLimits.MinimumPhysicsVehicleLimit, SliceResourceLimits.MaximumPhysicsVehicleLimit);
+        CapeSimulationLimit = Math.Clamp(CapeSimulationLimit, MinimumCapeSimulationLimit, MaximumCapeSimulationLimit);
         EffectsFor(SaberType.Light).Validate(SaberType.Light);
         EffectsFor(SaberType.Dark).Validate(SaberType.Dark);
     }

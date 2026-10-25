@@ -1,6 +1,20 @@
 # Acceptance record
 
-## Optional cape and hood (2026-10-24)
+## Cape performance review (2026-10-24)
+
+The global **Cape settings → Maximum simulated capes** preference accepts 0–16 and defaults to 4. Zero restores enabled capes to their static pose at the next settled update, even while paused. Raising the limit shares the existing two-update frame budget; it does not increase that budget. Selection still favors the nearest recently main-view-visible capes, and scheduling follows owner indices so distance-rank changes cannot starve a selected cape.
+
+An explicit registry removes the disabled population scan. With no opted-in owners or pending cleanup, the cape update exits before camera, time, motion or resource work. The native render postfix remains installed with a cheap gate. Distant first-use model setup is deferred until a visible main or secondary game camera is within 60 m; existing models are retained to avoid repeated GPU setup. Idle simulations release once. Shared authored positions avoid repeated trigonometry, and per-cape pose caches recalculate node rotations only after a cloth revision changes. Native skinning output is still refreshed as required by KSA.
+
+The actual KSA/Bepu host harness confirms unchanged motion, fixed pins, finite input handling, reset/disposal, authored pose equivalence for all 117 nodes, and zero managed allocations in warmed simulation/cache paths. In this run, advancing the maximum two capes took **0.412 ms median / 0.492 ms p95**. For 1,000 pose calculations, recomputation took 20.958 ms and revision-check plus cached-node-copy took 0.087 ms; both allocated 0 B. These cache measurements exclude native skeleton processing, skinning and GPU work. Evidence: `artifacts/checks/capes-performance-host.log`.
+
+Focused runtime checks pass for limits 0/1/4/16, 17 nearby enabled owners, changing distance ranks, reducing the limit without scheduling stale candidates, deferred setup through secondary views, hidden/unavailable cameras, setup at the exact 60 m boundary, pause/warp, quick toggles, boarding, teardown and fault recovery. Warmed empty and enabled manager paths allocate 0 B. Settings checks cover defaults, older JSON, bounds, save/load, autosave and reset. Evidence: `artifacts/checks/capes-performance-kittens.log` and `artifacts/checks/capes-performance-settings.log`.
+
+The final Release build has zero warnings/errors. The full managed/shader regression suite passes, with generated fixtures rebuilt against their already-restored dependencies; source and staged assets also pass validation. All 36 archive files match staging, the staged DLL matches Release, and the archive SHA-256 verifies. Evidence: `artifacts/checks/capes-performance-release.log`, `artifacts/checks/capes-performance-regressions.log` and `artifacts/checks/capes-performance-package.log`.
+
+Cold setup remains a separate cost: the first native cloth step in the standalone process took **54.826 ms**, and a later new cape after runtime warmup took **1.719 ms**. Those timings exclude model loading and do not establish KSA frame times. Nothing is prewarmed while capes are off. In-game first-use hitches, steady CPU/GPU cost, and visual fit still require native acceptance.
+
+## Initial cape and hood implementation (2026-10-24)
 
 Each EVA kitten starts with **Cape and hood** off in its existing per-kitten settings window. Enabling it supplies brown cloth for Light and black for Dark, independently of ignition and blade color. The option follows the existing session-only per-kitten appearance lifetime. The cape uses an original shoulder-pinned grid with KSA's native parachute cloth solver; the oversized open hood follows the final head pose and uses authored folds. Both use native two-sided skinned PBR materials, prepass and shadows, without changing shared glTF materials or the stock kitten/parachute data.
 

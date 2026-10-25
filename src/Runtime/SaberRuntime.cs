@@ -140,7 +140,7 @@ internal sealed partial class SaberRuntime : IDisposable
                 if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
             }
             UpdateOtherSabers(supportedSpeed ? playerDt : 0);
-            UpdateCapes(playerDt);
+            if (HasCapeWork) UpdateCapes(playerDt);
             UpdateSliceResources();
         }
         catch (Exception ex)

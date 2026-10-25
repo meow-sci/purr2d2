@@ -1,44 +1,49 @@
 using System;
+using Purr2D2.Core;
 
 namespace Purr2D2.Capes;
 
 /// <summary>Small allocation-free budget and frame-clock helpers for cape simulation.</summary>
 internal static class CapeUpdatePolicy
 {
-    internal const int MaxSimulatedCapes = 4;
+    // Fixed storage capacity follows the configurable setting's hard maximum.
+    internal const int MaximumSimulatedCapes = SaberSettings.MaximumCapeSimulationLimit;
     internal const int MaxStepCallsPerFrame = 2;
     internal const float SimulationInterval = 1f / 30f;
     internal const float SimulationDistance = 25f;
     internal const float RenderDistance = 60f;
     internal const float ReleaseAfterIdle = 1.5f;
 
-    internal readonly record struct Candidate(int Index, float Distance);
+    internal readonly record struct Candidate(int Index, double DistanceSquared);
 
     internal static bool WasVisibleRecently(ulong frame, ulong lastMainDrawFrame) =>
         lastMainDrawFrame != ulong.MaxValue && frame >= lastMainDrawFrame && frame - lastMainDrawFrame <= 1;
 
-    internal static bool CanRender(float distance) =>
-        float.IsFinite(distance) && distance >= 0f && distance <= RenderDistance;
+    internal static bool CanRenderSquared(double distanceSquared) =>
+        double.IsFinite(distanceSquared) && distanceSquared >= 0d
+        && distanceSquared <= (double)RenderDistance * RenderDistance;
 
-    internal static bool CanSimulate(bool enabled, bool visibleRecently, float distance) =>
-        enabled && visibleRecently && float.IsFinite(distance) && distance >= 0f && distance <= SimulationDistance;
+    internal static bool CanSimulateSquared(bool enabled, bool visibleRecently, double distanceSquared) =>
+        enabled && visibleRecently && double.IsFinite(distanceSquared) && distanceSquared >= 0d
+        && distanceSquared <= (double)SimulationDistance * SimulationDistance;
 
     internal static void ClearCandidates(Span<Candidate> candidates)
     {
         for (int i = 0; i < candidates.Length; i++)
-            candidates[i] = new(-1, float.PositiveInfinity);
+            candidates[i] = new(-1, double.PositiveInfinity);
     }
 
-    /// <summary>Keep the nearest candidates in stable distance/index order.</summary>
-    internal static void OfferCandidate(Span<Candidate> candidates, int index, float distance)
+    /// <summary>Keep the nearest candidates in stable squared-distance/index order.</summary>
+    internal static void OfferCandidateSquared(Span<Candidate> candidates, int index, double distanceSquared)
     {
-        if (index < 0 || !float.IsFinite(distance) || distance < 0f) return;
+        if (index < 0 || !double.IsFinite(distanceSquared) || distanceSquared < 0d) return;
 
         int insert = candidates.Length;
         for (int i = 0; i < candidates.Length; i++)
         {
             Candidate current = candidates[i];
-            if (current.Index < 0 || distance < current.Distance || distance == current.Distance && index < current.Index)
+            if (current.Index < 0 || distanceSquared < current.DistanceSquared
+                || distanceSquared == current.DistanceSquared && index < current.Index)
             {
                 insert = i;
                 break;
@@ -47,7 +52,7 @@ internal static class CapeUpdatePolicy
         if (insert >= candidates.Length) return;
         for (int i = candidates.Length - 1; i > insert; i--)
             candidates[i] = candidates[i - 1];
-        candidates[insert] = new(index, distance);
+        candidates[insert] = new(index, distanceSquared);
     }
 
     /// <summary>
@@ -72,22 +77,61 @@ internal static class CapeUpdatePolicy
     }
 
     /// <summary>
-    /// Selects due entries in a rotating order. At most two distinct controllers
-    /// are returned, and a stable cursor prevents later entries from starving.
+    /// Selects due entries in owner-index order. The distance-ranked span may be
+    /// reordered every frame, so the cursor tracks stable compact-owner indices,
+    /// not candidate slots. At most two distinct controllers are returned.
     /// </summary>
-    internal static int SelectDue(ReadOnlySpan<bool> due, Span<int> selected, ref int cursor)
+    internal static int SelectDue(ReadOnlySpan<Candidate> candidates, ReadOnlySpan<bool> due,
+        Span<int> selected, ref int cursor)
     {
         int count = 0;
         int budget = Math.Min(MaxStepCallsPerFrame, selected.Length);
-        if (due.Length == 0 || budget == 0) { cursor = 0; return 0; }
-        cursor = ((cursor % due.Length) + due.Length) % due.Length;
+        int length = Math.Min(candidates.Length, due.Length);
+        if (length == 0) { cursor = 0; return 0; }
+        if (budget == 0) return 0;
 
-        for (int inspected = 0; inspected < due.Length && count < budget; inspected++)
+        while (count < budget)
         {
-            int index = cursor;
-            cursor = (cursor + 1) % due.Length;
-            if (due[index]) selected[count++] = index;
+            int chosen = -1;
+            int chosenOwner = int.MaxValue;
+            for (int i = 0; i < length; i++)
+            {
+                int owner = candidates[i].Index;
+                if (!due[i] || owner < 0 || owner < cursor || IsSelected(i, selected[..count])) continue;
+                if (owner < chosenOwner || owner == chosenOwner && i < chosen)
+                {
+                    chosen = i;
+                    chosenOwner = owner;
+                }
+            }
+
+            if (chosen < 0)
+            {
+                // Wrap to the lowest due owner when this frame's candidate set
+                // contains no due index at or beyond the cursor.
+                for (int i = 0; i < length; i++)
+                {
+                    int owner = candidates[i].Index;
+                    if (!due[i] || owner < 0 || IsSelected(i, selected[..count])) continue;
+                    if (owner < chosenOwner || owner == chosenOwner && i < chosen)
+                    {
+                        chosen = i;
+                        chosenOwner = owner;
+                    }
+                }
+            }
+
+            if (chosen < 0) break;
+            selected[count++] = chosen;
+            cursor = chosenOwner + 1;
         }
         return count;
+
+        static bool IsSelected(int candidateIndex, ReadOnlySpan<int> selectedIndices)
+        {
+            for (int i = 0; i < selectedIndices.Length; i++)
+                if (selectedIndices[i] == candidateIndex) return true;
+            return false;
+        }
     }
 }
