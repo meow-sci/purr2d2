@@ -759,6 +759,12 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("ManualContactRuntimeChecks", manual_runtime_sources,
          "internal static class ManualContactRuntimeEntry { static void Main() { Purr2D2.Runtime.SaberRuntime.Run(); } }"),
         ("KittenSaberChecks", kitten_sources, None),
+        ("KittenPersistenceRuntimeChecks", [*[path for path in kitten_sources if path.name != "KittenSaberChecks.cs"],
+            source / "src/Runtime/SaberRuntime.Persistence.cs", source / "src/Runtime/KittenIdentityIndex.cs",
+            *sorted((source / "src/Persistence").glob("*.cs")), source / "tests/kittens/PersistenceRuntimeChecks.cs"], None),
+        ("KittenSaveChecks", [*sorted((source / "src/Persistence").glob("*.cs")),
+            source / "src/Runtime/KittenSaveHooks.cs", source / "tests/persistence/SaveChecks.cs",
+            source / "tests/persistence/HookHostStubs.cs"], None),
         ("AudioChecks", [source / "src/Audio/SaberAudio.cs", source / "src/Audio/ForceBreakupAudio.cs", source / "src/Core/SaberSettings.cs",
                          source / "tests/audio/AudioChecks.cs"], None),
         ("ForceBreakupSettingsChecks", [source / "src/Core/SaberSettings.cs", source / "tests/ForceBreakupSettingsChecks.cs"], None),
@@ -808,7 +814,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("SaberBlendChecks", [source / "src/Rendering/SaberBlendState.cs", source / "tests/SaberBlendChecks.cs"], None),
     ):
         code, output = _run_managed_project(source, name, required, program,
-                                           harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks", "QuietQuiescenceChecks"),
+                                           harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks", "QuietQuiescenceChecks", "KittenSaveChecks"),
                                            host_references=("Brutal.Vulkan", "Brutal.Core") if name == "SaberBlendChecks" else ())
         outputs.append(output)
         result = result or code

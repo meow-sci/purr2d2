@@ -16,6 +16,11 @@ internal sealed partial class SaberRuntime
     private readonly HashSet<KittenEva> _currentKittens = new(ReferenceEqualityComparer.Instance);
     private readonly List<KittenEva> _removedKittens = new();
     private readonly Queue<KittenSaberRequest> _kittenSaberRequests = new();
+    partial void BeginKittenProfileRefresh();
+    partial void RestoreKittenChoices(KittenEva kitten, KittenSaber saber);
+    partial void RememberKittenChoices(KittenEva kitten, KittenSaber saber, bool revalidate = false, bool? enabled = null);
+    partial void ForgetKittenBinding(KittenEva kitten);
+    partial void ReleaseProfileBindings();
     private KittenSaber? _activeSaber;
     private int _nextKittenColor;
     private static readonly float3[] KittenColorPalette =
@@ -83,13 +88,19 @@ internal sealed partial class SaberRuntime
     private void SetKittenSaberColor(KittenEva kitten, float3 color)
     {
         if (!kitten.IsDisposed && _currentKittens.Contains(kitten) && _kittenSabers.TryGetValue(kitten, out var saber))
+        {
             saber.Color = ClampSaberColor(color);
+            RememberKittenChoices(kitten, saber, revalidate: true);
+        }
     }
 
     private void SetKittenSaberType(KittenEva kitten, SaberType type)
     {
         if (!kitten.IsDisposed && _currentKittens.Contains(kitten) && _kittenSabers.TryGetValue(kitten, out var saber))
+        {
             saber.Type = type == SaberType.Dark ? SaberType.Dark : SaberType.Light;
+            RememberKittenChoices(kitten, saber, revalidate: true);
+        }
     }
 
     private static float3 ClampSaberColor(float3 color) => new(
@@ -112,7 +123,10 @@ internal sealed partial class SaberRuntime
     {
         if (_ready && !_disposed && _fault == null && !Program.EditorFlag
             && !kitten.IsDisposed && _currentKittens.Contains(kitten) && _kittenSaberRequests.Count < 128)
+        {
             _kittenSaberRequests.Enqueue(new(kitten, enabled));
+            if (_kittenSabers.TryGetValue(kitten, out var saber)) RememberKittenChoices(kitten, saber, revalidate: true, enabled: enabled);
+        }
     }
 
     private void QueueControlledSaberToggle()
@@ -124,6 +138,7 @@ internal sealed partial class SaberRuntime
 
     private void RefreshOverlayKittens()
     {
+        BeginKittenProfileRefresh();
         _overlayKittens.Clear();
         _currentKittens.Clear();
         if (!Program.EditorFlag && Universe.CurrentSystem is { } system)
@@ -144,6 +159,7 @@ internal sealed partial class SaberRuntime
             // Boarding destroys/deregisters the EVA object. Release its processor,
             // MMU override and owned channels even if it was not being controlled.
             var saber = _kittenSabers[kitten];
+            ForgetKittenBinding(kitten);
             RemoveCapeOwner(kitten);
             if (ReferenceEquals(kitten, _kittenColorPickerOwner)) DismissKittenColorPicker();
             if (ReferenceEquals(saber, _activeSaber)) SetControlledKitten(null);
@@ -162,6 +178,7 @@ internal sealed partial class SaberRuntime
             saber = new(DrawSaber) { Color = KittenColorPalette[_nextKittenColor] };
             _nextKittenColor = (_nextKittenColor + 1) % KittenColorPalette.Length;
             _kittenSabers.Add(kitten, saber);
+            RestoreKittenChoices(kitten, saber);
         }
         return saber;
     }
@@ -352,6 +369,7 @@ internal sealed partial class SaberRuntime
 
     private void ResetKittenSabers()
     {
+        ReleaseProfileBindings();
         DismissKittenColorPicker();
         foreach (var pair in _kittenSabers)
         {

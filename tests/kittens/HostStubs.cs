@@ -28,6 +28,7 @@ namespace KSA
     public static class Universe
     {
         public static CelestialSystem? CurrentSystem;
+        public static KittenRosterData KittenRoster = new();
         public static double Speed = 1;
         public static int SpeedReads;
         public static Exception? SpeedFailure;
@@ -45,13 +46,41 @@ namespace KSA
         public static int SnapshotReads;
         public object[] Items = [];
         public ReadOnlySpan<object> AsSpan() { SnapshotReads++; return Items; }
+        public object? Get(KeyHash hash) => Items.OfType<Vehicle>().FirstOrDefault(vehicle => vehicle.Hash == hash);
     }
-    public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder, Tumbling, Rightening, Swimming }
-    public sealed class LocomotionState { public LocomotionMode Mode = LocomotionMode.Grounded; }
-    public sealed class KittenEva(string id)
+    public readonly record struct KeyHash(uint Code)
+    {
+        public static readonly KeyHash Zero = new(0);
+        public static KeyHash Make(ReadOnlySpan<char> value)
+        {
+            uint hash = 2166136261;
+            foreach (char c in value) hash = (hash ^ char.ToLowerInvariant(c)) * 16777619;
+            return value.IsEmpty ? Zero : new(hash);
+        }
+    }
+    public sealed class KittenRosterData { public readonly List<KittenRosterEntryData> Kittens = []; }
+    public sealed class KittenRosterEntryData(string name, string character)
+    {
+        public const string EvaAssignmentId = "EVA";
+        public string Name = name, Character = character, AssignedVehicleId = EvaAssignmentId;
+        public KeyHash NameHash = KeyHash.Make(name);
+        public bool Kia;
+    }
+    public class Vehicle(string id)
     {
         public string Id = id;
+        public KeyHash Hash = KeyHash.Make(id);
         public bool IsDisposed;
+        public IVASeat[] Seats = [];
+        public ReadOnlySpan<IVASeat> Crew => Seats;
+    }
+    public sealed class IVASeat { public KeyHash AssignedKittenHash; }
+    public sealed class CharacterReference(string id) { public string Id = id; }
+    public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder, Tumbling, Rightening, Swimming }
+    public sealed class LocomotionState { public LocomotionMode Mode = LocomotionMode.Grounded; }
+    public sealed class KittenEva(string id) : Vehicle(id)
+    {
+        public CharacterReference Character = new("Stock");
         public readonly KittenRenderable Renderable = new();
         public readonly LocomotionState LocomotionState = new();
         public readonly ParentBody Parent = new();

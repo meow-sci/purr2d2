@@ -85,6 +85,18 @@ internal sealed partial class SaberRuntime
                 if (_renderer.LastError != null) ImGui.TextWrapped(_renderer.LastError);
                 if (_audio.LastError != null) ImGui.TextWrapped(_audio.LastError);
                 if (_preferencesSaveError != null) ImGui.TextWrapped(_preferencesSaveError);
+                if (ImGui.CollapsingHeader("Kitten save and restore"))
+                {
+                    ImGui.TextWrapped(SceneSaves.Status);
+                    if (SceneSaves.LastWarning is { } warning && warning != SceneSaves.Status) ImGui.TextWrapped("Last save/load warning: " + warning);
+                    ImGui.TextWrapped("Use KSA Save / Load to keep individual colors, Light/Dark choices, capes and saber equipment. Shared settings save automatically." );
+                    if (SceneSaves.Profiles.PreservedCount > 0)
+                    {
+                        ImGui.TextWrapped($"Preserved unavailable kitten records: {SceneSaves.Profiles.PreservedCount}");
+                        ImGui.TextWrapped("Discarding these records allows current choices to replace them in future saves. Existing save files change only when saved again.");
+                        if (ImGui.Button("Discard unavailable kitten records")) _discardUnavailableKittenRecords = true;
+                    }
+                }
 
                 if (ImGui.CollapsingHeader("Global lightsaber settings")) DrawSaberAppearanceSettings();
                 if (ImGui.CollapsingHeader("Cape settings")) DrawCapeSettings();

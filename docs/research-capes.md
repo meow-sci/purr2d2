@@ -24,7 +24,7 @@ The coffer articles on attaching props to kitten bones and the existing saber po
 
 ## Intended behavior and asset contract
 
-Each EVA kitten has its own session-only opt-in, initially false, in the existing per-kitten settings window. Its selected Light/Dark saber type determines brown/black cloth independently of blade color or ignition. World reset, boarding, mod disable and disposal release owned resources.
+Each kitten has its own opt-in, initially false, in the existing per-kitten settings window. The choice now persists across boarding and native saves through [per-kitten persistence](persistence.md). Its selected Light/Dark saber type determines brown/black cloth independently of blade color or ignition. World reset, boarding, mod disable and disposal release owned resources.
 
 The cape uses an original 9 × 13 grid (117 nodes), with the top row pinned. It has a curved 48 cm shoulder seam, an 86 cm flared hem and a 50 cm authored drop. The renderer maps `Cape_000` through `Cape_116` by name. Mesh coordinates are metres, +Y up and +Z toward the kitten's front, with the origin at the chest. Native two-sided materials provide cloth visibility and lighting from either side.
 

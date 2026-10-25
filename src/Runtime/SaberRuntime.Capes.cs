@@ -392,6 +392,7 @@ internal sealed partial class SaberRuntime
         }
 
         saber.CapeEnabled = enabled;
+        RememberKittenChoices(kitten, saber, revalidate: true);
         if (enabled)
         {
             if (FindCapeOwner(kitten) < 0) _capeOwners.Add(kitten);

@@ -20,6 +20,7 @@ The authority for this build is the supplied `ksa-game-assemblies/current` snaps
 | Slice marker | Private `Program.OnDrawUiThreadSafe(double)` postfix; main camera `EgoToScreen` | Uses the current frame's native pick for hover and locked-part markers |
 | Saved fragment hover | `Part(string, PartTemplate, PartInstance, Part)` constructor postfix | Adds legacy root picking meshes to identity visual children before tree ownership; new exports use native subpart picking directly |
 | World reset | `Universe.DeserializeSave(UniverseData)` last-priority prefix and `Program.OnGameLoaded()` postfix | Skipped originals do not clear state; actual loads join all native jobs before discarding queued commands, old owners, channels, slice requests and sparks; post-load cleanup remains idempotent |
+| Kitten persistence | `GameSave.Populate()`, bool `UncompressedSave.Write()`, `UncompressedSave.Load()`, `Universe.DeserializeSave(UniverseData)`, `Universe.LoadSystem(string)` | Passive last-priority hooks after Unscience; exact capture/snapshot pairing, XML hash, scoped generation tokens and executed-original guards; no second frame/load scheduler; roster/EVA/seat checks before binding |
 | Shutdown | `Program.Dispose()` prefix | Releases owned resources before FMOD/Vulkan teardown; StarMap unload is idempotent |
 | Avatar access | `KittenEva.Renderable`, private `KittenRenderable._characterAvatar` | Cached reflection; missing field/rig disables equip with status |
 | Pose | `CharacterModel.AnimProcessors`, `IAnimProcessor` local/skeleton callbacks | Updates arm only; removes only its own processor |
@@ -51,7 +52,7 @@ current session. Replay joins `JobSystems.WaitAll()` before cleanup and native r
 a failed join propagates and aborts reconstruction. File loads already defer at
 `UncompressedSave.Load`, so their initial request never reaches the deserialize prefix. Their
 existing `Program.OnGameLoaded` cleanup runs again after reconstruction with cleared ownership.
-No native/sidecar format, preference or generated-asset policy changes.
+Per-kitten choices now use the separate Purr2D2 sidecar described below; shared preferences and generated-asset storage keep their existing roles.
 
 For a shared kitten in Unscience Iron Man mode, its first-priority keyboard prefix owns vessel
 input before Purr2D2's effectful Space prefix. Purr2D2 also checks the final prepared worker's
@@ -63,7 +64,7 @@ The blade consumes each applied simulation timestamp once, suspends when paused 
 
 Only the explicit swing can prepare or commit a structural cut. The hovered ray hit must be within twice the visible blade length of the live hilt at selection and stroke start. After the stroke, ownership/transform and native physics checks still apply; range is not imposed again. Crew aboard does not block slicing. The cosmetic contact probe is independent and cannot initiate a cut. Autopilot and flight-control overrides have been removed.
 
-KSA owns the resulting split vessels and their native saves. The mod owns per-kitten equipment and colors, transient sparks and cap heat, channels and GPU pipelines. Switching control preserves equipment and colors; world changes clear them. No object pointers or GPU handles are serialized. User preferences use a bounded, validated JSON file and atomic replacement. Arbitrary slicing additionally persists immutable native GLB/XML definitions under `Generated/Slices`; those files are dependencies of saves that reference their generated IDs. Cache budgets refuse new work instead of evicting assets needed by older saves.
+KSA owns the resulting split vessels and their native saves. The mod owns per-kitten equipment and colors, transient sparks and cap heat, channels and GPU pipelines. Switching control and boarding preserve logical equipment, color/type and cape profiles. Successful scene loads replace those profiles from the matching `purr2d2.json`; vanilla/direct/new-system loads use defaults. Live resources and transient actions still clear. No object pointers or GPU handles are serialized. User preferences use a bounded, validated JSON file and atomic replacement. Arbitrary slicing additionally persists immutable native GLB/XML definitions under `Generated/Slices`; those files are dependencies of saves that reference their generated IDs. Cache budgets refuse new work instead of evicting assets needed by older saves.
 
 ## Updating the game
 
@@ -76,3 +77,5 @@ KSA owns the resulting split vessels and their native saves. The mod owns per-ki
 Do not infer native runtime/platform support from a successful macOS managed compilation. The provided game assemblies are Windows x64; no KSA native game session has been exercised by the build checks alone.
 
 `python3 tools/check_fragment_templates.py` also checks the environment-light patch against real host IL: installation, exact instruction/branch preservation, live 8/16 selection, main-view isolation, shutdown and rejection of changed selection branches. Native acceptance remains a six-or-seven-saber scene with the option off/on/off, camera movement, nearby competing lamps and a GPU frame-time comparison. The stock shader's sixteen-element arrays and dynamic `forwardLightCount` loop must remain aligned with the CPU layout when updating the game.
+
+Per-kitten schema, ownership and native timing limits are documented in [persistence](persistence.md). Standalone load observation retains native timing; managed fixtures do not establish late-UI GPU lifetime safety.

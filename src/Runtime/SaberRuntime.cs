@@ -60,6 +60,7 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         GameHooks.Runtime = this;
         GameHooks.Install(harmony);
+        KittenSaveHooks.Install(harmony);
         CapeController.Install(harmony);
         _somersaultMotion.Install(harmony);
         InitializeForce(harmony);
@@ -79,7 +80,9 @@ internal sealed partial class SaberRuntime : IDisposable
         {
             QuietSliceQuiescence.BeginSettledUpdate();
             QuietSliceContacts.Pump();
-            if (!ApplyActivation()) { _slicer.PumpRetired(); return; }
+            SceneSaves.ObserveSystem(Universe.CurrentSystem);
+            ApplyKittenProfileRecovery();
+            if (!ApplyActivation() || SceneSaves.Suspended || _fault is not null) { _slicer.PumpRetired(); return; }
             double playerDt = double.IsFinite(dtPlayer) ? Math.Clamp(dtPlayer, 0, .1) : 0;
             _playerTime += playerDt;
             var selected = !Program.EditorFlag ? Program.ControlledVehicle as KittenEva : null;
@@ -209,6 +212,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private void EnsureBlade()
     {
         if (_owner == null) return;
+        if (_activeSaber is { } equipment) RememberKittenChoices(_owner, equipment, revalidate: true, enabled: true);
         if (_activeSaber is { } saber) saber.TogglePhase = SaberTogglePhase.None;
         if (_blade.Equipped) return;
         _blade.Equip(true); _pose.Bind(_owner);
@@ -236,6 +240,7 @@ internal sealed partial class SaberRuntime : IDisposable
         Cleanup(DisposeForce, "Force capture"); Cleanup(_forcePose.Dispose, "Force pose");
         Cleanup(_somersaultMotion.Dispose, "Somersault motion"); Cleanup(_somersaultPose.Dispose, "Somersault pose");
         Cleanup(ResetWorld, "World"); Cleanup(QuietSliceContacts.RetireToNative, "Quiet slice contacts"); Cleanup(QuietSliceQuiescence.Clear, "Quiet slice modules"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
+        SceneSaves.Clear();
     }
     private static void Cleanup(Action action, string component)
     {

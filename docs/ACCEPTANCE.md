@@ -653,3 +653,22 @@ order and observed diagnostics for each run:
   reach vessel controls and Purr2D2 must leave the non-character worker's motion/inputs untouched.
   Return to EVA mode and verify a fresh explicit somersault request works; other kittens retain
   their existing behavior.
+
+## Per kitten save and restore (2026-10-25)
+
+Individual color, Light/Dark type, cape preference and equipment intent now persist in native-save `purr2d2.json`, including seated and disabled-mode saves. Roster-aware profiles survive boarding and runtime cleanup; only successful scene replacement changes the logical scene. Missing/invalid whole sidecars produce defaults, while unavailable individual records remain preserved until explicit recovery. This supersedes the earlier session-only equipment/appearance policy, including the old co-load checklist's expectation that saved kitten choices clear. Force holds, gestures, queued actions and worker activity still clear.
+
+The final Release build against KSA 2026.10.19.5638 has zero warnings/errors. Production storage/session/native-hook fixtures pass **49 scenarios / 223 assertions**, including both Harmony installation orders; production kitten/cape/pose/profile integration passes **29 runtime assertions**. These cover pending toggles, seated/disabled capture, replacement EVA bindings, identity and seat conflicts, explicit recovery, nested/skipped/failed native operations, quarantine rollback, unknown data retention, a 129-enabled-saber restore, and zero managed allocations with one fleet scan per warmed refresh. The new suites are integrated into `tools/validate.py --run-tests`.
+
+Final regression execution passes **35/35 managed test executables** after rebuilding the affected persistence projects. Source/stage asset and metadata validation and shader checks pass. The ZIP contains 39 files identical to the staged payload, the staged DLL matches the final Release DLL, only the mod DLL is packaged, and the SHA256 agrees. Final per-suite output and exit codes are under `artifacts/checks/persistence-regression/`, including `summary.log`.
+
+Native acceptance remains pending:
+
+- [ ] Use KSA Save / Load and restart with two kittens sharing a character asset but different color/type/cape/equipment choices. Confirm settings return only to their owners after enabling the mod.
+- [ ] Board, save while seated, reload, then disembark. Repeat while Purr2D2 is disabled, with hidden HUD, and across editor visits; confirm dormant preferences and lazy resource recreation.
+- [ ] Repeatedly load A → B → A, including native-only saves and new systems. Check one pose/attachment/light/audio owner per kitten and stable native resource counts; no queued cut, Force hold, somersault or old contact velocity may resume.
+- [ ] Exercise both mod installation orders and standalone Purr2D2, UI/console/automatic saves and deferred/direct loads. Both sidecars must match the same XML after overwrite. Include unreadable files, invalid sidecars, missing assets and sidecar publication failure.
+- [ ] Save while equipping/retracting or with a checkbox request pending; final intent should return through the normal sequence. Test recovery of unavailable records and arbitrary rename/duplicate-seat conflicts without retargeting another kitten.
+- [ ] Audit late-UI loads and GPU/FMOD/cloth lifetime in the native game. Passive observers preserve standalone native timing; managed Harmony fixtures do not certify optimized-JIT hooks or universal draw-list lifetime safety.
+
+Focused evidence: `artifacts/checks/kitten-save-hooks.log`, `artifacts/checks/kitten-profile-runtime.log` and `artifacts/checks/kitten-persistence-build.log`. See [the implemented contract](persistence.md) and [source investigation](research-persistence.md).
