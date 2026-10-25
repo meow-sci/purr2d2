@@ -1,6 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "SaberVfxCommon.glsl"
+#include "Content/Purr2D2/SaberVfxCommon.glsl"
 
 // A coarse piecewise contour travels through the halo; its temporal noise remains coherent.
 float bladeShimmer(float along) {
@@ -13,4 +13,4 @@ float bladeShimmer(float along) {
         + 0.35 * sin(along * 23.0 - pc.animation.x * TAU * 2.0 + seed);
 }
 
-#include "SaberRibbonFragment.glsl"
+#include "Content/Purr2D2/SaberRibbonFragment.glsl"

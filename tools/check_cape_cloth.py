@@ -60,11 +60,9 @@ items = ET.SubElement(project, "ItemGroup")
 for source in [
     "src/Capes/CapeGeometry.cs",
     "src/Capes/CapePoseCache.cs",
-    "src/Capes/CapeAttachmentMath.cs",
     "src/Capes/CapeCloth.cs",
     "tests/capes/ClothChecks.cs",
     "tests/capes/AssetHostChecks.cs",
-    "tests/capes/CapeAttachmentMathChecks.cs",
 ]:
     ET.SubElement(items, "Compile", Include=str(root / source))
 for dll in host.glob("*.dll"):

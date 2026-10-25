@@ -101,6 +101,8 @@ internal sealed partial class SaberRuntime
             var draw = ImGui.GetForegroundDrawList(viewport);
             var white = new ImColor8(255, 255, 255, 255);
             var muted = new ImColor8(195, 200, 210, 255);
+            var dragCircleWhite = new ImColor8(255, 255, 255, 204);
+            var dragCircleMuted = new ImColor8(195, 200, 210, 204);
             void DrawControls(float2 clipMin, float2 clipMax)
             {
                 if (clipMin.X >= clipMax.X || clipMin.Y >= clipMax.Y) return;
@@ -172,7 +174,7 @@ internal sealed partial class SaberRuntime
                         Math.Max(.5f, layout.Scale));
                     CenterOverlayText(draw, layout.IgniteCenter, toggleText,
                         toggleKitten != null && SaberEnabledFor(toggleKitten) ? "RETRACT" : "IGNITE", layout.IgniteRadius * 1.6f);
-                    var swingText = OverlayCanStartSwing ? white : muted;
+                    var swingText = OverlayCanStartSwing ? dragCircleWhite : dragCircleMuted;
                     CenterOverlayText(draw, layout.SwingCenter - new float2(0, fontSize * .55f), swingText, "SWING", layout.SwingRadius * 1.6f, fontSize);
                     CenterOverlayText(draw, layout.SwingCenter + new float2(0, fontSize * .65f), swingText, "hold + drag", layout.SwingRadius * 1.6f, fontSize);
                     CenterOverlayText(draw, layout.SliceCenter, SomersaultActive && !_selectingSlice ? muted : white,
@@ -535,7 +537,7 @@ internal sealed partial class SaberRuntime
                 type = SaberType.Dark;
             }
             bool capeEnabled = CapeEnabledFor(owner);
-            if (ImGui.Checkbox("Cape and hood", ref capeEnabled))
+            if (ImGui.Checkbox("Cape", ref capeEnabled))
                 SetKittenCapeEnabled(owner, capeEnabled);
             ImGui.TextWrapped("This kitten's color, saber type, and cape option last for this session.");
             if (CapeStatusFor(owner) is { } capeStatus)

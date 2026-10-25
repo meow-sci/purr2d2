@@ -53,6 +53,13 @@ internal static class StockSliceChecks
                 Console.WriteLine($"  Worker fragment: {legacySurfaces} legacy surfaces -> {asset.Uploads.Length} render surfaces; one visual SubPart; {hullPoints} collision vertices; native hull cook {System.Diagnostics.Stopwatch.GetElapsedTime(cooking).TotalMilliseconds:F2} ms");
             }
             Console.WriteLine($"PASS: {fixture.Name} worker pipeline; faceted={cpu.Faceted}, attempts={cpu.Attempts}, fallback={cpu.FacetFallback}; plan {planMs:F1} ms, complete {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
+            if (fixture.Name.Contains("FuelTank") || fixture.Name.EndsWith("HeightC", StringComparison.Ordinal))
+                ContactSlice(input, fixture.Name);
+            if (fixture.Name.EndsWith("LF1WHalfHB", StringComparison.Ordinal))
+            {
+                ContactSlice(input, fixture.Name, sample: 3);
+                ContactSlice(input, fixture.Name, sample: 0, expectRefusal: true);
+            }
             if (fixture.Name.Contains("FuelTank"))
             {
                 RepeatedTankSlices(input, fixture.Name);
@@ -128,6 +135,51 @@ internal static class StockSliceChecks
             }
         }
     }
+
+    private static void ContactSlice(SliceInput input, string name, int sample = 1, bool expectRefusal = false)
+    {
+        // Deterministic rendered-surface hit. Height C originally rejected all
+        // nine nearby planes with the crossing/touching contour error.
+        var faces = input.Groups.SelectMany(g => g).ToArray();
+        var hit = faces[1428 % faces.Length];
+        var normal = new CutPoint(.43, .51, -.03).Normalized;
+        if (name.EndsWith("LF1WHalfHB", StringComparison.Ordinal))
+        {
+            // A contact on the reported Gemini7 small tank needs the wider ring.
+            var random = new Random(27107);
+            for (int i = 0; i <= sample; i++)
+            {
+                hit = faces[random.Next(faces.Length)];
+                normal = new CutPoint(random.NextDouble() - .5, random.NextDouble() - .5, random.NextDouble() - .5).Normalized;
+            }
+        }
+        var point = (hit.A.Position + hit.B.Position + hit.C.Position) / 3;
+        var contact = new ContactSlice(point, normal);
+        if (expectRefusal)
+        {
+            bool refused = false, published = false;
+            try { SliceGeometryWork.Calculate(input with { Contact = contact }, default, _ => published = true); }
+            catch (InvalidDataException error) { refused = error.Message.Contains("Cannot slice at contact", StringComparison.Ordinal); }
+            if (!refused || published) throw new Exception(name + ": irrecoverable contact must not publish a replacement");
+            Console.WriteLine($"PASS: {name} irrecoverable contact refuses without publishing partial fragments");
+            return;
+        }
+        SlicePlan? plan = null;
+        var cut = SliceGeometryWork.Calculate(input with { Contact = contact }, default, p => plan = p);
+        if (plan == null || plan.Plane != cut.Plane || cut.Faceted || cut.AuthoredSubpartFallback
+            || cut.Attempts > ContactSliceGeometry.MaximumCandidateCount || cut.Fragments.Length != 2
+            || Math.Abs(CutPoint.Dot(cut.Plane.Normal, point) - cut.Plane.Offset) > 1e-5
+            || (!cut.ContactDirectionFallback && CutPoint.Dot(cut.Plane.Normal, contact.Normal) < Math.Cos(ContactSliceGeometry.MaximumTilt) - 1e-12)
+            || cut.ContactDirectionFallback != (cut.Attempts > ContactSliceGeometry.CandidateCount)
+            || Math.Abs(cut.Fragments.Sum(f => f.MassKg) - input.MassKg) > .001)
+            throw new Exception(name + ": manual fallback lost its contact anchor, tilt bound or fragment mass");
+        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out var reason)) throw new Exception(reason);
+        double before = source.Sum(s => PlaneSlicer.Properties(s).Volume);
+        double after = cut.Fragments.Sum(f => Reload(f).Groups.Sum(s => PlaneSlicer.Properties(s).Volume));
+        if (Math.Abs(after - before) > before * .0006) throw new Exception(name + ": manual fallback export/reload lost volume");
+        Console.WriteLine($"PASS: {name} contact cut; {cut.Attempts} anchored attempts, axis fallback={cut.ContactDirectionFallback}, exported/reloaded closed fragments, conserved mass/volume");
+    }
+
     private static void RepeatedTankSlices(SliceInput original, string name)
     {
         var inputs = new List<SliceInput> { original };

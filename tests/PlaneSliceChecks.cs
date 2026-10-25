@@ -102,6 +102,7 @@ internal static class PlaneSliceChecks
         Check(PlaneSlicer.TrySliceCompound(new[] { box, distant }, new(new(1, 0, 0), .5), out var carry, out _, 99), "compound carries uncut closed solids");
         Near(carry!.Pieces.Single(p => p.PositiveSide).Volume, 1.5, "uncut source component retains its mass on the correct side");
         MultiscaleChecks(box);
+        ThinContourChecks();
         Check(!PlaneSlicer.TrySliceCompound(new[] { box.Skip(1).ToArray(), shifted }, new(new(0, 0, 1), .5), out _, out _, 99),
             "compound mode never repairs or accepts an open authored group");
         var nearLevels = box.Select(f => new SliceFace(Perturb(f.A), Perturb(f.B), Perturb(f.C), f.Material)).ToArray();
@@ -148,6 +149,36 @@ internal static class PlaneSliceChecks
 
         static SliceFace Map(SliceFace f, Func<CutPoint, CutPoint> point) => new(
             f.A with { Position = point(f.A.Position) }, f.B with { Position = point(f.B.Position) }, f.C with { Position = point(f.C.Position) }, f.Material);
+    }
+
+    private static void ThinContourChecks()
+    {
+        // The long edge approaching this narrow notch must not inflate the
+        // short edge's contact tolerance. The outlines are separated by microns.
+        const double d = .00001;
+        CutPoint[] outline = [new(0, 0, 0), new(d, 2 * d, 0), new(0, 1, 0), new(-1, 1, 0),
+            new(-1, -1, 0), new(1, -1, 0), new(d / 3, d / 6, 0), new(d / 6, d / 8, 0)];
+        var faces = new List<SliceFace>();
+        var up = new CutPoint(0, 0, 1);
+        for (int i = 0; i < outline.Length; i++)
+        {
+            var a = outline[i]; var b = outline[(i + 1) % outline.Length];
+            Add(a, b, b + up); Add(a, b + up, a + up);
+        }
+        for (int i = 1; i < outline.Length - 1; i++)
+        {
+            var a = outline[4]; var b = outline[(4 + i) % outline.Length]; var c = outline[(5 + i) % outline.Length];
+            Add(a, c, b); Add(a + up, b + up, c + up);
+        }
+        var cut = Slice(faces.ToArray(), new(new(0, 0, 1), .5), "thin notch next to a long contour edge");
+        Check(cut.Pieces.Length == 2 && cut.Pieces.All(p => PlaneSlicer.TryAudit(p.Faces, out _)), "thin nonintersecting notch produces closed volume-conserving halves");
+
+        void Add(CutPoint a, CutPoint b, CutPoint c)
+        {
+            var normal = CutPoint.Cross(b - a, c - a).Normalized;
+            SliceVertex V(CutPoint p) => new(p, normal, p.X, p.Y);
+            faces.Add(new(V(a), V(b), V(c), 10));
+        }
     }
 
     private static void FacetedChecks(SliceFace[] box, SliceFace[] tube)

@@ -743,15 +743,23 @@ internal static class PlaneSlicer
 
     private static bool SegmentsTouch(Point2 a, Point2 b, Point2 c, Point2 d, double epsilon)
     {
+        if (Math.Max(a.X, b.X) < Math.Min(c.X, d.X) - epsilon || Math.Max(c.X, d.X) < Math.Min(a.X, b.X) - epsilon
+            || Math.Max(a.Y, b.Y) < Math.Min(c.Y, d.Y) - epsilon || Math.Max(c.Y, d.Y) < Math.Min(a.Y, b.Y) - epsilon) return false;
         double abC = Point2.Cross(b - a, c - a), abD = Point2.Cross(b - a, d - a);
         double cdA = Point2.Cross(d - c, a - c), cdB = Point2.Cross(d - c, b - c);
-        double tolerance = epsilon * (Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y))
-            + Math.Sqrt((d.X - c.X) * (d.X - c.X) + (d.Y - c.Y) * (d.Y - c.Y)));
-        if ((abC > tolerance && abD < -tolerance || abC < -tolerance && abD > tolerance)
-            && (cdA > tolerance && cdB < -tolerance || cdA < -tolerance && cdB > tolerance)) return true;
-        return Math.Abs(abC) <= tolerance && On(a, b, c) || Math.Abs(abD) <= tolerance && On(a, b, d)
-            || Math.Abs(cdA) <= tolerance && On(c, d, a) || Math.Abs(cdB) <= tolerance && On(c, d, b);
-        bool On(Point2 p, Point2 q, Point2 r) => r.X >= Math.Min(p.X, q.X) - epsilon && r.X <= Math.Max(p.X, q.X) + epsilon
-            && r.Y >= Math.Min(p.Y, q.Y) - epsilon && r.Y <= Math.Max(p.Y, q.Y) + epsilon;
+        if ((abC > 0 && abD < 0 || abC < 0 && abD > 0)
+            && (cdA > 0 && cdB < 0 || cdA < 0 && cdB > 0)) return true;
+        // Use a distance in metres for near contact. A shared cross-product
+        // tolerance scaled by both lengths lets a long edge inflate the allowed
+        // distance from a tiny edge, falsely rejecting thin, nonintersecting details.
+        return Near(a, b, c) || Near(a, b, d) || Near(c, d, a) || Near(c, d, b);
+        bool Near(Point2 p, Point2 q, Point2 r)
+        {
+            var edge = q - p; var delta = r - p;
+            double lengthSquared = edge.X * edge.X + edge.Y * edge.Y;
+            double t = lengthSquared > 0 ? Math.Clamp((delta.X * edge.X + delta.Y * edge.Y) / lengthSquared, 0, 1) : 0;
+            double x = delta.X - edge.X * t, y = delta.Y - edge.Y * t;
+            return x * x + y * y <= epsilon * epsilon;
+        }
     }
 }

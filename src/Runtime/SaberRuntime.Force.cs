@@ -758,9 +758,11 @@ internal sealed partial class SaberRuntime
         draw.AddCircleFilled(layout.MoveCenter, layout.MoveRadius, new ImColor8(0, 0, 0, 128), 64);
         draw.AddCircle(layout.MoveCenter, layout.MoveRadius, faintWhiteRim, 64, Math.Max(.5f, layout.Scale));
         float font = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
-        var moveText = ForceHolding ? white : muted;
+        var moveText = ForceHolding
+            ? new ImColor8(255, 255, 255, 204)
+            : new ImColor8(195, 200, 210, 204);
         CenterOverlayText(draw, layout.MoveCenter - new float2(0, font * .55f), moveText,
-            "MOVE FORCE", layout.MoveRadius * 1.6f, font);
+            "THE FURCE", layout.MoveRadius * 1.6f, font);
         CenterOverlayText(draw, layout.MoveCenter + new float2(0, font * .65f), moveText,
             "drag + [shift] wheel", layout.MoveRadius * 1.6f, font);
         if (_forceDrag.Held)
@@ -795,9 +797,7 @@ internal sealed partial class SaberRuntime
         if (!KittenColorPickerContainsPointer(overlayPointer) && !SettingsContainsPointer(overlayPointer))
         {
             var overlayHit = layout.Hit(overlayPointer);
-            if (overlayHit == ForceOverlayHit.Move)
-                ShowSaberTooltip("Drag to move held objects in the camera plane.\n\nScroll to change depth; Shift+scroll compresses or expands the group. Outward Shift+scroll builds breakup tension for intact vehicles; inward Shift+scroll unwinds it.");
-            else if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
+            if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
                 ShowSaberTooltip("Drag up to choose a throw speed from 25 to 200 m/s; release to throw.");
             else if (overlayHit == ForceOverlayHit.CaptureLimit)
                 ShowSaberTooltip("max # objects force can capture");

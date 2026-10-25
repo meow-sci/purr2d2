@@ -20,6 +20,7 @@ internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments)
     internal int Attempts { get; init; }
     internal string FacetFallback { get; init; } = "";
     internal bool AuthoredSubpartFallback { get; init; }
+    internal bool ContactDirectionFallback { get; init; }
 }
 
 internal static class SliceGeometryWork
@@ -39,7 +40,8 @@ internal static class SliceGeometryWork
         {
             if (!ContactSliceGeometry.TryCandidates(contact, out var contactCandidates, out var contactReason))
                 throw new InvalidDataException("Cannot slice at contact: " + contactReason);
-            attemptsToTry = contactCandidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i));
+            attemptsToTry = contactCandidates.Concat(ContactSliceGeometry.AxisCandidates(contact, input.Axes))
+                .Select((plane, i) => (Plane: plane, Faceted: false, Index: i));
         }
         else
         {
@@ -104,7 +106,11 @@ internal static class SliceGeometryWork
             // Publish only a fully exportable section. The visible swing starts
             // independently, while hull cooking and serialization stay on this worker.
             publish(new(result.EffectivePlane));
-            return new(result.EffectivePlane, assets) { Faceted = attempt.Faceted, Attempts = attempts, FacetFallback = attempt.Faceted ? "" : facetFailure };
+            return new(result.EffectivePlane, assets)
+            {
+                Faceted = attempt.Faceted, Attempts = attempts, FacetFallback = attempt.Faceted ? "" : facetFailure,
+                ContactDirectionFallback = input.Contact is not null && attempt.Index >= ContactSliceGeometry.CandidateCount
+            };
         }
         if (input.Contact is null)
         {

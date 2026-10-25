@@ -1,6 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "SaberVfxCommon.glsl"
+#include "Content/Purr2D2/SaberVfxCommon.glsl"
 
 // Light sabers carry smooth, gently curving energy loops with no spatial noise knots.
 vec3 arcPoint(float u, float seed, float arc) {
@@ -15,4 +15,4 @@ vec3 arcPoint(float u, float seed, float arc) {
     return vec3(vec2(cos(angle), sin(angle)) * radius, extent.x + u * extent.y);
 }
 
-#include "SaberRibbonVertex.glsl"
+#include "Content/Purr2D2/SaberRibbonVertex.glsl"

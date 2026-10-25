@@ -1,6 +1,6 @@
 {
   "authoring": "original deterministic procedural mesh and texture generator",
-  "preview": "CPU software render with original measured-size helmet/visor proxy; not in-game",
+  "preview": "software preview with full-body rear and side cape views; not in-game",
   "cape": {
     "glb": "Assets/Models/Purr2D2_Cape.glb",
     "mesh": "CapeMesh",
@@ -10,34 +10,6 @@
     "clothJoints": 117,
     "units": "meters",
     "origin": "chest"
-  },
-  "hood": {
-    "glb": "Assets/Models/Purr2D2_Hood.glb",
-    "mesh": "HoodMesh",
-    "vertices": 430,
-    "triangles": 800,
-    "skinJoints": 1,
-    "units": "meters",
-    "origin": "native helmet attachment frame",
-    "openFaceDirection": "+Z",
-    "fit": {
-      "hemOpeningHalfAngleRadians": 1.25,
-      "browOpeningHalfAngleRadians": 0.0,
-      "topRingY": 0.72,
-      "apexY": 0.755,
-      "apexX": 0.022,
-      "apexZ": -0.05,
-      "bottomY": -0.18,
-      "neckJoinY": -0.085,
-      "mainHalfWidth": 0.435,
-      "mainHalfDepth": 0.43,
-      "topHalfWidth": 0.15,
-      "topHalfDepth": 0.16,
-      "crownTransition": 0.5,
-      "asymmetricSideHang": 0.05,
-      "bottomHalfWidth": 0.34,
-      "bottomHalfDepth": 0.235
-    }
   },
   "previewProxy": {
     "helmetBoundsMeters": {

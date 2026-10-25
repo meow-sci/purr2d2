@@ -163,7 +163,7 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Maximum simulated capes");
             changed |= ImGui.SliderInt("##CapeSimulationLimit", ref simulationLimit,
                 SaberSettings.MinimumCapeSimulationLimit, SaberSettings.MaximumCapeSimulationLimit);
-            ShowSaberControlTip("Among enabled capes visible within 25 m, the nearest up to this many receive cloth simulation. A value of 0 keeps the cape and hood visible with cloth motion off. Default: 4.\n\nAt most two capes update per frame, so higher limits share the same update budget and refresh motion less often.");
+            ShowSaberControlTip("Among enabled capes visible within 25 m, the nearest up to this many receive cloth simulation. A value of 0 keeps the cape visible with cloth motion off. Default: 4.\n\nAt most two capes update per frame, so higher limits share the same update budget and refresh motion less often.");
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;

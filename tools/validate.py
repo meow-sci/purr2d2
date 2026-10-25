@@ -17,7 +17,7 @@ import wave
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from check_saber_shaders import SHADER_PAIRS, run_shader_checks
+from check_saber_shaders import check_shader_includes, run_shader_checks
 import check_cape_assets
 
 
@@ -429,11 +429,7 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
     if not assets_root.is_dir():
         issues.append(f"{label}: missing Assets directory")
         return issues
-    for style, stem in SHADER_PAIRS:
-        for suffix in (".vert", ".frag"):
-            shader = assets_root / "Shaders" / (stem + suffix)
-            if not shader.is_file():
-                issues.append(f"{label}: missing {style} saber shader: {shader.relative_to(root).as_posix()}")
+    issues.extend(f"{label}: {issue}" for issue in check_shader_includes(assets_root / "Shaders"))
     asset_files = [path for path in assets_root.rglob("*") if path.is_file()]
     ext_counts: dict[str, int] = {}
     for path in asset_files:
@@ -458,8 +454,9 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
     # for zero-weight slots. Check that contract in both source and staged assets.
     try:
         check_cape_assets.check_xml(root)
+        check_cape_assets.check_no_hood(root)
         check_cape_assets.check_textures(root)
-        for kind, name in (("cape", "Purr2D2_Cape.glb"), ("hood", "Purr2D2_Hood.glb")):
+        for kind, name in (("cape", "Purr2D2_Cape.glb"),):
             check_cape_assets.check_glb(root / "Assets/Models" / name,
                                        check_cape_assets.expected_asset(kind), root)
     except (OSError, ValueError, KeyError, TypeError, ET.ParseError, check_cape_assets.CheckError, struct.error) as exc:

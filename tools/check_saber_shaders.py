@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Compile/link the saber GLSL and check its reflected push-constant ABI."""
+"""Check KSA include compatibility, compile/link GLSL and check its reflected ABI."""
 
 from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
 import subprocess
@@ -23,6 +23,44 @@ def _compiler() -> Path | None:
 
 
 SHADER_PAIRS = (("Dark", "SaberGlow"), ("Light", "SaberLight"))
+
+
+def check_shader_includes(shaders: Path) -> list[str]:
+    """Check literal includes using shaderc's requesting-file-relative resolution."""
+    shaders = shaders.resolve()
+    pending = [shaders / (stem + suffix) for _, stem in SHADER_PAIRS
+               for suffix in (".vert", ".frag")]
+    visited: set[Path] = set()
+    issues: list[str] = []
+    while pending:
+        shader = pending.pop()
+        if shader in visited:
+            continue
+        visited.add(shader)
+        relative = shader.relative_to(shaders).as_posix()
+        try:
+            text = shader.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            issues.append(f"{relative}: cannot read shader/include: {exc}")
+            continue
+        text = re.sub(r"/\*.*?\*/|//[^\r\n]*", "", text, flags=re.DOTALL)
+        for include in re.findall(r'^\s*#\s*include\s*["<]([^">\r\n]+)[">]', text, re.MULTILINE):
+            if "\\" in include or PurePosixPath(include).is_absolute() or PureWindowsPath(include).drive:
+                issues.append(f"{relative}: include must use a relative path with forward slashes: {include!r}")
+                continue
+            target = (shader.parent / include).resolve()
+            try:
+                target_relative = target.relative_to(shaders)
+            except ValueError:
+                issues.append(f"{relative}: include escapes the packaged shader tree: {include!r}")
+                continue
+            # KSA 2026.10.19.5638 GetModPath uses Substring(IndexOf("Content")),
+            # even when shaders compile from the user's mods folder. Do not let
+            # an incidental "Content" in this checkout's parent hide the bug.
+            if "Content" not in target_relative.parts[:-1]:
+                issues.append(f"{relative}: include {include!r} needs a Content directory for KSA dependency tracking")
+            pending.append(target)
+    return issues
 
 
 def _compile_shader_pair(compiler: Path, shaders: Path, output: Path, style: str,
@@ -72,6 +110,12 @@ def run_shader_checks(source: Path, stage: Path | None = None) -> tuple[int, str
         outputs = []
         code = 0
         for label, shaders in roots:
+            issues = check_shader_includes(shaders)
+            if issues:
+                code = 1
+                outputs.extend(f"FAIL: {label} {issue}\n" for issue in issues)
+                continue
+            outputs.append(f"PASS: {label} shader includes resolve with KSA-compatible Content paths\n")
             for style, stem in SHADER_PAIRS:
                 result, message = _compile_shader_pair(compiler, shaders, output, style, stem, label)
                 code = code or result

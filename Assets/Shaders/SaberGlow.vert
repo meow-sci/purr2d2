@@ -1,6 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "SaberVfxCommon.glsl"
+#include "Content/Purr2D2/SaberVfxCommon.glsl"
 
 // Dark sabers throw coarse jagged arcs. Fixed knots keep the same path across detail levels.
 vec3 arcPoint(float u, float seed, float arc) {
@@ -20,4 +20,4 @@ vec3 arcPoint(float u, float seed, float arc) {
     return vec3(vec2(cos(angle), sin(angle)) * radius, extent.x + u * extent.y);
 }
 
-#include "SaberRibbonVertex.glsl"
+#include "Content/Purr2D2/SaberRibbonVertex.glsl"

@@ -13,11 +13,10 @@ using RenderCore.Systems;
 
 namespace Purr2D2.Capes;
 
-/// <summary>Owns one opted-in kitten's skinned cape, hood and local cloth state.</summary>
+/// <summary>Owns one opted-in kitten's skinned cape and local cloth state.</summary>
 internal sealed class CapeController : IDisposable
 {
     private const string CapeAssetId = "Purr2D2_Cape_Glb";
-    private const string HoodAssetId = "Purr2D2_Hood_Glb";
     private const string LightMaterialId = "Purr2D2_Cloth_Light";
     private const string DarkMaterialId = "Purr2D2_Cloth_Dark";
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -28,9 +27,7 @@ internal sealed class CapeController : IDisposable
     private readonly CharacterAvatar _avatar;
     private readonly CapeCloth _cloth;
     private readonly int _chestBone;
-    private readonly int _headBone;
     private AnimatedRenderable _cape = null!;
-    private AnimatedRenderable _hood = null!;
     private SaberType _type;
     private float _stepAccumulator;
     private float _idleSeconds;
@@ -96,16 +93,14 @@ internal sealed class CapeController : IDisposable
         _avatar = avatar;
         Skeleton kittenSkeleton = avatar.Core.CharacterModel.Skeleton;
         _chestBone = FindBone(kittenSkeleton, "Chest_M");
-        _headBone = FindBone(kittenSkeleton, "Head_M");
-        if (_chestBone < 0 || _headBone < 0)
-            throw new InvalidOperationException("The kitten rig is missing Chest_M or Head_M.");
+        if (_chestBone < 0)
+            throw new InvalidOperationException("The kitten rig is missing Chest_M.");
 
         _cloth = new CapeCloth();
         try { RebuildRenderables(type == SaberType.Dark ? SaberType.Dark : SaberType.Light); }
         catch
         {
             _cape?.Dispose();
-            _hood?.Dispose();
             _cloth.Dispose();
             throw;
         }
@@ -124,29 +119,22 @@ internal sealed class CapeController : IDisposable
         SuperMeshRenderSystem system = Program.Instance.SuperMeshRenderSystem;
         string materialId = type == SaberType.Dark ? DarkMaterialId : LightMaterialId;
         AnimatedRenderable? nextCape = null;
-        AnimatedRenderable? nextHood = null;
         try
         {
             nextCape = CreateRenderable(system, CapeAssetId, materialId);
-            nextHood = CreateRenderable(system, HoodAssetId, materialId);
             var pose = new CapePoseProcessor(_cloth, nextCape.Skeleton);
             nextCape.AnimProcessors.Add(pose);
             nextCape.FreezeAnimation = true;
             nextCape.SkinningPoseIsViewportInvariant = true;
-            nextHood.FreezeAnimation = true;
-            nextHood.SkinningPoseIsViewportInvariant = true;
         }
         catch
         {
             nextCape?.Dispose();
-            nextHood?.Dispose();
             throw;
         }
 
         _cape?.Dispose();
-        _hood?.Dispose();
         _cape = nextCape;
-        _hood = nextHood;
         _type = type;
     }
 
@@ -173,7 +161,7 @@ internal sealed class CapeController : IDisposable
         if (_disposed || Owner.IsDisposed || viewport.Type is not (ViewportType.Main or ViewportType.Secondary)) return false;
         AnimatedRenderable character = _avatar.Core.CharacterModel;
         Skeleton skeleton = character.Skeleton;
-        if (_chestBone >= skeleton.BoneCount || _headBone >= skeleton.BoneCount) return false;
+        if (_chestBone >= skeleton.BoneCount) return false;
 
         float4x4 modelToBody = ModelToBody();
         float4x4 capeFrame = SocketFrame(character, skeleton, _chestBone, modelToBody, out var bodyToCape);
@@ -183,18 +171,6 @@ internal sealed class CapeController : IDisposable
         ViewHandle view = Program.Instance.SuperMeshRenderSystem.ViewForViewport(viewport);
         _cape.UpdateAnimation(0d);
         _cape.Draw(view);
-
-        if (!renderable.HideHead)
-        {
-            var helmet = _avatar.Attachments.Helmet;
-            if (CapeAttachmentMath.TryGetNativeHoodTransform(helmet.HasAttachment, helmet.HelmetMesh?.Transform,
-                    out float4x4 nativeHoodFrame))
-                _hood.Transform = nativeHoodFrame;
-            else
-                _hood.Transform = SocketFrame(character, skeleton, _headBone, modelToBody, out _);
-            _hood.UpdateAnimation(0d);
-            _hood.Draw(view);
-        }
 
         if (mainView) LastMainDrawFrame = frame;
         return true;
@@ -286,11 +262,7 @@ internal sealed class CapeController : IDisposable
         _disposed = true;
         _stepAccumulator = 0f;
         try { _cape.Dispose(); }
-        finally
-        {
-            try { _hood.Dispose(); }
-            finally { _cloth.Dispose(); }
-        }
+        finally { _cloth.Dispose(); }
     }
 
     private static int FindBone(Skeleton skeleton, string name)

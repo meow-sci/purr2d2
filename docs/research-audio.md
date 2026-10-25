@@ -70,8 +70,10 @@ ignition/retraction and contact effects. Light uses the calmer recording; Dark u
 the more violent recording. Type is independent of blade color. Changing type stops
 only the previous static channel and starts the new one on the next unpaused update.
 The layer uses the moving hilt's 3D position, the existing 1–35 m spatial range and
-Sfx routing, with gain `Volume × Deployment × 0.30`. Thus it grows with extension,
-recedes with distance, and respects both the mod and game volume controls. It shares
+Sfx routing, with base gain `Volume × Deployment × 0.30`. Dark playback reduces both
+the shared hum and Dark static by another 30%; Light ignition uses 75% of the normal
+transition gain, while Dark ignition and retraction keep the existing level. Thus the
+loops grow with extension, recede with distance, and respect both the mod and game volume controls. It shares
 the hum's pause, suspension, retry limits, mute, retraction and cleanup behavior.
 Ogg files are included in both the staged folder and release ZIP. In-game listening
 is still needed to assess the supplied loop seams and balance against the hum.
@@ -122,8 +124,8 @@ KSA; this class stops its channels and does not release the engine's shared soun
 
 Ignition selects the current Light/Dark recording when the transition begins, including
 a deferred ignition after pause. Switching style while already lit does not replay
-ignition. The supplied recordings retain their original gain; audition transition/idle
-balance in game before selecting final gains.
+ignition. Source files retain their original gain; audition the runtime transition and
+Dark ambient multipliers in game to confirm the final balance.
 
 ## Spatial coordinates and vacuum
 

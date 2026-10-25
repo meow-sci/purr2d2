@@ -106,7 +106,10 @@ internal sealed class ArbitrarySlicer : IDisposable
                     catch (Exception effect) { Console.WriteLine("[purr2d2] Slice completed; spark effect: " + effect.Message); }
             }
             return new(true, reason + (_loaded.Data.AuthoredSubpartFallback
-                ? " Used authored subpart boundaries because mesh cutting failed." : " Cut faces are cooling."));
+                ? " Used authored subpart boundaries because mesh cutting failed."
+                : _loaded.Data.ContactDirectionFallback
+                    ? " Adjusted the cut angle to fit the contact geometry. Cut faces are cooling."
+                    : " Cut faces are cooling."));
         }
         catch (Exception error) { return new(false, "Slice commit failed: " + error.Message); }
         finally

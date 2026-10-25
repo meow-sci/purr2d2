@@ -13,10 +13,8 @@ internal static class AssetHostChecks
 
     public static void Run()
     {
-        CapeAttachmentMathChecks.Run();
         CheckCape(Path.Combine("Assets", "Models", "Purr2D2_Cape.glb"));
-        CheckHood(Path.Combine("Assets", "Models", "Purr2D2_Hood.glb"));
-        Console.WriteLine("Cape and hood GLBs load through the actual managed KSA/Brutal GLTF pipeline.");
+        Console.WriteLine("Cape GLB loads through the actual managed KSA/Brutal GLTF pipeline.");
     }
 
     private static void CheckCape(string path)
@@ -56,37 +54,6 @@ internal static class AssetHostChecks
         finally
         {
             // GltfUtils creates these lists, while Skeleton.Dispose owns only its three rig lists.
-            skeleton.InverseBindPose?.Dispose();
-            skeleton.DefaultLocalPose?.Dispose();
-            skeleton.Dispose();
-        }
-    }
-
-    private static void CheckHood(string path)
-    {
-        Check(File.Exists(path), "hood GLB exists: " + path);
-        using var loader = new GltfLoader(path);
-        Check(loader.GltfJson.Skins is { Length: 1 }, "hood GLB has one skin");
-        Skin skin = loader.GltfJson.Skins[0];
-        Check(skin.Joints.Length == 1, "hood skin has one identity joint");
-        Check(loader.GltfJson.Nodes[skin.Joints[0]].Name == "HoodRoot", "hood skin joint is HoodRoot");
-
-        var mappedNodes = new Dictionary<Node, int>();
-        Skeleton skeleton = loader.ExtractSkeleton(mappedNodes)
-            ?? throw new InvalidOperationException("Hood GLB did not yield a KSA skeleton.");
-        try
-        {
-            Check(skeleton.BoneCount == 1 && skeleton.GetBoneName(0) == "HoodRoot",
-                "hood maps to one identity joint");
-            Check(mappedNodes.Count == 1 && mappedNodes.TryGetValue(loader.GltfJson.Nodes[skin.Joints[0]], out int root)
-                && root == 0, "hood joint maps to skeleton index zero");
-            float matrixError = CheckRestSkinMatrices(skeleton, "hood");
-            int zeroWeightSlots = CheckSkinnedMeshes(loader, skeleton, mappedNodes, "hood");
-            Console.WriteLine($"Hood GLB host check: bones={skeleton.BoneCount}, max inverse-bind/rest error={matrixError:G4}, " +
-                $"zero-weight slots={zeroWeightSlots}");
-        }
-        finally
-        {
             skeleton.InverseBindPose?.Dispose();
             skeleton.DefaultLocalPose?.Dispose();
             skeleton.Dispose();

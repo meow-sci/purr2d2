@@ -14,6 +14,9 @@ public sealed class SaberAudio : IDisposable
 {
     private const int MaxLoopStartsPerTransition = 4;
     private const float AudibleDeployment = 0.001f;
+    private const float TransitionGain = 0.7f;
+    private const float LightIgniteGain = 0.75f;
+    private const float DarkAmbientGain = 0.7f;
     private SoundBehavior? _lightIgniteSound;
     private SoundBehavior? _darkIgniteSound;
     private SoundBehavior? _retractSound;
@@ -26,6 +29,7 @@ public sealed class SaberAudio : IDisposable
     private IChannel? _static;
     private SaberType _type;
     private IChannel? _contact;
+    private float _transitionGain = TransitionGain;
     private KittenEva? _owner;
     private bool _initializationAttempted;
     private bool _lastTargetOn;
@@ -102,17 +106,19 @@ public sealed class SaberAudio : IDisposable
             if (_transitionPending && !paused)
             {
                 Cut(ref _transition);
+                _transitionGain = TransitionGain * (targetOn && _type == SaberType.Light ? LightIgniteGain : 1f);
                 if (volume > 0)
                 {
                     SoundBehavior? ignite = _type == SaberType.Dark ? _darkIgniteSound : _lightIgniteSound;
-                    _transition = Play(targetOn ? ignite : _retractSound, spatial, volume * 0.7f);
+                    _transition = Play(targetOn ? ignite : _retractSound, spatial, volume * _transitionGain);
                 }
                 _transitionPending = false;
             }
 
             float swing = Math.Clamp(swingSpeed / 6f, 0, 1);
-            float humGain = volume * deployment * 0.42f * (1 + swing * 0.18f);
-            float staticGain = volume * deployment * 0.3f;
+            float ambientTypeGain = _type == SaberType.Dark ? DarkAmbientGain : 1f;
+            float humGain = volume * deployment * 0.42f * ambientTypeGain * (1 + swing * 0.18f);
+            float staticGain = volume * deployment * 0.3f * ambientTypeGain;
             if (deployment <= AudibleDeployment || volume <= 0)
             {
                 Cut(ref _hum);
@@ -137,7 +143,7 @@ public sealed class SaberAudio : IDisposable
                 }
             }
 
-            Follow(ref _transition, spatial, volume * 0.7f, 1, paused);
+            Follow(ref _transition, spatial, volume * _transitionGain, 1, paused);
             Follow(ref _hum, spatial, humGain, 1 + swing * 0.15f, paused);
             Follow(ref _static, spatial, staticGain, 1, paused);
             Follow(ref _contact, spatial, volume * deployment * contact * 0.35f, 1, paused);

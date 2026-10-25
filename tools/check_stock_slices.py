@@ -18,6 +18,7 @@ from validate import DEFAULT_SOURCE, _run_managed_project
 
 def fixtures(content):
     for family, target in [('FuelTankA', 'CoreFuelTankA_Prefab_LF3W3HA'),
+                           ('FuelTankA', 'CoreFuelTankA_Prefab_LF1WHalfHB'),
                            ('CommandA', 'CoreCommandA_Prefab_MediumCapsuleVariantA'),
                            *[('ServiceModuleA', f'CoreServiceModuleA_Prefab_SetAHeight{height}') for height in 'ABCD']]:
         def load_meshes(atlas):

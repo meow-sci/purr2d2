@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Purr2D2 cape/hood GLBs, rig contract, cloth maps, and XML paths.
+"""Validate the Purr2D2 cape GLB, rig contract, cloth maps, and XML paths.
 
 Run from any directory:
     python3 tools/check_cape_assets.py
@@ -135,59 +135,6 @@ def cape_rest(u, t):
     )
 
 
-def hood_rest(u, v):
-    theta_open = 1.25
-    brow_open = 0.0
-    top_y, bottom_y, center_z = 0.72, -0.18, -0.02
-    neck_join_y = -0.085
-    main_half_width, main_half_depth = 0.435, 0.430
-    top_half_width, top_half_depth = 0.150, 0.160
-    crown_transition, side_hang = 0.50, 0.050
-    positive_profile = ((0.0, 0.0), (1.0 / 6.0, 0.0), (0.25, 0.0),
-                        (1.0 / 3.0, 0.61), (5.0 / 12.0, theta_open), (1.0, theta_open))
-    negative_profile = ((0.0, 0.0), (1.0 / 6.0, 0.0), (0.25, 0.0),
-                        (1.0 / 3.0, 0.67), (5.0 / 12.0, theta_open), (1.0, theta_open))
-    bottom_half_width, bottom_half_depth = 0.34, 0.235
-
-    def smoothstep01(value):
-        value = min(1.0, max(0.0, value))
-        return value * value * (3.0 - 2.0 * value)
-
-    def opening(profile):
-        for index in range(len(profile) - 1):
-            start_v, start_angle = profile[index]
-            end_v, end_angle = profile[index + 1]
-            if v <= end_v:
-                amount = smoothstep01((v - start_v) / (end_v - start_v))
-                return start_angle + (end_angle - start_angle) * amount
-        return profile[-1][1]
-
-    positive_open = opening(positive_profile)
-    negative_open = opening(negative_profile)
-    theta = positive_open + u * (math.tau - positive_open - negative_open)
-    if positive_open == 0.0 and negative_open == 0.0 and u == 1.0:
-        theta = 0.0
-    crown = math.sin(min(1.0, (v / crown_transition) ** 0.72) * math.pi / 2.0)
-    neck_start = (top_y - neck_join_y) / (top_y - bottom_y)
-    lower = min(1.0, max(0.0, (v - neck_start) / (1.0 - neck_start)))
-    lower = lower * lower * (3.0 - 2.0 * lower)
-    width = top_half_width + (main_half_width - top_half_width) * crown
-    depth = top_half_depth + (main_half_depth - top_half_depth) * crown
-    width += (bottom_half_width - width) * lower
-    depth += (bottom_half_depth - depth) * lower
-    y = top_y - (top_y - bottom_y) * v
-    y -= side_hang * max(0.0, math.sin(theta)) ** 1.5 * smoothstep01((v - 0.58) / 0.42)
-    fold_envelope = math.sin(math.pi * v) ** 0.8
-    fold_a = math.exp(-((theta - 1.78) / 0.42) ** 2)
-    fold_b = math.exp(-((theta - 2.86) / 0.53) ** 2)
-    fold_c = math.exp(-((theta - 4.95) / 0.42) ** 2)
-    radial_fold = fold_envelope * (0.014 * fold_a + 0.024 * fold_b + 0.030 * fold_c)
-    tangential_fold = fold_envelope * 0.012 * fold_a
-    return ((width + radial_fold) * math.sin(theta) + tangential_fold * math.cos(theta),
-            y,
-            center_z + (depth + radial_fold) * math.cos(theta) - tangential_fold * math.sin(theta))
-
-
 def expected_weights(u, t):
     gx, gy = u * 8.0, t * 12.0
     c0, r0 = min(8, int(gx)), min(12, int(gy))
@@ -205,6 +152,7 @@ def expected_weights(u, t):
 
 def check_glb(path, expected, root):
     context = path.relative_to(root).as_posix()
+    require(expected.get("kind") == "cape", f"{context}: only the cape GLB is supported")
     doc, binary = read_glb(path)
     meshes = doc.get("meshes")
     nodes = doc.get("nodes")
@@ -326,53 +274,6 @@ def check_glb(path, expected, root):
             require(set(actual) == set(expected_weights_for_vertex), f"{context}: vertex {i} has unexpected joint influences")
             require(all(close(actual[j], weight, 1e-5) for j, weight in expected_weights_for_vertex.items()),
                     f"{context}: vertex {i} has unexpected bilinear weights")
-    else:
-        require(len(nodes) == 2 and nodes[0].get("name") == "HoodRoot",
-                f"{context}: expected one identity hood root and one separate mesh node")
-        root_node = nodes[0]
-        require(root_node.get("translation", [0, 0, 0]) == [0, 0, 0]
-                and root_node.get("rotation", [0, 0, 0, 1]) == [0, 0, 0, 1]
-                and root_node.get("scale", [1, 1, 1]) == [1, 1, 1],
-                f"{context}: HoodRoot must be identity at the socket origin")
-        require(len(skin["joints"]) == 1, f"{context}: hood must be a single-joint skin")
-        require(vertex_count == 430 and len(indices) // 3 == 800,
-                f"{context}: hood mesh exceeds or differs from the compact authored contract")
-        require(all(all(close(value, 0.0) for value in joints) for joints in joint_values),
-                f"{context}: hood vertices must all use HoodRoot")
-        require(all(close(weight[0], 1.0) and all(close(value, 0.0) for value in weight[1:])
-                    for weight in weight_values), f"{context}: hood weights must be 100% HoodRoot")
-        minimum = [min(p[i] for p in pos) for i in range(3)]
-        maximum = [max(p[i] for p in pos) for i in range(3)]
-        expected_bounds = [(-0.460, 0.447), (-0.230, 0.755), (-0.469, 0.361)]
-        require(all(expected_bounds[i][0] - 1e-5 <= minimum[i] <= expected_bounds[i][0] + 0.012
-                    and expected_bounds[i][1] - 0.012 <= maximum[i] <= expected_bounds[i][1] + 1e-5
-                    for i in range(3)), f"{context}: hood dimensions differ from the socket-local design")
-        for row in range(13):
-            v = row / 12.0
-            for col in range(33):
-                expected_position = hood_rest(col / 32.0, v)
-                actual_position = pos[row * 33 + col]
-                require(all(close(a, b, 1e-6) for a, b in zip(actual_position, expected_position)),
-                        f"{context}: hood grid vertex row={row}, col={col} differs from the fit profile")
-            left, right = row * 33, row * 33 + 32
-            seam_distance = math.sqrt(sum((pos[left][axis] - pos[right][axis]) ** 2 for axis in range(3)))
-            if seam_distance <= 1e-7:
-                require(all(close(a, b, 1e-7) for a, b in zip(pos[left], pos[right])),
-                        f"{context}: closed front seam row={row} does not share a position")
-                require(all(close(a, b, 1e-5) for a, b in zip(normals[left], normals[right])),
-                        f"{context}: closed front seam row={row} normals are not smoothed together")
-                require(all(close(a, b, 1e-5) for a, b in zip(tangents[left], tangents[right])),
-                        f"{context}: closed front seam row={row} tangents are not smoothed together")
-        require(all(close(a, b, 1e-6) for a, b in zip(pos[429], (0.022, 0.755, -0.050))),
-                f"{context}: slumped hood crown apex differs from the native helmet frame contract")
-        # The opening is a gap in the angular UV strip: triangles never bridge u=0 to u=1.
-        for tri in range(0, len(indices), 3):
-            face = indices[tri:tri + 3]
-            if 429 in face:
-                continue
-            face_u = [uvs[i][0] for i in face]
-            require(max(face_u) - min(face_u) <= 1.0 / 32.0 + 1e-6,
-                    f"{context}: a face bridges the +Z opening across the back arc")
     return vertex_count, len(indices) // 3
 
 
@@ -502,10 +403,12 @@ def check_xml(root):
             except ValueError as exc:
                 raise CheckError(f"Assets/Capes.xml: path escapes root: {value}") from exc
             require(target.is_file(), f"Assets/Capes.xml: referenced file missing: {value}")
-    expected = {"Purr2D2_Cape_Glb", "Purr2D2_Hood_Glb", "Purr2D2_Cloth_Light", "Purr2D2_Cloth_Dark"}
-    require(expected.issubset(ids), "Assets/Capes.xml: missing expected GLB/material IDs")
-    for glb_id, material_name in (("Purr2D2_Cape_Glb", "Purr2D2_Cloth_Light"),
-                                   ("Purr2D2_Hood_Glb", "Purr2D2_Cloth_Light")):
+    expected = {"Purr2D2_Cape_Glb", "Purr2D2_Cloth_Light", "Purr2D2_Cloth_Dark"}
+    require(set(ids) == expected,
+            "Assets/Capes.xml: expected only the cape GLB and the two cloth materials")
+    require("Purr2D2_Hood_Glb" not in ids,
+            "Assets/Capes.xml: obsolete hood asset declaration must be absent")
+    for glb_id, material_name in (("Purr2D2_Cape_Glb", "Purr2D2_Cloth_Light"),):
         ref = ids[glb_id].find("Material")
         require(ref is not None and ref.get("Name") == material_name and ref.get("AssetId") == material_name,
                 f"Assets/Capes.xml: {glb_id} must map its default glTF slot to {material_name}")
@@ -529,16 +432,28 @@ def check_xml(root):
     return ids
 
 
+def check_no_hood(root):
+    hood_path = root / "Assets/Models/Purr2D2_Hood.glb"
+    require(not hood_path.exists(), f"obsolete hood model must be absent: {hood_path}")
+    metadata_path = root / "art/cape-cloth-metadata.json"
+    if metadata_path.is_file():
+        source = metadata_path.read_text(encoding="utf-8")
+        metadata = json.loads(source)
+        require("hood" not in metadata and "hood" not in source.lower()
+                and "Purr2D2_Hood" not in source,
+                "cape cloth metadata must not describe or reference a hood")
+
+
 def expected_asset(kind):
-    if kind == "cape":
-        joints = list(range(118))
-        binds = [identity_matrix()]
-        for row in range(13):
-            for col in range(9):
-                x, y, z = cape_rest(col / 8.0, row / 12.0)
-                binds.append(translation_matrix(-x, -y, -z))
-        return {"kind": kind, "mesh": "CapeMesh", "root_index": 0, "joint_nodes": joints, "binds": binds}
-    return {"kind": kind, "mesh": "HoodMesh", "root_index": 0, "joint_nodes": [0], "binds": [identity_matrix()]}
+    if kind != "cape":
+        raise CheckError(f"unknown asset kind {kind!r}; only 'cape' is supported")
+    joints = list(range(118))
+    binds = [identity_matrix()]
+    for row in range(13):
+        for col in range(9):
+            x, y, z = cape_rest(col / 8.0, row / 12.0)
+            binds.append(translation_matrix(-x, -y, -z))
+    return {"kind": kind, "mesh": "CapeMesh", "root_index": 0, "joint_nodes": joints, "binds": binds}
 
 
 def identity_matrix():
@@ -562,19 +477,17 @@ def main():
     root = args.root.resolve()
     try:
         xml_ids = check_xml(root)
+        check_no_hood(root)
         check_textures(root)
-        results = []
-        for kind, filename in (("cape", "Purr2D2_Cape.glb"), ("hood", "Purr2D2_Hood.glb")):
-            glb_path = root / "Assets/Models" / filename
-            counts = check_glb(glb_path, expected_asset(kind), root)
-            results.append((kind, counts))
+        glb_path = root / "Assets/Models/Purr2D2_Cape.glb"
+        counts = check_glb(glb_path, expected_asset("cape"), root)
         print("PASS: cape rig has 117 named cloth joints, row-major binds, and normalized weights")
-        print("PASS: hood is a single-bone open-front shell with a separate mesh node")
+        print("PASS: Cape GLB is the only cape model asset; hood model/ID/metadata are absent")
         print("PASS: normals, tangents, UVs, indices, GLB material slots, and inverse binds")
         print("PASS: six 256px cloth maps, near-flat Light normals, and varied matte non-metal ORM values")
         print("PASS: Assets/Capes.xml IDs, material mappings, and texture/model paths")
-        for kind, (vertices, triangles) in results:
-            print(f"  {kind}: {vertices} vertices, {triangles} triangles")
+        vertices, triangles = counts
+        print(f"  cape: {vertices} vertices, {triangles} triangles")
         print(f"  assets declared: {', '.join(sorted(xml_ids))}")
     except (OSError, ValueError, KeyError, TypeError, ET.ParseError, CheckError, struct.error) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)

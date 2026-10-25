@@ -26,6 +26,12 @@ Sparks store a part reference, local contact position/normal and birth time. Eac
 
 Contact emission uses `SaberContactProbe`: a current-segment, two-sided triangle intersection at 20 Hz, separate from all structural cutting. It refreshes nearby render-mesh references at most every 0.5 seconds, reuses list storage, resumes budget-limited searches and validates a previous hit with current transforms. It checks at most 256 mesh entries and 4,096 triangles per sample. No BVH rebuild, cut coverage, source-mesh preparation or vessel mutation runs for visual contact.
 
+## Shader include paths
+
+KSA 2026.10.19.5638's `ShaderReloader.GetModPath` calls `fullPath.Substring(fullPath.IndexOf("Content", StringComparison.Ordinal))` without checking for a missing match. `ShaderReference.OnIncludeResolved` calls it after resolving each include, catches the exception and logs `Error resolving include path`; shader compilation can still succeed. Installing under the user's `mods/purr2d2/` folder exposed this because the old `Assets/Shaders/*.glsl` paths contained no `Content`. A copy beneath the game's own `Content` directory could hide the bug.
+
+Shared headers now live under `Assets/Shaders/Content/Purr2D2/`, giving the dependency tracker distinct `Content/Purr2D2/<header>` keys in either install location. Entry shader paths and asset IDs stay the same. The asset validator checks source and staged include trees, resolving every literal include relative to its requesting file as shaderc does; glslang's additional `-I` fallback alone would miss this class of error. This layout fixes dependency bookkeeping; it does not add shader hot reload support. Evidence: `decomp/KSA.AssetReloader/ShaderReloader.cs` (`GetModPath`), `decomp/KSA/ShaderReference.cs` (`OnIncludeResolved`) and `decomp/Brutal.ShaderCApi/ShaderC.cs` (`Callbacks.ResolveInternal`).
+
 ## GPU lifetime and viewports
 
 Call `Prepare()` outside command recording, after render targets exist. It creates no per-frame geometry, textures or descriptor sets. Pipelines are cached by color format, depth format and sample count, because crew portraits and camera windows can differ from the main view. Target resizing does not invalidate those pipelines; changing formats/sample count creates a compatible pair. No waits or uploads occur in the draw callback.
