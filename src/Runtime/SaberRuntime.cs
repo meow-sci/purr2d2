@@ -64,6 +64,8 @@ internal sealed partial class SaberRuntime : IDisposable
         _somersaultMotion.Install(harmony);
         InitializeForce(harmony);
         _renderer.Initialize(harmony);
+        EnvironmentLightingPatch.Install(harmony,
+            () => _enabled && _ready && !_disposed && _settings.ExtendedEnvironmentLighting);
         RuntimeFragmentAssets.Install(harmony);
         QuietSliceQuiescence.Install(harmony);
         _audio.Initialize();
@@ -227,6 +229,7 @@ internal sealed partial class SaberRuntime : IDisposable
     internal void Shutdown()
     {
         if (_disposed) return;
+        EnvironmentLightingPatch.Release();
         if (!_settingsAutosaver.Flush(_settings))
             Console.WriteLine("[purr2d2] " + _settingsAutosaver.LastError);
         _disposed = true; _ready = false;

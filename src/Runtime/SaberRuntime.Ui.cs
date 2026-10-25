@@ -2,6 +2,7 @@ using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using KSA;
 using Purr2D2.Core;
+using Purr2D2.Rendering;
 using System.Diagnostics;
 
 namespace Purr2D2.Runtime;
@@ -41,6 +42,7 @@ internal sealed partial class SaberRuntime
     {
         _fault = "Initialization failed: " + message;
         _ready = false;
+        EnvironmentLightingPatch.Release();
         _windowVisible = _enabled;
         // The caller removes our Harmony hooks after this, so release partial ownership now.
         Cleanup(ResetWorld, "World");
@@ -128,8 +130,9 @@ internal sealed partial class SaberRuntime
 
     private void DrawSaberAppearanceSettings()
     {
-        if (!BeginSaberSettingsTable("##SaberAppearance", "Slice grace / reach")) return;
+        if (!BeginSaberSettingsTable("##SaberAppearance", "Extended environment lighting")) return;
         bool changed = false;
+        bool extendedLighting = _settings.ExtendedEnvironmentLighting;
         float length = _settings.BladeLength, volume = _settings.Volume, sliceReach = _settings.SliceReachMultiplier;
         try
         {
@@ -144,12 +147,19 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Sound volume");
             changed |= ImGui.SliderFloat("##SoundVolume", ref volume, 0, 1, "%.2f");
             ShowSaberControlTip("Overall volume for lightsaber sound effects and hum.");
+            SaberSettingsRow("Extended environment lighting");
+            ImGui.BeginDisabled(EnvironmentLightingPatch.UnavailableReason != null);
+            try { changed |= ImGui.Checkbox("##ExtendedEnvironmentLighting", ref extendedLighting); }
+            finally { ImGui.EndDisabled(); }
+            ShowSaberControlTip("Lets more nearby sabers light the ground: raises the main view's environment-light limit from 8 to 16. Each ordinary saber uses two lights, and other scene lamps share the limit.\n\nOff by default. Applies immediately; extra graphics work occurs only when more than eight lights are selected.");
+            if (EnvironmentLightingPatch.UnavailableReason is { } reason) ImGui.TextWrapped(reason);
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.BladeLength = length;
         _settings.SliceReachMultiplier = sliceReach;
         _settings.Volume = volume;
+        _settings.ExtendedEnvironmentLighting = extendedLighting;
         _settings.Validate();
     }
 

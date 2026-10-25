@@ -62,6 +62,8 @@ The panel retains blade length (**0.25–12 m**), slice grace / reach (**1–4×
 
 Without saved preferences, defaults are **1.4 m** blade length, **2×** slice reach, grip **(-24.5, -14.7, 16) cm**, blade direction **(0.22, 0.45, 0.6)** and finger curl **0.12 rad**. Existing settings files without a slice reach value retain exactly the previous 2× behavior. Existing saved alignment and length are retained.
 
+**Settings → Global lightsaber settings → Extended environment lighting** is off by default. Enabling it raises the main view's shared terrain and ground-clutter light budget from eight to sixteen, using the game's existing buffer capacity. Ordinary sabers use two lights each; other scene lamps share the budget. The toggle applies immediately, saves automatically, and resets to off with **Reset all settings**. Disabling Purr2D2 restores the stock budget without changing the saved preference. Extra lighting work occurs only when more than eight eligible lights are present; this does not change secondary-camera budgets, shaders or shadows. An incompatible game lighting layout leaves native behavior intact and displays why the option is unavailable.
+
 ## Slicing and effects
 
 Lit blades have a subtle travelling shimmer and brief electrical arcs around the blade. The bright core stays readable while the surrounding glow ripples. Arcs follow the paw and current blade length, inherit each kitten's blade color, and fade out at a distance. These cosmetic effects use player time, including while paused, like the existing cooling sparks.

@@ -26,6 +26,7 @@ The authority for this build is the supplied `ksa-game-assemblies/current` snaps
 | Hilt | Native GltfFile/PbrMaterial/StaticMeshRenderable | Shared mod assets remain engine-owned |
 | Blade | SuperMeshRenderSystem.ClearBuckets/RenderTranslucencyPass; ShaderReference; HDR target | Draws after atmosphere using existing color/depth attachments; per-view submissions and sample/format-specific pipelines |
 | Light | Program.UpdateRenderingResources prefix; LightSystem.CreateLightInstance | Runs after ClearLights and before forward/deferred light uploads |
+| Extended environment lighting | `ClusteredLightSystem.WriteForwardLights(IViewport, ref UboLightingData)` transpiler; `UboLightingData.ForwardLightArray` and private `_forwardCandidates` capacity | Default-off saved preference; guarded replacement of the clustered branch's eight-light cap with a live 8/16 choice for the enabled mod's main clustered view. Requires sixteen-slot CPU storage; preserves selection, packing and secondary-view budgets. Incompatible installation/rebuild returns incoming IL intact, disables the feature and reports availability in settings. No shader or buffer-layout changes. |
 | Audio | GameAudio, SoundBehavior, IChannel, SpatialAudio | Own channels only; SFX/master mixing respected; stops before mixer release |
 | Contact | Static/dynamic/glass native render meshes, PositionsCompare, part/body/Ego matrices | Double precision transforms; 20 Hz bounded visual-only triangle query; no damage callback |
 | Separation | Vehicle.Split, Part.Connection/PartTree | Uses native topology transfer; unsupported graphs are left intact |
@@ -73,3 +74,5 @@ KSA owns the resulting split vessels and their native saves. The mod owns per-ki
 5. Complete the native acceptance checklist before claiming support for the new snapshot.
 
 Do not infer native runtime/platform support from a successful macOS managed compilation. The provided game assemblies are Windows x64; no KSA native game session has been exercised by the build checks alone.
+
+`python3 tools/check_fragment_templates.py` also checks the environment-light patch against real host IL: installation, exact instruction/branch preservation, live 8/16 selection, main-view isolation, shutdown and rejection of changed selection branches. Native acceptance remains a six-or-seven-saber scene with the option off/on/off, camera movement, nearby competing lamps and a GPU frame-time comparison. The stock shader's sixteen-element arrays and dynamic `forwardLightCount` loop must remain aligned with the CPU layout when updating the game.

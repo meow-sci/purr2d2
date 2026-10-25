@@ -84,6 +84,7 @@ public sealed class SaberSettings
     public const int DefaultCapeSimulationLimit = 4;
 
     public float BladeLength { get; set; } = 1.4f;
+    public bool ExtendedEnvironmentLighting { get; set; } = false;
     public float SliceReachMultiplier { get; set; } = SaberLimits.DefaultSliceReachMultiplier;
     public float ColorR { get; set; } = .12f;
     public float ColorG { get; set; } = .75f;

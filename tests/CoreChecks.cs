@@ -194,6 +194,8 @@ internal static class CoreChecks
         try
         {
             Directory.CreateDirectory(directory);
+            Check(!new SaberSettings().ExtendedEnvironmentLighting && !SaberSettings.Load(path).ExtendedEnvironmentLighting,
+                "extended environment lighting is off for new settings and missing preferences");
             Check(DefaultEffects(SaberSettings.Load(path).DarkEffects, SaberType.Dark),
                 "a missing preferences file starts with Dark defaults");
             Check(SaberSettings.Load(path).SliceReachMultiplier == 2,
@@ -202,6 +204,8 @@ internal static class CoreChecks
                 "legacy preferences acquire the default somersault combo interval");
             File.WriteAllText(path, "{\"BladeLength\":0.85,\"GripX\":-13,\"GripY\":-8,\"GripZ\":18,\"AimX\":0.05,\"AimY\":0.8,\"AimZ\":0.6,\"FingerCurl\":0.2}");
             var explicitPreferences = SaberSettings.Load(path);
+            Check(!explicitPreferences.ExtendedEnvironmentLighting,
+                "legacy preferences keep the stock environment-light budget");
             Check(explicitPreferences.BladeLength == .85f && explicitPreferences.GripX == -13 && explicitPreferences.GripY == -8
                 && explicitPreferences.GripZ == 18 && explicitPreferences.AimX == .05f && explicitPreferences.AimY == .8f
                 && explicitPreferences.AimZ == .6f && explicitPreferences.FingerCurl == .2f,
@@ -322,6 +326,7 @@ internal static class CoreChecks
                 "unchanged defaults do not create a preferences file");
 
             settings.SaberControlsOffsetX = .375f;
+            settings.ExtendedEnvironmentLighting = true;
             Check(!autosaver.Observe(settings, 0) && autosaver.HasPendingChanges && !File.Exists(path),
                 "overlay position changes become pending without writing immediately");
             settings.DarkEffects.ArcWidth = 2.25f;
@@ -334,8 +339,13 @@ internal static class CoreChecks
             var loaded = SaberSettings.Load(path);
             Check(loaded.SaberControlsOffsetX == .375f && loaded.DarkEffects.ArcWidth == 2.25f,
                 "autosave persists overlay positions and nested saber effects together");
+            Check(loaded.ExtendedEnvironmentLighting, "autosave preserves the opted-in environment-light budget");
+            settings.ExtendedEnvironmentLighting = false;
+            Check(autosaver.Flush(settings) && !SaberSettings.Load(path).ExtendedEnvironmentLighting,
+                "disabling only extended lighting is detected and persisted");
 
             var defaults = new SaberSettings();
+            Check(!defaults.ExtendedEnvironmentLighting, "Reset all settings restores the stock environment-light budget");
             Check(autosaver.DeletePreferencesAndRebase(defaults) && !File.Exists(path) && !autosaver.HasPendingChanges,
                 "reset deletes saved preferences and clears the autosave baseline");
             Check(!autosaver.Observe(defaults, 20) && !File.Exists(path),

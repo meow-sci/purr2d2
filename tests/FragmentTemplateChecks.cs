@@ -14,6 +14,7 @@ internal static class FragmentTemplateChecks
         SliceWorkerDiagnosticsChecks.Run();
         SliceWorkerHooksChecks.Run();
         QuietSliceHooksChecks.Run();
+        EnvironmentLightingChecks.Run();
         var xml = Encoding.UTF8.GetBytes("""
             <Assets>
               <MeshAtlas Id="fragment_atlas" Path="fixture.glb"/>
