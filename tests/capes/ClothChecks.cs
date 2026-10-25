@@ -5,6 +5,13 @@ using Purr2D2.Capes;
 internal static class ClothChecks
 {
     private const double UpdateDt = 1d / 30d;
+    private const float CapeLengthMeters = .50f;
+    private const float PreviousCapeLengthMeters = .88f;
+    private const float CapeFloorY = -.43f;
+
+    // Preserve the prior relative-motion gates as the measured cape is shorter.
+    private const float TrailThresholdMeters = .15f * CapeLengthMeters / PreviousCapeLengthMeters;
+    private const float HemMotionThresholdMeters = .04f * CapeLengthMeters / PreviousCapeLengthMeters;
 
     public static void Main()
     {
@@ -51,6 +58,21 @@ internal static class ClothChecks
     {
         Check(CapeGeometry.Columns == 9 && CapeGeometry.Rows == 13 && CapeGeometry.NodeCount == 117,
             "the cape has the expected 9 by 13 mesh");
+        Check(MathF.Abs(CapeGeometry.RestPosition(0).X + .24f) < 1e-6f
+            && MathF.Abs(CapeGeometry.RestPosition(4).Z + .23f) < 1e-6f
+            && MathF.Abs(CapeGeometry.RestPosition(8).Z + .19f) < 1e-6f,
+            "the pinned shoulder seam is narrowed and curves from z=-.23 at center to z=-.19 at edges");
+        Check(MathF.Abs(CapeRestPose.BackCollisionLimitZ(CapeGeometry.Columns) - CapeGeometry.RestPosition(CapeGeometry.Columns).Z) < 1e-6f
+            && MathF.Abs(CapeRestPose.BackCollisionLimitZ(CapeGeometry.Columns + CapeGeometry.Columns / 2)
+                - CapeRestPose.BackCollisionZ) < 1e-6f,
+            "the first outer dynamic row keeps its authored shoulder clearance while the center uses the torso rear plane");
+        int hemLeft = (CapeGeometry.Rows - 1) * CapeGeometry.Columns;
+        int hemCenter = hemLeft + CapeGeometry.Columns / 2;
+        int hemRight = hemLeft + CapeGeometry.Columns - 1;
+        Check(MathF.Abs(CapeGeometry.RestPosition(hemLeft).X + .43f) < 1e-6f
+            && MathF.Abs(CapeGeometry.RestPosition(hemCenter).Y + CapeLengthMeters * .8f) < 1e-6f
+            && MathF.Abs(CapeGeometry.RestPosition(hemRight).X - .43f) < 1e-6f,
+            "the cape hem is .86 m wide and reaches y=-.40 m");
         using var cape = new CapeCloth();
         Check(cape.Positions.Length == CapeGeometry.NodeCount, "the default pose contains all cloth nodes");
         for (int i = 0; i < cape.Positions.Length; i++)
@@ -70,10 +92,20 @@ internal static class ClothChecks
     {
         using var still = new CapeCloth();
         using var moving = new CapeCloth();
+        float movingFirstStepStretch = 0f;
+        float movingPeakStretch = 0f;
+        float movingPinnedFirstStepStretch = 0f;
+        float movingPinnedPeakStretch = 0f;
+        int movingPeakFrame = -1, movingPeakEdgeA = -1, movingPeakEdgeB = -1, movingPinnedPeakColumn = -1;
         for (int frame = 0; frame < 90; frame++)
         {
             still.Step(UpdateDt, float3.Zero);
             moving.Step(UpdateDt, new float3(0, 0, 3));
+            EnsureFinite(moving.Positions, "forward cloth remains finite during motion");
+            TrackStretch(moving.Positions, frame,
+                ref movingFirstStepStretch, ref movingPeakStretch,
+                ref movingPinnedFirstStepStretch, ref movingPinnedPeakStretch,
+                ref movingPeakFrame, ref movingPeakEdgeA, ref movingPeakEdgeB, ref movingPinnedPeakColumn);
         }
 
         EnsureFinite(still.Positions, "stationary cloth remains finite");
@@ -83,23 +115,43 @@ internal static class ClothChecks
         float stillHemZ = MeanRowZ(still.Positions, CapeGeometry.Rows - 1);
         float movingHemZ = MeanRowZ(moving.Positions, CapeGeometry.Rows - 1);
         float movingMaximumY = MaximumY(moving.Positions);
-        float movingStretchRatio = MaximumStructuralStretchRatio(moving.Positions);
         Console.WriteLine($"Cape motion check after 3s: stationary hem=({stillHemY:F3}y, {stillHemZ:F3}z), " +
-            $"at 3m/s=({movingHemY:F3}y, {movingHemZ:F3}z; max y={movingMaximumY:F3}; max edge ratio={movingStretchRatio:F3})");
-        Check(stillHemY < -.79f, $"stationary cape settles under gravity (hem Y {stillHemY:F3})");
-        Check(movingHemZ < stillHemZ - .15f,
+            $"at 3m/s=({movingHemY:F3}y, {movingHemZ:F3}z; max y={movingMaximumY:F3}; " +
+            $"final/first/peak edge ratio={MaximumStructuralStretchRatio(moving.Positions):F3}/" +
+            $"{movingFirstStepStretch:F3}/{movingPeakStretch:F3}; first-row first/peak=" +
+            $"{movingPinnedFirstStepStretch:F3}/{movingPinnedPeakStretch:F3} " +
+            $"at edge {movingPeakEdgeA}-{movingPeakEdgeB}, frame {movingPeakFrame}, " +
+            $"pinned column {movingPinnedPeakColumn})");
+        Check(stillHemY >= CapeFloorY - 1e-5f,
+            $"stationary hem stays above the measured mesh sole/ground bound (hem Y {stillHemY:F3})");
+        Check(stillHemY <= CapeFloorY + .01f,
+            $"stationary cape settles within 1 cm of the measured mesh sole/ground (hem Y {stillHemY:F3})");
+        Check(movingHemZ < stillHemZ - TrailThresholdMeters,
             $"walking speed trails the cape backward (still Z {stillHemZ:F3}, moving Z {movingHemZ:F3})");
-        Check(movingHemY > stillHemY + .04f,
+        Check(movingHemY > stillHemY + HemMotionThresholdMeters,
             $"walking speed reduces the cape's drop through bounded lift (still Y {stillHemY:F3}, moving Y {movingHemY:F3})");
         Check(movingMaximumY < .5f, $"walking speed does not launch the cape upward (max Y {movingMaximumY:F3})");
-        Check(movingStretchRatio <= 1.3f,
-            $"walking motion keeps structural edges within 1.3x rest length (ratio {movingStretchRatio:F3})");
+        Check(movingPeakStretch <= 1.3f,
+            $"forward motion keeps every structural edge within 1.3x rest length (peak ratio {movingPeakStretch:F3})");
+        Check(movingPinnedPeakStretch <= 1.3f,
+            $"forward motion keeps the first dynamic row within 1.3x rest length (peak ratio {movingPinnedPeakStretch:F3})");
 
-        for (int frame = 0; frame < 90; frame++) moving.Step(UpdateDt, float3.Zero);
+        float movingStoppedPeakStretch = 0f;
+        float movingStoppedPinnedPeakStretch = 0f;
+        for (int frame = 0; frame < 90; frame++)
+        {
+            moving.Step(UpdateDt, float3.Zero);
+            TrackStopStretch(moving.Positions, ref movingStoppedPeakStretch, ref movingStoppedPinnedPeakStretch);
+        }
         float stoppedHemY = MeanRowY(moving.Positions, CapeGeometry.Rows - 1);
-        Console.WriteLine($"Cape motion check after stopping for 3s: hem Y={stoppedHemY:F3}");
-        Check(stoppedHemY < movingHemY - .04f,
+        Console.WriteLine($"Cape motion check after stopping for 3s: hem Y={stoppedHemY:F3}; " +
+            $"peak/first-row edge ratio={movingStoppedPeakStretch:F3}/{movingStoppedPinnedPeakStretch:F3}");
+        Check(stoppedHemY < movingHemY - HemMotionThresholdMeters,
             $"the cape drops again after movement stops (moving Y {movingHemY:F3}, stopped Y {stoppedHemY:F3})");
+        Check(movingStoppedPeakStretch <= 1.3f,
+            $"stopped forward motion keeps structural edges within 1.3x rest length (peak {movingStoppedPeakStretch:F3})");
+        Check(movingStoppedPinnedPeakStretch <= 1.3f,
+            $"stopped forward motion keeps the first dynamic row within 1.3x rest length (peak {movingStoppedPinnedPeakStretch:F3})");
         EnsureFinite(moving.Positions, "stopped cloth remains finite");
         CheckBehindWearer(moving.Positions, "stopped cloth stays behind the wearer");
         Check(moving.Failure is null && still.Failure is null, "steady simulation does not report a failure");
@@ -154,11 +206,35 @@ internal static class ClothChecks
         using var backward = new CapeCloth();
         using var sideways = new CapeCloth();
         using var fast = new CapeCloth();
+        float backwardFirstStepStretch = 0f, backwardPeakStretch = 0f;
+        float sidewaysFirstStepStretch = 0f, sidewaysPeakStretch = 0f;
+        float fastFirstStepStretch = 0f, fastPeakStretch = 0f;
+        float backwardPinnedFirstStepStretch = 0f, backwardPinnedPeakStretch = 0f;
+        float sidewaysPinnedFirstStepStretch = 0f, sidewaysPinnedPeakStretch = 0f;
+        float fastPinnedFirstStepStretch = 0f, fastPinnedPeakStretch = 0f;
+        int backwardPeakFrame = -1, backwardPeakEdgeA = -1, backwardPeakEdgeB = -1, backwardPinnedPeakColumn = -1;
+        int sidewaysPeakFrame = -1, sidewaysPeakEdgeA = -1, sidewaysPeakEdgeB = -1, sidewaysPinnedPeakColumn = -1;
+        int fastPeakFrame = -1, fastPeakEdgeA = -1, fastPeakEdgeB = -1, fastPinnedPeakColumn = -1;
         for (int frame = 0; frame < 90; frame++)
         {
             backward.Step(UpdateDt, new float3(0, 0, -3));
             sideways.Step(UpdateDt, new float3(3, 0, 0));
             fast.Step(UpdateDt, new float3(0, 0, 8));
+            EnsureFinite(backward.Positions, "backward cloth remains finite during motion");
+            EnsureFinite(sideways.Positions, "sideways cloth remains finite during motion");
+            EnsureFinite(fast.Positions, "maximum-speed cloth remains finite during motion");
+            TrackStretch(backward.Positions, frame,
+                ref backwardFirstStepStretch, ref backwardPeakStretch,
+                ref backwardPinnedFirstStepStretch, ref backwardPinnedPeakStretch,
+                ref backwardPeakFrame, ref backwardPeakEdgeA, ref backwardPeakEdgeB, ref backwardPinnedPeakColumn);
+            TrackStretch(sideways.Positions, frame,
+                ref sidewaysFirstStepStretch, ref sidewaysPeakStretch,
+                ref sidewaysPinnedFirstStepStretch, ref sidewaysPinnedPeakStretch,
+                ref sidewaysPeakFrame, ref sidewaysPeakEdgeA, ref sidewaysPeakEdgeB, ref sidewaysPinnedPeakColumn);
+            TrackStretch(fast.Positions, frame,
+                ref fastFirstStepStretch, ref fastPeakStretch,
+                ref fastPinnedFirstStepStretch, ref fastPinnedPeakStretch,
+                ref fastPeakFrame, ref fastPeakEdgeA, ref fastPeakEdgeB, ref fastPinnedPeakColumn);
         }
 
         EnsureFinite(backward.Positions, "backward airflow remains finite");
@@ -171,31 +247,59 @@ internal static class ClothChecks
         CheckPinned(sideways.Positions, "sideways airflow keeps shoulder pins fixed");
         CheckPinned(fast.Positions, "maximum airflow keeps shoulder pins fixed");
 
-        float backwardStretch = MaximumStructuralStretchRatio(backward.Positions);
-        float sidewaysStretch = MaximumStructuralStretchRatio(sideways.Positions);
-        float fastStretch = MaximumStructuralStretchRatio(fast.Positions);
-        Console.WriteLine($"Cape stretch check after 3s: backward={backwardStretch:F3}, sideways={sidewaysStretch:F3}, 8m/s={fastStretch:F3}");
-        Check(backwardStretch <= 1.3f, $"backward motion bounds structural stretch (ratio {backwardStretch:F3})");
-        Check(sidewaysStretch <= 1.3f, $"sideways motion bounds structural stretch (ratio {sidewaysStretch:F3})");
-        Check(fastStretch <= 1.3f, $"8m/s motion bounds structural stretch (ratio {fastStretch:F3})");
+        Console.WriteLine($"Cape structural stretch check over 3s: " +
+            $"backward first/peak={backwardFirstStepStretch:F3}/{backwardPeakStretch:F3} " +
+            $"(first-row={backwardPinnedFirstStepStretch:F3}/{backwardPinnedPeakStretch:F3}), " +
+            $"sideways first/peak={sidewaysFirstStepStretch:F3}/{sidewaysPeakStretch:F3} " +
+            $"(first-row={sidewaysPinnedFirstStepStretch:F3}/{sidewaysPinnedPeakStretch:F3}), " +
+            $"8m/s first/peak={fastFirstStepStretch:F3}/{fastPeakStretch:F3} " +
+            $"(first-row={fastPinnedFirstStepStretch:F3}/{fastPinnedPeakStretch:F3})\n" +
+            $"Cape peak edges: backward {backwardPeakEdgeA}-{backwardPeakEdgeB} at frame {backwardPeakFrame}, " +
+            $"pin col {backwardPinnedPeakColumn}; sideways {sidewaysPeakEdgeA}-{sidewaysPeakEdgeB} " +
+            $"at frame {sidewaysPeakFrame}, pin col {sidewaysPinnedPeakColumn}; 8m/s " +
+            $"{fastPeakEdgeA}-{fastPeakEdgeB} at frame {fastPeakFrame}, pin col {fastPinnedPeakColumn}");
+        Check(backwardPeakStretch <= 1.3f, $"backward motion bounds peak structural stretch (ratio {backwardPeakStretch:F3})");
+        Check(sidewaysPeakStretch <= 1.3f, $"sideways motion bounds peak structural stretch (ratio {sidewaysPeakStretch:F3})");
+        Check(fastPeakStretch <= 1.3f, $"8m/s motion bounds peak structural stretch (ratio {fastPeakStretch:F3})");
+        Check(backwardPinnedPeakStretch <= 1.3f, $"backward motion bounds first-row peak stretch (ratio {backwardPinnedPeakStretch:F3})");
+        Check(sidewaysPinnedPeakStretch <= 1.3f, $"sideways motion bounds first-row peak stretch (ratio {sidewaysPinnedPeakStretch:F3})");
+        Check(fastPinnedPeakStretch <= 1.3f, $"8m/s motion bounds first-row peak stretch (ratio {fastPinnedPeakStretch:F3})");
         Check(backward.Failure is null && sideways.Failure is null && fast.Failure is null,
             "reverse, sideways and maximum airflow do not poison simulation");
 
         float backwardHemY = MeanRowY(backward.Positions, CapeGeometry.Rows - 1);
         float sidewaysHemY = MeanRowY(sideways.Positions, CapeGeometry.Rows - 1);
         float fastHemY = MeanRowY(fast.Positions, CapeGeometry.Rows - 1);
+        float backwardStoppedPeakStretch = 0f, backwardStoppedPinnedPeakStretch = 0f;
+        float sidewaysStoppedPeakStretch = 0f, sidewaysStoppedPinnedPeakStretch = 0f;
+        float fastStoppedPeakStretch = 0f, fastStoppedPinnedPeakStretch = 0f;
+        Console.WriteLine($"Cape hem before stop: backward={backwardHemY:F3}, sideways={sidewaysHemY:F3}, 8m/s={fastHemY:F3}");
         for (int frame = 0; frame < 90; frame++)
         {
             backward.Step(UpdateDt, float3.Zero);
             sideways.Step(UpdateDt, float3.Zero);
             fast.Step(UpdateDt, float3.Zero);
+            TrackStopStretch(backward.Positions, ref backwardStoppedPeakStretch, ref backwardStoppedPinnedPeakStretch);
+            TrackStopStretch(sideways.Positions, ref sidewaysStoppedPeakStretch, ref sidewaysStoppedPinnedPeakStretch);
+            TrackStopStretch(fast.Positions, ref fastStoppedPeakStretch, ref fastStoppedPinnedPeakStretch);
         }
-        Check(MeanRowY(backward.Positions, CapeGeometry.Rows - 1) < backwardHemY - .04f,
-            "cape drops after backward movement stops");
-        Check(MeanRowY(sideways.Positions, CapeGeometry.Rows - 1) < sidewaysHemY - .04f,
-            "cape drops after sideways movement stops");
-        Check(MeanRowY(fast.Positions, CapeGeometry.Rows - 1) < fastHemY - .04f,
-            "cape drops after maximum movement stops");
+        float backwardStoppedHemY = MeanRowY(backward.Positions, CapeGeometry.Rows - 1);
+        float sidewaysStoppedHemY = MeanRowY(sideways.Positions, CapeGeometry.Rows - 1);
+        float fastStoppedHemY = MeanRowY(fast.Positions, CapeGeometry.Rows - 1);
+        Console.WriteLine($"Cape hem after stop: backward={backwardStoppedHemY:F3}, sideways={sidewaysStoppedHemY:F3}, 8m/s={fastStoppedHemY:F3}");
+        Console.WriteLine($"Cape stopping stretch peaks: backward={backwardStoppedPeakStretch:F3}/" +
+            $"{backwardStoppedPinnedPeakStretch:F3}, sideways={sidewaysStoppedPeakStretch:F3}/" +
+            $"{sidewaysStoppedPinnedPeakStretch:F3}, 8m/s={fastStoppedPeakStretch:F3}/" +
+            $"{fastStoppedPinnedPeakStretch:F3} (full/first-row)");
+        CheckHemDropsOrSettlesAtFloor(backwardHemY, backwardStoppedHemY, "backward movement");
+        CheckHemDropsOrSettlesAtFloor(sidewaysHemY, sidewaysStoppedHemY, "sideways movement");
+        CheckHemDropsOrSettlesAtFloor(fastHemY, fastStoppedHemY, "maximum-speed movement");
+        Check(backwardStoppedPeakStretch <= 1.3f && backwardStoppedPinnedPeakStretch <= 1.3f,
+            $"stopped backward motion keeps full/first-row stretch within 1.3x ({backwardStoppedPeakStretch:F3}/{backwardStoppedPinnedPeakStretch:F3})");
+        Check(sidewaysStoppedPeakStretch <= 1.3f && sidewaysStoppedPinnedPeakStretch <= 1.3f,
+            $"stopped sideways motion keeps full/first-row stretch within 1.3x ({sidewaysStoppedPeakStretch:F3}/{sidewaysStoppedPinnedPeakStretch:F3})");
+        Check(fastStoppedPeakStretch <= 1.3f && fastStoppedPinnedPeakStretch <= 1.3f,
+            $"stopped maximum-speed motion keeps full/first-row stretch within 1.3x ({fastStoppedPeakStretch:F3}/{fastStoppedPinnedPeakStretch:F3})");
         EnsureFinite(backward.Positions, "cape remains finite after backward motion stops");
         EnsureFinite(sideways.Positions, "cape remains finite after sideways motion stops");
         EnsureFinite(fast.Positions, "cape remains finite after maximum motion stops");
@@ -395,7 +499,24 @@ internal static class ClothChecks
     private static void CheckBehindWearer(ReadOnlySpan<float3> positions, string message)
     {
         for (int i = CapeGeometry.Columns; i < positions.Length; i++)
-            Check(positions[i].Z <= -.22f + 1e-5f, message + " at node " + i);
+            Check(positions[i].Z <= CapeRestPose.BackCollisionLimitZ(i) + 1e-5f, message + " at node " + i);
+    }
+
+    private static void CheckHemDropsOrSettlesAtFloor(float movingHemY, float stoppedHemY, string motion)
+    {
+        if (movingHemY > CapeFloorY + HemMotionThresholdMeters)
+        {
+            Check(stoppedHemY < movingHemY - HemMotionThresholdMeters,
+                $"cape drops after {motion} stops (moving {movingHemY:F3}, stopped {stoppedHemY:F3})");
+            return;
+        }
+
+        Check(stoppedHemY >= CapeFloorY - 1e-5f,
+            $"cape stays above the mesh sole/ground after {motion} stops (hem Y {stoppedHemY:F3})");
+        Check(stoppedHemY <= CapeFloorY + .01f,
+            $"cape settles within 1 cm of the mesh sole/ground after {motion} stops (hem Y {stoppedHemY:F3})");
+        Check(stoppedHemY <= movingHemY + 1e-5f,
+            $"cape does not rise after {motion} stops (moving {movingHemY:F3}, stopped {stoppedHemY:F3})");
     }
 
     private static void CheckPinned(ReadOnlySpan<float3> positions, string message)
@@ -410,17 +531,85 @@ internal static class ClothChecks
 
     private static float MaximumStructuralStretchRatio(ReadOnlySpan<float3> positions)
     {
+        return MaximumStructuralStretchRatio(positions, out _, out _);
+    }
+
+    private static float MaximumStructuralStretchRatio(ReadOnlySpan<float3> positions, out int edgeA, out int edgeB)
+    {
         float maximum = 0f;
+        edgeA = -1;
+        edgeB = -1;
         for (int row = 0; row < CapeGeometry.Rows; row++)
         for (int column = 0; column < CapeGeometry.Columns; column++)
         {
             int index = row * CapeGeometry.Columns + column;
             if (column + 1 < CapeGeometry.Columns)
-                maximum = MathF.Max(maximum, EdgeRatio(positions, index, index + 1));
+            {
+                float ratio = EdgeRatio(positions, index, index + 1);
+                if (ratio > maximum) (maximum, edgeA, edgeB) = (ratio, index, index + 1);
+            }
             if (row + 1 < CapeGeometry.Rows)
-                maximum = MathF.Max(maximum, EdgeRatio(positions, index, index + CapeGeometry.Columns));
+            {
+                float ratio = EdgeRatio(positions, index, index + CapeGeometry.Columns);
+                if (ratio > maximum) (maximum, edgeA, edgeB) = (ratio, index, index + CapeGeometry.Columns);
+            }
         }
         return maximum;
+    }
+
+    private static float MaximumPinnedRowStretchRatio(ReadOnlySpan<float3> positions)
+    {
+        return MaximumPinnedRowStretchRatio(positions, out _);
+    }
+
+    private static float MaximumPinnedRowStretchRatio(ReadOnlySpan<float3> positions, out int column)
+    {
+        float maximum = 0f;
+        column = -1;
+        for (int candidateColumn = 0; candidateColumn < CapeGeometry.Columns; candidateColumn++)
+        {
+            int pinned = candidateColumn;
+            float ratio = EdgeRatio(positions, pinned, pinned + CapeGeometry.Columns);
+            if (ratio > maximum)
+            {
+                maximum = ratio;
+                column = candidateColumn;
+            }
+        }
+        return maximum;
+    }
+
+    private static void TrackStretch(ReadOnlySpan<float3> positions, int frame,
+        ref float firstStep, ref float peak,
+        ref float firstPinnedStep, ref float pinnedPeak,
+        ref int peakFrame, ref int peakEdgeA, ref int peakEdgeB, ref int pinnedPeakColumn)
+    {
+        float stretch = MaximumStructuralStretchRatio(positions, out int edgeA, out int edgeB);
+        float pinnedStretch = MaximumPinnedRowStretchRatio(positions, out int pinnedColumn);
+        if (frame == 0)
+        {
+            firstStep = stretch;
+            firstPinnedStep = pinnedStretch;
+        }
+        if (stretch > peak)
+        {
+            peak = stretch;
+            peakFrame = frame;
+            peakEdgeA = edgeA;
+            peakEdgeB = edgeB;
+        }
+        if (pinnedStretch > pinnedPeak)
+        {
+            pinnedPeak = pinnedStretch;
+            pinnedPeakColumn = pinnedColumn;
+        }
+    }
+
+    private static void TrackStopStretch(ReadOnlySpan<float3> positions,
+        ref float peak, ref float pinnedPeak)
+    {
+        peak = MathF.Max(peak, MaximumStructuralStretchRatio(positions));
+        pinnedPeak = MathF.Max(pinnedPeak, MaximumPinnedRowStretchRatio(positions));
     }
 
     private static float EdgeRatio(ReadOnlySpan<float3> positions, int a, int b)

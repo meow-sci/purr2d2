@@ -124,13 +124,35 @@ def accessor_values(doc, binary, index, expected_type=None):
 
 
 def cape_rest(u, t):
+    r = 2.0 * u - 1.0
     return (
-        (u - 0.5) * (0.64 + 0.56 * t),
-        0.10 - 0.88 * t,
-        -0.30 - 0.06 * t + 0.025 * math.sin(u * 4.0 * math.pi) * math.sin(t * math.pi / 2.0)
-        + 0.012 * math.sin(u * 8.0 * math.pi) * math.sin(t * 12.0 * math.pi)
-        + 0.005 * math.sin(u * 16.0 * math.pi) * math.sin(t * 6.0 * math.pi),
+        (u - 0.5) * (0.48 + 0.38 * t),
+        0.10 - 0.50 * t,
+        -0.23 + 0.04 * r * r * (1.0 - t) - 0.04 * t
+        + 0.018 * math.sin(u * 4.0 * math.pi) * math.sin(t * math.pi / 2.0)
+        + 0.006 * math.sin(u * 8.0 * math.pi) * math.sin(t * 12.0 * math.pi)
+        + 0.003 * math.sin(u * 16.0 * math.pi) * math.sin(t * 6.0 * math.pi),
     )
+
+
+def hood_rest(u, v):
+    theta_open = 1.25
+    top_y, bottom_y, center_z = 0.75, -0.18, -0.02
+    neck_join_y = -0.085
+    main_half_width, main_half_depth = 0.410, 0.400
+    bottom_half_width, bottom_half_depth = 0.34, 0.235
+    theta = theta_open + u * (math.tau - 2.0 * theta_open)
+    crown = math.sin(min(1.0, v / 0.44) * math.pi / 2.0)
+    neck_start = (top_y - neck_join_y) / (top_y - bottom_y)
+    lower = min(1.0, max(0.0, (v - neck_start) / (1.0 - neck_start)))
+    lower = lower * lower * (3.0 - 2.0 * lower)
+    width = 0.025 + main_half_width * crown + 0.030 * (1.0 - crown)
+    depth = 0.030 + main_half_depth * crown + 0.030 * (1.0 - crown)
+    width += (bottom_half_width - width) * lower
+    depth += (bottom_half_depth - depth) * lower
+    y = top_y - (top_y - bottom_y) * v
+    return (width * math.sin(theta), y,
+            center_z + depth * math.cos(theta) + 0.012 * math.sin(theta * 3.0) * math.sin(v * math.pi))
 
 
 def expected_weights(u, t):
@@ -288,10 +310,19 @@ def check_glb(path, expected, root):
                     for weight in weight_values), f"{context}: hood weights must be 100% HoodRoot")
         minimum = [min(p[i] for p in pos) for i in range(3)]
         maximum = [max(p[i] for p in pos) for i in range(3)]
-        expected_bounds = [(-0.42, 0.42), (-0.28, 0.392), (-0.36, 0.16)]
-        require(all(expected_bounds[i][0] - 1e-5 <= minimum[i] <= expected_bounds[i][0] + 0.025
-                    and expected_bounds[i][1] - 0.025 <= maximum[i] <= expected_bounds[i][1] + 1e-5
+        expected_bounds = [(-0.435, 0.435), (-0.18, 0.765), (-0.452, 0.125)]
+        require(all(expected_bounds[i][0] - 1e-5 <= minimum[i] <= expected_bounds[i][0] + 0.012
+                    and expected_bounds[i][1] - 0.012 <= maximum[i] <= expected_bounds[i][1] + 1e-5
                     for i in range(3)), f"{context}: hood dimensions differ from the socket-local design")
+        for row in range(13):
+            v = row / 12.0
+            for col in range(33):
+                expected_position = hood_rest(col / 32.0, v)
+                actual_position = pos[row * 33 + col]
+                require(all(close(a, b, 1e-6) for a, b in zip(actual_position, expected_position)),
+                        f"{context}: hood grid vertex row={row}, col={col} differs from the fit profile")
+        require(all(close(a, b, 1e-6) for a, b in zip(pos[429], (0.0, 0.765, -0.02))),
+                f"{context}: hood crown apex differs from the native helmet frame contract")
         # The opening is a gap in the angular UV strip: triangles never bridge u=0 to u=1.
         for tri in range(0, len(indices), 3):
             face = indices[tri:tri + 3]
@@ -428,7 +459,7 @@ def main():
             counts = check_glb(glb_path, expected_asset(kind), root)
             results.append((kind, counts))
         print("PASS: cape rig has 117 named cloth joints, row-major binds, and normalized weights")
-        print("PASS: hood is a compact single-bone open-front shell with a separate mesh node")
+        print("PASS: hood is a single-bone open-front shell with a separate mesh node")
         print("PASS: normals, tangents, UVs, indices, GLB material slots, and inverse binds")
         print("PASS: 256px brown/black cloth maps and matte non-metal ORM values")
         print("PASS: Assets/Capes.xml IDs, material mappings, and texture/model paths")

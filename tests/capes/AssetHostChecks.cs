@@ -13,6 +13,7 @@ internal static class AssetHostChecks
 
     public static void Run()
     {
+        CapeAttachmentMathChecks.Run();
         CheckCape(Path.Combine("Assets", "Models", "Purr2D2_Cape.glb"));
         CheckHood(Path.Combine("Assets", "Models", "Purr2D2_Hood.glb"));
         Console.WriteLine("Cape and hood GLBs load through the actual managed KSA/Brutal GLTF pipeline.");

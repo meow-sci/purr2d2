@@ -6,6 +6,7 @@ import os
 import platform
 import struct
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 
@@ -59,9 +60,11 @@ items = ET.SubElement(project, "ItemGroup")
 for source in [
     "src/Capes/CapeGeometry.cs",
     "src/Capes/CapePoseCache.cs",
+    "src/Capes/CapeAttachmentMath.cs",
     "src/Capes/CapeCloth.cs",
     "tests/capes/ClothChecks.cs",
     "tests/capes/AssetHostChecks.cs",
+    "tests/capes/CapeAttachmentMathChecks.cs",
 ]:
     ET.SubElement(items, "Compile", Include=str(root / source))
 for dll in host.glob("*.dll"):
@@ -75,4 +78,5 @@ for dll in host.glob("*.dll"):
     ET.SubElement(reference, "Private").text = "true"
 path = folder / "CapeClothChecks.csproj"
 ET.ElementTree(project).write(path, encoding="unicode")
-raise SystemExit(subprocess.run(["dotnet", "run", "--project", str(path), "-c", "Release"], cwd=root).returncode)
+raise SystemExit(subprocess.run(
+    ["dotnet", "run", "--project", str(path), "-c", "Release", *sys.argv[1:]], cwd=root).returncode)

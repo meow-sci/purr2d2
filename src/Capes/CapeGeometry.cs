@@ -19,9 +19,11 @@ public static class CapeGeometry
         int column = index % Columns;
         float u = column / (float)(Columns - 1);
         float t = row / (float)(Rows - 1);
+        float r = 2f * u - 1f;
         return new float3(
-            (u - .5f) * (.64f + .56f * t),
-            .10f - .88f * t,
-            -.30f - .06f * t + .025f * MathF.Sin(u * 4f * MathF.PI) * MathF.Sin(t * MathF.PI / 2f));
+            (u - .5f) * (.48f + .38f * t),
+            .10f - .50f * t,
+            -.23f + .04f * r * r * (1f - t) - .04f * t
+                + .018f * MathF.Sin(u * 4f * MathF.PI) * MathF.Sin(t * MathF.PI / 2f));
     }
 }

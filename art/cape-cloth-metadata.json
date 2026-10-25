@@ -1,6 +1,6 @@
 {
   "authoring": "original deterministic procedural mesh and texture generator",
-  "preview": "CPU software material render; not captured in-game or in Blender",
+  "preview": "CPU software render with original measured-size helmet/visor proxy; not in-game",
   "cape": {
     "glb": "Assets/Models/Purr2D2_Cape.glb",
     "mesh": "CapeMesh",
@@ -18,8 +18,70 @@
     "triangles": 800,
     "skinJoints": 1,
     "units": "meters",
-    "origin": "Head_M socket center",
-    "openFaceDirection": "+Z"
+    "origin": "native helmet attachment frame",
+    "openFaceDirection": "+Z",
+    "fit": {
+      "openingHalfAngleRadians": 1.25,
+      "topRingY": 0.75,
+      "apexY": 0.765,
+      "bottomY": -0.18,
+      "neckJoinY": -0.085,
+      "mainHalfWidth": 0.41,
+      "mainHalfDepth": 0.4,
+      "topCrownRoundnessRadius": 0.03,
+      "bottomHalfWidth": 0.34,
+      "bottomHalfDepth": 0.235
+    }
+  },
+  "previewProxy": {
+    "helmetBoundsMeters": {
+      "x": [
+        -0.4031762314,
+        0.403175354
+      ],
+      "y": [
+        -0.0805445957,
+        0.6374948502
+      ],
+      "z": [
+        -0.4117322159,
+        0.3477876663
+      ]
+    },
+    "visorBoundsMeters": {
+      "x": [
+        -0.3377220917,
+        0.3377267075
+      ],
+      "y": [
+        0.0011220413,
+        0.4882292938
+      ],
+      "z": [
+        0.122022438,
+        0.3745520782
+      ]
+    },
+    "headFromChestMeters": [
+      0.0,
+      0.10899,
+      0.00958
+    ],
+    "torsoBoundsChestMeters": {
+      "x": [
+        -0.3479055464,
+        0.3479055762
+      ],
+      "y": [
+        -0.4309300069,
+        0.1022684758
+      ],
+      "z": [
+        -0.1916999287,
+        0.2001998358
+      ]
+    },
+    "torso": "original ring mannequin reconstructed from measured KittyBody bounds; not stock geometry"
   },
   "textures": {
     "size": "256x256",

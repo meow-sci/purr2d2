@@ -22,11 +22,15 @@ internal readonly struct CapeNodePose
 /// </summary>
 internal static class CapeRestPose
 {
+    internal const float BackCollisionZ = -.22f;
+
     private static readonly float3[] Positions = BuildPositions();
+    private static readonly float[] BackCollisionLimits = BuildBackCollisionLimits();
 
     internal static ReadOnlySpan<float3> All => Positions;
 
     internal static float3 Position(int index) => Positions[index];
+    internal static float BackCollisionLimitZ(int index) => BackCollisionLimits[index];
 
     private static float3[] BuildPositions()
     {
@@ -34,6 +38,18 @@ internal static class CapeRestPose
         for (int i = 0; i < positions.Length; i++)
             positions[i] = CapeGeometry.RestPosition(i);
         return positions;
+    }
+
+    private static float[] BuildBackCollisionLimits()
+    {
+        var limits = new float[Positions.Length];
+        for (int i = 0; i < limits.Length; i++)
+        {
+            // Preserve authored shoulder wrap while keeping the torso on the
+            // existing conservative rear plane.
+            limits[i] = MathF.Max(BackCollisionZ, Positions[i].Z);
+        }
+        return limits;
     }
 }
 

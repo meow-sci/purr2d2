@@ -25,6 +25,65 @@ ART = ROOT / "art"
 TAU = math.tau
 TEX_SIZE = 256
 LIGHT_MATERIAL = "Purr2D2_Cloth_Light"
+HOOD_OPEN_HALF_ANGLE = 1.25
+HOOD_TOP_RING_Y = 0.75
+HOOD_APEX_Y = 0.765
+HOOD_BOTTOM_Y = -0.18
+HOOD_CENTER_Z = -0.02
+HOOD_NECK_JOIN_Y = -0.085
+HOOD_MAIN_HALF_WIDTH = 0.410
+HOOD_MAIN_HALF_DEPTH = 0.400
+HOOD_TOP_EXTRA_RADIUS = 0.030
+HOOD_BOTTOM_HALF_WIDTH = 0.34
+HOOD_BOTTOM_HALF_DEPTH = 0.235
+
+# Source-only dimensions for the original proxy in art previews. These match
+# the local stock helmet/visor bounds after converting native centimeters to m;
+# the stock meshes and textures are never copied into the mod.
+HELMET_PROXY_BOUNDS = {
+    "x": (-0.4031762314, 0.4031753540),
+    "y": (-0.0805445957, 0.6374948502),
+    "z": (-0.4117322159, 0.3477876663),
+}
+VISOR_PROXY_BOUNDS = {
+    "x": (-0.3377220917, 0.3377267075),
+    "y": (0.0011220413, 0.4882292938),
+    "z": (0.1220224380, 0.3745520782),
+}
+HEAD_FROM_CHEST_METERS = (0.0, 0.10899, 0.00958)
+TORSO_PROXY_BOUNDS_CHEST_METERS = {
+    "x": (-0.3479055464, 0.3479055762),
+    "y": (-0.4309300069, 0.1022684758),
+    "z": (-0.1916999287, 0.2001998358),
+}
+# (chest-local y, measured half-width, measured rear z, measured front z).
+# These binned bounds come from the stock KittyBody POSITION point cloud after
+# subtracting Chest_M. The preview reconstructs an original ring proxy from
+# these metrics; no stock character mesh or texture is included.
+TORSO_PROXY_PROFILE = (
+    (-0.430930, 0.2112, -0.0643, 0.1298),
+    (-0.392500, 0.2000, -0.0584, 0.1208),
+    (-0.367500, 0.1916, -0.0584, 0.1085),
+    (-0.342500, 0.1740, -0.0582, 0.0826),
+    (-0.317500, 0.1744, -0.0560, 0.0828),
+    (-0.292500, 0.1670, -0.0681, 0.1041),
+    (-0.267500, 0.1756, -0.0910, 0.1307),
+    (-0.242500, 0.3433, -0.1040, 0.1476),
+    (-0.217500, 0.3479, -0.1178, 0.1567),
+    (-0.192500, 0.3475, -0.1236, 0.1613),
+    (-0.167500, 0.3433, -0.1255, 0.1557),
+    (-0.142500, 0.3352, -0.1242, 0.1624),
+    (-0.117500, 0.3284, -0.1178, 0.1609),
+    (-0.092500, 0.3025, -0.1131, 0.1727),
+    (-0.067500, 0.2772, -0.1109, 0.1679),
+    (-0.042500, 0.2800, -0.1105, 0.1575),
+    (-0.017500, 0.2569, -0.1100, 0.1335),
+    (0.007500, 0.2165, -0.1102, 0.1385),
+    (0.032500, 0.1904, -0.1094, 0.1898),
+    (0.057500, 0.2050, -0.1917, 0.1989),
+    (0.082500, 0.2050, -0.1904, 0.2002),
+    (0.102268, 0.1817, -0.1813, -0.0307),
+)
 
 
 def dot(a, b):
@@ -156,12 +215,15 @@ def make_textures():
 
 def cape_position(u, t):
     # Cape design contract: meters, chest origin, +X left, +Y up, +Z forward.
-    # Two subtle extra folds vanish on the 9x13 joint lattice.
-    x = (u - 0.5) * (0.64 + 0.56 * t)
-    y = 0.10 - 0.88 * t
-    z = -0.30 - 0.06 * t + 0.025 * math.sin(u * 4.0 * math.pi) * math.sin(t * math.pi / 2.0)
-    z += 0.012 * math.sin(u * 8.0 * math.pi) * math.sin(t * 12.0 * math.pi)
-    z += 0.005 * math.sin(u * 16.0 * math.pi) * math.sin(t * 6.0 * math.pi)
+    # The 9x13 pin lattice follows the shared measured geometry. Two finer
+    # mesh-only folds vanish at all 117 bones and add a subtle cloth surface.
+    r = 2.0 * u - 1.0
+    x = (u - 0.5) * (0.48 + 0.38 * t)
+    y = 0.10 - 0.50 * t
+    z = (-0.23 + 0.04 * r * r * (1.0 - t) - 0.04 * t
+         + 0.018 * math.sin(u * 4.0 * math.pi) * math.sin(t * math.pi / 2.0))
+    z += 0.006 * math.sin(u * 8.0 * math.pi) * math.sin(t * 12.0 * math.pi)
+    z += 0.003 * math.sin(u * 16.0 * math.pi) * math.sin(t * 6.0 * math.pi)
     return (x, y, z)
 
 
@@ -242,25 +304,31 @@ def make_cape():
             "coordinateFrame": "+X left, +Y up, +Z kitten forward",
             "origin": "chest",
             "clothNodes": "Cape_000..Cape_116; row-major index=row*9+col",
-            "jointRestPosition": "x=(u-.5)*(.64+.56*t); y=.10-.88*t; z=-.30-.06*t+.025*sin(u*4*pi)*sin(t*pi/2)",
+            "jointRestPosition": "r=2u-1; x=(u-.5)*(.48+.38*t); y=.10-.50*t; z=-.23+.04*r*r*(1-t)-.04*t+.018*sin(4*pi*u)*sin(pi*t/2)",
             "meshSubdivisions": "2x per authored cloth-node interval",
         },
     }
 
 
 def hood_position(u, v):
-    # An open +Z hood surface, not a closed helmet or cone.
-    theta_open = 0.66
-    theta = theta_open + u * (TAU - 2.0 * theta_open)
+    # Native helmet-attachment frame in meters. The aperture clears the full
+    # measured visor; below the helmet shell the cowl narrows into the neck.
+    theta = HOOD_OPEN_HALF_ANGLE + u * (TAU - 2.0 * HOOD_OPEN_HALF_ANGLE)
     crown = math.sin(min(1.0, v / 0.44) * math.pi / 2.0)
-    lower = min(1.0, max(0.0, (v - 0.82) / 0.18))
+    neck_start = (HOOD_TOP_RING_Y - HOOD_NECK_JOIN_Y) / (HOOD_TOP_RING_Y - HOOD_BOTTOM_Y)
+    lower = min(1.0, max(0.0, (v - neck_start) / (1.0 - neck_start)))
     lower = lower * lower * (3.0 - 2.0 * lower)
-    # Rounded cap over the helmet, near-vertical side flaps, then a cowl flare.
-    width = 0.025 + 0.31 * crown + 0.085 * lower
-    depth = 0.030 + 0.21 * crown + 0.040 * lower
-    y = 0.38 - 0.66 * v
+    # The helmet envelope stays full-size through its lowest point. Only the
+    # short free section below that shell tapers toward the neck/shoulders.
+    width = (0.025 + HOOD_MAIN_HALF_WIDTH * crown
+             + HOOD_TOP_EXTRA_RADIUS * (1.0 - crown))
+    depth = (0.030 + HOOD_MAIN_HALF_DEPTH * crown
+             + HOOD_TOP_EXTRA_RADIUS * (1.0 - crown))
+    width += (HOOD_BOTTOM_HALF_WIDTH - width) * lower
+    depth += (HOOD_BOTTOM_HALF_DEPTH - depth) * lower
+    y = HOOD_TOP_RING_Y - (HOOD_TOP_RING_Y - HOOD_BOTTOM_Y) * v
     x = width * math.sin(theta)
-    z = -0.07 + depth * math.cos(theta) + 0.012 * math.sin(theta * 3.0) * math.sin(v * math.pi)
+    z = HOOD_CENTER_Z + depth * math.cos(theta) + 0.012 * math.sin(theta * 3.0) * math.sin(v * math.pi)
     return (x, y, z)
 
 
@@ -274,7 +342,7 @@ def make_hood():
             positions.append(hood_position(u, v))
             uvs.append((u, v))
     apex = len(positions)
-    positions.append((0.0, 0.392, -0.07))
+    positions.append((0.0, HOOD_APEX_Y, HOOD_CENTER_Z))
     uvs.append((0.5, 0.0))
 
     def at(row, col):
@@ -315,10 +383,21 @@ def make_hood():
         "extras": {
             "units": "meters",
             "coordinateFrame": "+X left, +Y up, +Z kitten forward",
-            "origin": "Head_M socket center",
-            "design": "open +Z face aperture with draped sides and flared cowl; no front panel",
-            "approximateBounds": "x +/-0.42m; y -0.28m..+0.392m; rear z about -0.35m",
-            "faceOpening": "theta 0.66 rad on either side of +Z",
+            "origin": "native helmet attachment frame; vertices are authored in meters",
+            "design": "rounded oversized hood over helmet shell; open visor aperture; tapered neck cowl",
+            "hoodFitProfile": {
+                "openingHalfAngleRadians": HOOD_OPEN_HALF_ANGLE,
+                "topRingY": HOOD_TOP_RING_Y,
+                "apexY": HOOD_APEX_Y,
+                "bottomY": HOOD_BOTTOM_Y,
+                "centerZ": HOOD_CENTER_Z,
+                "neckJoinY": HOOD_NECK_JOIN_Y,
+                "neckHalfWidth": HOOD_BOTTOM_HALF_WIDTH,
+                "neckHalfDepth": HOOD_BOTTOM_HALF_DEPTH,
+                "mainHalfWidth": HOOD_MAIN_HALF_WIDTH,
+                "mainHalfDepth": HOOD_MAIN_HALF_DEPTH,
+            },
+            "faceOpening": "theta 1.25 rad on either side of +Z, measured against stock visor vertices",
         },
     }
 
@@ -396,7 +475,7 @@ def write_assets(cape, hood):
 <!-- Original Purr2D2 cloth assets. Both GLBs are in meters, +Y up and +Z forward.
      CapeRoot is the identity skin root; its 117 children are row-major local translations.
      CapeMesh is a separate identity scene node. HoodRoot is the identity skin root;
-     HoodMesh is a separate identity scene node at the Head_M socket origin. -->
+     HoodMesh is a separate identity scene node in the native helmet attachment frame. -->
 <Assets>
   <GltfFile Id="Purr2D2_Cape_Glb">
     <Source Path="Assets/Models/Purr2D2_Cape.glb" />
@@ -421,59 +500,128 @@ def write_assets(cape, hood):
     (ROOT / "Assets" / "Capes.xml").write_text(xml, encoding="utf-8")
 
 
-def guide_head_mesh():
-    # Preview-only stylized head and visor, not written into either GLB.
+def helmet_proxy_mesh():
+    # Original, preview-only ellipsoid matching measured stock helmet bounds.
     positions, normals, uvs, indices = [], [], [], []
-    segments, rows = 24, 12
+    (xmin, xmax) = HELMET_PROXY_BOUNDS["x"]
+    (ymin, ymax) = HELMET_PROXY_BOUNDS["y"]
+    (zmin, zmax) = HELMET_PROXY_BOUNDS["z"]
+    center = ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
+    radii = ((xmax - xmin) * 0.5, (ymax - ymin) * 0.5, (zmax - zmin) * 0.5)
+    segments, rows = 40, 20
     for row in range(rows + 1):
         phi = -math.pi / 2 + math.pi * row / rows
         for col in range(segments + 1):
             theta = TAU * col / segments
-            positions.append((0.14 * math.cos(phi) * math.sin(theta),
-                              0.05 + 0.205 * math.sin(phi),
-                              -0.02 + 0.12 * math.cos(phi) * math.cos(theta)))
-            normals.append(unit((math.cos(phi) * math.sin(theta) / 0.14,
-                                 math.sin(phi) / 0.205,
-                                 math.cos(phi) * math.cos(theta) / 0.12)))
+            point = (center[0] + radii[0] * math.cos(phi) * math.sin(theta),
+                     center[1] + radii[1] * math.sin(phi),
+                     center[2] + radii[2] * math.cos(phi) * math.cos(theta))
+            positions.append(point)
+            normals.append(unit(((point[0] - center[0]) / (radii[0] * radii[0]),
+                                 (point[1] - center[1]) / (radii[1] * radii[1]),
+                                 (point[2] - center[2]) / (radii[2] * radii[2]))))
             uvs.append((col / segments, row / rows))
     for row in range(rows):
         for col in range(segments):
             a = row * (segments + 1) + col
             b, d = a + 1, a + segments + 1
             indices.extend((a, b, d + 1, a, d + 1, d))
-    base = len(positions)
-    visor_start = base
-    positions.append((0.0, 0.095, 0.102))
-    normals.append((0.0, 0.0, 1.0))
-    uvs.append((0.5, 0.5))
-    for col in range(25):
-        angle = TAU * col / 24
-        positions.append((0.105 * math.cos(angle), 0.095 + 0.065 * math.sin(angle), 0.108))
-        normals.append((0.0, 0.0, 1.0))
-        uvs.append((0.5 + 0.5 * math.cos(angle), 0.5 + 0.5 * math.sin(angle)))
-    for col in range(24):
-        indices.extend((base, base + col + 1, base + col + 2))
     return {"positions": positions, "normals": normals, "uvs": uvs, "indices": indices,
-            "visor_start": visor_start}
+            "proxy": "original ellipsoid matching measured stock helmet bounds"}
+
+
+def visor_proxy_mesh():
+    # Original curved shield proxy fitted to the measured stock visor bounds.
+    positions, normals, uvs, indices = [], [], [], []
+    (xmin, xmax) = VISOR_PROXY_BOUNDS["x"]
+    (ymin, ymax) = VISOR_PROXY_BOUNDS["y"]
+    (zmin, zmax) = VISOR_PROXY_BOUNDS["z"]
+    center_y = (ymin + ymax) * 0.5
+    radius_x = (xmax - xmin) * 0.5
+    radius_y = (ymax - ymin) * 0.5
+    columns, rows = 32, 12
+    for row in range(rows + 1):
+        vertical = -1.0 + 2.0 * row / rows
+        for col in range(columns + 1):
+            angle = -math.pi / 2.0 + math.pi * col / columns
+            cos_angle = math.cos(angle)
+            x = radius_x * math.sin(angle)
+            y = center_y + radius_y * cos_angle * vertical
+            z = zmin + (zmax - zmin) * cos_angle
+            positions.append((x, y, z))
+            normals.append(unit((math.sin(angle) * 0.38, vertical * 0.18, 1.0)))
+            uvs.append((col / columns, row / rows))
+    for row in range(rows):
+        for col in range(columns):
+            a = row * (columns + 1) + col
+            b, d = a + 1, a + columns + 1
+            indices.extend((a, b, d + 1, a, d + 1, d))
+    return {"positions": positions, "normals": normals, "uvs": uvs, "indices": indices,
+            "proxy": "original curved shield matching measured stock visor bounds"}
+
+
+def torso_proxy_mesh():
+    # Original mannequin proxy reconstructed from measured KittyBody section
+    # bounds, in Chest_M-local meters. The stock character mesh is not included.
+    positions, normals, uvs, indices = [], [], [], []
+    segments = 48
+    rows = len(TORSO_PROXY_PROFILE)
+    for row, (y, width, rear_z, front_z) in enumerate(TORSO_PROXY_PROFILE):
+        center_z = (rear_z + front_z) * 0.5
+        depth = (front_z - rear_z) * 0.5
+        for col in range(segments + 1):
+            theta = TAU * col / segments
+            positions.append((width * math.sin(theta), y, center_z + depth * math.cos(theta)))
+            uvs.append((col / segments, row / (rows - 1)))
+    for row in range(rows):
+        for col in range(segments + 1):
+            before = max(0, col - 1)
+            after = min(segments, col + 1)
+            across = sub(positions[row * (segments + 1) + after],
+                         positions[row * (segments + 1) + before])
+            upper = min(rows - 1, row + 1)
+            lower = max(0, row - 1)
+            vertical = sub(positions[upper * (segments + 1) + col],
+                           positions[lower * (segments + 1) + col])
+            normals.append(unit(cross(across, vertical)))
+    for row in range(rows - 1):
+        for col in range(segments):
+            a = row * (segments + 1) + col
+            b, d = a + 1, a + segments + 1
+            indices.extend((a, b, d + 1, a, d + 1, d))
+    return {"positions": positions, "normals": normals, "uvs": uvs, "indices": indices,
+            "proxy": "original ring mannequin from measured KittyBody bounds; not stock geometry"}
+
+
+def translated_mesh(mesh, translation):
+    tx, ty, tz = translation
+    return {**mesh, "positions": [(x + tx, y + ty, z + tz) for x, y, z in mesh["positions"]]}
+
+
+def combined_projection_mesh(meshes):
+    return {"positions": [point for mesh in meshes for point in mesh["positions"]]}
 
 
 def projection_for(mesh, rect, target, eye_offset):
-    positions, normals, uvs, indices = mesh["positions"], mesh["normals"], mesh["uvs"], mesh["indices"]
+    positions = mesh["positions"]
     eye = add(target, eye_offset)
     forward = unit(sub(target, eye))
     right = unit(cross(forward, (0.0, 1.0, 0.0)))
     up = unit(cross(right, forward))
     xlo, ylo, xhi, yhi = rect
     projected = [(dot(sub(p, target), right), dot(sub(p, target), up)) for p in positions]
-    span_x = max(p[0] for p in projected) - min(p[0] for p in projected)
-    span_y = max(p[1] for p in projected) - min(p[1] for p in projected)
+    x_min, x_max = min(p[0] for p in projected), max(p[0] for p in projected)
+    y_min, y_max = min(p[1] for p in projected), max(p[1] for p in projected)
+    span_x = x_max - x_min
+    span_y = y_max - y_min
     scale = min((xhi - xlo - 42) / max(span_x, 1e-6),
                 (yhi - ylo - 36) / max(span_y, 1e-6)) * 0.91
-    cx, cy = (xlo + xhi) * 0.5, (ylo + yhi) * 0.5 + 8
+    cx = (xlo + xhi) * 0.5 - (x_min + x_max) * 0.5 * scale
+    cy = (ylo + yhi) * 0.5 + (y_min + y_max) * 0.5 * scale
     return eye, forward, right, up, scale, cx, cy
 
 
-def render_mesh(canvas, mesh, texture, rect, target, eye_offset, flat_color=None, visor_guide=False,
+def render_mesh(canvas, mesh, texture, rect, target, eye_offset, flat_color=None,
                 zbuffer=None, projection=None):
     positions, normals, uvs, indices = mesh["positions"], mesh["normals"], mesh["uvs"], mesh["indices"]
     if projection is None:
@@ -524,8 +672,6 @@ def render_mesh(canvas, mesh, texture, rect, target, eye_offset, flat_color=None
                     tx = max(0, min(tex_w - 1, int(uv[0] * (tex_w - 1))))
                     ty = max(0, min(tex_h - 1, int(uv[1] * (tex_h - 1))))
                     base_color = tex_pixels[tx, ty][:3] if tex_pixels is not None else (90, 90, 90)
-                if visor_guide and all(i >= mesh["visor_start"] for i in (ia, ib, ic)):
-                    base_color = (72, 101, 119)
                 illumination = 0.25 + sum(max(0.0, dot(n, light)) * power
                                           for light, power in zip(lights, (0.58, 0.32, 0.12)))
                 pixels[sx, sy] = tuple(max(0, min(255, int(channel * illumination))) for channel in base_color)
@@ -543,28 +689,54 @@ def make_preview(cape, hood):
         small = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 15)
     except OSError:
         title = label = small = ImageFont.load_default()
-    draw.text((48, 32), "PURR2D2  /  CLOTH ASSETS", fill=(211, 221, 224), font=title)
-    draw.text((48, 73), "Original procedural meshes  •  software preview only, not in-game",
+    draw.text((48, 32), "PURR2D2  /  CLOTH FIT", fill=(211, 221, 224), font=title)
+    draw.text((48, 73), "Original procedural meshes • software preview only, not an in-game capture",
               fill=(122, 145, 156), font=small)
     left, right = (40, 118, 670, 710), (690, 118, 1320, 710)
     for box in (left, right):
         draw.rounded_rectangle(box, radius=14, outline=(43, 58, 67), width=2, fill=(16, 23, 29))
-    draw.text((65, 132), "TRAVEL CAPE  /  117 JOINTS", fill=(213, 194, 160), font=label)
-    draw.text((715, 132), "OVERSIZED HOOD  /  OPEN +Z FACE", fill=(195, 202, 207), font=label)
+    draw.text((65, 132), "CAPE + HOOD  /  ATTACHMENT FRAME", fill=(213, 194, 160), font=label)
+    draw.text((715, 132), "HOOD FIT  /  OPEN VISOR", fill=(195, 202, 207), font=label)
     light = Image.open(TEXTURES / "Purr2D2_Cloth_Light_Diffuse.png").convert("RGB")
-    render_mesh(image, cape, light, (70, 185, 640, 665), (0.0, -0.34, -0.33), (0.72, 0.12, 1.0))
+    head_from_chest = HEAD_FROM_CHEST_METERS
+    torso = torso_proxy_mesh()
+    combined_head = translated_mesh(helmet_proxy_mesh(), head_from_chest)
+    combined_visor = translated_mesh(visor_proxy_mesh(), head_from_chest)
+    combined_hood = translated_mesh(hood, head_from_chest)
+    combined_parts = [cape, torso, combined_head, combined_visor, combined_hood]
+    combined_rect = (70, 185, 640, 665)
+    combined_target = (0.0, -0.03, -0.06)
+    combined_eye = (1.10, 0.18, -1.30)
+    combined_projection = projection_for(combined_projection_mesh(combined_parts),
+                                         combined_rect, combined_target, combined_eye)
+    combined_depth = [float("inf")] * ((combined_rect[2] - combined_rect[0])
+                                       * (combined_rect[3] - combined_rect[1]))
+    render_mesh(image, cape, light, combined_rect, combined_target, combined_eye,
+                flat_color=(104, 69, 45), zbuffer=combined_depth, projection=combined_projection)
+    render_mesh(image, torso, None, combined_rect, combined_target, combined_eye,
+                flat_color=(43, 51, 56), zbuffer=combined_depth, projection=combined_projection)
+    render_mesh(image, combined_head, None, combined_rect, combined_target, combined_eye,
+                flat_color=(49, 67, 78), zbuffer=combined_depth, projection=combined_projection)
+    render_mesh(image, combined_visor, None, combined_rect, combined_target, combined_eye,
+                flat_color=(83, 132, 154), zbuffer=combined_depth, projection=combined_projection)
+    render_mesh(image, combined_hood, light, combined_rect, combined_target, combined_eye,
+                zbuffer=combined_depth, projection=combined_projection)
     hood_rect = (715, 185, 1295, 665)
-    hood_target = (0.0, 0.04, -0.02)
-    hood_eye = (0.08, 0.05, 1.0)
+    hood_target = (0.0, 0.30, HOOD_CENTER_Z)
+    hood_eye = (0.45, 0.10, 1.25)
     hood_projection = projection_for(hood, hood_rect, hood_target, hood_eye)
     hood_depth = [float("inf")] * ((hood_rect[2] - hood_rect[0]) * (hood_rect[3] - hood_rect[1]))
-    render_mesh(image, guide_head_mesh(), None, hood_rect,
-                hood_target, hood_eye, flat_color=(49, 67, 78), visor_guide=True,
+    render_mesh(image, helmet_proxy_mesh(), None, hood_rect,
+                hood_target, hood_eye, flat_color=(49, 67, 78),
+                zbuffer=hood_depth, projection=hood_projection)
+    render_mesh(image, visor_proxy_mesh(), None, hood_rect,
+                hood_target, hood_eye, flat_color=(83, 132, 154),
                 zbuffer=hood_depth, projection=hood_projection)
     render_mesh(image, hood, light, hood_rect,
                 hood_target, hood_eye, zbuffer=hood_depth, projection=hood_projection)
-    draw.text((70, 681), "Brown weave • chest origin • soft cloth folds", fill=(144, 160, 166), font=small)
-    draw.text((715, 681), "Brown preview; black variant included • visor guide is display-only",
+    draw.text((70, 681), "Measured torso profile • helmet offset +0.109m Y / +0.0096m Z",
+              fill=(144, 160, 166), font=small)
+    draw.text((715, 681), "Measured-size original helmet/visor proxy • not stock geometry or a game capture",
               fill=(144, 160, 166), font=small)
     ART.mkdir(parents=True, exist_ok=True)
     image.save(ART / "cape-cloth-preview.png")
@@ -580,15 +752,31 @@ def main():
     preview = make_preview(cape, hood)
     metadata = {
         "authoring": "original deterministic procedural mesh and texture generator",
-        "preview": "CPU software material render; not captured in-game or in Blender" if preview
+        "preview": "CPU software render with original measured-size helmet/visor proxy; not in-game" if preview
                    else "Pillow unavailable; preview omitted",
         "cape": {"glb": "Assets/Models/Purr2D2_Cape.glb", "mesh": "CapeMesh",
                  "vertices": len(cape["positions"]), "triangles": len(cape["indices"]) // 3,
                  "skinJoints": 118, "clothJoints": 117, "units": "meters", "origin": "chest"},
         "hood": {"glb": "Assets/Models/Purr2D2_Hood.glb", "mesh": "HoodMesh",
                  "vertices": len(hood["positions"]), "triangles": len(hood["indices"]) // 3,
-                 "skinJoints": 1, "units": "meters", "origin": "Head_M socket center",
-                 "openFaceDirection": "+Z"},
+                 "skinJoints": 1, "units": "meters",
+                 "origin": "native helmet attachment frame",
+                 "openFaceDirection": "+Z",
+                 "fit": {"openingHalfAngleRadians": HOOD_OPEN_HALF_ANGLE,
+                         "topRingY": HOOD_TOP_RING_Y, "apexY": HOOD_APEX_Y,
+                         "bottomY": HOOD_BOTTOM_Y, "neckJoinY": HOOD_NECK_JOIN_Y,
+                         "mainHalfWidth": HOOD_MAIN_HALF_WIDTH,
+                         "mainHalfDepth": HOOD_MAIN_HALF_DEPTH,
+                         "topCrownRoundnessRadius": HOOD_TOP_EXTRA_RADIUS,
+                         "bottomHalfWidth": HOOD_BOTTOM_HALF_WIDTH,
+                         "bottomHalfDepth": HOOD_BOTTOM_HALF_DEPTH}},
+        "previewProxy": {
+            "helmetBoundsMeters": HELMET_PROXY_BOUNDS,
+            "visorBoundsMeters": VISOR_PROXY_BOUNDS,
+            "headFromChestMeters": [0.0, 0.10899, 0.00958],
+            "torsoBoundsChestMeters": TORSO_PROXY_BOUNDS_CHEST_METERS,
+            "torso": "original ring mannequin reconstructed from measured KittyBody bounds; not stock geometry",
+        },
         "textures": {"size": f"{TEX_SIZE}x{TEX_SIZE}",
                      "channels": "diffuse RGB, tangent normal, AO/roughness/metalness",
                      "roughness": 0.95, "metalness": 0.0},

@@ -26,9 +26,23 @@ The coffer articles on attaching props to kitten bones and the existing saber po
 
 Each EVA kitten has its own session-only opt-in, initially false, in the existing per-kitten settings window. Its selected Light/Dark saber type determines brown/black cloth independently of blade color or ignition. The hood accompanies the cape and leaves the helmet visor opening exposed. World reset, boarding, mod disable and disposal release owned resources.
 
-The cape uses an original 9 × 13 grid (117 nodes), with the top row pinned. It has an oversized flared hem and shallow folds. The renderer maps `Cape_000` through `Cape_116` by name. Mesh coordinates are metres, +Y up and +Z toward the kitten's front, with the origin at the chest. The hood uses a separate `HoodRoot` rig at the head socket. Native two-sided materials provide cloth visibility and lighting from either side.
+The cape uses an original 9 × 13 grid (117 nodes), with the top row pinned. It has a curved 48 cm shoulder seam, an 86 cm flared hem and a 50 cm authored drop. The renderer maps `Cape_000` through `Cape_116` by name. Mesh coordinates are metres, +Y up and +Z toward the kitten's front, with the origin at the chest. The hood uses a separate `HoodRoot` rig in the native helmet attachment frame. Native two-sided materials provide cloth visibility and lighting from either side.
 
 Artificial gravity and bounded drag deliberately ignore atmospheric density and local gravitational strength. Forward movement makes the sheet trail behind; stopping lets it settle. This is a cosmetic Earth-like simulation and never supplies aerodynamic forces to the kitten or vessel. Hood folds are authored geometry; the hood is attached to the head rather than separately simulated.
+
+## Helmet and shoulder fit correction
+
+The first in-game screenshots exposed a bad authoring reference: the hood crown was 24.5 cm below the real helmet crown. Most of the hood lay inside the helmet, leaving its flared lower section visible around the shoulders. The original cape also extended about 35 cm below the stock kitten's soles.
+
+Fit measurements now use local stock `KSA_Cat`, `KSA_Cat_Helmet` and `KSA_Cat_Visor` assets. Stock geometry is read only and is not redistributed. `GltfLoader.ExtractSkeleton` places `Chest_M` 0.43093 m above the mesh sole and `Head_M` 0.10899 m up / 0.00958 m forward of the chest in the cape's axes. Native helmet coordinates are centimetres; converted to metres, its bounds are X ±0.40318, Y −0.08055–0.63750, Z −0.41173–0.34779. Those dimensions explain why the previous small guide could not establish fit.
+
+`CharacterAssets.xml` assigns the stock helmet to `Head_M` with no extra transform. `KittenRenderable.UpdateRenderData` publishes the final helmet matrix after animation and per-viewport placement. The hood now uses that exact matrix, preceded by a 100× metres-to-centimetres conversion. This preserves the helmet's socket orientation, translation and scale. The existing head-socket frame remains a fallback when no helmet is equipped. No extra skeleton traversal or physics pass is needed.
+
+The revised hood extends to Y 0.765 m, holds its full shell width through the helmet's lower edge, then narrows to a 0.34 m half-width / 0.235 m rear depth at Y −0.18 m. Its open face clears the stock visor, and its lower rear edge overlaps the cape near the neck. The cape's curved top seam moves inward toward the shoulders; its static hem is about 3 cm above the soles. A local lower bound stops simulated nodes at sole height without terrain queries.
+
+The body-clearance profile is cached once with the rest pose. Central nodes retain the −0.22 m rear limit; outboard shoulder nodes retain their authored rear position where the old flat limit would stretch short links away from the fixed pins. The closest dynamic bound is −0.19667 m at X ±0.25583 m, beyond the measured upper-body half-width of about 0.205 m. It is still 4.97 mm behind even the body's globally rearmost vertex. First-row nodes within that body width have at least 18.7 mm clearance from the same plane. There are no additional simulation passes, per-cape arrays or collision queries. Airflow uses half the bounded movement velocity, and lift is capped at 5.5 m/s² so the cloth always retains downward pull.
+
+`tools/check_cape_fit.py` takes local helmet and visor GLTF paths and checks the generated hood against their actual vertices. It is an offline authoring check, never runtime work. The checked-in `art/cape-cloth-preview.png` uses original measurement-based proxies and is a software preview, not an in-game capture. Native acceptance must still cover animation, other character rigs and MMU equipment.
 
 ## Performance requirements
 

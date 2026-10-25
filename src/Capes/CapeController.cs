@@ -186,7 +186,12 @@ internal sealed class CapeController : IDisposable
 
         if (!renderable.HideHead)
         {
-            _hood.Transform = SocketFrame(character, skeleton, _headBone, modelToBody, out _);
+            var helmet = _avatar.Attachments.Helmet;
+            if (CapeAttachmentMath.TryGetNativeHoodTransform(helmet.HasAttachment, helmet.HelmetMesh?.Transform,
+                    out float4x4 nativeHoodFrame))
+                _hood.Transform = nativeHoodFrame;
+            else
+                _hood.Transform = SocketFrame(character, skeleton, _headBone, modelToBody, out _);
             _hood.UpdateAnimation(0d);
             _hood.Draw(view);
         }

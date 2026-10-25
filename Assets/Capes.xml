@@ -2,7 +2,7 @@
 <!-- Original Purr2D2 cloth assets. Both GLBs are in meters, +Y up and +Z forward.
      CapeRoot is the identity skin root; its 117 children are row-major local translations.
      CapeMesh is a separate identity scene node. HoodRoot is the identity skin root;
-     HoodMesh is a separate identity scene node at the Head_M socket origin. -->
+     HoodMesh is a separate identity scene node in the native helmet attachment frame. -->
 <Assets>
   <GltfFile Id="Purr2D2_Cape_Glb">
     <Source Path="Assets/Models/Purr2D2_Cape.glb" />

@@ -14,10 +14,12 @@ public sealed class CapeCloth : IDisposable
     private const float MaxFrameDt = .1f;
     private const int MaxSubstepsPerUpdate = 4;
     private const float MaxLocalSpeed = 8f;
-    private const float MaximumLift = 9.81f;
-    private const float LiftPerSpeed = 3.27f;
-    private const float BackCollisionZ = -.22f;
-    private const float HemFloorY = -.88f;
+    private const float AirflowResponse = .5f;
+    // Partial lift always leaves a downward pull, including at maximum airflow.
+    private const float MaximumLift = 5.5f;
+    private const float LiftPerSpeed = 1.8333334f;
+    // Chest_M is about .431m above the stock kitten's mesh sole/ground level in bind pose.
+    private const float HemFloorY = -.43f;
 
     private static readonly Lazy<ChuteClothTopology> SharedTopology = new(BuildTopology);
 
@@ -52,7 +54,7 @@ public sealed class CapeCloth : IDisposable
         if (!float.IsFinite(frameDt) || frameDt <= 0f) return;
 
         float3 velocity = ClampFiniteVelocity(localVelocity);
-        _state.AirVelocityLocal = velocity;
+        _state.AirVelocityLocal = velocity * AirflowResponse;
         _state.QLocal = _state.Tuning.ReferenceQForDrag;
         float horizontalSpeed = MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z);
         float lift = MathF.Min(MaximumLift, LiftPerSpeed * horizontalSpeed);
@@ -133,10 +135,12 @@ public sealed class CapeCloth : IDisposable
 
             float3 velocity = _state.Velocities[i];
 
-            // Keep the whole cosmetic sheet behind the wearer without querying a body collider.
-            if (position.Z > BackCollisionZ)
+            // Preserve the authored shoulder curve without pulling the short
+            // first-row links away from their fixed pins.
+            float backCollisionLimit = CapeRestPose.BackCollisionLimitZ(i);
+            if (position.Z > backCollisionLimit)
             {
-                position.Z = BackCollisionZ;
+                position.Z = backCollisionLimit;
                 if (velocity.Z > 0f) velocity.Z = 0f;
                 changed = true;
             }

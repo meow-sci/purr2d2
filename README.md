@@ -6,7 +6,7 @@ Targets **KSA 2026.10.19.5638**, **StarMap.API 0.3.6**, and the loader's **Harmo
 
 ## Optional capes
 
-Open a kitten's settings with its colored overlay button and enable **Cape and hood**. This option starts **off for every kitten** and lasts for that EVA kitten's current session, like its saber color/type. **Light** selects brown woven cloth; **Dark** selects black. The cape stays equipped when the saber is stowed. An oversized open hood follows the head over the helmet.
+Open a kitten's settings with its colored overlay button and enable **Cape and hood**. This option starts **off for every kitten** and lasts for that EVA kitten's current session, like its saber color/type. **Light** selects brown woven cloth; **Dark** selects black. The cape stays equipped when the saber is stowed. An oversized open hood follows the helmet's native attachment, leaves the visor exposed and tapers into the cape at the neck. The cape has a curved shoulder seam and a hem near the feet.
 
 The hanging cape reuses KSA's parachute cloth solver with its own shoulder-pinned mesh. Artificial Earth-like gravity and airflow make it trail during movement and settle when stopped, including on airless bodies. It has no effect on vessel physics. The hood's folds are modeled rather than simulated, and a simple back-clearance boundary keeps the cape behind its wearer; there are no terrain or vessel collision queries.
 
@@ -14,7 +14,7 @@ The hanging cape reuses KSA's parachute cloth solver with its own shoulder-pinne
 
 Beyond 25 m or outside that budget, capes use a static drape after a short idle period; beyond 60 m they are not drawn. Distant enabled capes defer model setup until they enter a visible game camera's range. Pausing freezes the cloth, and unsupported time warp restores its rest pose. With all capes off, cape processing exits immediately without scanning the kitten population or creating renderables or cloth simulations. Render poses are reused until the cloth changes, and idle simulations are released once. See [the source research and asset contract](docs/research-capes.md) for the native integration and performance limits. Helmet fit, final appearance and game frame times still require in-game acceptance.
 
-The deterministic asset generator is `python3 tools/create_cape_assets.py`. Focused checks are `python3 tools/check_cape_assets.py` and `python3 tools/check_cape_cloth.py`; the latter exercises the actual managed KSA/Bepu solver and reports warmed CPU timings and allocation counts.
+The deterministic asset generator is `python3 tools/create_cape_assets.py`. Focused checks are `python3 tools/check_cape_assets.py` and `python3 tools/check_cape_cloth.py`; the latter exercises the actual managed KSA/Bepu solver and reports warmed CPU timings and allocation counts. `tools/check_cape_fit.py --helmet-gltf <path> --visor-gltf <path>` additionally checks hood clearance against locally available stock meshes. Restart KSA after replacing cape assets so its cached models are reloaded.
 
 ## Controls
 

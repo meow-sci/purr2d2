@@ -1,0 +1,25 @@
+{
+  "stockSourceNote": "Local stock GLTF vertices only; not redistributed with the mod.",
+  "clearanceMethod": "same-height radial gap from stock vertex to exact hood GLB triangle-shell intersection",
+  "units": "meters",
+  "helmetVertexCount": 5166,
+  "visorVertexCount": 333,
+  "hoodVertexCount": 430,
+  "hoodOpeningHalfAngleDegrees": 70.96232051525095,
+  "visorMaxHalfAngleDegrees": 66.92511614919484,
+  "visorAngularClearanceDegrees": 4.041266838507349,
+  "visorVerticesWithinOpening": true,
+  "helmetVerticesInOpenAperture": 2201,
+  "helmetVerticesCheckedAgainstShell": 2965,
+  "minimumRadialShellClearanceMeters": 0.02736466175295682,
+  "minimumClearancePointMeters": [
+    0.20418550491333007,
+    0.2933979034423828,
+    -0.3556996917724609
+  ],
+  "minimumClearancePointAngleDegrees": 148.6904193096869,
+  "shellClearanceP01Meters": 0.030348363134734047,
+  "crownVerticalClearanceMeters": 0.1275051355361938,
+  "cowlBottomHalfWidthMeters": 0.33980491757392883,
+  "cowlBottomRearDepthMeters": 0.23499999523162843
+}
