@@ -18,6 +18,14 @@
     <SoundFile Path="Assets/Audio/saber_close.ogg" />
     <SpatialSoundData Id="Purr2D2SaberSpatial" />
   </Sound>
+  <Sound Id="Purr2D2ForceCreak" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
+    <SoundFile Path="Assets/Audio/metal_creak.ogg" />
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
+  <Sound Id="Purr2D2ForceBreak" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
+    <SoundFile Path="Assets/Audio/metal_bang.ogg" />
+    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  </Sound>
   <Sound Id="Purr2D2SaberHum" ChannelId="Sfx" SimSpeed="Ignore" Priority="112">
     <SoundFile Path="Assets/Audio/saber-hum.wav">
       <Loop>

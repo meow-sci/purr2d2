@@ -87,14 +87,14 @@ internal static class AudioChecks
 
         audio.Initialize();
         audio.PlayGroan(owner, new double3(2, 3, 4), .8f);
-        Check(GameAudio.Channels.Count == firstChannel + 1, "groan starts exactly one existing ignition one-shot");
+        Check(GameAudio.Channels.Count == firstChannel + 1, "stage one starts exactly one creak one-shot");
         Check(audio.HasActiveChannels, "active groan is exposed to the runtime poller");
         var groan = GameAudio.Channels[^1];
-        Check(groan.Id == "Purr2D2SaberLightIgnite" && !groan.Stopped && !groan.Paused,
-            "groan maps to the existing lightsaber ignition sound");
+        Check(groan.Id == "Purr2D2ForceCreak" && !groan.Stopped && !groan.Paused,
+            "stage one maps to the dedicated force creak sound");
         Check(groan.VolumeMultiplier == .8f * .7f && groan.Spatial.Position == new double3(12, 23, 34)
             && groan.Spatial.Velocity == GameAudio.CameraVelocity && groan.Channel.DopplerLevel == 0,
-            "groan uses the body-frame emitter, global volume and zero Doppler");
+            "creak uses the body-frame emitter, 70 percent gain, global volume and zero Doppler");
 
         audio.Update(owner, new double3(3, 4, 5), .8f);
         audio.Update(owner, new double3(4, 5, 6), .8f);
@@ -104,18 +104,21 @@ internal static class AudioChecks
         audio.PlayBreak(owner, new double3(5, 6, 7), .6f);
         Check(GameAudio.Channels.Count == firstChannel + 2, "break starts a separate one-shot channel");
         var breakup = GameAudio.Channels[^1];
-        Check(breakup.Id == "Purr2D2SaberRetract" && !breakup.Stopped && !groan.Stopped,
-            "break maps to the existing retract sound and overlaps the groan");
+        Check(breakup.Id == "Purr2D2ForceBreak" && !breakup.Stopped && !groan.Stopped,
+            "stage two maps to the dedicated force bang and overlaps the creak");
+        Check(breakup.VolumeMultiplier == .6f,
+            "bang keeps its natural gain while respecting the global volume");
         Check(audio.HasActiveChannels, "overlapping one-shots keep the runtime poller active");
 
         audio.Update(owner, new double3(7, 8, 9), .4f, paused: true);
         Check(groan.Paused && breakup.Paused
             && groan.Spatial.Position == new double3(17, 28, 39)
-            && breakup.Spatial.Position == new double3(17, 28, 39),
-            "pause retains and spatially follows both active channels");
+            && breakup.Spatial.Position == new double3(17, 28, 39)
+            && groan.VolumeMultiplier == .4f * .7f && breakup.VolumeMultiplier == .4f,
+            "pause retains and spatially follows both channels with their separate stage gains");
         audio.Update(owner, new double3(8, 9, 10), 0, paused: false);
         Check(!groan.Paused && !breakup.Paused && groan.VolumeMultiplier == 0 && breakup.VolumeMultiplier == 0,
-            "resume follows the saved global volume, including mute");
+            "resume follows each stage's gain and the saved global volume, including mute");
         int beforeMutedPlay = GameAudio.Channels.Count;
         audio.PlayGroan(owner, new double3(0, 0, 0), 0);
         audio.PlayBreak(owner, new double3(0, 0, 0), 0);
@@ -163,7 +166,7 @@ internal static class AudioChecks
         GameAudio.System.Null = false;
         Check(GameAudio.Channels.Count == firstChannel, "missing audio system fails closed without throwing");
 
-        ModLibrary.MissingIds.Add("Purr2D2SaberLightIgnite");
+        ModLibrary.MissingIds.Add("Purr2D2ForceCreak");
         using (var missingAsset = new ForceBreakupAudio())
         {
             missingAsset.Initialize();

@@ -5,12 +5,13 @@ using KSA;
 
 namespace Purr2D2.Audio;
 
-/// <summary>Owns the short placeholder sounds played by the Force breakup gesture.</summary>
+/// <summary>Owns the short sounds played by the Force breakup gesture.</summary>
 internal sealed class ForceBreakupAudio : IDisposable
 {
-    private const string GroanSoundId = "Purr2D2SaberLightIgnite";
-    private const string BreakSoundId = "Purr2D2SaberRetract";
-    private const float PlaybackGain = .7f;
+    private const string GroanSoundId = "Purr2D2ForceCreak";
+    private const string BreakSoundId = "Purr2D2ForceBreak";
+    private const float GroanGain = .7f;
+    private const float BreakGain = 1f;
 
     private SoundBehavior? _groanSound;
     private SoundBehavior? _breakSound;
@@ -63,8 +64,8 @@ internal sealed class ForceBreakupAudio : IDisposable
         try
         {
             SpatialAudio spatial = GetSpatial(owner, emitterBody);
-            Follow(ref _groan, spatial, volume * PlaybackGain, paused);
-            Follow(ref _break, spatial, volume * PlaybackGain, paused);
+            Follow(ref _groan, spatial, volume * GroanGain, paused);
+            Follow(ref _break, spatial, volume * BreakGain, paused);
         }
         catch (Exception ex)
         {
@@ -89,7 +90,8 @@ internal sealed class ForceBreakupAudio : IDisposable
             // A repeated event cannot restart the same sound while its one-shot is still active.
             if (Alive(channel)) return;
             Cut(ref channel);
-            channel = Start(sound, GetSpatial(owner, emitterBody), volume * PlaybackGain);
+            float gain = groan ? GroanGain : BreakGain;
+            channel = Start(sound, GetSpatial(owner, emitterBody), volume * gain);
         }
         catch (Exception ex)
         {
