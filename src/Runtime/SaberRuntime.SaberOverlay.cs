@@ -11,6 +11,10 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime
 {
+    // Space + arrow keys are the active somersault controls; keep the overlay
+    // buttons available in code for easy restoration when desired.
+    private const bool SomersaultOverlayControlsEnabled = false;
+
     private static readonly ImColor8 MovementButtonFill = new(0, 0, 255, 64);
     private static readonly ImColor8 MovementButtonText = new(210, 230, 255, 255);
     private static readonly ImColor8 MovementButtonDisabledText = new(135, 145, 165, 255);
@@ -83,7 +87,7 @@ internal sealed partial class SaberRuntime
             var kittens = OverlayKittens;
             float menuInset = OverlayMenuBarInset(viewport);
             var baseLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(), kittens.Count,
-                menuInset, ShowSomersaultButtons);
+                menuInset, ShowSomersaultButtons && SomersaultOverlayControlsEnabled);
             _overlayLayout = baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
                 new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset);
             _overlayLayoutAvailable = _overlayLayout.Valid;
@@ -179,13 +183,9 @@ internal sealed partial class SaberRuntime
                     CenterOverlayText(draw, layout.SwingCenter + new float2(0, fontSize * .65f), swingText, "hold + drag", layout.SwingRadius * 1.6f, fontSize);
                     CenterOverlayText(draw, layout.SliceCenter, SomersaultActive && !_selectingSlice ? muted : white,
                         _selectingSlice ? "CANCEL" : "SLICE", layout.SliceRadius * 1.6f);
-                    if (layout.ShowSomersaultButtons)
-                    {
-                        DrawSomersaultButton(draw, layout.ForwardCenter, layout.SomersaultRadius, new(0, -1), canSomersault);
-                        DrawSomersaultButton(draw, layout.LeftCenter, layout.SomersaultRadius, new(-1, 0), canSomersault);
-                        DrawSomersaultButton(draw, layout.RightCenter, layout.SomersaultRadius, new(1, 0), canSomersault);
-                        DrawSomersaultButton(draw, layout.BackwardCenter, layout.SomersaultRadius, new(0, 1), canSomersault);
-                    }
+                    // Temporarily hidden while somersaults use Space + arrow keys.
+                    // Set SomersaultOverlayControlsEnabled to true and uncomment to restore.
+                    // DrawSomersaultButtons(draw, layout, canSomersault);
                     // The small reticle moves inside the fixed circle; the control itself never moves.
                     if (_overlayDrag.Active)
                     {
@@ -251,6 +251,15 @@ internal sealed partial class SaberRuntime
         draw.AddLine(tail, tip, color, thickness);
         draw.AddLine(tip, tip - direction * radius * .21f + normal * radius * .18f, color, thickness);
         draw.AddLine(tip, tip - direction * radius * .21f - normal * radius * .18f, color, thickness);
+    }
+
+    private static void DrawSomersaultButtons(ImDrawListPtr draw, OverlayLayout layout, bool available)
+    {
+        if (!layout.ShowSomersaultButtons) return;
+        DrawSomersaultButton(draw, layout.ForwardCenter, layout.SomersaultRadius, new(0, -1), available);
+        DrawSomersaultButton(draw, layout.LeftCenter, layout.SomersaultRadius, new(-1, 0), available);
+        DrawSomersaultButton(draw, layout.RightCenter, layout.SomersaultRadius, new(1, 0), available);
+        DrawSomersaultButton(draw, layout.BackwardCenter, layout.SomersaultRadius, new(0, 1), available);
     }
 
     private static float OverlayMenuBarInset(ImGuiViewportPtr viewport)
