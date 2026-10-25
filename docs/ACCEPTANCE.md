@@ -1,5 +1,15 @@
 # Acceptance record
 
+## Generated debris editor visibility (2026-10-25)
+
+Sliced fragments and Force debris must stay registered in KSA's shared part library so native vehicles and saves can resolve their template IDs. The vehicle editor also enumerates that library, and our generated templates lacked its `Hidden` tag. This exposed debris roots in the parts catalog and generated visual subparts in the separate Add SubParts menu.
+
+The detached fragment loader now adds the resolved native `EditorTag.Hidden` to every generated part/subpart. Startup restoration applies the same rule to existing `Generated/Slices/` bundles, covering older fragments and Force debris. Only in-memory editor tags change; template identities, part/subpart roles, generated XML/GLB bytes and normal authored practice parts retain their existing behavior. Exported XML is deliberately unchanged because persistent files must remain byte-identical when reused at the same content ID.
+
+The new visibility regression reproduces the original failure. `python3 tools/check_fragment_templates.py` and `python3 tools/check_force_host.py` pass with the actual managed KSA types, covering fresh fragments, frozen v3 saved fragments, simple/compound Force debris, idempotence and preserved tags/identities. The test harnesses supply the reference snapshot's omitted `System.IO.Hashing` dependency. `dotnet build Purr2D2.slnx -c Release --no-restore` passes with zero warnings/errors and produces the installable folder and ZIP.
+
+Native acceptance remains pending: install the rebuilt mod and restart KSA, slice a vehicle, then create a new vehicle and check both editor catalogs. Save/restart/reload and repeat with existing sliced fragments and Force debris. Confirm debris remains visible and usable in flight, ordinary parts/practice targets remain available, and repeating a cut does not report modified persistent assets. Keep `Generated/Slices/` alongside the saves.
+
 ## Manual contact contour recovery (2026-10-25)
 
 Manual cuts retain the preferred sweep plane and original eight small adjustments, then try sixteen wider tilts up to 0.6 radians (34.4 degrees). If all 25 attempts fail, up to three sections aligned with the captured part axes follow, ordered by closeness to the sweep direction. All candidates pass through the confirmed hit, subject to the existing microscopic topology nudge. Axis recovery can substantially change seam orientation and reports that adjustment in the completion message. Every accepted result still passes closure, additive volume, principal-frame, float32, geometry-budget, export and collider checks before publication. Impossible contacts retain the existing refusal and cannot fall back to a center cut or authored-subpart breakup.

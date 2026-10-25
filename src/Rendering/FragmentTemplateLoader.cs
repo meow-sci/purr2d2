@@ -10,6 +10,15 @@ internal static class FragmentTemplateLoader
     private static readonly Lazy<XmlSerializer> Serializer = new(BuildSerializer);
     internal static XmlSerializer CreateSerializer() => Serializer.Value;
 
+    /// <summary>Keep generated roots and visual subparts out of both editor catalogs.</summary>
+    internal static void HideFromEditor(AssetBundle bundle)
+    {
+        // Change only the resolved native tags. Durable XML is immutable at its
+        // content ID, and older saved debris must receive the same visibility fix.
+        foreach (var part in bundle.Assets.OfType<PartTemplate>())
+            if (!part.IsHidden) part.EditorTags.Add(EditorTag.Hidden);
+    }
+
     private static XmlSerializer BuildSerializer()
     {
         // PartTemplate.Components has no element attributes. A plain XmlSerializer silently
@@ -41,6 +50,7 @@ internal static class FragmentTemplateLoader
             || full.InertMasses.Count == 0
             || parts.Sum(p => p.Components.Count(c => c is PartModelModule.Template or PartModelGlassModule.Template)) != surfaceCount)
             throw new InvalidDataException("Fragment XML lost its render, collision or mass components.");
+        HideFromEditor(bundle);
         bundle.Assets.RemoveAll(asset => asset is MeshAtlasFileReference);
         return bundle; // Registration and OnDataLoad stay on the game thread.
     }

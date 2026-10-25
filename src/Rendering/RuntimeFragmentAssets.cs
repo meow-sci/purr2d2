@@ -72,6 +72,7 @@ internal static partial class RuntimeFragmentAssets
                 }
                 var bundle = XmlLoader.Load<AssetBundle>(path, mod)
                     ?? throw new InvalidDataException($"Could not restore generated slice assets from '{path}'. Keep this file and its GLB with the save.");
+                FragmentTemplateLoader.HideFromEditor(bundle);
                 mod.Register(bundle);
                 _registeredTemplates += bundle.Assets.OfType<PartTemplate>().Count();
             }

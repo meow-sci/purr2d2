@@ -37,6 +37,8 @@ internal static class FragmentTemplateChecks
         var bundle = FragmentTemplateLoader.Read(serializer, xml, "fragment", 2);
         var root = bundle.Assets.OfType<PartTemplate>().Single(p => p.Id == "fragment");
         var visual = bundle.Assets.OfType<PartTemplate>().Single(p => p.Id == "fragment_solid");
+        if (!root.IsHidden || !visual.IsHidden || root.IsSubPart || !visual.IsSubPart)
+            throw new Exception("Generated debris must stay instantiable as parts/subparts but be absent from both editor catalogs.");
         if (root.Components.OfType<MeshViewModule.Template>().Any()
             || visual.Components.OfType<MeshViewModule.Template>().Single().MeshView.Id != "pick_mesh")
             throw new Exception("Picking must stay on the visual subpart for native hover raycasts.");
@@ -62,6 +64,8 @@ internal static class FragmentTemplateChecks
         var merged = FragmentTemplateLoader.Read(serializer, generated.Xml, generated.Id, generated.Uploads.Length);
         var mergedRoot = merged.Assets.OfType<PartTemplate>().Single(p => p.Id == generated.Id);
         var mergedVisual = merged.Assets.OfType<SubPartTemplate>().Single();
+        if (!mergedRoot.IsHidden || !mergedVisual.IsHidden)
+            throw new Exception("Newly sliced roots and visual subparts must be hidden from the vehicle editor.");
         if (mergedRoot.SubPartInstances.Count != 1 || mergedRoot.SubPartInstances.Single().InstanceOf != mergedVisual.Id
             || mergedVisual.Components.OfType<PartModelModule.Template>().Count() != 3
             || mergedVisual.Components.OfType<PartModelGlassModule.Template>().Count() != 1
@@ -75,9 +79,28 @@ internal static class FragmentTemplateChecks
         var savedBundle = FragmentTemplateLoader.Read(serializer, savedXml, savedId, 4);
         if (savedId == generated.Id || !savedBundle.Assets.OfType<PartTemplate>().Any(p => p.Id == savedId))
             throw new Exception("Canonical export must preserve older saved assets under their original IDs.");
+        if (savedBundle.Assets.OfType<PartTemplate>().Any(p => !p.IsHidden))
+            throw new Exception("Older saved fragments without editor tags must also be hidden when loaded.");
+        // Startup uses KSA's loader, bypassing Read. Exercise the shared visibility
+        // fix on a raw saved bundle, including tags already resolved by OnDataLoad.
+        using var savedStream = new MemoryStream(savedXml, writable: false);
+        var restored = (AssetBundle)serializer.Deserialize(savedStream)!;
+        var restoredParts = restored.Assets.OfType<PartTemplate>().ToArray();
+        if (restoredParts.Any(p => p.IsHidden)) throw new Exception("The frozen legacy fixture must reproduce unhidden debris.");
+        var identities = restoredParts.Select(p => (p.Id, p.IsSubPart)).ToArray();
+        var structural = new EditorTag("Structural");
+        restoredParts[0].EditorTags.Add(structural);
+        FragmentTemplateLoader.HideFromEditor(restored);
+        FragmentTemplateLoader.HideFromEditor(restored);
+        if (restoredParts.Any(p => !p.IsHidden || p.EditorTags.Count(t => t == EditorTag.Hidden) != 1)
+            || !restoredParts[0].EditorTags.Contains(structural)
+            || !identities.SequenceEqual(restoredParts.Select(p => (p.Id, p.IsSubPart)))
+            || !savedXml.SequenceEqual(File.ReadAllBytes("tests/fixtures/fragment-v3.xml")))
+            throw new Exception("Restored debris visibility must be idempotent and preserve tags, part identities and immutable save assets.");
         Console.WriteLine("PASS: actual KSA XML retains visual-subpart picking, legacy picking, render/glass/collider modules and mass; missing/unattached picking and plain serializer rejected");
         Console.WriteLine("PASS: actual KSA XML decodes generated merged fragment with one visual SubPart, four render surfaces and durable topology metadata");
         Console.WriteLine("PASS: actual KSA XML still decodes frozen v3 saved fragment under its original identity");
+        Console.WriteLine("PASS: fresh and restored debris roots/subparts are editor-hidden; repeated normalization preserves native tags, identities and saved XML");
 
         void Reject(XDocument input, string message)
         {

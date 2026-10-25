@@ -35,6 +35,8 @@ internal static class ForceBreakupHostChecks
         var bundle = FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), xml, id, 2);
         var root = bundle.Assets.OfType<PartTemplate>().Single(p => p.Id == id);
         var visual = bundle.Assets.OfType<PartTemplate>().Single(p => p.Id == id + "_surface");
+        Check(root.IsHidden && visual.IsHidden && !root.IsSubPart && visual.IsSubPart,
+            "Force debris roots and visual subparts remain native parts but are hidden from both editor catalogs");
         var different = AuthoredDebrisAssets.Build(shape with { MassKg = 101 });
         var otherVisual = FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), different.Xml, different.Id, 2)
             .Assets.OfType<PartTemplate>().Single(p => p.Id == different.Id + "_surface");
@@ -270,6 +272,8 @@ internal static class ForceBreakupHostChecks
         var root = bundle.Assets.OfType<PartTemplate>().Single(part => part.Id == id);
         foreach (var instance in root.SubPartInstances) instance.Transform!.OnDataLoad(null!);
         var visualTemplates = bundle.Assets.OfType<PartTemplate>().Where(part => part.Id != id).ToDictionary(part => part.Id);
+        Check(root.IsHidden && visualTemplates.Values.All(part => part.IsHidden),
+            "compound Force debris hides every generated root and visual node from the editor");
         Check(root.SubPartInstances.Count == 2 && visualTemplates.Count == 2
             && visualTemplates.Values.Sum(visual => visual.Components.OfType<MeshViewModule.Template>().Count()) == 2
             && visualTemplates.Values.SelectMany(visual => visual.Components).OfType<PartModelGlassModule.Template>().Count() == 1,
