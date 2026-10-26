@@ -68,7 +68,7 @@ for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/Fragmen
                'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs',
                'src/Slicing/QuietSliceQuiescence.cs', 'tests/QuietSliceHooksChecks.cs',
                'src/Slicing/SliceColliderGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',
-               'src/Slicing/SliceMeshPrecision.cs', 'src/Core/SaberLimits.cs',
+               'src/Slicing/SliceMeshPrecision.cs', 'src/Core/SaberLimits.cs', 'src/Core/SliceResourceLimits.cs',
                'src/Slicing/SliceDiagnosticCounters.cs', 'src/Slicing/SliceFrameDiagnostics.cs',
                'src/Slicing/SliceWorkerDiagnostics.cs', 'src/Runtime/SliceWorkerHooks.cs',
                'src/Slicing/SliceCommitTimings.cs', 'src/Runtime/GameHooks.cs',

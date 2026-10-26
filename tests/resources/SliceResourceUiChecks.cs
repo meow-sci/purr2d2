@@ -56,6 +56,23 @@ internal sealed partial class SaberRuntime
         Check(runtime._settings.SliceVertexMaximumMiB == 256 && runtime._settings.SliceIndexMaximumMiB == 128,
             "growth controls cannot set ceilings below the selected startup reservation");
 
+        int applied = runtime._appliedSettings;
+        ImGui.Reset(); ImGui.SliderChanges["##SliceSolidLimit"] = 4096;
+        ImGui.SliderChanges["##SliceTriangleLimit"] = 240_000;
+        runtime.DrawSliceResourceSettings();
+        Check(runtime._settings.SliceSolidLimit == 4096 && runtime._settings.SliceTriangleLimit == 240_000
+            && runtime._appliedSettings == applied + 1
+            && ImGui.Text.Any(text => text.Contains("4,096 solids") && text.Contains("240,000 source triangles")
+                && text.Contains("480,000 combined output") && text.Contains("400,000 triangles per fragment"))
+            && ImGui.Text.Any(text => text.Contains("Geometry limits apply to the next cut")),
+            "geometry controls apply together and display the derived output allowances and next-cut timing");
+        ImGui.Reset(); ImGui.SliderChanges["##SliceSolidLimit"] = int.MaxValue;
+        ImGui.SliderChanges["##SliceTriangleLimit"] = int.MinValue;
+        runtime.DrawSliceResourceSettings();
+        Check(runtime._settings.SliceSolidLimit == Purr2D2.Core.SliceResourceLimits.MaximumSolidLimit
+            && runtime._settings.SliceTriangleLimit == Purr2D2.Core.SliceResourceLimits.MinimumTriangleLimit,
+            "geometry controls clamp out-of-range edits to supported ceilings and floors");
+
         Draw("Clear unused slice caches");
         Check(runtime._cacheClears == 1 && runtime._debrisClears == 0,
             "cache clearing queues only cache maintenance");

@@ -26,16 +26,25 @@ internal sealed partial class SaberRuntime
         ImGui.TextWrapped("Shared game buffers include stock meshes and fragments restored at startup, beyond the runtime slice reservation shown above.");
         if (!string.IsNullOrWhiteSpace(usage.GrowthStatus)) ImGui.TextWrapped(usage.GrowthStatus);
 
-        if (BeginSaberSettingsTable("##SliceResources", "Maximum vertex memory"))
+        if (BeginSaberSettingsTable("##SliceResources", "Source triangle limit"))
         {
             int vertex = _settings.SliceVertexArenaMiB, index = _settings.SliceIndexArenaMiB;
             bool autoGrow = _settings.SliceAutoGrow;
             int vertexMaximum = _settings.SliceVertexMaximumMiB, indexMaximum = _settings.SliceIndexMaximumMiB;
             int disk = _settings.SliceAssetDiskMiB, entries = _settings.SliceAssetEntryLimit;
             int vehicles = _settings.SlicePhysicsVehicleLimit;
+            int solids = _settings.SliceSolidLimit, triangles = _settings.SliceTriangleLimit;
             bool memoryChanged = false, liveChanged = false;
             try
             {
+                SaberSettingsRow("Closed solid limit");
+                liveChanged |= ImGui.SliderInt("##SliceSolidLimit", ref solids,
+                    SliceResourceLimits.MinimumSolidLimit, SliceResourceLimits.MaximumSolidLimit);
+                ShowSaberControlTip("Maximum closed solids in a part being sliced and in each resulting fragment. Open panels and sharp folds can create separate solids.\n\nApplies to the next cut; larger limits require more preparation work.");
+                SaberSettingsRow("Source triangle limit");
+                liveChanged |= ImGui.SliderInt("##SliceTriangleLimit", ref triangles,
+                    SliceResourceLimits.MinimumTriangleLimit, SliceResourceLimits.MaximumTriangleLimit);
+                ShowSaberControlTip("Maximum triangles while copying, preparing and subdividing the source hull. Backing open panels adds triangles.\n\nCombined cut output may use twice this count; each fragment may use five thirds. Applies to the next cut and saves automatically.");
                 SaberSettingsRow("Initial vertex memory");
                 memoryChanged |= ImGui.SliderInt("##SliceVertexArenaMiB", ref vertex,
                     SliceResourceLimits.MinimumVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB, "%d MiB");
@@ -76,13 +85,18 @@ internal sealed partial class SaberRuntime
                 _settings.SliceVertexMaximumMiB = vertexMaximum; _settings.SliceIndexMaximumMiB = indexMaximum;
                 _settings.SliceAssetDiskMiB = disk; _settings.SliceAssetEntryLimit = entries;
                 _settings.SlicePhysicsVehicleLimit = vehicles;
+                _settings.SliceSolidLimit = solids; _settings.SliceTriangleLimit = triangles;
                 _settings.Validate();
                 // Validation can raise a maximum to match an edited startup size;
                 // only growth limits apply live, never the startup reservation.
                 ApplySliceResourceSettings();
             }
         }
-        ImGui.TextWrapped("Startup graphics reservations take effect after restarting KSA. Other limits apply now and save automatically.");
+        var geometry = new SliceGeometryBudget(_settings.SliceSolidLimit, _settings.SliceTriangleLimit);
+        ImGui.TextWrapped($"Geometry limits: {geometry.Solids:N0} solids; {geometry.SourceTriangles:N0} source triangles; "
+            + $"{geometry.OutputTriangles:N0} combined output triangles; {geometry.FragmentTriangles:N0} triangles per fragment.\n"
+            + $"Separate export limits: {SliceResourceLimits.MaximumFragmentVertices:N0} unique positions per fragment and {SliceResourceLimits.MaximumRenderSurfaces:N0} render surfaces.");
+        ImGui.TextWrapped("Startup graphics reservations take effect after restarting KSA. Geometry limits apply to the next cut; other limits apply now. Settings save automatically.");
         ImGui.TextWrapped("Registered fragment meshes remain allocated. Automatic growth adds space within the chosen limits.\n\nClearing unused caches recovers unpublished uploads and keeps saved asset files.");
 
         bool maintain = CanMaintainSliceResources;

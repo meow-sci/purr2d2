@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Xml.Linq;
+using Purr2D2.Core;
 using Purr2D2.Cutting;
 
 namespace Purr2D2.Rendering;
@@ -35,8 +36,12 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
         Cache[id] = topology;
     }
 
-    internal static FragmentTopology? Read(XDocument document)
+    internal static FragmentTopology? Read(XDocument document, SliceGeometryBudget? geometry = null)
     {
+        // These files can belong to older saves, or a cut whose settings have since
+        // changed. Validate durable data against supported ceilings; admission of a
+        // recut uses its captured preferences in SliceSourceCapture and the slicer.
+        geometry ??= SliceGeometryBudget.Maximum;
         var element = document.Root?.Element(ElementName);
         if (element == null)
         {
@@ -49,7 +54,8 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
             throw new InvalidDataException("Fragment contains duplicate closed-solid topology.");
         if ((int?)element.Attribute("Version") != 1) throw new InvalidDataException("Unsupported fragment topology version.");
         int count = (int?)element.Attribute("Solids") ?? 0;
-        if (count is < 1 or > 2048) throw new InvalidDataException("Fragment topology solid count is outside the geometry budget.");
+        if (count < 1 || count > geometry.Solids)
+            throw new InvalidDataException($"Fragment topology solid count is outside the geometry budget ({count:N0} / {geometry.Solids:N0}).");
         var result = new Dictionary<string, FragmentSolidRun[]>(StringComparer.Ordinal);
         var seen = new HashSet<int>();
         int total = 0;
@@ -62,7 +68,8 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
                 throw new InvalidDataException("Fragment topology contains missing or duplicate surface ranges.");
             foreach (var run in runs)
             {
-                if (run.Solid < 0 || run.Solid >= count || run.Triangles is < 1 or > 200_000 || total > 200_000 - run.Triangles)
+                if (run.Solid < 0 || run.Solid >= count || run.Triangles < 1 || run.Triangles > geometry.FragmentTriangles
+                    || total > geometry.FragmentTriangles - run.Triangles)
                     throw new InvalidDataException("Fragment topology range is outside the geometry budget.");
                 total += run.Triangles;
                 seen.Add(run.Solid);
@@ -71,7 +78,7 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
         var models = document.Root!.Elements("SubPart").SelectMany(p => p.Elements())
             .Where(e => e.Name.LocalName is "PartModel" or "PartModelGlass")
             .Select(e => (string?)e.Element("Mesh")?.Attribute("Id") ?? "").ToHashSet(StringComparer.Ordinal);
-        if (result.Count is < 1 or > 2046 || seen.Count != count || !models.SetEquals(result.Keys))
+        if (result.Count < 1 || result.Count > SliceResourceLimits.MaximumRenderSurfaces || seen.Count != count || !models.SetEquals(result.Keys))
             throw new InvalidDataException("Fragment topology does not cover every visual surface and closed solid.");
         return new(count, result);
     }

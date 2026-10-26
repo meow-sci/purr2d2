@@ -1,3 +1,5 @@
+using Purr2D2.Core;
+
 namespace Purr2D2.Cutting;
 
 /// <summary>Bounded, repeatable variation followed by broad sections along the part's own axes.</summary>
@@ -59,7 +61,6 @@ internal static class AssistedSliceGeometry
 /// </summary>
 internal static class FacetedSliceGeometry
 {
-    private const int MaximumFaces = 120_000;
     private sealed class Profile(CutPoint normal, CutPoint across, double[] knots, double[] heights)
     {
         internal readonly CutPoint Normal = normal, Across = across;
@@ -74,11 +75,15 @@ internal static class FacetedSliceGeometry
     }
 
     internal static bool TrySlice(SliceFace[][] source, SlicePlane plane, uint seed,
-        out PlaneSliceResult? result, out string reason, CancellationToken cancel = default)
+        out PlaneSliceResult? result, out string reason, CancellationToken cancel = default, SliceGeometryBudget? geometry = null)
     {
+        geometry ??= SliceGeometryBudget.Current;
         result = null;
         try
         {
+            long triangles = source.Sum(s => (long)s.Length);
+            if (!geometry.AllowsSource(source.Length, triangles))
+            { reason = $"Faceted source exceeds the geometry budget ({geometry.SourceUsage(source.Length, triangles)}). {SliceGeometryBudget.SettingsHint}"; return false; }
             var points = source.SelectMany(s => s).SelectMany(f => new[] { f.A.Position, f.B.Position, f.C.Position }).ToArray();
             if (points.Length == 0) { reason = "No geometry for a faceted section."; return false; }
             var normal = plane.Normal.Normalized;
@@ -101,13 +106,14 @@ internal static class FacetedSliceGeometry
             foreach (var solid in source)
             {
                 cancel.ThrowIfCancellationRequested();
-                var split = Split(solid, profile, cancel);
+                var split = Split(solid, profile, cancel, geometry);
                 var mapped = Map(split, profile, inverse: false);
-                if (!PlaneSlicer.TryAudit(mapped, out reason)) { reason = "Faceted forward map: " + reason; return false; }
+                if (!PlaneSlicer.TryAudit(mapped, out reason, geometry)) { reason = "Faceted forward map: " + reason; return false; }
                 warped.Add(mapped);
-                if (warped.Sum(s => s.Length) > MaximumFaces) throw new InvalidDataException("Faceted source exceeds the subdivision budget.");
+                if (!geometry.AllowsSource(warped.Count, warped.Sum(s => (long)s.Length)))
+                    throw new InvalidDataException($"Faceted source exceeds the subdivision budget ({geometry.SourceUsage(warped.Count, warped.Sum(s => (long)s.Length))}). {SliceGeometryBudget.SettingsHint}");
             }
-            if (!PlaneSlicer.TrySliceCompound(warped, plane, out var clipped, out reason, cancellation: cancel)) { reason = "Faceted clipping: " + reason; return false; }
+            if (!PlaneSlicer.TrySliceCompound(warped, plane, out var clipped, out reason, cancellation: cancel, geometry: geometry)) { reason = "Faceted clipping: " + reason; return false; }
             var pieces = new List<SlicePiece>();
             foreach (var piece in clipped!.Pieces)
             {
@@ -115,17 +121,21 @@ internal static class FacetedSliceGeometry
                 foreach (var solid in piece.ClosedSolids ?? [piece.Faces])
                 {
                     cancel.ThrowIfCancellationRequested();
-                    var inverseSplit = Split(solid, profile, cancel);
-                    if (!PlaneSlicer.TryAudit(inverseSplit, out reason)) {
+                    var inverseSplit = Split(solid, profile, cancel, geometry);
+                    if (!PlaneSlicer.TryAudit(inverseSplit, out reason, geometry)) {
                         reason = "Faceted inverse subdivision: " + reason; return false; }
                     var faces = Map(inverseSplit, profile, inverse: true);
-                    if (!PlaneSlicer.TryAudit(faces, out reason)) { reason = "Faceted inverse map: " + reason; return false; }
+                    if (!PlaneSlicer.TryAudit(faces, out reason, geometry)) { reason = "Faceted inverse map: " + reason; return false; }
                     restored.Add(faces);
                 }
                 var all = restored.SelectMany(s => s).ToArray();
-                if (all.Length > 200_000) throw new InvalidDataException("Faceted output exceeds the subdivision budget.");
+                if (!geometry.AllowsFragment(restored.Count, all.Length))
+                    throw new InvalidDataException($"Faceted output exceeds the subdivision budget ({geometry.FragmentUsage(restored.Count, all.Length)}). {SliceGeometryBudget.SettingsHint}");
                 var properties = PlaneSlicer.Properties(all);
                 pieces.Add(new(all, properties.Volume, properties.Centroid, properties.Inertia, piece.PositiveSide) { ClosedSolids = restored.ToArray() });
+                long outputTriangles = pieces.Sum(p => (long)p.Faces.Length);
+                if (outputTriangles > geometry.OutputTriangles)
+                    throw new InvalidDataException($"Faceted output exceeds the combined triangle budget ({outputTriangles:N0} / {geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
             }
             double sourceVolume = source.Sum(s => PlaneSlicer.Properties(s).Volume);
             if (Math.Abs(pieces.Sum(p => p.Volume) - sourceVolume) > Math.Max(1e-10, sourceVolume * 2e-6))
@@ -156,7 +166,7 @@ internal static class FacetedSliceGeometry
         return result;
     }
 
-    private static SliceFace[] Split(SliceFace[] source, Profile profile, CancellationToken cancel)
+    private static SliceFace[] Split(SliceFace[] source, Profile profile, CancellationToken cancel, SliceGeometryBudget geometry)
     {
         var current = PlaneSlicer.CanonicalPositions(source);
         double epsilon = PlaneSlicer.TopologyTolerance(current);
@@ -217,7 +227,8 @@ internal static class FacetedSliceGeometry
                         if (CutPoint.Cross(polygon[j].Position - polygon[0].Position, polygon[j + 1].Position - polygon[0].Position).LengthSquared > 1e-24)
                             output.Add(new(polygon[0], polygon[j], polygon[j + 1], f.Material));
                 }
-                if (output.Count > MaximumFaces * 2) throw new InvalidDataException("Faceted subdivision exceeds the triangle budget.");
+                if (output.Count > geometry.OutputTriangles)
+                    throw new InvalidDataException($"Faceted subdivision exceeds the triangle budget ({output.Count:N0} / {geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
             }
             current = output.ToArray();
         }

@@ -1,4 +1,5 @@
 using Brutal.Numerics;
+using Purr2D2.Core;
 using Purr2D2.Cutting;
 using Purr2D2.Rendering;
 
@@ -9,6 +10,7 @@ internal sealed record SliceMaterialData(string Id, bool Glass);
 internal sealed record SliceInput(SliceFace[][] Groups, CutPoint[] Axes,
     IReadOnlyDictionary<int, SliceMaterialData> Materials, float MassKg, uint Seed = 0)
 {
+    internal SliceGeometryBudget Geometry { get; init; } = SliceGeometryBudget.Current;
     internal bool GeneratedClosedGeometry { get; init; }
     internal ContactSlice? Contact { get; init; }
 }
@@ -28,7 +30,8 @@ internal static class SliceGeometryWork
     internal static CpuSlice Calculate(SliceInput input, CancellationToken cancel, Action<SlicePlan> publish)
     {
         cancel.ThrowIfCancellationRequested();
-        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel, input.GeneratedClosedGeometry))
+        var geometry = input.Geometry;
+        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel, input.GeneratedClosedGeometry, geometry))
         {
             if (input.Contact is not null) throw new InvalidDataException("Cannot slice at contact: " + reason);
             if (QuietSubpartBreakup.TryBuild(input, out var authored, out var authoredFailure, cancel))
@@ -60,8 +63,8 @@ internal static class SliceGeometryWork
             cancel.ThrowIfCancellationRequested();
             PlaneSliceResult? result;
             bool sliced = attempt.Faceted
-                ? FacetedSliceGeometry.TrySlice(source, candidate, input.Seed + (uint)attempt.Index * 0x9e3779b9u, out result, out failure, cancel)
-                : PlaneSlicer.TrySliceCompound(source, candidate, out result, out failure, cancellation: cancel);
+                ? FacetedSliceGeometry.TrySlice(source, candidate, input.Seed + (uint)attempt.Index * 0x9e3779b9u, out result, out failure, cancel, geometry)
+                : PlaneSlicer.TrySliceCompound(source, candidate, out result, out failure, cancellation: cancel, geometry: geometry);
             if (!sliced) { if (attempt.Faceted) facetFailure = failure; continue; }
             var prepared = new List<CpuFragment>();
             double volume = result!.Pieces.Sum(p => p.Volume);
@@ -74,15 +77,15 @@ internal static class SliceGeometryWork
             {
                 cancel.ThrowIfCancellationRequested();
                 if (!SlicePrincipalFrame.TryCreate(piece, out var frame, out failure)
-                    || !SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var solids, out var extents, out failure, cancel)) break;
+                    || !SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var solids, out var extents, out failure, cancel, geometry)) break;
                 var points = new HashSet<CutPoint>();
                 foreach (var solid in solids)
                 {
                     foreach (var f in solid) { points.Add(f.A.Position); points.Add(f.B.Position); points.Add(f.C.Position); }
                 }
                 int groups = FragmentAssetWriter.CountRenderSurfaces(solids, input.Materials);
-                if (groups > 2046 || points.Count > 65536 || solids.Sum(s => s.Length) > 200_000)
-                { failure = "This cut exceeds the native fragment geometry budget."; break; }
+                if (groups > SliceResourceLimits.MaximumRenderSurfaces || points.Count > SliceResourceLimits.MaximumFragmentVertices)
+                { failure = $"This cut exceeds the fragment export budget ({groups:N0} / {SliceResourceLimits.MaximumRenderSurfaces:N0} render surfaces; {points.Count:N0} / {SliceResourceLimits.MaximumFragmentVertices:N0} unique positions)."; break; }
                 float mass = (float)(input.MassKg * piece.Volume / volume);
                 if (!float.IsFinite(mass) || mass <= .0001f) { failure = "Slice fragment mass is invalid."; break; }
                 prepared.Add(new(piece, frame, solids, extents, mass));
@@ -94,7 +97,7 @@ internal static class SliceGeometryWork
                 for (int i = 0; i < assets.Length; i++)
                 {
                     cancel.ThrowIfCancellationRequested();
-                    assets[i] = FragmentAssetWriter.Build(prepared[i], input.Materials, cancel);
+                    assets[i] = FragmentAssetWriter.Build(prepared[i], input.Materials, cancel, geometry);
                 }
             }
             catch (InvalidDataException error)

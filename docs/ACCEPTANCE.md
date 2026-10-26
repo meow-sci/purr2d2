@@ -319,6 +319,22 @@ after confirmation and a settled-state recheck. It retains registered graphics
 memory and saved assets, so exhausting published mesh memory still needs a
 restart. Existing assets remain reusable after lowering storage limits.
 
+Geometry admission is also configurable here: defaults of 2,048 closed solids /
+120,000 source triangles, with ranges of 128–16,384 / 1,000–1,000,000. Each cut
+captures one immutable budget before native copying; shell preparation, planar
+and faceted cuts, authored fallback, float32 normalization/audits and export use
+that snapshot. Combined output and per-fragment triangle allowances scale at
+2× and 5/3× respectively. Existing saved topology loads against supported ceilings
+after preferences are lowered; recuts use the newly selected admission limits.
+Managed regressions cover the 2,078-solid failure case through production worker
+export, valid clipping above 120,000 source triangles, GLB output above 200,000
+triangles, multi-island groups, backing expansion, generated/closed fast paths,
+fallback aggregate limits, lower output/normalization allowances, snapshot
+isolation, UI bounds and preference persistence. The in-game controls and complex
+car model still require native acceptance; these fixtures do not measure native
+frame times or guarantee that every mesh passes the independent contour/collider
+constraints.
+
 Focused regressions cover orbital translation, rotating frames, current markers,
 selection identity, tolerance bounds and capture, exact-hit priority, terrain
 occlusion, native sphere/box/capsule/compound queries, resource persistence,

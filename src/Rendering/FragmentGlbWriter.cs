@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Purr2D2.Core;
 using Purr2D2.Cutting;
 
 namespace Purr2D2.Rendering;
@@ -9,9 +10,11 @@ internal static class FragmentGlbWriter
 {
     internal readonly record struct Group(string Name, int Material, SliceFace[] Faces);
 
-    internal static byte[] Write(IReadOnlyList<Group> groups)
+    internal static byte[] Write(IReadOnlyList<Group> groups, SliceGeometryBudget? geometry = null)
     {
-        if (groups.Count == 0 || groups.Count > 2048) throw new InvalidDataException("Fragment material group count is outside 1..2048.");
+        geometry ??= SliceGeometryBudget.Current;
+        if (groups.Count == 0 || groups.Count > SliceResourceLimits.MaximumRenderSurfaces + 2)
+            throw new InvalidDataException($"Fragment material group count is outside 1..{SliceResourceLimits.MaximumRenderSurfaces + 2}.");
         using var binary = new MemoryStream();
         using var writer = new BinaryWriter(binary, Encoding.UTF8, leaveOpen: true);
         var views = new List<object>();
@@ -20,8 +23,8 @@ internal static class FragmentGlbWriter
         var nodes = new List<object>();
         foreach (var group in groups)
         {
-            if (group.Faces.Length == 0 || group.Faces.Length > 200_000)
-                throw new InvalidDataException("Fragment group has no triangles or exceeds the 200,000 triangle limit.");
+            if (group.Faces.Length == 0 || group.Faces.Length > geometry.FragmentTriangles)
+                throw new InvalidDataException($"Fragment group has no triangles or exceeds the triangle limit ({group.Faces.Length:N0} / {geometry.FragmentTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
             var vertices = new SliceVertex[checked(group.Faces.Length * 3)];
             for (var i = 0; i < group.Faces.Length; i++)
             {

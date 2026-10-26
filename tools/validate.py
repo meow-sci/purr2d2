@@ -679,6 +679,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/FragmentAssetChecks.cs",
         source / "tests/QuietBreakupAssetChecks.cs",
         source / "tests/ContactSliceChecks.cs",
+        source / "tests/SliceGeometryBudgetChecks.cs",
     ]
     somersault_runtime_sources = [
         source / "src/Core/SomersaultMotion.cs",
@@ -781,7 +782,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("QuietContactChecks", [source / "src/Slicing/QuietSliceContacts.cs", source / "tests/slicing/QuietContactChecks.cs"], None),
         ("QuietQuiescenceChecks", [source / "src/Slicing/QuietSliceQuiescence.cs", source / "tests/slicing/QuietQuiescenceChecks.cs"], None),
         ("FragmentAssetChecks", fragment_asset_sources,
-         "internal static class Program { static void Main() { FragmentAssetChecks.Run(); QuietBreakupAssetChecks.Run(); ContactSliceChecks.Run(); } }"),
+         "internal static class Program { static void Main() { FragmentAssetChecks.Run(); QuietBreakupAssetChecks.Run(); ContactSliceChecks.Run(); SliceGeometryBudgetChecks.Run(); } }"),
         ("SomersaultRuntimeChecks", somersault_runtime_sources, None),
         ("SomersaultWorkerChecks", somersault_worker_sources, None),
         ("SomersaultPoseChecks", somersault_pose_sources, None),

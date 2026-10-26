@@ -1,4 +1,5 @@
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Rendering;
 using Purr2D2.Slicing;
 
@@ -20,6 +21,7 @@ internal sealed partial class SaberRuntime
     private void ApplySliceResourceSettings()
     {
         _settings.Validate();
+        SliceGeometryBudget.Configure(_settings.SliceSolidLimit, _settings.SliceTriangleLimit);
         RuntimeFragmentAssets.ConfigureStorageLimits(_settings.SliceAssetDiskMiB, _settings.SliceAssetEntryLimit);
         RuntimeFragmentAssets.ConfigureGrowth(_settings.SliceAutoGrow, _settings.SliceVertexMaximumMiB, _settings.SliceIndexMaximumMiB);
         NativeSlicePhysics.ConfigureVehicleLimit(_settings.SlicePhysicsVehicleLimit);

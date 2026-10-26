@@ -1,3 +1,5 @@
+using Purr2D2.Core;
+
 namespace Purr2D2.Cutting;
 
 /// <summary>
@@ -15,29 +17,48 @@ internal static class SliceShellBuilder
     }
 
     internal static bool TryPrepare(IReadOnlyList<SliceFace[]> groups, out SliceFace[][] solids, out string reason, CancellationToken cancellation = default,
-        bool generatedClosedGeometry = false)
+        bool generatedClosedGeometry = false, SliceGeometryBudget? geometry = null)
     {
+        geometry ??= SliceGeometryBudget.Current;
         var result = new List<SliceFace[]>();
         solids = [];
+        long triangles = 0;
+        int solidCount = 0;
+        if (!geometry.AllowsSource(groups.Count, groups.Sum(g => (long)g.Length)))
+        { reason = $"Source hull exceeds the shell geometry budget ({geometry.SourceUsage(groups.Count, groups.Sum(g => (long)g.Length))}). {SliceGeometryBudget.SettingsHint}"; return false; }
         foreach (var group in groups)
         {
             cancellation.ThrowIfCancellationRequested();
-            if (PlaneSlicer.TryAudit(group, out _)) { result.Add(group); continue; }
-            if (generatedClosedGeometry)
+            if (PlaneSlicer.TryAuditSolids(group, out _, out int count, out _, geometry))
             {
-                if (!ClosedMeshPreparation.TryNormalize(group, out var repaired, out reason, cancellation))
-                { reason = $"Generated solid {result.Count} cannot be repaired as closed geometry: " + reason; return false; }
-                result.Add(repaired); continue;
+                if (!Append(group, count, result, ref solidCount, ref triangles, geometry, out reason)) return false;
             }
-            if (!PrepareGroup(group, result, out reason)) { reason = $"Hull group {groups.ToList().IndexOf(group)} ({group.Length} triangles): " + reason; return false; }
-            if (result.Count > 2048 || result.Sum(g => g.Length) > 120_000)
-            { reason = $"Prepared hull exceeds the shell geometry budget ({result.Count} solids / {result.Sum(g => g.Length)} triangles)."; return false; }
+            else if (generatedClosedGeometry)
+            {
+                if (!ClosedMeshPreparation.TryNormalize(group, out var repaired, out reason, cancellation, geometry: geometry))
+                { reason = $"Generated solid {result.Count} cannot be repaired as closed geometry: " + reason; return false; }
+                if (!PlaneSlicer.TryAuditSolids(repaired, out _, out count, out reason, geometry)
+                    || !Append(repaired, count, result, ref solidCount, ref triangles, geometry, out reason)) return false;
+            }
+            else if (!PrepareGroup(group, result, ref solidCount, ref triangles, geometry, cancellation, out reason))
+            { reason = $"Hull group {groups.ToList().IndexOf(group)} ({group.Length} triangles): " + reason; return false; }
         }
         solids = result.ToArray(); reason = "";
         return solids.Length > 0;
     }
 
-    private static bool PrepareGroup(SliceFace[] source, List<SliceFace[]> output, out string reason)
+    private static bool Append(SliceFace[] solid, int count, List<SliceFace[]> output, ref int solidCount, ref long triangles,
+        SliceGeometryBudget geometry, out string reason)
+    {
+        output.Add(solid); triangles += solid.Length; solidCount += count;
+        reason = "";
+        if (geometry.AllowsSource(solidCount, triangles)) return true;
+        reason = $"Prepared hull exceeds the shell geometry budget ({geometry.SourceUsage(solidCount, triangles)}). {SliceGeometryBudget.SettingsHint}";
+        return false;
+    }
+
+    private static bool PrepareGroup(SliceFace[] source, List<SliceFace[]> output, ref int solidCount, ref long triangles,
+        SliceGeometryBudget geometry, CancellationToken cancellation, out string reason)
     {
         reason = "";
         var positions = new List<CutPoint>();
@@ -83,6 +104,7 @@ internal static class SliceShellBuilder
         var visited = new bool[faces.Count]; var reversed = new bool[faces.Count];
         for (int seed = 0; seed < faces.Count; seed++)
         {
+            cancellation.ThrowIfCancellationRequested();
             if (visited[seed]) continue;
             var component = new List<int>(); var pending = new Queue<int>();
             visited[seed] = true; pending.Enqueue(seed);
@@ -115,7 +137,11 @@ internal static class SliceShellBuilder
             // A closed authored island can be inside an otherwise open mesh.
             if (patch.Sum(f => CutPoint.Dot(f.A.Position, CutPoint.Cross(f.B.Position, f.C.Position))) < 0)
                 patch = patch.Select(Reverse).ToArray();
-            if (PlaneSlicer.TryAudit(patch, out _)) { output.Add(patch); continue; }
+            if (PlaneSlicer.TryAudit(patch, out _, geometry))
+            {
+                if (!Append(patch, 1, output, ref solidCount, ref triangles, geometry, out reason)) return false;
+                continue;
+            }
             // Do not use a closed volume's signed-volume heuristic for open panels.
             patch = component.Select(i => reversed[i] ? Reverse(faces[i]) : faces[i]).ToArray();
             patch = SeparatePinchedVertices(patch);
@@ -151,9 +177,9 @@ internal static class SliceShellBuilder
                 shell.Add(new(b with { Normal = normal }, ia with { Normal = normal }, ib with { Normal = normal }, material));
             }
             var prepared = shell.ToArray();
-            if (!PlaneSlicer.TryAudit(prepared, out string failure))
+            if (!PlaneSlicer.TryAudit(prepared, out string failure, geometry))
             { reason = $"Could not close an authored hull panel ({patch.Length} triangles, {boundary.Count} border edges): " + failure; return false; }
-            output.Add(prepared);
+            if (!Append(prepared, 1, output, ref solidCount, ref triangles, geometry, out reason)) return false;
         }
         return true;
     }

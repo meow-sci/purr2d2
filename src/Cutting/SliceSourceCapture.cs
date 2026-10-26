@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Brutal.Numerics;
 using Brutal.Render.Mesh;
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Rendering;
 using Purr2D2.Slicing;
 using RenderCore;
@@ -13,6 +14,7 @@ internal sealed class SliceSourceCapture : IDisposable
 {
     private static int _cutSequence = Environment.TickCount;
     private readonly uint _seed = unchecked((uint)Interlocked.Increment(ref _cutSequence));
+    private readonly SliceGeometryBudget _geometry = SliceGeometryBudget.Current;
     private sealed record Node(Part Part, double4x4 Transform, MeshReference?[] Meshes, SliceMaterialData[] Materials);
     private readonly Part _full;
     private readonly Vehicle _vehicle;
@@ -98,8 +100,9 @@ internal sealed class SliceSourceCapture : IDisposable
                 {
                     if (primitive.IndexBuffer == null || primitive.IndexBuffer.Stride != 4 || primitive.IndexBuffer.Count % 3 != 0)
                         throw new InvalidDataException("Part mesh does not expose native indexed triangles.");
-                    if (total + faces.Count + primitive.IndexBuffer.Count / 3 > 120_000)
-                        throw new InvalidDataException("Part exceeds the 120,000-triangle slicing budget.");
+                    long triangles = (long)total + faces.Count + primitive.IndexBuffer.Count / 3;
+                    if (triangles > _geometry.SourceTriangles)
+                        throw new InvalidDataException($"Part exceeds the source triangle budget ({triangles:N0} / {_geometry.SourceTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
                     for (int start = 0; start < primitive.IndexBuffer.Count; start += 768)
                     {
                         CopyChunk(primitive, start, faces, transform, inverse, determinant < 0, materialId);
@@ -120,11 +123,14 @@ internal sealed class SliceSourceCapture : IDisposable
         if (topology != null)
             foreach (var solid in topology.Complete()) { groups.Add(solid); yield return 0; }
         if (groups.Count == 0) throw new InvalidDataException("No supported native part-model surfaces found.");
+        if (!_geometry.AllowsSource(groups.Count, total))
+            throw new InvalidDataException($"Captured hull exceeds the geometry budget ({_geometry.SourceUsage(groups.Count, total)}). {SliceGeometryBudget.SettingsHint}");
         if (!double4x4.Invert(_full.MatrixAsmb2VehicleAsmb, out var inv)) throw new InvalidDataException("Part transform is unavailable.");
         CutPoint[] axes = [new(inv.M11, inv.M21, inv.M31), new(inv.M12, inv.M22, inv.M32), new(inv.M13, inv.M23, inv.M33)];
         Input = new(groups.ToArray(), axes, materials, _mass, _seed)
         {
             GeneratedClosedGeometry = RuntimeFragmentAssets.IsGeneratedTemplate(_full.Template.Id),
+            Geometry = _geometry,
             Contact = contact
         };
         if (!IsCurrent(_full)) throw new InvalidOperationException("Source changed during capture; try again.");

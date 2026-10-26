@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Purr2D2.Core;
 
 namespace Purr2D2.Cutting;
 
@@ -30,18 +31,17 @@ internal sealed record PlaneSliceResult(SlicePiece[] Pieces, SlicePlane Effectiv
 /// </summary>
 internal static class PlaneSlicer
 {
-    private const int MaximumSourceFaces = 120_000;
-    private const int MaximumOutputFaces = 240_000;
+    // Contour complexity and cap work are independent of source triangle/solid admission.
     private const int MaximumContourVertices = 2_048;
     private const int MaximumCapCells = 30_000;
 
     public static bool TrySlice(IReadOnlyList<SliceFace> source, SlicePlane plane,
-        out PlaneSliceResult? result, out string failure, int capMaterial = -1)
+        out PlaneSliceResult? result, out string failure, int capMaterial = -1, SliceGeometryBudget? geometry = null)
     {
         result = null;
         try
         {
-            result = new Operation(source, plane, capMaterial).Run();
+            result = new Operation(source, plane, capMaterial, geometry ?? SliceGeometryBudget.Current).Run();
             failure = "";
             return true;
         }
@@ -55,21 +55,23 @@ internal static class PlaneSlicer
     /// are additive exactly as in the authored compound; this is deliberately not mesh union.
     /// </summary>
     public static bool TrySliceCompound(IReadOnlyList<SliceFace[]> authoredGroups, SlicePlane plane,
-        out PlaneSliceResult? result, out string failure, int capMaterial = -1, CancellationToken cancellation = default)
+        out PlaneSliceResult? result, out string failure, int capMaterial = -1, CancellationToken cancellation = default,
+        SliceGeometryBudget? geometry = null)
     {
+        geometry ??= SliceGeometryBudget.Current;
         result = null;
         try
         {
-            Require(authoredGroups.Count > 0 && authoredGroups.Count <= 2048, "Authored compound group count exceeds the runtime budget.");
-            int triangleCount = authoredGroups.Sum(x => x.Length);
-            Require(triangleCount >= 4 && triangleCount <= MaximumSourceFaces, "Compound source triangle count is outside the slicing budget.");
+            long triangleCount = authoredGroups.Sum(x => (long)x.Length);
+            Require(authoredGroups.Count > 0 && triangleCount >= 4 && geometry.AllowsSource(authoredGroups.Count, triangleCount),
+                $"Compound source exceeds the geometry budget ({geometry.SourceUsage(authoredGroups.Count, triangleCount)}). {SliceGeometryBudget.SettingsHint}");
             // Audit once with each group's own topology policy. Canonical seams
             // before choosing the one common plane, including carried-through solids.
             var prepared = new List<(SliceFace[] Faces, List<List<int>> Components, double Epsilon)>();
             foreach (var group in authoredGroups)
             {
                 cancellation.ThrowIfCancellationRequested();
-                Require(TryAudit(group, out _, out var components, out var auditFailure),
+                Require(TryAudit(group, out _, out var components, out _, out var auditFailure, geometry),
                     $"Compound input group {prepared.Count} is not a valid solid: " + auditFailure);
                 prepared.Add((CanonicalPositions(group), components, TopologyTolerance(group)));
             }
@@ -109,7 +111,8 @@ internal static class PlaneSlicer
                 foreach (var solid in solids)
                 {
                     cancellation.ThrowIfCancellationRequested();
-                    Require(++solidCount <= 2048, "Compound contains too many independent closed solids.");
+                    Require(++solidCount <= geometry.Solids,
+                        $"Compound exceeds the closed-solid limit ({solidCount:N0} / {geometry.Solids:N0}). {SliceGeometryBudget.SettingsHint}");
                     var faces = solid.Faces.ToArray(); var props = Properties(faces);
                     Require(props.Volume > topologyEpsilon * topologyEpsilon * topologyEpsilon * 100, "Compound solid has nonpositive material volume.");
                     sourceVolume += props.Volume;
@@ -125,7 +128,7 @@ internal static class PlaneSlicer
                     else
                     {
                         PlaneSliceResult sliced;
-                        try { sliced = new Operation(faces, effectivePlane, capMaterial, fixedPlane: true).Run(); }
+                        try { sliced = new Operation(faces, effectivePlane, capMaterial, geometry, fixedPlane: true).Run(); }
                         catch (SliceRejected error) { throw new SliceRejected("Closed compound solid cannot be sliced: " + error.Message); }
                         Require(sliced != null && (sliced.EffectivePlane.Normal - effectivePlane.Normal).Length < 1e-12
                             && Math.Abs(sliced.EffectivePlane.Offset - effectivePlane.Offset) < epsilon,
@@ -137,7 +140,8 @@ internal static class PlaneSlicer
                         }
                         contours += sliced.ContourCount; holes += sliced.HoleCount;
                     }
-                    Require(positive.Count + negative.Count <= MaximumOutputFaces, "Compound slice exceeds the output triangle budget.");
+                    Require(positive.Count + negative.Count <= geometry.OutputTriangles,
+                        $"Compound slice exceeds the output triangle budget ({positive.Count + negative.Count:N0} / {geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
                 }
             }
             Require(contours > 0 && positive.Count > 0 && negative.Count > 0, "Plane does not cut material in this rigid compound.");
@@ -154,28 +158,44 @@ internal static class PlaneSlicer
     }
 
     /// <summary>Revalidate generated/float-quantized geometry before exposing it to native physics.</summary>
-    public static bool TryAudit(IReadOnlyList<SliceFace> faces, out string failure) => TryAudit(faces, out _, out failure);
-    public static bool TryAuditCompound(IReadOnlyList<SliceFace[]> solids, out double volume, out string failure)
+    public static bool TryAudit(IReadOnlyList<SliceFace> faces, out string failure, SliceGeometryBudget? geometry = null)
+        => TryAudit(faces, out _, out failure, geometry);
+    public static bool TryAuditCompound(IReadOnlyList<SliceFace[]> solids, out double volume, out string failure,
+        SliceGeometryBudget? geometry = null)
+        => TryAuditCompound(solids, out volume, out _, out failure, geometry);
+
+    internal static bool TryAuditCompound(IReadOnlyList<SliceFace[]> solids, out double volume, out int solidCount,
+        out string failure, SliceGeometryBudget? geometry = null)
     {
-        volume = 0;
-        if (solids.Count == 0 || solids.Count > 2048 || solids.Sum(s => s.Length) > MaximumOutputFaces)
-        { failure = "Generated closed-solid compound exceeds the audit budget."; return false; }
+        geometry ??= SliceGeometryBudget.Current;
+        volume = 0; solidCount = 0;
+        if (solids.Count == 0 || solids.Count > geometry.Solids || solids.Sum(s => (long)s.Length) > geometry.OutputTriangles)
+        { failure = $"Generated closed-solid compound exceeds the audit budget ({solids.Count:N0} / {geometry.Solids:N0} solids; {solids.Sum(s => (long)s.Length):N0} / {geometry.OutputTriangles:N0} output triangles). {SliceGeometryBudget.SettingsHint}"; return false; }
         foreach (var solid in solids)
         {
-            if (!TryAudit(solid, out double solidVolume, out failure)) return false;
+            if (!TryAuditSolids(solid, out double solidVolume, out int count, out failure, geometry)) return false;
+            solidCount += count;
+            if (solidCount > geometry.Solids)
+            { failure = $"Generated compound exceeds the closed-solid limit ({solidCount:N0} / {geometry.Solids:N0}). {SliceGeometryBudget.SettingsHint}"; return false; }
             volume += solidVolume;
         }
         failure = ""; return double.IsFinite(volume) && volume > 0;
     }
-    public static bool TryAudit(IReadOnlyList<SliceFace> faces, out double volume, out string failure)
-        => TryAudit(faces, out volume, out _, out failure);
+    public static bool TryAudit(IReadOnlyList<SliceFace> faces, out double volume, out string failure, SliceGeometryBudget? geometry = null)
+        => TryAuditSolids(faces, out volume, out _, out failure, geometry);
 
-    private static bool TryAudit(IReadOnlyList<SliceFace> faces, out double volume, out List<List<int>> components, out string failure)
+    internal static bool TryAuditSolids(IReadOnlyList<SliceFace> faces, out double volume, out int solidCount, out string failure,
+        SliceGeometryBudget? geometry = null)
+        => TryAudit(faces, out volume, out _, out solidCount, out failure, geometry ?? SliceGeometryBudget.Current);
+
+    private static bool TryAudit(IReadOnlyList<SliceFace> faces, out double volume, out List<List<int>> components, out int solidCount, out string failure,
+        SliceGeometryBudget geometry)
     {
-        volume = 0; components = [];
+        volume = 0; components = []; solidCount = 0;
         try
         {
-            Require(faces.Count >= 4 && faces.Count <= MaximumOutputFaces, "Generated mesh triangle count is outside the audit budget.");
+            Require(faces.Count >= 4 && faces.Count <= geometry.OutputTriangles,
+                $"Generated mesh triangle count is outside the audit budget ({faces.Count:N0} / {geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
             var min = new CutPoint(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity);
             var max = new CutPoint(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
             foreach (var face in faces)
@@ -197,6 +217,9 @@ internal static class PlaneSlicer
                 && double.IsFinite(properties.Inertia.XX + properties.Inertia.YY + properties.Inertia.ZZ), "Generated mesh has invalid inertia.");
             var shells = components.Select(c => c.Select(i => faces[i]).ToArray()).ToArray();
             var shellVolumes = shells.Select(s => Properties(s).Volume).ToArray();
+            solidCount = shellVolumes.Count(v => v > 0);
+            Require(solidCount <= geometry.Solids,
+                $"Generated mesh exceeds the closed-solid limit ({solidCount:N0} / {geometry.Solids:N0}). {SliceGeometryBudget.SettingsHint}");
             for (int i = 0; i < shells.Length; i++)
             {
                 Require(Math.Abs(shellVolumes[i]) > epsilon * epsilon * epsilon * 100, "Generated mesh has a zero-volume shell.");
@@ -255,6 +278,7 @@ internal static class PlaneSlicer
         private readonly SlicePlane _requested;
         private readonly int _capMaterial;
         private readonly bool _fixedPlane;
+        private readonly SliceGeometryBudget _geometry;
         private readonly List<IndexedFace> _source = new();
         private readonly List<CutPoint> _positions = new();
         private readonly Dictionary<Edge, int> _intersectionByEdge = new();
@@ -271,12 +295,13 @@ internal static class PlaneSlicer
         private CutPoint _u, _v;
         private SlicePlane _plane;
 
-        public Operation(IReadOnlyList<SliceFace> input, SlicePlane plane, int capMaterial, bool fixedPlane = false)
-        { _input = input; _requested = plane; _capMaterial = capMaterial; _fixedPlane = fixedPlane; }
+        public Operation(IReadOnlyList<SliceFace> input, SlicePlane plane, int capMaterial, SliceGeometryBudget geometry, bool fixedPlane = false)
+        { _input = input; _requested = plane; _capMaterial = capMaterial; _geometry = geometry; _fixedPlane = fixedPlane; }
 
         public PlaneSliceResult Run()
         {
-            Require(_input.Count >= 4 && _input.Count <= MaximumSourceFaces, "Source triangle count is outside the slicing budget.");
+            Require(_input.Count >= 4 && _input.Count <= _geometry.SourceTriangles,
+                $"Source triangle count is outside the slicing budget ({_input.Count:N0} / {_geometry.SourceTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
             Require(_requested.Normal.Finite && _requested.Normal.Length > 1e-12 && double.IsFinite(_requested.Offset), "Slice plane is invalid.");
             var minimum = new CutPoint(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity);
             var maximum = new CutPoint(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
@@ -302,8 +327,12 @@ internal static class PlaneSlicer
                 _source.Add(new(canonical, a, b, c));
             }
             var canonicalFaces = _source.Select(x => x.Face).ToArray();
-            try { Audit(canonicalFaces, _epsilon, out _); }
+            List<List<int>> sourceComponents;
+            try { Audit(canonicalFaces, _epsilon, out sourceComponents); }
             catch (SliceRejected error) { throw new SliceRejected("Canonical source: " + error.Message); }
+            int solidCount = sourceComponents.Count(c => Properties(c.Select(i => canonicalFaces[i]).ToArray()).Volume > 0);
+            Require(solidCount <= _geometry.Solids,
+                $"Source exceeds the closed-solid limit ({solidCount:N0} / {_geometry.Solids:N0}). {SliceGeometryBudget.SettingsHint}");
             var sourceProperties = Properties(canonicalFaces);
             Require(sourceProperties.Volume > _epsilon * _epsilon * _epsilon * 100, "Source has nonpositive signed solid volume; check winding.");
             ChoosePlane();
@@ -316,7 +345,8 @@ internal static class PlaneSlicer
             var positiveFaces = EmitSides(_positive);
             var negativeFaces = EmitSides(_negative);
             AddCaps(positiveFaces, negativeFaces);
-            Require(positiveFaces.Count + negativeFaces.Count <= MaximumOutputFaces, "Sliced geometry exceeds the output budget.");
+            Require(positiveFaces.Count + negativeFaces.Count <= _geometry.OutputTriangles,
+                $"Sliced geometry exceeds the output budget ({positiveFaces.Count + negativeFaces.Count:N0} / {_geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
             List<List<int>> positiveComponents, negativeComponents;
             try { Audit(positiveFaces, _epsilon, out positiveComponents); Audit(negativeFaces, _epsilon, out negativeComponents); }
             catch (SliceRejected error) { throw new SliceRejected("Clipped output: " + error.Message); }
@@ -543,7 +573,8 @@ internal static class PlaneSlicer
                         refined.Add(SliceVertex.Lerp(a.Vertex, b.Vertex, item.T) with { Position = item.Position });
                 }
                 Fan(refined, polygon.Material, output);
-                Require(output.Count <= MaximumOutputFaces, "Side subdivision exceeds the output budget.");
+                Require(output.Count <= _geometry.OutputTriangles,
+                    $"Side subdivision exceeds the output budget ({output.Count:N0} / {_geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
             }
             return output;
         }
@@ -579,7 +610,8 @@ internal static class PlaneSlicer
                     Fan(minus, _capMaterial, negative);
                     var plus = minus.AsEnumerable().Reverse().Select(x => x with { Normal = _plane.Normal * -1 }).ToList();
                     Fan(plus, _capMaterial, positive);
-                    Require(positive.Count + negative.Count <= MaximumOutputFaces, "Cap triangulation exceeds the output budget.");
+                    Require(positive.Count + negative.Count <= _geometry.OutputTriangles,
+                        $"Cap triangulation exceeds the output budget ({positive.Count + negative.Count:N0} / {_geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}");
 
                     void AddRow(int level, CutPoint left, CutPoint right, bool reverse)
                     {

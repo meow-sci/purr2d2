@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using Brutal.Numerics;
+using Purr2D2.Core;
 using Purr2D2.Cutting;
 using Purr2D2.Slicing;
 
@@ -35,8 +36,13 @@ internal static class FragmentAssetWriter
         return material;
     }
 
-    internal static CpuFragmentAsset Build(CpuFragment fragment, IReadOnlyDictionary<int, SliceMaterialData> materials, CancellationToken cancel)
+    internal static CpuFragmentAsset Build(CpuFragment fragment, IReadOnlyDictionary<int, SliceMaterialData> materials, CancellationToken cancel,
+        SliceGeometryBudget? geometry = null)
     {
+        geometry ??= SliceGeometryBudget.Current;
+        long triangles = fragment.Solids.Sum(s => (long)s.Length);
+        if (!geometry.AllowsFragment(fragment.Solids.Length, triangles))
+            throw new InvalidDataException($"Fragment exceeds the export geometry budget ({geometry.FragmentUsage(fragment.Solids.Length, triangles)}). {SliceGeometryBudget.SettingsHint}");
         // Closed-solid boundaries belong to the geometry/recutting pipeline, not the
         // renderer. Concatenate faces without welding or changing their attributes.
         // Durable identity merges aliases while keeping opaque and glass passes apart.
@@ -46,7 +52,8 @@ internal static class FragmentAssetWriter
             .OrderBy(g => g.Key.Id, StringComparer.Ordinal).ThenBy(g => g.Key.Glass)
             .Select(g => new SurfaceGroup(g.Key, g.Select(f => f.Face).ToArray(),
                 CountSolidRuns(g.Select(f => f.Solid)))).ToArray();
-        if (surfaces.Length > 2046) throw new InvalidDataException("Fragment surface count exceeds the export budget.");
+        if (surfaces.Length > SliceResourceLimits.MaximumRenderSurfaces)
+            throw new InvalidDataException($"Fragment surface count exceeds the export budget ({surfaces.Length:N0} / {SliceResourceLimits.MaximumRenderSurfaces:N0}).");
         cancel.ThrowIfCancellationRequested();
         var collider = SliceColliderGeometry.Build(transformed, cancel);
         var inertia = fragment.Frame.PrincipalSpecificInertia;
@@ -108,7 +115,7 @@ internal static class FragmentAssetWriter
         var xml = AssetXml(id, "Generated/Slices/" + id + ".glb", groups, surfaces, fragment.MassKg, inertia);
         // Cancellation between expensive serialization stages bounds abandoned work.
         cancel.ThrowIfCancellationRequested();
-        var glb = FragmentGlbWriter.Write(groups);
+        var glb = FragmentGlbWriter.Write(groups, geometry);
         return new(id, glb, Encoding.UTF8.GetBytes(xml.ToString()), uploads, groups.Select(g => g.Name).ToArray(),
             fragment.Frame, fragment.Extents, fragment.MassKg, fragment.Piece.PositiveSide, sparks.ToArray());
     }

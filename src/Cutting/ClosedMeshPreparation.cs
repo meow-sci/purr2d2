@@ -1,3 +1,5 @@
+using Purr2D2.Core;
+
 namespace Purr2D2.Cutting;
 
 /// <summary>
@@ -7,16 +9,19 @@ namespace Purr2D2.Cutting;
 internal static class ClosedMeshPreparation
 {
     internal static bool TryNormalize(SliceFace[] source, out SliceFace[] accepted,
-        out string reason, CancellationToken cancellation = default, bool float32Conversion = false)
+        out string reason, CancellationToken cancellation = default, bool float32Conversion = false, SliceGeometryBudget? geometry = null)
     {
+        geometry ??= SliceGeometryBudget.Current;
         accepted = []; reason = "";
-        if (source.Length is < 4 or > 240_000 || source.Any(f => new[] { f.A, f.B, f.C }.Any(v =>
+        if (source.Length < 4 || source.Length > geometry.OutputTriangles)
+        { reason = $"Closed solid exceeds the normalization triangle budget ({source.Length:N0} / {geometry.OutputTriangles:N0}). {SliceGeometryBudget.SettingsHint}"; return false; }
+        if (source.Any(f => new[] { f.A, f.B, f.C }.Any(v =>
             !v.Position.Finite || !v.Normal.Finite || !double.IsFinite(v.U) || !double.IsFinite(v.V))))
-        { reason = "Closed solid has invalid attributes or exceeds the normalization budget."; return false; }
+        { reason = "Closed solid has invalid attributes."; return false; }
         cancellation.ThrowIfCancellationRequested();
         // Preserve already-valid surfaces, including their small triangles and
         // every corner attribute. Numerical cleanup is only a recovery stage.
-        if (PlaneSlicer.TryAudit(source, out _)) { accepted = source; return true; }
+        if (PlaneSlicer.TryAudit(source, out _, geometry)) { accepted = source; return true; }
         // Never use repair to hide pre-existing duplicate shells/faces. Only faces
         // newly made coincident by a bounded positional collapse may cancel below.
         var exact = new HashSet<(CutPoint, CutPoint, CutPoint)>();
@@ -93,7 +98,7 @@ internal static class ClosedMeshPreparation
 
         bool Accept(SliceFace[] candidate, out string failure)
         {
-            if (!PlaneSlicer.TryAudit(candidate, out var volume, out failure)) return false;
+            if (!PlaneSlicer.TryAudit(candidate, out var volume, out failure, geometry)) return false;
             if (Math.Abs(volume - sourceVolume) > Math.Max(sourceVolume * .0002, 1e-10))
             { failure = "Closed-solid repair changes volume beyond 0.02%."; return false; }
             return true;
