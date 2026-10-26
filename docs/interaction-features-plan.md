@@ -154,6 +154,19 @@ Checks: 10/90% press baseline, relative motion, endpoints/non-finite input, rele
 
 Checks: toggle versus drag; duration limits and re-grab; final release value; duplicate release and cancellation; one-way timing; symmetric end easing, zero endpoint speed, and constant faster middle; shallow arch; phase continuity across a clash and pause; partial deployment; multiple kittens and control switches; warmed allocation count; non-overlapping button hit bounds.
 
+## 7. Mouse swing audio
+
+Requested after the dedicated clash and somersault recordings. Research: GPT-6.1 Sol / xhigh; implementation: GPT-6 Luna / max.
+
+1. Copy the supplied `saber_swoosh.ogg` unchanged and declare a non-looping `Purr2D2SaberSwing` spatial sound. Cache its behavior once, with a channel independent of ignition, somersault, clash and slice cues. Preserve the existing swoosh base gain of 0.525 and the shared volume, pause, follow and cleanup behavior.
+2. Route native cursor events and the overlay's polling fallback through `MoveManualSwing`. Record distinct finite raw mouse positions in one fixed-size gate. Four pixels of net movement from the press, scaled with the overlay, authorize the initial cue. Returning pose smoothing and automatic swings cannot authorize audio.
+3. Enforce a monotonic 1,250 ms minimum interval across release/repress and ordinary cancellation. Retain only the latest motion marker, not a queue. Consume and clear it once per settled frame after `AdvanceKittenSaber` publishes freshness. Reject samples older than 150 ms, and discard cooldown-denied motion without a delayed replay.
+4. Validate owner, pointer hold, controls, visible blade, pose freshness, supported speed and absence of a modal or clash at both sampling and consumption. Rebase blocked movement so motion sampled during the last clash frame cannot play after the hold expires later in the same handoff. Require fresh movement after a pause, clash or stale pose.
+5. Release and cancellation clear pending gesture state while preserving cadence; world reset clears the whole gate. Retain no extra kitten references, per-frame collections or delegates. Existing visual motion and contact-slice transactions keep their normal lifecycle.
+6. Run focused gate, manual-runtime and audio checks, then build and validate the release payload. Verify exact source/stage/ZIP recording bytes. Native listening still needs KSA; managed checks cannot establish mix balance.
+
+Checks: click/subthreshold silence; first motion; duplicate input paths; stationary hold; 1,249/1,250 ms boundary; no cooldown backlog; release/repress; stale and invalid samples; pause/warp/clash and fresh-motion rearm; owner/visibility/modal cleanup; no automatic, keyboard or return-animation cue; zero warmed gate allocations; independent spatial audio lifetimes.
+
 ## Integration and verification
 
 Feature ownership separates Force code, per-kitten controls/persistence, and clash pose/audio/rendering. Shared runtime hooks and isolated test source registration receive a final integration pass.

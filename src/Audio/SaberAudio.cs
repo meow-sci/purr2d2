@@ -19,10 +19,12 @@ public sealed class SaberAudio : IDisposable
     private const float DarkAmbientGain = 0.7f;
     private const float ClashGain = 0.8f;
     private const float SwooshGain = 0.525f;
+    private const float ManualSwingGain = 0.525f;
     private const float SliceGain = 1f;
     private SoundBehavior? _lightIgniteSound;
     private SoundBehavior? _darkIgniteSound;
     private SoundBehavior? _swooshSound;
+    private SoundBehavior? _manualSwingSound;
     private SoundBehavior? _retractSound;
     private SoundBehavior? _clashSound;
     private SoundBehavior? _humSound;
@@ -35,7 +37,7 @@ public sealed class SaberAudio : IDisposable
     private IChannel? _static;
     private SaberType _type;
     private IChannel? _contact;
-    private OneShot _clash, _swoosh, _slice;
+    private OneShot _clash, _swoosh, _manualSwing, _slice;
     private struct OneShot
     {
         internal IChannel? Channel;
@@ -67,6 +69,7 @@ public sealed class SaberAudio : IDisposable
         _lightIgniteSound = Resolve("Purr2D2SaberLightIgnite");
         _darkIgniteSound = Resolve("Purr2D2SaberDarkIgnite");
         _swooshSound = Resolve("Purr2D2SomersaultSwoosh");
+        _manualSwingSound = Resolve("Purr2D2SaberSwing");
         _retractSound = Resolve("Purr2D2SaberRetract");
         _clashSound = Resolve("Purr2D2SaberClash");
         _humSound = Resolve("Purr2D2SaberHum");
@@ -109,12 +112,14 @@ public sealed class SaberAudio : IDisposable
             _nextHumStart = _nextStaticStart = _nextContactStart = 0;
         }
 
-        if (!Ready && _clash.Channel is null && _swoosh.Channel is null && _slice.Channel is null) return;
+        if (!Ready && _clash.Channel is null && _swoosh.Channel is null
+            && _manualSwing.Channel is null && _slice.Channel is null) return;
         try
         {
             Camera camera = GameAudio.GetAudioCamera();
             FollowOneShot(ref _clash, owner, camera, volume * ClashGain, paused);
             FollowOneShot(ref _swoosh, owner, camera, volume * SwooshGain, paused);
+            FollowOneShot(ref _manualSwing, owner, camera, volume * ManualSwingGain, paused);
             FollowOneShot(ref _slice, owner, camera, volume * SliceGain, paused);
             if (!Ready) return;
             double3 position = camera.GetPositionEgo(owner) + emitterBody.Transform(owner.Body2Cce);
@@ -177,6 +182,7 @@ public sealed class SaberAudio : IDisposable
             Cut(ref _contact);
             Cut(ref _clash.Channel);
             Cut(ref _swoosh.Channel);
+            Cut(ref _manualSwing.Channel);
             Cut(ref _slice.Channel);
         }
     }
@@ -233,6 +239,13 @@ public sealed class SaberAudio : IDisposable
     {
         Initialize();
         PlayOneShot(ref _swoosh, _swooshSound, owner, pointBody, volume, SwooshGain);
+    }
+
+    /// <summary>Play the dedicated one-shot for a mouse-driven manual swing.</summary>
+    public void PlayManualSwing(KittenEva owner, double3 pointBody, float volume)
+    {
+        Initialize();
+        PlayOneShot(ref _manualSwing, _manualSwingSound, owner, pointBody, volume, ManualSwingGain);
     }
 
     /// <summary>Use the Force breakup bang for an accepted manual contact slice.</summary>
@@ -309,6 +322,7 @@ public sealed class SaberAudio : IDisposable
         PauseOwned(ref _contact);
         PauseOwned(ref _clash.Channel);
         PauseOwned(ref _swoosh.Channel);
+        PauseOwned(ref _manualSwing.Channel);
         PauseOwned(ref _slice.Channel);
     }
 
@@ -329,10 +343,11 @@ public sealed class SaberAudio : IDisposable
             Cut(ref _contact);
             Cut(ref _clash.Channel);
             Cut(ref _swoosh.Channel);
+            Cut(ref _manualSwing.Channel);
             Cut(ref _slice.Channel);
         }
         else _transition = _hum = _static = _contact = null;
-        _clash = _swoosh = _slice = default;
+        _clash = _swoosh = _manualSwing = _slice = default;
         _owner = null;
         _lastTargetOn = _transitionPending = false;
         _humStarts = _staticStarts = _contactStarts = 0;

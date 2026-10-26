@@ -112,7 +112,7 @@ internal sealed partial class SaberRuntime
             {
                 // Overlay-owned buttons never enter ImGui, so its MouseDown is deliberately false.
                 if (!_overlayPointerCapture.IsHeld((int)GlfwMouseButton.Left)) ReleaseManualSwing();
-                else _overlayDrag.Move(io.MousePos);
+                else MoveManualSwing(io.MousePos);
             }
             if (_autoSwingDrag.Held)
             {
@@ -449,7 +449,7 @@ internal sealed partial class SaberRuntime
                     var baseAim = new float3(_settings.AimX, _settings.AimY, _settings.AimZ);
                     if (_overlayDrag.Begin(pointer, _overlayLayout.SwingTravelRadius, baseGrip, baseAim))
                     {
-                        BeginManualSwing();
+                        BeginManualSwing(pointer, 4 * _overlayLayout.Scale);
                         _overlayDragOwner = _owner;
                         _overlayDragPose = _pose;
                     }
@@ -678,7 +678,7 @@ internal sealed partial class SaberRuntime
         if (ForcePicking) return true;
         if (!_overlayPointerCapture.AnyHeld) return !Program.HasMouseInputLatch
             && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)));
-        if (_overlayDrag.Held) _overlayDrag.Move(OverlayPointer(window));
+        if (_overlayDrag.Held) MoveManualSwing(OverlayPointer(window));
         if (_forceDrag.Held) MoveForcePointer(OverlayPointer(window));
         return true;
     }

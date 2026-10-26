@@ -76,8 +76,9 @@ internal static class AudioChecks
         ForceBreakupAudioGracefulFailures();
         SaberClashOneShot();
         SaberActionOneShots();
+        ManualSwingOneShot();
         SaberSwooshAssetSelectionAndMissingCue();
-        Console.WriteLine("PASS: audio layering, action and clash one-shots, type switching, pause, mute and cleanup");
+        Console.WriteLine("PASS: audio layering, saber action one-shots, type switching, pause, mute and cleanup");
     }
 
     private static void SaberActionOneShots()
@@ -187,6 +188,103 @@ internal static class AudioChecks
                 "missing swoosh playback neither adds a fallback channel nor cuts actual ignition");
         }
         finally { ModLibrary.MissingIds.Remove("Purr2D2SomersaultSwoosh"); }
+    }
+
+    private static void ManualSwingOneShot()
+    {
+        var owner = new KittenEva();
+        GameAudio.CameraPosition = new double3(10, 20, 30);
+        GameAudio.CameraVelocity = new double3(1, 2, 3);
+        using (var audio = new SaberAudio())
+        {
+            audio.Update(owner, double3.Zero, 0, targetOn: true, paused: false, volume: .8f);
+            var ignition = GameAudio.Channels[^1];
+            audio.PlaySwoosh(owner, new double3(1, 1, 1), .8f);
+            var somersault = GameAudio.Channels[^1];
+            audio.PlayClash(owner, new double3(3, 4, 5), .8f);
+            var clash = GameAudio.Channels[^1];
+            audio.PlaySlice(owner, new double3(5, 6, 7), .8f);
+            var slice = GameAudio.Channels[^1];
+            int beforeSwing = GameAudio.Channels.Count;
+            audio.PlayManualSwing(owner, new double3(2, 3, 4), .8f);
+            var swing = GameAudio.Channels[^1];
+
+            Check(GameAudio.Channels.Count == beforeSwing + 1 && swing.Id == "Purr2D2SaberSwing"
+                && !swing.Stopped && !swing.Paused && swing.VolumeMultiplier == .8f * .525f
+                && swing.Spatial.Position == new double3(12, 23, 34)
+                && swing.Spatial.Velocity == GameAudio.CameraVelocity && swing.Channel.DopplerLevel == 0,
+                "manual swing uses its own spatial one-shot at the captured point and 52.5 percent gain");
+            Check(!ignition.Stopped && !somersault.Stopped && !clash.Stopped && !slice.Stopped,
+                "manual swing leaves ignition, somersault, clash and slice channels independent");
+
+            audio.PlayManualSwing(owner, new double3(6, 7, 8), .6f);
+            var nextSwing = GameAudio.Channels[^1];
+            Check(swing.Stopped && nextSwing.Id == "Purr2D2SaberSwing" && !nextSwing.Stopped
+                && !ignition.Stopped && !somersault.Stopped && !clash.Stopped && !slice.Stopped,
+                "a later manual swing replaces only the previous manual swing channel");
+
+            audio.Suspend();
+            Check(nextSwing.Paused, "suspending the saber pauses the manual swing");
+            GameAudio.CameraPosition = new double3(20, 30, 40);
+            audio.Update(owner, double3.Zero, 0, targetOn: true, paused: true, volume: .4f);
+            Check(nextSwing.Paused && nextSwing.Spatial.Position == new double3(26, 37, 48)
+                && nextSwing.VolumeMultiplier == .4f * .525f,
+                "paused updates move the manual swing with its owner and apply current volume");
+            audio.Update(owner, double3.Zero, 0, targetOn: true, paused: false, volume: .4f);
+            Check(!nextSwing.Paused, "a fresh pose resumes the manual swing");
+
+            int beforeInvalid = GameAudio.Channels.Count;
+            audio.PlayManualSwing(owner, double3.Zero, 0);
+            audio.PlayManualSwing(owner, new double3(double.NaN, 0, 0), 1);
+            audio.PlayManualSwing(owner, double3.Zero, float.NaN);
+            Check(GameAudio.Channels.Count == beforeInvalid && !nextSwing.Stopped,
+                "muted or invalid manual swing input does not create or replace a channel");
+
+            audio.Reset();
+            Check(nextSwing.Stopped && ignition.Stopped && somersault.Stopped && clash.Stopped && slice.Stopped,
+                "reset stops the manual swing and other owned saber channels");
+            audio.PlayManualSwing(owner, double3.Zero, 1);
+            var shutdownSwing = GameAudio.Channels[^1];
+            audio.Shutdown();
+            int afterShutdown = GameAudio.Channels.Count;
+            audio.PlayManualSwing(owner, double3.Zero, 1);
+            Check(shutdownSwing.Stopped && GameAudio.Channels.Count == afterShutdown,
+                "shutdown stops manual swing and prevents later playback");
+        }
+
+        ModLibrary.MissingIds.Add("Purr2D2SaberSwing");
+        try
+        {
+            using var missingSwing = new SaberAudio();
+            int beforeMissing = GameAudio.Channels.Count;
+            missingSwing.PlayManualSwing(owner, double3.Zero, 1);
+            Check(GameAudio.Channels.Count == beforeMissing,
+                "a missing manual swing cue fails closed without starting another sound");
+            missingSwing.Update(owner, double3.Zero, 0, targetOn: true, paused: false, volume: .5f);
+            var ignition = GameAudio.Channels[^1];
+            missingSwing.PlayManualSwing(owner, double3.Zero, 1);
+            Check(GameAudio.Channels.Count == beforeMissing + 1 && ignition.Id == "Purr2D2SaberLightIgnite"
+                && !ignition.Stopped,
+                "missing manual swing never falls back to ignition, which remains independently available");
+        }
+        finally { ModLibrary.MissingIds.Remove("Purr2D2SaberSwing"); }
+
+        ModLibrary.MissingIds.Add("Purr2D2SaberHum");
+        try
+        {
+            using var withoutHum = new SaberAudio();
+            withoutHum.PlayManualSwing(owner, new double3(2, 3, 4), .8f);
+            var swingWithoutHum = GameAudio.Channels[^1];
+            GameAudio.CameraPosition = new double3(30, 40, 50);
+            withoutHum.Update(owner, double3.Zero, 0, targetOn: false, paused: true, volume: .4f);
+            Check(swingWithoutHum.Id == "Purr2D2SaberSwing" && swingWithoutHum.Paused
+                && swingWithoutHum.Spatial.Position == new double3(32, 43, 54)
+                && swingWithoutHum.VolumeMultiplier == .4f * .525f,
+                "an active manual swing still follows, pauses and updates gain when the hum asset is missing");
+        }
+        finally { ModLibrary.MissingIds.Remove("Purr2D2SaberHum"); }
+        GameAudio.CameraPosition = double3.Zero;
+        GameAudio.CameraVelocity = double3.Zero;
     }
 
     private static void SaberClashOneShot()

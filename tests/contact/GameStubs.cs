@@ -14,8 +14,11 @@ namespace KSA
     public static class Program
     {
         public static bool EditorFlag;
+        public static bool ModalOpen, HasMouseInputLatch;
+        public static Vehicle? ControlledVehicle;
         public static Camera? Camera = new();
         public static Camera? GetMainCamera() => Camera;
+        public static bool IsModalOpen() => ModalOpen;
     }
 
     public static class Universe

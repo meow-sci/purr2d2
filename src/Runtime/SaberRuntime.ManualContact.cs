@@ -14,13 +14,15 @@ internal sealed partial class SaberRuntime
     private bool _manualPoseAvailable, _manualResetPending, _manualCancelPending, _manualSliceActive, _manualIsolated;
     private bool SliceWorkActive => _sliceSequence.Active || _manualSliceActive;
 
-    private void BeginManualSwing()
+    private void BeginManualSwing(float2 pointer = default, float swooshThresholdPixels = 4)
     {
+        BeginManualSwingSwoosh(pointer, swooshThresholdPixels);
         _manualGesture.Begin();
         ClearManualPose(); _manualResetPending = true;
     }
     private void ReleaseManualSwing()
     {
+        _manualSwingSwoosh.Release();
         _overlayDrag.Release(); _manualGesture.Release();
         ClearManualPose(); _manualResetPending = true;
     }

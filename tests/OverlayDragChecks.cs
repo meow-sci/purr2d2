@@ -75,6 +75,7 @@ internal static class OverlayDragChecks
         PairedConsumerOwnership();
         LayoutBounds();
         SomersaultPressOwnership();
+        ManualSwooshGate();
     }
 
     private static void DeploymentDrag()
@@ -484,6 +485,80 @@ internal static class OverlayDragChecks
                 && !capture.Consume(0, false, true, false, 7, out _),
                 "focus loss releases somersault pointer state without retaining an invisible target");
         }
+    }
+
+    private static void ManualSwooshGate()
+    {
+        var gate = new ManualSwingSwooshGate();
+        gate.Begin(float2.Zero, 4);
+        Check(!gate.TryConsume(0, true), "a manual SWING press without pointer movement produces no swoosh");
+        gate.Move(new(2, 0), 1, true);
+        Check(!gate.TryConsume(1, true), "sub-threshold pointer movement remains silent");
+        gate.Move(new(4, 0), 2, true);
+        Check(gate.TryConsume(2, true), "the first four logical pixels of held mouse movement produce one swoosh");
+        Check(!gate.TryConsume(3, true), "a stationary held pointer does not repeat the swoosh");
+
+        gate.Reset(); gate.Begin(float2.Zero, 4);
+        gate.Move(new(4, 0), 100, true);
+        gate.Move(new(4, 0), 125, true); // UI and native callbacks can report the same sample.
+        Check(!gate.TryConsume(251, true), "duplicate native/UI coordinates do not refresh a stale pending sample");
+        gate.Move(new(8, 0), 252, true);
+        Check(gate.TryConsume(252, true), "fresh motion after a stale sample can still produce a swoosh");
+
+        gate.Reset(); gate.Begin(float2.Zero, 4);
+        gate.Move(new(4, 0), 0, true);
+        Check(gate.TryConsume(0, true), "first cue establishes a monotonic movement cadence");
+        gate.Move(new(8, 0), 1249, true);
+        Check(!gate.TryConsume(1249, true), "repeat cue is blocked through 1249 milliseconds");
+        Check(!gate.TryConsume(1250, true), "a discarded cooldown sample cannot replay at the deadline without new motion");
+        gate.Move(new(9, 0), 1250, true);
+        Check(gate.TryConsume(1250, true), "fresh held movement can repeat exactly at 1250 milliseconds");
+
+        gate.Release(); gate.Begin(new(20, 0), 4);
+        gate.Move(new(24, 0), 1500, true);
+        Check(!gate.TryConsume(1500, true), "release and re-press preserve the global swoosh cooldown");
+        gate.Move(new(25, 0), 2499, true);
+        Check(!gate.TryConsume(2499, true), "re-grab remains silent one millisecond before the retained deadline");
+        gate.Move(new(26, 0), 2500, true);
+        Check(gate.TryConsume(2500, true), "a re-grab accepts fresh movement at the retained deadline");
+
+        gate.Reset(); gate.Begin(float2.Zero, 4);
+        gate.Move(new(4, 0), 10, true);
+        Check(!gate.TryConsume(11, false) && !gate.TryConsume(12, true),
+            "a blocked final-frame sample is discarded instead of replaying after the clash or pause ends");
+        gate.Move(new(6, 0), 13, true);
+        Check(!gate.TryConsume(13, true), "resuming after blocked input requires a fresh four-pixel movement");
+        gate.Move(new(8, 0), 14, true);
+        Check(gate.TryConsume(14, true), "fresh movement after a clash or pause can trigger normally");
+
+        gate.Reset(); gate.Begin(float2.Zero, 4);
+        gate.Move(new(4, 0), 100, true);
+        Check(!gate.TryConsume(251, true) && !gate.TryConsume(99, true),
+            "pending motion older than 150 milliseconds and backwards time are rejected");
+        gate.Move(new(8, 0), 252, true);
+        Check(gate.TryConsume(252, true), "a stale-sample rebase admits later distinct motion");
+        gate.Release(); gate.Reset();
+        Check(!gate.Held && !gate.Pending, "full gate reset clears capture, pending input, and cadence state");
+        gate.Begin(float2.Zero, 4); gate.Move(new(4, 0), 1, true);
+        Check(gate.TryConsume(1, true), "full reset also clears the retained cooldown deadline");
+        gate.Reset();
+
+        gate.Begin(new(float.NaN, 0), 4);
+        Check(!gate.Held, "a nonfinite press pointer cannot begin a swoosh gesture");
+        gate.Begin(float2.Zero, float.NaN);
+        Check(!gate.Held, "a nonfinite movement threshold cannot begin a swoosh gesture");
+        gate.Begin(float2.Zero, 4); gate.Move(new(float.NaN, 0), 1, true);
+        Check(!gate.Pending && !gate.TryConsume(1, true), "nonfinite cursor samples are ignored safely");
+
+        gate.Begin(float2.Zero, 4); gate.Move(new(4, 0), 1, true); gate.TryConsume(1, true);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1024; i++)
+        {
+            gate.Move(new(4 + (i & 1), 0), 2 + i, true);
+            gate.TryConsume(2 + i, true);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check(allocated == 0, "warmed manual swoosh movement and cadence gating allocate no managed memory");
     }
 
     private static void PointerOwnership()

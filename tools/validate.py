@@ -565,6 +565,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SaberAutoSwing.cs",
         source / "src/Core/SaberAutoSwingDrag.cs",
         source / "src/Core/SaberOverlayDrag.cs",
+        source / "src/Core/ManualSwingSwooshGate.cs",
         source / "src/Core/SaberDeploymentDrag.cs",
         source / "src/Core/SaberOverlayLayout.cs",
         source / "tests/OverlayDragChecks.cs",
@@ -630,6 +631,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     manual_runtime_sources = [
         *[path for path in target_sources if path.name not in ("TargetSelectionChecks.cs", "ContactEffectsChecks.cs", "ManualContactChecks.cs", "SaberContactProbe.cs")],
         source / "src/Core/SaberOverlayDrag.cs",
+        source / "src/Core/ManualSwingSwooshGate.cs",
         source / "src/Core/AssistedSliceSequence.cs", source / "src/Core/SaberSwing.cs",
         source / "src/Runtime/SaberRuntime.ManualContact.cs", source / "src/Runtime/SaberRuntime.OverlaySwing.cs",
         source / "tests/contact/ManualRuntimeChecks.cs", source / "tests/contact/ManualRuntimeHostStubs.cs"]

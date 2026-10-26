@@ -11,7 +11,7 @@ The idle recording was supplied by the user in the feature directory.
 Their original files are unmodified. This project does not claim authorship or establish
 redistribution rights for those supplied recordings. The contact sound is
 original procedural synthesis generated from this repository's Python code. The Light/Dark
-ignition, static, saber close, clash, somersault swoosh and metal recordings were also supplied by the user and are copied unchanged from the workspace root.
+ignition, static, saber close, clash, mouse swing, somersault swoosh and metal recordings were also supplied by the user and are copied unchanged from the workspace root.
 
 | Runtime file | Source | Preparation |
 | --- | --- | --- |
@@ -21,6 +21,7 @@ ignition, static, saber close, clash, somersault swoosh and metal recordings wer
 | `Assets/Audio/saber_close.ogg` | User-supplied `saber_close.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.187392 s; plays once on retraction. |
 | `Assets/Audio/saber_clash.ogg` | User-supplied `saber_clash.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.190476 s; plays once per accepted clash. |
 | `Assets/Audio/sommersault_swoosh.ogg` | User-supplied `sommersault_swoosh.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.024580 s; plays once per acknowledged somersault jump with a lit saber. |
+| `Assets/Audio/saber_swoosh.ogg` | User-supplied `saber_swoosh.ogg` | Unmodified mono Vorbis, 22,050 Hz, 0.780771 s; plays on eligible mouse swing movement, at most once every 1.25 s. |
 | `Assets/Audio/metal_creak.ogg` | User-supplied `metal_creak.ogg` | Unmodified mono Vorbis, 48,000 Hz, 1.188521 s; plays once when Force breakup preparation starts. |
 | `Assets/Audio/metal_bang.ogg` | User-supplied `metal_bang.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.713787 s; plays once on visible Force breakup or an accepted manual slice. |
 | `Assets/Audio/light_side_static.ogg` | User-supplied `light_side_static.ogg` | Unmodified mono Vorbis, 44,100 Hz, 4.77059 s; full-file loop. |
@@ -33,6 +34,7 @@ SHA-256 of original input recordings:
 lightsaber-idle.wav   e30a4532683ab70c083d98ee17a0d6f18579c9d640715543022c660342c99c6b
 saber_clash.ogg       dcf4da17373dee9117b47aa16bf718740e32acf16cc637227cb25e443873041f
 sommersault_swoosh.ogg 59550492d7ccffaff9b698a1da26ef3a7bce9a5b1e4816b16b8ea8b56acdb7ca
+saber_swoosh.ogg      be8c19b37ad7cab7bb090e83c5be83b02cd7b365e907752a7086ef6469e728cf
 ```
 
 SHA-256 of prepared runtime WAVs:
@@ -92,6 +94,7 @@ is still needed to assess the supplied loop seams and balance against the hum.
 void Initialize();
 void PlayClash(KittenEva owner, double3 pointBody, float volume);
 void PlaySwoosh(KittenEva owner, double3 pointBody, float volume);
+void PlayManualSwing(KittenEva owner, double3 pointBody, float volume);
 void PlaySlice(KittenEva owner, double3 pointBody, float volume);
 void Update(KittenEva owner, double3 emitterBody, float deployment,
     bool targetOn, bool paused, float volume, float swingSpeed = 0, float contact = 0, SaberType type = SaberType.Light);
@@ -123,7 +126,15 @@ Accepted manual slices share the supplied metal bang with Force breakup; the
 contact sizzle remains a dedicated synthesized effect. Each action cue has its own
 channel, follows its accepted body-local point, and shares pause, volume and cleanup behavior.
 
-Ordinary **Swing / Alt+F7** uses the original motion-driven hum pitch/gain swoosh.
+Motion continues to modulate hum pitch/gain. Mouse **SWING / hold + drag** also uses
+the dedicated `Purr2D2SaberSwing` one-shot, with `saber_swoosh.ogg` and base gain 0.525.
+A four-pixel initial threshold (scaled with the overlay) prevents click-only playback.
+Distinct raw pointer movement authorizes each cue; a held stationary offset, smoothed
+return, automatic swing or keyboard stroke cannot trigger it. A monotonic 1,250 ms
+cooldown survives release/repress and ordinary cancellation. Both input paths publish
+to one fixed-size gate, consumed once at the settled frame handoff with a fresh visible
+blade pose. Motion rejected for cooldown, pause, warp, clash, stale pose or unavailable
+controls is discarded. No queued cue plays later without new movement.
 Only the explicit slicing stroke supplies sizzle intensity; ordinary swing state
 must not enable the cutting loop in either the frame or rendered-pose update.
 

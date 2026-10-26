@@ -129,6 +129,7 @@ internal sealed partial class SaberRuntime : IDisposable
             AdvanceKittenSaber(activeSaber, supportedSpeed ? playerDt : 0);
             _freshPoseThisTick = activeSaber.FreshPoseThisTick;
             _consumedPoseGeneration = activeSaber.ConsumedPoseGeneration;
+            UpdateManualSwingSwoosh(Environment.TickCount64);
             // Assisted and intentional manual contact share the settled slice worker.
             if (_sliceSequence.Active) UpdateAssistedSlice(_pose.ClashHeld ? 0 : playerDt);
             UpdateManualContact(simulationDt > 0);
@@ -228,7 +229,7 @@ internal sealed partial class SaberRuntime : IDisposable
         _forcePose.Unbind();
         ResetSomersault();
         ClearSaberClashes();
-        CancelAssistedSlice(""); ResetOverlaySwing(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
+        CancelAssistedSlice(""); ResetOverlaySwing(); _manualSwingSwoosh.Reset(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
         _renderer.ClearEffects(); _contactProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
         _renderer.ClearEmitters();
         _owner = null; _system = null; _hasConsumedTime = _hasPreviousTip = _freshPoseThisTick = false;

@@ -23,11 +23,13 @@ internal sealed partial class SaberRuntime
     private sealed class FakeSettings { internal float Volume = .6f; }
     private sealed class FakeAudio
     {
-        internal int Slices;
-        internal double3 Emitter;
-        internal float Volume;
+        internal int Slices, Swooshes;
+        internal double3 Emitter, SwooshEmitter;
+        internal float Volume, SwooshVolume;
         internal void PlaySlice(KittenEva owner, double3 emitter, float volume)
         { Slices++; Emitter = emitter; Volume = volume; }
+        internal void PlayManualSwing(KittenEva owner, double3 emitter, float volume)
+        { Swooshes++; SwooshEmitter = emitter; SwooshVolume = volume; }
     }
     private sealed class FakeRenderer
     {
@@ -48,11 +50,19 @@ internal sealed partial class SaberRuntime
     private sealed class FakeBlade
     { internal bool Equipped = true, TargetOn = true, ManualDeployment; internal float Deployment = 1; }
     private sealed class FakePose
-    { internal bool Eligible = true, ClashHeld; internal float3 GripOffsetFromChestCm, BladeDirectionModel; }
+    {
+        internal bool Eligible = true, ClashHeld, HasFreshBodyFrame = true, BladeSegmentAvailable = true;
+        internal float3 GripOffsetFromChestCm, BladeDirectionModel;
+        internal double3 BladeEmitter = new(3, 4, 5);
+        internal bool TryGetBladeSegment(double length, out double3 emitter, out double3 tip)
+        { emitter = BladeEmitter; tip = BladeEmitter + new double3(0, length, 0); return BladeSegmentAvailable; }
+    }
     private KittenEva? _overlayDragOwner;
     private FakePose? _overlayDragPose;
-    private bool OverlayCanSwing => OverlayVisible && _owner != null && _blade.Equipped && _pose.Eligible
+    private bool OverlayCanSwing => OverlayVisible && _owner != null && _fault == null
+        && ReferenceEquals(_owner, Program.ControlledVehicle) && _blade.Equipped && _pose.Eligible
         && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
+    private float Length => _blade.Deployment;
     private void CancelAssistedSlice(string reason, bool manualAttemptCompleted = false)
     {
         bool finishManualAttempt = manualAttemptCompleted || _manualGesture.InFlight;
@@ -74,6 +84,8 @@ internal sealed partial class SaberRuntime
         KSA.Program.EditorFlag = false; KSA.Program.Camera = new();
         runtime._manualProbe.SoftBudgetMilliseconds = double.PositiveInfinity;
         runtime._targeting.SliceHandler = (target, _) => runtime._slicer.Commit(target);
+        Program.ControlledVehicle = runtime._owner; Program.ModalOpen = Program.HasMouseInputLatch = false;
+        Universe.SimulationSpeed = 1;
         return runtime;
     }
     private void Begin()
@@ -87,8 +99,9 @@ internal sealed partial class SaberRuntime
         bool move = true, float? pointerX = null)
     {
         _playerTime = time; _freshPoseThisTick = fresh;
-        if (move) { _overlayDrag.Move(new(pointerX ?? (float)(time * 200), 0)); _overlayDrag.Advance(.02, out _, out _); }
+        if (move) { MoveManualSwing(new(pointerX ?? (float)(time * 200), 0), (long)(time * 1000)); _overlayDrag.Advance(.02, out _, out _); }
         ApplyOverlaySwing(.02);
+        UpdateManualSwingSwoosh((long)(time * 1000));
         if (fresh) PublishManualPose(emitter, tip);
         ApplyManualContactReset(); UpdateManualContact(advancing);
     }
@@ -115,6 +128,8 @@ internal sealed partial class SaberRuntime
         KSA.Program.EditorFlag = false; KSA.Program.Camera = new();
         runtime._manualProbe.SoftBudgetMilliseconds = double.PositiveInfinity;
         runtime._targeting.SliceHandler = (target, _) => runtime._slicer.Commit(target);
+        Program.ControlledVehicle = runtime._owner; Program.ModalOpen = Program.HasMouseInputLatch = false;
+        Universe.SimulationSpeed = 1;
         return runtime;
     }
     internal static void Run()
@@ -254,6 +269,75 @@ internal sealed partial class SaberRuntime
             r = Scene(); r.Begin(); r.Tick(-.1, 10); gate.Apply(r); r.Tick(.1, 10.02);
             Check(r._slicer.Begins == 0, $"runtime {gate.Name} gate blocks contact detection");
         }
+        SwooshRuntimeChecks();
+    }
+
+    private static void SwooshRuntimeChecks()
+    {
+        var r = Scene(); r.Begin();
+        r.UpdateManualSwingSwoosh(0);
+        r.MoveManualSwing(new(2, 0), 1); r.UpdateManualSwingSwoosh(1);
+        Check(r._audio.Swooshes == 0, "manual swoosh runtime stays silent on press and sub-threshold motion");
+        r.MoveManualSwing(new(4, 0), 2); r.MoveManualSwing(new(4, 0), 3);
+        r.UpdateManualSwingSwoosh(3);
+        Check(r._audio.Swooshes == 1 && r._audio.SwooshEmitter == r._pose.BladeEmitter
+            && r._audio.SwooshVolume == r._settings.Volume,
+            "duplicate UI/native samples produce one settled swoosh at the fresh emitter and configured volume");
+        r.MoveManualSwing(new(4, 0), 4); r.UpdateManualSwingSwoosh(4);
+        Check(r._audio.Swooshes == 1, "stationary held manual input does not retrigger the sound");
+
+        r = Scene(); r.Begin(); r.MoveManualSwing(new(4, 0), 10); r._pose.ClashHeld = true;
+        r.UpdateManualSwingSwoosh(11); r._pose.ClashHeld = false; r.UpdateManualSwingSwoosh(12);
+        Check(r._audio.Swooshes == 0, "clash-final-frame movement is discarded and cannot sound after clash release");
+        r.MoveManualSwing(new(6, 0), 13); r.UpdateManualSwingSwoosh(13);
+        Check(r._audio.Swooshes == 0, "post-clash motion must cross a fresh threshold");
+        r.MoveManualSwing(new(8, 0), 14); r.UpdateManualSwingSwoosh(14);
+        Check(r._audio.Swooshes == 1, "fresh held movement resumes the swoosh after a clash");
+
+        r = Scene(); r.Begin(); r._pose.ClashHeld = true;
+        r.MoveManualSwing(new(4, 0), 15); r._pose.ClashHeld = false;
+        r.UpdateManualSwingSwoosh(15);
+        Check(r._audio.Swooshes == 0, "movement sampled during clash is discarded even when the clash ends before handoff");
+        r.MoveManualSwing(new(6, 0), 16); r.UpdateManualSwingSwoosh(16);
+        Check(r._audio.Swooshes == 0, "same-handoff clash recovery still requires four fresh pixels");
+        r.MoveManualSwing(new(8, 0), 17); r.UpdateManualSwingSwoosh(17);
+        Check(r._audio.Swooshes == 1, "fresh motion after same-handoff clash recovery produces one cue");
+
+        r = Scene(); r.Begin(); r.MoveManualSwing(new(4, 0), 20); Universe.SimulationSpeed = 0;
+        r.UpdateManualSwingSwoosh(21); Universe.SimulationSpeed = 1; r.UpdateManualSwingSwoosh(22);
+        Check(r._audio.Swooshes == 0, "pause discards a pending sample rather than replaying it on resume");
+        r.MoveManualSwing(new(8, 0), 23); r.UpdateManualSwingSwoosh(23);
+        Check(r._audio.Swooshes == 1, "fresh motion after pause can trigger once supported speed resumes");
+
+        foreach (var block in new (string Name, Action<SaberRuntime> Apply, Action<SaberRuntime> Clear)[] {
+            ("warp", _ => Universe.SimulationSpeed = 6, _ => Universe.SimulationSpeed = 1),
+            ("modal", _ => Program.ModalOpen = true, _ => Program.ModalOpen = false),
+            ("mouse latch", _ => Program.HasMouseInputLatch = true, _ => Program.HasMouseInputLatch = false),
+            ("stale pose", x => x._pose.HasFreshBodyFrame = false, x => x._pose.HasFreshBodyFrame = true),
+            ("missing blade segment", x => x._pose.BladeSegmentAvailable = false, x => x._pose.BladeSegmentAvailable = true),
+            ("hidden controls", x => x.OverlayVisible = false, x => x.OverlayVisible = true),
+            ("owner switch", _ => Program.ControlledVehicle = new KittenEva(), x => Program.ControlledVehicle = x._owner),
+        })
+        {
+            r = Scene(); r.Begin(); r.MoveManualSwing(new(4, 0), 100);
+            block.Apply(r); r.UpdateManualSwingSwoosh(101); block.Clear(r);
+            r.UpdateManualSwingSwoosh(102);
+            Check(r._audio.Swooshes == 0, $"runtime {block.Name} invalidation drops pending motion");
+            r.MoveManualSwing(new(8, 0), 103); r.UpdateManualSwingSwoosh(103);
+            Check(r._audio.Swooshes == 1, $"runtime {block.Name} recovery accepts fresh movement");
+        }
+
+        r = Scene(); r.Begin(); r.MoveManualSwing(new(4, 0), 200); r._freshPoseThisTick = false;
+        r.UpdateManualSwingSwoosh(201); r._freshPoseThisTick = true;
+        Check(r._audio.Swooshes == 0, "a non-fresh settled handoff cannot emit a swoosh");
+        r.MoveManualSwing(new(8, 0), 202); r.UpdateManualSwingSwoosh(202);
+        Check(r._audio.Swooshes == 1, "fresh rendered pose and fresh movement are both required at consumption");
+
+        r = Scene(); r.Begin(); r.MoveManualSwing(new(4, 0), 300);
+        r.ReleaseManualSwing(); r.UpdateManualSwingSwoosh(301);
+        r._overlayDrag.Advance(.1, out _, out _); r.UpdateManualSwingSwoosh(302);
+        Check(r._audio.Swooshes == 0,
+            "release and automatic pose return never trigger a manual swoosh without a held mouse gesture");
     }
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); Console.WriteLine("PASS: " + message); }
 }
