@@ -11,7 +11,7 @@ The idle recording was supplied by the user in the feature directory.
 Their original files are unmodified. This project does not claim authorship or establish
 redistribution rights for those supplied recordings. The contact sound is
 original procedural synthesis generated from this repository's Python code. The Light/Dark
-ignition, static, saber close, clash and metal recordings were also supplied by the user and are copied unchanged from the workspace root.
+ignition, static, saber close, clash, somersault swoosh and metal recordings were also supplied by the user and are copied unchanged from the workspace root.
 
 | Runtime file | Source | Preparation |
 | --- | --- | --- |
@@ -20,6 +20,7 @@ ignition, static, saber close, clash and metal recordings were also supplied by 
 | `Assets/Audio/saber-hum.wav` | `feature/purr2d2-light-sabers/sounds/lightsaber-idle.wav` | Stereo averaged to mono; 35 ms cosine overlap joins end to beginning. Original 95,091 frames becomes 93,547 frames at 44,100 Hz (2.12125 s). No resampling or normalization. |
 | `Assets/Audio/saber_close.ogg` | User-supplied `saber_close.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.187392 s; plays once on retraction. |
 | `Assets/Audio/saber_clash.ogg` | User-supplied `saber_clash.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.190476 s; plays once per accepted clash. |
+| `Assets/Audio/sommersault_swoosh.ogg` | User-supplied `sommersault_swoosh.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.024580 s; plays once per acknowledged somersault jump with a lit saber. |
 | `Assets/Audio/metal_creak.ogg` | User-supplied `metal_creak.ogg` | Unmodified mono Vorbis, 48,000 Hz, 1.188521 s; plays once when Force breakup preparation starts. |
 | `Assets/Audio/metal_bang.ogg` | User-supplied `metal_bang.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.713787 s; plays once on visible Force breakup or an accepted manual slice. |
 | `Assets/Audio/light_side_static.ogg` | User-supplied `light_side_static.ogg` | Unmodified mono Vorbis, 44,100 Hz, 4.77059 s; full-file loop. |
@@ -31,6 +32,7 @@ SHA-256 of original input recordings:
 ```text
 lightsaber-idle.wav   e30a4532683ab70c083d98ee17a0d6f18579c9d640715543022c660342c99c6b
 saber_clash.ogg       dcf4da17373dee9117b47aa16bf718740e32acf16cc637227cb25e443873041f
+sommersault_swoosh.ogg 59550492d7ccffaff9b698a1da26ef3a7bce9a5b1e4816b16b8ea8b56acdb7ca
 ```
 
 SHA-256 of prepared runtime WAVs:
@@ -114,9 +116,10 @@ gain can respond slightly to relative swing speed. The optional sizzle is a sepa
 native loop. It is silent unless the caller supplies contact intensity.
 
 Clashes use the dedicated `Purr2D2SaberClash` one-shot on an independent spatial channel.
-There is no ignition fallback when that asset is missing. The only remaining placeholder
-cue is the somersault swoosh, which uses the Light ignition recording for either saber
-type. Accepted manual slices share the supplied metal bang with Force breakup; the
+Somersaults use the dedicated `Purr2D2SomersaultSwoosh` one-shot with the supplied
+`sommersault_swoosh.ogg` recording for either saber type, at base gain 0.525. Neither
+cue falls back to ignition when its asset is missing. No audio placeholders remain.
+Accepted manual slices share the supplied metal bang with Force breakup; the
 contact sizzle remains a dedicated synthesized effect. Each action cue has its own
 channel, follows its accepted body-local point, and shares pause, volume and cleanup behavior.
 

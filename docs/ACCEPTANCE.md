@@ -724,4 +724,12 @@ Clashes now use the supplied `saber_clash.ogg` as a non-looping spatial cue, wit
 
 The focused `AudioChecks` harness passes, including independent clash/ignition playback, pause, gain, cleanup and missing-asset behavior. `tools/generate_audio.py --check` passes and leaves the synthesized contact WAV unchanged. The Release solution build has zero warnings/errors; source/stage validation passes, all 40 ZIP files match staging, the staged DLL matches Release, and the archive checksum agrees. Evidence: `artifacts/checks/clash-audio-release-build.log`, `clash-audio-package-validation.log`, and `clash-audio-package-integrity.log`. The complete managed suite was not rerun for this audio replacement.
 
-Native audition remains pending: check the new clash cue's balance and spatial position during repeated contacts, pause/resume and simultaneous ignition. The somersault swoosh still uses Light ignition as its placeholder; manual slices share the supplied metal bang with Force breakup, and contact sizzle remains synthesized.
+Native audition remains pending: check the new clash cue's balance and spatial position during repeated contacts, pause/resume and simultaneous ignition.
+
+## Dedicated somersault swoosh (2026-10-26)
+
+Somersaults now use the supplied `sommersault_swoosh.ogg` as a non-looping spatial cue for either saber type. The source, repository, staged copy and ZIP entry are byte-identical; provenance and SHA-256 are recorded in [research-audio.md](research-audio.md). The recording is mono Vorbis at 22,050 Hz and lasts 1.024580 seconds. The existing base gain is preserved at 0.525, independently of ignition tuning, and there is no ignition fallback.
+
+Focused `AudioChecks` pass for both saber types, missing-cue behavior, independent ignition playback, spatial follow, pause, gain and cleanup. The audio generator check passes without changing the contact WAV. The Release solution build has zero warnings/errors; source/stage validation passes, all 41 ZIP files match staging, the staged DLL matches Release, and the archive checksum agrees. Evidence: `artifacts/checks/swoosh-audio-release-build.log`, `swoosh-audio-package-validation.log`, and `swoosh-audio-package-integrity.log`. The complete managed suite was not rerun for this audio replacement.
+
+No audio placeholders remain. Native audition is pending: check the new swoosh during repeated somersault jumps, pause/resume, both saber types and simultaneous ignition or clash effects.

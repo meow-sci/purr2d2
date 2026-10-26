@@ -18,10 +18,11 @@ public sealed class SaberAudio : IDisposable
     private const float LightIgniteGain = 0.75f;
     private const float DarkAmbientGain = 0.7f;
     private const float ClashGain = 0.8f;
-    private const float SwooshGain = TransitionGain * LightIgniteGain;
+    private const float SwooshGain = 0.525f;
     private const float SliceGain = 1f;
     private SoundBehavior? _lightIgniteSound;
     private SoundBehavior? _darkIgniteSound;
+    private SoundBehavior? _swooshSound;
     private SoundBehavior? _retractSound;
     private SoundBehavior? _clashSound;
     private SoundBehavior? _humSound;
@@ -65,6 +66,7 @@ public sealed class SaberAudio : IDisposable
         _initializationAttempted = true;
         _lightIgniteSound = Resolve("Purr2D2SaberLightIgnite");
         _darkIgniteSound = Resolve("Purr2D2SaberDarkIgnite");
+        _swooshSound = Resolve("Purr2D2SomersaultSwoosh");
         _retractSound = Resolve("Purr2D2SaberRetract");
         _clashSound = Resolve("Purr2D2SaberClash");
         _humSound = Resolve("Purr2D2SaberHum");
@@ -226,11 +228,11 @@ public sealed class SaberAudio : IDisposable
         PlayOneShot(ref _clash, _clashSound, owner, pointBody, volume, ClashGain);
     }
 
-    /// <summary>Use Light ignition as the somersault swoosh for either saber type.</summary>
+    /// <summary>Play the dedicated somersault swoosh for either saber type.</summary>
     public void PlaySwoosh(KittenEva owner, double3 pointBody, float volume)
     {
         Initialize();
-        PlayOneShot(ref _swoosh, _lightIgniteSound, owner, pointBody, volume, SwooshGain);
+        PlayOneShot(ref _swoosh, _swooshSound, owner, pointBody, volume, SwooshGain);
     }
 
     /// <summary>Use the Force breakup bang for an accepted manual contact slice.</summary>

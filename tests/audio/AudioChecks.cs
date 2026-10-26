@@ -76,6 +76,7 @@ internal static class AudioChecks
         ForceBreakupAudioGracefulFailures();
         SaberClashOneShot();
         SaberActionOneShots();
+        SaberSwooshAssetSelectionAndMissingCue();
         Console.WriteLine("PASS: audio layering, action and clash one-shots, type switching, pause, mute and cleanup");
     }
 
@@ -87,16 +88,18 @@ internal static class AudioChecks
         audio.Update(owner, double3.Zero, 1, true, false, .8f, type: SaberType.Dark);
         var ignition = GameAudio.Channels.Last(c => c.Id == "Purr2D2SaberDarkIgnite");
         int before = GameAudio.Channels.Count;
+        int lightIgnitionsBeforeSwoosh = GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberLightIgnite");
         audio.PlaySwoosh(owner, new double3(2, 3, 4), .8f);
         var swoosh = GameAudio.Channels[^1];
         audio.PlaySlice(owner, new double3(5, 6, 7), .8f);
         var slice = GameAudio.Channels[^1];
-        Check(GameAudio.Channels.Count == before + 2 && swoosh.Id == "Purr2D2SaberLightIgnite"
-            && slice.Id == "Purr2D2ForceBreak" && !ignition.Stopped && !swoosh.Stopped,
-            "Dark and Light sabers use the Light swoosh and Force breakup bang on independent action channels");
-        Check(swoosh.VolumeMultiplier == .8f * (.7f * .75f) && slice.VolumeMultiplier == .8f
+        Check(GameAudio.Channels.Count == before + 2 && swoosh.Id == "Purr2D2SomersaultSwoosh"
+            && slice.Id == "Purr2D2ForceBreak" && !ignition.Stopped && !swoosh.Stopped
+            && GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberLightIgnite") == lightIgnitionsBeforeSwoosh,
+            "Dark saber uses the dedicated swoosh and Force breakup bang without starting Light ignition");
+        Check(swoosh.VolumeMultiplier == .8f * .525f && slice.VolumeMultiplier == .8f
             && !swoosh.Paused && !slice.Paused && swoosh.Channel.DopplerLevel == 0 && slice.Channel.DopplerLevel == 0,
-            "action sounds reuse their source gains, global volume and disabled orbital Doppler");
+            "action sounds use their independent gains, global volume and disabled orbital Doppler");
         audio.Suspend();
         Check(swoosh.Paused && slice.Paused, "a stale pose suspends action sounds");
         GameAudio.CameraPosition = new double3(20, 30, 40);
@@ -104,7 +107,7 @@ internal static class AudioChecks
         Check(GameAudio.Channels.Count == before + 2 && swoosh.Paused && slice.Paused
             && swoosh.Spatial.Position == new double3(22, 33, 44)
             && slice.Spatial.Position == new double3(25, 36, 47)
-            && swoosh.VolumeMultiplier == .4f * (.7f * .75f) && slice.VolumeMultiplier == .4f,
+            && swoosh.VolumeMultiplier == .4f * .525f && slice.VolumeMultiplier == .4f,
             "paused updates follow each captured emitter and apply changed volume without replaying events");
         audio.Update(owner, double3.Zero, 1, true, false, .4f, type: SaberType.Dark);
         Check(!swoosh.Paused && !slice.Paused, "resume retains the original action channels");
@@ -143,6 +146,47 @@ internal static class AudioChecks
             "action channels still follow and pause when an unrelated ambient asset is unavailable");
         ModLibrary.MissingIds.Clear();
         GameAudio.CameraPosition = double3.Zero;
+    }
+
+    private static void SaberSwooshAssetSelectionAndMissingCue()
+    {
+        var owner = new KittenEva();
+        foreach (SaberType type in new[] { SaberType.Light, SaberType.Dark })
+        {
+            using var audio = new SaberAudio();
+            audio.Update(owner, double3.Zero, 0, targetOn: false, paused: false, volume: .8f, type: type);
+            int before = GameAudio.Channels.Count;
+            int lightIgnitionsBefore = GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberLightIgnite");
+            audio.PlaySwoosh(owner, new double3(1, 2, 3), .8f);
+            var swoosh = GameAudio.Channels[^1];
+            Check(GameAudio.Channels.Count == before + 1 && swoosh.Id == "Purr2D2SomersaultSwoosh"
+                && !swoosh.Stopped && swoosh.VolumeMultiplier == .8f * .525f
+                && GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberLightIgnite") == lightIgnitionsBefore,
+                $"{type} saber uses the dedicated swoosh without starting Light ignition");
+        }
+
+        ModLibrary.MissingIds.Add("Purr2D2SomersaultSwoosh");
+        try
+        {
+            using var missingSwoosh = new SaberAudio();
+            int before = GameAudio.Channels.Count;
+            int lightIgnitionsBefore = GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberLightIgnite");
+            missingSwoosh.PlaySwoosh(owner, double3.Zero, 1);
+            Check(GameAudio.Channels.Count == before
+                && GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberLightIgnite") == lightIgnitionsBefore,
+                "a missing swoosh asset fails closed without falling back to Light ignition");
+
+            missingSwoosh.Update(owner, double3.Zero, 0, targetOn: true, paused: false, volume: .5f,
+                type: SaberType.Light);
+            var ignition = GameAudio.Channels[^1];
+            Check(GameAudio.Channels.Count == before + 1 && ignition.Id == "Purr2D2SaberLightIgnite"
+                && !ignition.Stopped,
+                "actual Light ignition remains available when the dedicated swoosh asset is missing");
+            missingSwoosh.PlaySwoosh(owner, double3.Zero, 1);
+            Check(GameAudio.Channels.Count == before + 1 && !ignition.Stopped,
+                "missing swoosh playback neither adds a fallback channel nor cuts actual ignition");
+        }
+        finally { ModLibrary.MissingIds.Remove("Purr2D2SomersaultSwoosh"); }
     }
 
     private static void SaberClashOneShot()

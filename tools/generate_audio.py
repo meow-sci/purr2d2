@@ -113,7 +113,7 @@ def check_manifest() -> None:
     manifest = ET.parse(ROOT / "Assets" / "Sounds.xml").getroot()
     assert manifest.tag == "Assets"
     sounds = manifest.findall("Sound")
-    assert len(sounds) == 10, "expected ten sound declarations"
+    assert len(sounds) == 11, "expected eleven sound declarations"
     for sound in sounds:
         assert sound.get("ChannelId") == "Sfx" and sound.get("SimSpeed") == "Ignore"
         file = sound.find("SoundFile")
@@ -129,6 +129,7 @@ def check_manifest() -> None:
                 "Purr2D2SaberRetract": "saber_close.ogg",
                 "Purr2D2SaberLightIgnite": "light_saber_on.ogg",
                 "Purr2D2SaberDarkIgnite": "dark_saber_on.ogg",
+                "Purr2D2SomersaultSwoosh": "sommersault_swoosh.ogg",
                 "Purr2D2SaberClash": "saber_clash.ogg",
                 "Purr2D2ForceCreak": "metal_creak.ogg",
                 "Purr2D2ForceBreak": "metal_bang.ogg",
