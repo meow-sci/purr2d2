@@ -9,7 +9,8 @@ internal readonly record struct ForceRigidState(double3 Position, double3 Veloci
 /// <summary>Rigid-follow arithmetic in an inertial parent frame, independent of native objects.</summary>
 internal static class ForceMath
 {
-    internal const double DefaultAngryRadius = 10;
+    internal const double DefaultAngryRadius = 2;
+    internal const double DefaultCaptureRadius = DefaultAngryRadius;
     internal const double MinimumAngryRadius = 1;
     internal const double MaximumAngryRadius = 50;
     internal const double ThrowSpeed = 25;

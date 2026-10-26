@@ -694,3 +694,26 @@ Native acceptance remains pending:
 - [ ] Audit late-UI loads and GPU/FMOD/cloth lifetime in the native game. Passive observers preserve standalone native timing; managed Harmony fixtures do not certify optimized-JIT hooks or universal draw-list lifetime safety.
 
 Focused evidence: `artifacts/checks/kitten-save-hooks.log`, `artifacts/checks/kitten-profile-runtime.log` and `artifacts/checks/kitten-persistence-build.log`. See [the implemented contract](persistence.md) and [source investigation](research-persistence.md).
+
+
+## Saber clashes and interaction controls (2026-10-26)
+
+The design and implementation contracts are recorded in [interaction-features-plan.md](interaction-features-plan.md). Implementation used GPT-6 Luna / max, with GPT-6.1 Sol / xhigh research and independent review plus orchestrator review.
+
+Automated verification passed:
+
+- The complete validator workflow passed **39/39 managed harness projects**, including the production clash coordinator, pose hold, assisted-slice gates, auto-swing easing, deployment/persistence, capture growth, and existing regressions. Generated projects built and ran the current sources with cached dependency restores (`dotnet run --no-restore`). Source and staged Light/Dark shader includes, compilation/linking, and the 128-byte push-constant ABI passed. See `artifacts/checks/interaction-full-validation.log`.
+- Debug and Release solution builds both passed with **zero warnings and errors**. See `artifacts/checks/interaction-debug-build.log` and `interaction-release-build.log`.
+- The Force host-contract/native-clutter checks and post-Release source/stage validation passed. The ZIP contains 39 files under one `purr2d2/` root; every file matches staging, the staged DLL matches the Release DLL, and its SHA-256 matches the generated checksum. See `artifacts/checks/interaction-force-host.log`, `interaction-package-validation.log`, and `interaction-package-integrity.log`.
+- Warmed automatic-swing evaluation, sphere projection, and the production clash detector's distant-pair and stable-overlap fixtures report zero managed allocations. These isolated checks establish bounded behavior and allocation properties; native frame time and visual quality still need game testing.
+
+The Release artifact is `artifacts/dist/purr2d2-0.2.0.zip`. No native in-game acceptance run was performed. The following checks remain necessary:
+
+- [ ] Cross two blades from controlled and background kittens. Confirm a single spark/sound event, both visual poses held for 0.4 seconds, and both available angry faces for 0.5 seconds. Continue overlapping, separate, and clash again. Repeat during a somersault and with a Force hand active. Native locomotion must remain functional.
+- [ ] Repeat after pause/resume, a world reload, and stowing one participant. Check that effects are visible/audible and no owner or audio channel remains stuck. Try partial and differently sized blades, and confirm no contact beyond either visible tip.
+- [ ] Click and drag each kitten's deployment bar, including uncontrolled kittens: off starts at 10%, on starts at 90%, release retains the fraction, endpoints work, and ordinary toggles resume matching bar/blade animation. Hide the HUD, change focus, resize, open a modal, switch owner, and remove a kitten while dragging.
+- [ ] Set independent lengths, change the global default, reset one kitten to default, then save/load, board/disembark, and reload an older save. Confirm overrides, inheritance, and enabled intent return to the correct kittens.
+- [ ] Click AUTO SWING to toggle, drag its downward pill through 0.5–3 seconds per one-way stroke, and release to enable. Check a shallow upward arc, smooth endpoints, correct button color, partial extension, and two background kittens continuing independently. Clash during each direction, pause/resume, use manual SWING or SLICE, and retract; there must be no phase catch-up after a hold or unwanted cut from automatic motion.
+- [ ] Start an Angry capture at 2 m, drag upward, then downward and re-grab. Check the radius never shrinks, count tooltips stay hidden during drag, and release never throws. A plain click throws at default speed; Shift-drag retains adjustable throw speed.
+- [ ] Grow a mixed vessel/clutter group after moving and spreading it. The dashed sphere must follow its selected point; old pieces stay in place and eligible new pieces join without jumping. Repeat at the count cap, after reducing the cap below the held count, and while staged breakup is underway.
+- [ ] Move the camera through/behind the sphere and near its edge; verify finite 2-pixel dashes, eight distinct meridians and latitude rings, Light green/Dark red, and hidden-UI/modal behavior. Profile dense holds and many distant sabers in the native game.

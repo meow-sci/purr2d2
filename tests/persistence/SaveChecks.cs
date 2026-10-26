@@ -23,6 +23,7 @@ internal static class SaveChecks
             Run("storage rejects foreign, duplicate, deep, oversized and future files", StorageRejection);
             Run("unsupported and invalid kitten records survive alongside editable kittens", PreservedRecords);
             Run("known profile extension data survives edits", ProfileExtensionData);
+            Run("old profiles inherit the default length and invalid overrides remain preserved", LengthProfileCompatibility);
             Run("changed character records remain recoverable through explicit discard", CharacterMismatchRecovery);
             Run("invalid colors, enums and excessive entry counts are rejected", InvalidSettings);
             Run("session generations reject stale completion and recognize known system", SessionGenerations);
@@ -122,12 +123,15 @@ internal static class SaveChecks
         string directory = DirectoryFor("round-trip");
         Check(KittenSaveStorage.Read(directory) is null, "missing sidecar is native-only");
         var document = Document("one");
+        var profileWithOverride = Profile(); profileWithOverride.BladeLengthOverride = 2.75f;
+        document.Kittens[0].State = JsonSerializer.SerializeToElement(profileWithOverride, KittenSaveStorage.Options);
         KittenSaveStorage.Write(directory, document);
         var restored = KittenSaveStorage.Read(directory)!;
         Check(restored.SchemaVersion == 1 && restored.UniverseSha256.Length == 64, "schema and native fingerprint persisted");
         var profile = SavedProfile(directory, "one");
         Check(profile.Red == .25f && profile.Green == .5f && profile.Blue == .75f
-            && profile.Type == SaberType.Dark && profile.CapeEnabled && profile.SaberEnabled, "all user choices round-trip");
+            && profile.Type == SaberType.Dark && profile.CapeEnabled && profile.SaberEnabled
+            && profile.BladeLengthOverride == 2.75f, "all user choices and the optional blade length round-trip");
         Check(File.Exists(Path.Combine(directory, "purr2d2.json")) && !File.Exists(Path.Combine(directory, "unscience.json")), "Purr2D2 owns only its sidecar");
         Check(Directory.GetFiles(directory, "*.tmp").Length == 0, "atomic write leaves no temporary file");
     }
@@ -185,6 +189,26 @@ internal static class SaveChecks
         var state = Session.Profiles.Capture().Kittens[0].State;
         Check(state.GetProperty("FutureSetting").GetProperty("Width").GetInt32() == 3 && state.GetProperty("Red").GetSingle() == .9f,
             "recognized settings can change without discarding unknown fields");
+    }
+
+    private static void LengthProfileCompatibility()
+    {
+        var oldProfile = Document("old-format");
+        using (var state = JsonDocument.Parse("{\"Red\":0.25,\"Green\":0.5,\"Blue\":0.75,\"Type\":\"Dark\",\"CapeEnabled\":true,\"SaberEnabled\":true}"))
+            oldProfile.Kittens[0].State = state.RootElement.Clone();
+        Session.Profiles.Import(oldProfile, Session.Warn);
+        Check(Session.Profiles.GetOrCreate(Identity("old-format"), Profile(), Session.Warn)?.BladeLengthOverride is null,
+            "version-one profiles without the optional override remain valid and inherit the global default");
+
+        var invalid = Document("invalid-length");
+        using (var state = JsonDocument.Parse("{\"Red\":0.25,\"Green\":0.5,\"Blue\":0.75,\"Type\":\"Dark\",\"CapeEnabled\":true,\"SaberEnabled\":true,\"BladeLengthOverride\":12.01}"))
+            invalid.Kittens[0].State = state.RootElement.Clone();
+        string original = invalid.Kittens[0].State.GetRawText();
+        Session.Profiles.Import(invalid, Session.Warn);
+        Check(Session.Profiles.PreservedCount == 1
+            && Session.Profiles.GetOrCreate(Identity("invalid-length"), Profile(), Session.Warn) is null
+            && Session.Profiles.Capture().Kittens[0].State.GetRawText() == original,
+            "out-of-range overrides are rejected while their original profile JSON remains untouched");
     }
 
     private static void CharacterMismatchRecovery()

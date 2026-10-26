@@ -74,7 +74,36 @@ internal static class AudioChecks
 
         ForceBreakupOneShots();
         ForceBreakupAudioGracefulFailures();
+        SaberClashOneShot();
         Console.WriteLine("PASS: audio layering, type switching, spatial follow, pause, mute, retraction and cleanup");
+    }
+
+    private static void SaberClashOneShot()
+    {
+        int firstChannel = GameAudio.Channels.Count;
+        var owner = new KittenEva();
+        GameAudio.CameraPosition = new double3(10, 20, 30);
+        using var audio = new SaberAudio();
+        audio.PlayClash(owner, new double3(2, 3, 4), .5f);
+        Check(GameAudio.Channels.Count == firstChannel + 1,
+            "a clash starts exactly one independent existing Dark ignition placeholder");
+        var first = GameAudio.Channels[^1];
+        Check(first.Id == "Purr2D2SaberDarkIgnite" && !first.Paused && first.VolumeMultiplier == .4f
+            && first.Spatial.Position == new double3(12, 23, 34),
+            "clash configures its contact point, gain and playback before unpausing");
+
+        audio.Update(owner, double3.Zero, 1, targetOn: false, paused: true, volume: .25f);
+        Check(first.Paused && first.VolumeMultiplier == .2f
+            && first.Spatial.Position == new double3(12, 23, 34),
+            "the hit follows its contact offset and pauses independently of the blade emitter");
+
+        audio.PlayClash(owner, new double3(3, 4, 5), .5f);
+        var second = GameAudio.Channels[^1];
+        Check(first.Stopped && second.Id == "Purr2D2SaberDarkIgnite" && !second.Paused
+            && second.Spatial.Position == new double3(13, 24, 35),
+            "a distinct accepted clash replaces a still-playing one-shot instead of losing its cue");
+        audio.Reset();
+        Check(second.Stopped, "reset cleans up the separate clash channel");
     }
 
     private static void ForceBreakupOneShots()

@@ -25,6 +25,7 @@ internal sealed partial class ForceController : IDisposable
     {
         internal Vehicle? Source => Target.Vehicle;
         internal ClutterForceHold? ClutterHold { get; set; }
+        internal bool GrowthMutationStarted { get; set; }
         internal string DisplayName => Source?.Id ?? Target.Clutter?.DisplayName ?? "Unavailable object";
     }
 
@@ -33,6 +34,7 @@ internal sealed partial class ForceController : IDisposable
     internal KittenEva? Owner { get; private set; }
     internal double3 GroupOffsetBody { get; private set; }
     internal double GroupSpread { get; private set; } = ForceMath.DefaultGroupSpread;
+    internal double CaptureRadius { get; private set; } = ForceMath.DefaultCaptureRadius;
     internal string Status { get; private set; } = "";
     internal ForceStatusSeverity StatusSeverity { get; private set; }
 
@@ -124,6 +126,7 @@ internal sealed partial class ForceController : IDisposable
             GroupSpread = ForceMath.DefaultGroupSpread;
             _groupCenterBody = groupCenterBody;
             _spreadDirty = false;
+            CaptureRadius = angry ? angryRadius : ForceMath.DefaultCaptureRadius;
             _anchorBody = (target.HitCci - ownerPosition).Transform(ownerRotation.Inverse());
             foreach (var held in _held)
                 if (held.Target.Clutter is { } clutter)
@@ -271,6 +274,7 @@ internal sealed partial class ForceController : IDisposable
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter release cleanup failed: {cleanup}"); }
         _held.Clear(); Owner = null; _system = null; _parent = null;
         GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
+        CaptureRadius = ForceMath.DefaultCaptureRadius;
         _anchorBody = _groupCenterBody = _primaryCenteredOffsetBody = double3.Zero;
         _hasFrame = false; _offsetDirty = _spreadDirty = false;
         _breakupEligible = false; _breakupRefused = false;

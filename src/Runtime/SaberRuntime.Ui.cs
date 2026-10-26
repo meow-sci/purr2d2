@@ -156,14 +156,15 @@ internal sealed partial class SaberRuntime
         float length = _settings.BladeLength, volume = _settings.Volume, sliceReach = _settings.SliceReachMultiplier;
         try
         {
-            SaberSettingsRow("Blade length");
+            SaberSettingsRow("Default blade length");
             changed |= ImGui.SliderFloat("##BladeLength", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m");
             SaberSettingsRow("Slice grace / reach");
             changed |= ImGui.SliderFloat("##SliceReachMultiplier", ref sliceReach,
                 SaberLimits.MinimumSliceReachMultiplier, SaberLimits.MaximumSliceReachMultiplier, "%.2fx");
             ShowSaberControlTip("The blade length multiplier fudge factor for how far away a part slice is detected");
-            double visibleLength = _blade.Deployment * length;
-            ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(length, sliceReach):F2} m fully extended.");
+            float effectiveLength = _activeSaber?.BladeLengthOverride ?? length;
+            double visibleLength = _pose.ClashHeld ? _pose.ClashHeldBladeLength : _blade.Deployment * effectiveLength;
+            ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(effectiveLength, sliceReach):F2} m fully extended.");
             SaberSettingsRow("Sound volume");
             changed |= ImGui.SliderFloat("##SoundVolume", ref volume, 0, 1, "%.2f");
             ShowSaberControlTip("Overall volume for lightsaber sound effects and hum.");
@@ -279,18 +280,15 @@ internal sealed partial class SaberRuntime
     private void DrawForceSettings()
     {
         if (!BeginSaberSettingsTable("##ForceSettings", "Force breakup split (px)")) return;
-        float radius = _settings.AngryForceRadius, tolerance = _settings.ClutterPickTolerance;
+        float tolerance = _settings.ClutterPickTolerance;
         float maximumSpread = _settings.ForceMaximumSpread;
         float breakupGroan = _settings.ForceBreakupGroanPixels, breakupSplit = _settings.ForceBreakupSplitPixels;
         int captureLimit = _settings.ForceCaptureLimit, breakupPieceLimit = _settings.ForceBreakupPieceLimit;
         bool changed;
         try
         {
-            SaberSettingsRow("Angry Force radius");
-            changed = ImGui.SliderFloat("##AngryForceRadius", ref radius, 1, 50, "%.1f m");
-            ShowSaberControlTip("Capture objects within this distance of the selected surface point.");
             SaberSettingsRow("Force capture limit");
-            changed |= ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
+            changed = ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
             ShowSaberControlTip($"Maximum vessels, debris, and ground objects per Angry Force capture (default {ForceCaptureLimits.Default}); applies next capture.\n\nThe selected target is included first, then nearest objects fill remaining slots.");
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
@@ -312,7 +310,6 @@ internal sealed partial class SaberRuntime
         }
         finally { ImGui.EndTable(); }
         if (!changed) return;
-        _settings.AngryForceRadius = radius;
         _settings.ForceCaptureLimit = captureLimit;
         _settings.ClutterPickTolerance = tolerance;
         _settings.ForceMaximumSpread = maximumSpread;
@@ -409,9 +406,9 @@ internal sealed partial class SaberRuntime
         ImGui.SetNextItemWidth(-1);
     }
 
-    private static void ShowSaberControlTip(string text)
+    private void ShowSaberControlTip(string text)
     {
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ShowSaberTooltip(text);
+        if (!_autoSwingDrag.Held && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ShowSaberTooltip(text);
     }
 
     private static void ShowSaberTooltip(string text)

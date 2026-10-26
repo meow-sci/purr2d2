@@ -15,7 +15,9 @@ internal sealed partial class SaberRuntime
     private readonly List<KittenEva> _overlayKittens = new();
     private readonly HashSet<KittenEva> _currentKittens = new(ReferenceEqualityComparer.Instance);
     private readonly List<KittenEva> _removedKittens = new();
-    private readonly Queue<KittenSaberRequest> _kittenSaberRequests = new();
+    private readonly List<KittenSaberRequest> _kittenSaberRequests = new();
+    private readonly Dictionary<KittenEva, bool> _kittenIntentWrites = new(ReferenceEqualityComparer.Instance);
+    private const int PendingRequestsPerKittenLimit = 2;
     partial void BeginKittenProfileRefresh();
     partial void RestoreKittenChoices(KittenEva kitten, KittenSaber saber);
     partial void RememberKittenChoices(KittenEva kitten, KittenSaber saber, bool revalidate = false, bool? enabled = null);
@@ -31,7 +33,8 @@ internal sealed partial class SaberRuntime
         new(98 / 255f, 9 / 255f, 96 / 255f),
     ];
 
-    private readonly record struct KittenSaberRequest(KittenEva Kitten, bool Enabled);
+    private readonly record struct KittenSaberRequest(KittenEva Kitten, bool Enabled,
+        float? ManualDeployment = null, bool RememberIntent = true);
     private enum SaberTogglePhase { None, Equipping, Retracting, Unequipping }
     private static readonly FieldInfo? MmuAvatarField = typeof(KittenRenderable).GetField(
         "_characterAvatar", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -39,6 +42,7 @@ internal sealed partial class SaberRuntime
     private sealed class KittenSaber
     {
         internal readonly BladeState Blade = new();
+        internal readonly SaberAutoSwing AutoSwing = new();
         internal readonly SaberPoseController Pose;
         internal readonly SaberAudio Audio = new();
         internal ulong ConsumedPoseGeneration;
@@ -47,6 +51,9 @@ internal sealed partial class SaberRuntime
         internal double PreviousTipTime;
         internal float SwingSpeed;
         internal float3 Color = new(.12f, .75f, 1);
+        internal float? BladeLengthOverride;
+        internal float? DeferredManualDeployment;
+        internal string AutoSwingDurationText = "0.5 s";
         internal SaberType Type = SaberType.Light;
         internal SaberTogglePhase TogglePhase;
         internal bool CapeEnabled;
@@ -70,6 +77,9 @@ internal sealed partial class SaberRuntime
             if (Cape is { } cape) Cleanup(cape.Dispose, "Kitten cape");
             Cape = null; CapeNeedsSetup = false;
             Blade.Reset();
+            AutoSwing.Reset();
+            AutoSwingDurationText = "0.5 s";
+            DeferredManualDeployment = null;
             TogglePhase = SaberTogglePhase.None;
         }
     }
@@ -80,8 +90,13 @@ internal sealed partial class SaberRuntime
 
     private float3 DefaultSaberColor => ClampSaberColor(new(_settings.ColorR, _settings.ColorG, _settings.ColorB));
     private float3 Color => _activeSaber?.Color ?? DefaultSaberColor;
+    private float SaberLengthFor(KittenSaber saber) => saber.BladeLengthOverride ?? _settings.BladeLength;
+    private float VisibleBladeLength(KittenSaber saber) => saber.Pose.ClashHeld
+        ? saber.Pose.ClashHeldBladeLength : saber.Blade.Deployment * SaberLengthFor(saber);
     private float3 SaberColorFor(KittenEva kitten) => _kittenSabers.TryGetValue(kitten, out var saber) ? saber.Color : DefaultSaberColor;
     private SaberType SaberTypeFor(KittenEva kitten) => _kittenSabers.TryGetValue(kitten, out var saber) ? saber.Type : SaberType.Light;
+    private float SaberLengthFor(KittenEva kitten) => _kittenSabers.TryGetValue(kitten, out var saber) ? SaberLengthFor(saber) : _settings.BladeLength;
+    private float? SaberLengthOverrideFor(KittenEva kitten) => _kittenSabers.TryGetValue(kitten, out var saber) ? saber.BladeLengthOverride : null;
     private KittenEva? AppearanceKitten => !Program.EditorFlag && Program.ControlledVehicle is KittenEva { IsDisposed: false } kitten
         && _currentKittens.Contains(kitten) ? kitten : null;
 
@@ -103,6 +118,21 @@ internal sealed partial class SaberRuntime
         }
     }
 
+    private void SetKittenSaberLength(KittenEva kitten, float length)
+    {
+        if (!float.IsFinite(length) || length < .25f || length > SaberLimits.MaximumBladeLength
+            || kitten.IsDisposed || !_currentKittens.Contains(kitten) || !_kittenSabers.TryGetValue(kitten, out var saber)) return;
+        saber.BladeLengthOverride = length;
+        RememberKittenChoices(kitten, saber, revalidate: true);
+    }
+
+    private void UseDefaultKittenSaberLength(KittenEva kitten)
+    {
+        if (kitten.IsDisposed || !_currentKittens.Contains(kitten) || !_kittenSabers.TryGetValue(kitten, out var saber)) return;
+        saber.BladeLengthOverride = null;
+        RememberKittenChoices(kitten, saber, revalidate: true);
+    }
+
     private static float3 ClampSaberColor(float3 color) => new(
         float.IsFinite(color.X) ? Math.Clamp(color.X, 0, 1) : .12f,
         float.IsFinite(color.Y) ? Math.Clamp(color.Y, 0, 1) : .75f,
@@ -113,20 +143,89 @@ internal sealed partial class SaberRuntime
         bool enabled = _kittenSabers.TryGetValue(kitten, out var saber)
             && (saber.TogglePhase == SaberTogglePhase.Equipping
                 || saber.TogglePhase == SaberTogglePhase.None && saber.Blade.Equipped && saber.Blade.TargetOn);
+        if (saber?.DeferredManualDeployment is { } deferred) enabled = deferred > 0;
         // Reflect the latest click while waiting for the next settled handoff.
         foreach (var request in _kittenSaberRequests)
-            if (ReferenceEquals(request.Kitten, kitten)) enabled = request.Enabled;
+            if (ReferenceEquals(request.Kitten, kitten))
+                enabled = request.ManualDeployment is { } deployment ? deployment > 0 : request.Enabled;
         return enabled;
+    }
+
+    private bool? PendingSaberEnabledIntent(KittenEva kitten)
+    {
+        for (int i = _kittenSaberRequests.Count - 1; i >= 0; i--)
+        {
+            var request = _kittenSaberRequests[i];
+            if (!ReferenceEquals(request.Kitten, kitten)) continue;
+            return request.ManualDeployment is { } deployment ? deployment > 0 : request.Enabled;
+        }
+        if (_kittenSabers.TryGetValue(kitten, out var saber) && saber.DeferredManualDeployment is { } deferred)
+            return deferred > 0;
+        return null;
     }
 
     private void QueueKittenSaber(KittenEva kitten, bool enabled)
     {
-        if (_ready && !_disposed && _fault == null && !Program.EditorFlag
-            && !kitten.IsDisposed && _currentKittens.Contains(kitten) && _kittenSaberRequests.Count < 128)
+        if (!_ready || _disposed || _fault != null || Program.EditorFlag || kitten.IsDisposed || !_currentKittens.Contains(kitten)) return;
+        // A discrete equipment action supersedes any currently captured overlay
+        // gesture for this same kitten, before a newer press can be started.
+        if (ReferenceEquals(kitten, _saberDeploymentDragOwner)) CancelSaberDeploymentDrag();
+        if (ReferenceEquals(kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
+        PublishKittenSaberRequest(new(kitten, enabled));
+    }
+
+    private void QueueKittenBladeDeployment(KittenEva kitten, float deployment, bool rememberIntent = false)
+    {
+        if (!_ready || _disposed || _fault != null || Program.EditorFlag || kitten.IsDisposed
+            || !_currentKittens.Contains(kitten) || !float.IsFinite(deployment)) return;
+        PublishKittenSaberRequest(new(kitten, deployment > 0, Math.Clamp(deployment, 0, 1), rememberIntent));
+    }
+
+    private void PublishKittenSaberRequest(KittenSaberRequest request)
+    {
+        // Requests from another kitten commute. Coalesce consecutive manual cursor
+        // updates for this kitten while leaving every toggle/manual boundary ordered.
+        for (int i = _kittenSaberRequests.Count - 1; i >= 0; i--)
         {
-            _kittenSaberRequests.Enqueue(new(kitten, enabled));
-            if (_kittenSabers.TryGetValue(kitten, out var saber)) RememberKittenChoices(kitten, saber, revalidate: true, enabled: enabled);
+            if (!ReferenceEquals(_kittenSaberRequests[i].Kitten, request.Kitten)) continue;
+            var previous = _kittenSaberRequests[i];
+            if (previous.ManualDeployment is not null && request.ManualDeployment is not null)
+            {
+                _kittenSaberRequests[i] = request with { RememberIntent = request.RememberIntent || previous.RememberIntent };
+                return;
+            }
+            break;
         }
+        _kittenSaberRequests.Add(request);
+        if (_kittenSaberRequests.Count > Math.Max(1, _currentKittens.Count) * PendingRequestsPerKittenLimit)
+            CompactKittenSaberRequests();
+    }
+
+    private void CompactKittenSaberRequests()
+    {
+        if (_kittenSaberRequests.Count < 2) return;
+        var latest = new Dictionary<KittenEva, (int Last, int LastManual)>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < _kittenSaberRequests.Count; i++)
+        {
+            var request = _kittenSaberRequests[i];
+            int lastManual = request.ManualDeployment is null ? -1 : i;
+            if (latest.TryGetValue(request.Kitten, out var previous))
+            {
+                if (lastManual < 0) lastManual = previous.LastManual;
+            }
+            latest[request.Kitten] = (i, lastManual);
+        }
+        var keep = new bool[_kittenSaberRequests.Count];
+        foreach (var item in latest.Values)
+        {
+            keep[item.Last] = true;
+            if (_kittenSaberRequests[item.Last].ManualDeployment is null && item.LastManual >= 0)
+                keep[item.LastManual] = true;
+        }
+        int write = 0;
+        for (int read = 0; read < _kittenSaberRequests.Count; read++)
+            if (keep[read]) _kittenSaberRequests[write++] = _kittenSaberRequests[read];
+        if (write < _kittenSaberRequests.Count) _kittenSaberRequests.RemoveRange(write, _kittenSaberRequests.Count - write);
     }
 
     private void QueueControlledSaberToggle()
@@ -159,6 +258,9 @@ internal sealed partial class SaberRuntime
             // Boarding destroys/deregisters the EVA object. Release its processor,
             // MMU override and owned channels even if it was not being controlled.
             var saber = _kittenSabers[kitten];
+            if (ReferenceEquals(kitten, _saberDeploymentDragOwner)) CancelSaberDeploymentDrag();
+            if (ReferenceEquals(kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
+            RemoveClashOwner(kitten);
             ForgetKittenBinding(kitten);
             RemoveCapeOwner(kitten);
             if (ReferenceEquals(kitten, _kittenColorPickerOwner)) DismissKittenColorPicker();
@@ -185,6 +287,8 @@ internal sealed partial class SaberRuntime
 
     private void SetControlledKitten(KittenEva? kitten)
     {
+        CancelSaberDeploymentDrag();
+        CancelSaberAutoSwingDrag();
         DismissKittenColorPicker();
         CancelAssistedSlice(SliceWorkActive || _selectingSlice ? "Slice cancelled: controlled kitten changed." : "");
         ResetOverlaySwing();
@@ -204,28 +308,83 @@ internal sealed partial class SaberRuntime
 
     private void ApplyKittenSaberRequests()
     {
-        while (_kittenSaberRequests.TryDequeue(out var request))
+        _kittenIntentWrites.Clear();
+        for (int i = 0; i < _kittenSaberRequests.Count; i++)
         {
+            var request = _kittenSaberRequests[i];
+            if (!_currentKittens.Contains(request.Kitten) || request.Kitten.IsDisposed
+                || !_kittenSabers.ContainsKey(request.Kitten)) continue;
+            bool intent = request.ManualDeployment is { } deployment ? deployment > 0 : request.Enabled;
+            if (_kittenIntentWrites.ContainsKey(request.Kitten)) _kittenIntentWrites[request.Kitten] = intent;
+            else if (request.RememberIntent) _kittenIntentWrites.Add(request.Kitten, intent);
+        }
+        for (int requestIndex = 0; requestIndex < _kittenSaberRequests.Count; requestIndex++)
+        {
+            var request = _kittenSaberRequests[requestIndex];
             if (_fault != null || !_currentKittens.Contains(request.Kitten) || request.Kitten.IsDisposed
                 || !_kittenSabers.TryGetValue(request.Kitten, out var saber)) continue;
             if (ReferenceEquals(saber, _activeSaber) && (SliceWorkActive || _selectingSlice))
-                CancelAssistedSlice("Slice cancelled by manual control.");
+                CancelAssistedSlice(request.ManualDeployment is null
+                    ? "Slice cancelled by manual control." : "Slice cancelled by blade deployment control.");
+            if (request.ManualDeployment is { } deployment)
+            {
+                if (_kittenIntentWrites.ContainsKey(request.Kitten))
+                    _kittenIntentWrites[request.Kitten] = deployment > 0;
+                if (saber.Pose.ClashHeld)
+                {
+                    // Keep the visible blade frozen for the clash window. Only the latest
+                    // requested level is retained; an ordinary toggle clears this slot.
+                    bool deferredChanged = saber.DeferredManualDeployment != deployment;
+                    saber.DeferredManualDeployment = deployment;
+                    if (_kittenIntentWrites.ContainsKey(request.Kitten))
+                        _kittenIntentWrites[request.Kitten] = deployment > 0;
+                    else if (deferredChanged)
+                        _kittenIntentWrites.Add(request.Kitten, deployment > 0);
+                    continue;
+                }
+                saber.DeferredManualDeployment = null;
+                if (ApplyManualDeploymentNow(request.Kitten, saber, deployment))
+                    _kittenIntentWrites[request.Kitten] = deployment > 0;
+                continue;
+            }
+            // A normal toggle supersedes an uncommitted slider target.
+            saber.DeferredManualDeployment = null;
+            if (_kittenIntentWrites.ContainsKey(request.Kitten))
+                _kittenIntentWrites[request.Kitten] = request.Enabled;
             if (request.Enabled)
             {
                 saber.Blade.Equip(true);
-                saber.Pose.Bind(request.Kitten);
+                if (!ReferenceEquals(saber.Pose.Kitten, request.Kitten)) saber.Pose.Bind(request.Kitten);
                 saber.TogglePhase = SaberTogglePhase.Equipping;
             }
             else
             {
                 // Keep the hilt, pose and channels alive through retraction and
                 // arm lowering. A later enable reverses from the current pose/length.
+                if (ReferenceEquals(request.Kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
+                saber.Pose.ClearClash();
+                DisableSaberAutoSwing(saber);
                 saber.Blade.SetIgnited(false);
                 if (saber.TogglePhase != SaberTogglePhase.Unequipping)
                     saber.TogglePhase = saber.Blade.Equipped ? SaberTogglePhase.Retracting : SaberTogglePhase.None;
                 if (ReferenceEquals(saber, _activeSaber)) ResetOverlaySwing();
             }
         }
+        foreach (var intent in _kittenIntentWrites)
+            if (_currentKittens.Contains(intent.Key) && _kittenSabers.TryGetValue(intent.Key, out var saber))
+                RememberKittenChoices(intent.Key, saber, revalidate: true, enabled: intent.Value);
+        _kittenIntentWrites.Clear();
+        _kittenSaberRequests.Clear();
+    }
+
+    private bool ApplyManualDeploymentNow(KittenEva kitten, KittenSaber saber, float deployment)
+    {
+        if (!saber.Blade.Equipped) saber.Blade.Equip(true);
+        if (!ReferenceEquals(saber.Pose.Kitten, kitten)) saber.Pose.Bind(kitten);
+        saber.TogglePhase = SaberTogglePhase.None;
+        bool changed = !saber.Blade.ManualDeployment || saber.Blade.Deployment != deployment;
+        if (!saber.Blade.HoldDeployment(deployment)) return false;
+        return changed;
     }
 
     private void ConfigureSaberPose(SaberPoseController pose)
@@ -307,6 +466,14 @@ internal sealed partial class SaberRuntime
     {
         var pose = saber.Pose;
         bool advancing = double.IsFinite(playerDt) && playerDt > 0;
+        double visualDt = pose.ClashHeld ? 0 : playerDt;
+        if (!pose.ClashHeld && saber.DeferredManualDeployment is { } deferred
+            && pose.Kitten is { IsDisposed: false } deferredKitten)
+        {
+            saber.DeferredManualDeployment = null;
+            if (ApplyManualDeploymentNow(deferredKitten, saber, deferred))
+                RememberKittenChoices(deferredKitten, saber, revalidate: true, enabled: deferred > 0);
+        }
         if (advancing)
         {
             if (saber.TogglePhase == SaberTogglePhase.Equipping && pose.Eligible && pose.Blend == 1)
@@ -317,13 +484,13 @@ internal sealed partial class SaberRuntime
             else if (saber.TogglePhase == SaberTogglePhase.Retracting && saber.Blade.Deployment == 0)
                 saber.TogglePhase = SaberTogglePhase.Unequipping;
         }
-        pose.Update(playerDt, saber.Blade.Equipped && saber.TogglePhase != SaberTogglePhase.Unequipping);
+        pose.Update(visualDt, saber.Blade.Equipped && saber.TogglePhase != SaberTogglePhase.Unequipping);
         saber.FreshPoseThisTick = pose.MainPoseGeneration != saber.ConsumedPoseGeneration && pose.HasFreshBodyFrame;
         saber.ConsumedPoseGeneration = pose.MainPoseGeneration;
         // Pose availability can change while moving or grabbing a ladder. It
         // suspends presentation, never the player's ignition/equipment intent.
         // Pending equip resumes when the hand pose is available again.
-        saber.Blade.Advance(playerDt);
+        saber.Blade.Advance(visualDt);
         if (advancing && saber.TogglePhase == SaberTogglePhase.Unequipping && pose.Blend == 0)
         {
             saber.Blade.Equip(false);
@@ -341,10 +508,11 @@ internal sealed partial class SaberRuntime
             var saber = pair.Value;
             if (ReferenceEquals(saber, _activeSaber)) continue;
             ConfigureSaberPose(saber.Pose);
+            AdvanceSaberAutoSwing(saber, playerDt);
             AdvanceKittenSaber(saber, playerDt);
             var pose = saber.Pose;
             if (saber.Blade.Equipped && saber.FreshPoseThisTick && pose.TryGetBodyFrame(out var emitter))
-                _renderer.SetEmitter(pair.Key, emitter, saber.Blade.Deployment * _settings.BladeLength, saber.Color);
+                _renderer.SetEmitter(pair.Key, emitter, VisibleBladeLength(saber), saber.Color);
             else if (saber.Blade.Equipped) saber.Audio.Suspend();
             else saber.Audio.Stop();
         }
@@ -357,7 +525,7 @@ internal sealed partial class SaberRuntime
         {
             var saber = pair.Value;
             if (ReferenceEquals(saber, _activeSaber)) continue;
-            float length = saber.Blade.Deployment * _settings.BladeLength;
+            float length = VisibleBladeLength(saber);
             if (saber.Blade.Equipped && saber.FreshPoseThisTick && saber.Pose.TryGetBladeSegment(length, out var emitter, out _))
                 saber.Audio.Update(pair.Key, emitter, saber.Blade.Deployment, saber.Blade.TargetOn,
                     unsupportedSpeed || !saber.Pose.HasFreshBodyFrame, _settings.Volume, saber.SwingSpeed,
@@ -369,11 +537,14 @@ internal sealed partial class SaberRuntime
 
     private void ResetKittenSabers()
     {
+        CancelSaberDeploymentDrag();
+        CancelSaberAutoSwingDrag();
         ReleaseProfileBindings();
         DismissKittenColorPicker();
         foreach (var pair in _kittenSabers)
         {
             DisposeKittenCape(pair.Key, pair.Value, clearFailure: true);
+            pair.Value.AutoSwing.Reset();
             pair.Value.Dispose();
         }
         _capeControllers.Clear();
@@ -383,6 +554,7 @@ internal sealed partial class SaberRuntime
         _capeFaultCleanupPending = _capePendingCleanup = false;
         _capeRoundRobinCursor = 0;
         _kittenSabers.Clear(); _kittenSaberRequests.Clear(); _overlayKittens.Clear();
+        _kittenIntentWrites.Clear();
         _currentKittens.Clear(); _removedKittens.Clear(); _activeSaber = null;
         _nextKittenColor = 0;
         _blade = _idleSaber.Blade; _pose = _idleSaber.Pose; _audio = _idleSaber.Audio;

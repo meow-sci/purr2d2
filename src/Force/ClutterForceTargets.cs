@@ -23,11 +23,11 @@ internal sealed class ClutterForceTarget
     private readonly StaticHandle? _static;
     private readonly BodyHandle? _body;
     private readonly int _generation;
+    private readonly string _stableOrder;
     internal IParentBody Parent { get; }
     internal CelestialSystem System { get; }
     internal ClutterForceIdentity StableKey => new(Native, _generation, Key);
-    internal string StableOrder => $"{Key.CelestialHash.Code:D10}:{Key.EcotypeIndex:D10}:{Key.Cell.FaceId:D2}:"
-        + $"{Key.Cell.X:D10}:{Key.Cell.Y:D10}:{Key.SubCellId:D10}:{_generation:D10}";
+    internal string StableOrder => _stableOrder;
     internal string DisplayName { get; }
     internal bool IsValid => TryResolve(out _, out _, out _, out _);
 
@@ -36,7 +36,10 @@ internal sealed class ClutterForceTarget
     {
         Bubble = bubble; Native = bubble.GroundClutterStatics; Sim = bubble.ConstraintSim!;
         Parent = bubble.Parent; System = system; Key = key; Shape = shape; _static = staticHandle; _body = bodyHandle;
-        _generation = ClutterForceNative.Generation(Native); DisplayName = ClutterForceNative.Name(Native, in key);
+        _generation = ClutterForceNative.Generation(Native);
+        _stableOrder = $"{Key.CelestialHash.Code:D10}:{Key.EcotypeIndex:D10}:{Key.Cell.FaceId:D2}:"
+            + $"{Key.Cell.X:D10}:{Key.Cell.Y:D10}:{Key.SubCellId:D10}:{_generation:D10}";
+        DisplayName = ClutterForceNative.Name(Native, in key);
     }
 
     internal bool IsLocalTo(KittenEva owner) => ForceTargeting.IsLive(owner)
@@ -99,6 +102,9 @@ internal static partial class ClutterForceTargets
 {
     internal const int MaximumCandidates = 32768;
     internal const int MaximumChildTests = 250000;
+    private static readonly List<ProximityHit> NearHits = new(512);
+    private static readonly HashSet<CollidableReference> NearSeenCollidables = [];
+    private static readonly HashSet<ClutterForceIdentity> NearSeenTargets = [];
     private static bool _installed;
     private static System.Reflection.MethodInfo? _contactMethod;
 
@@ -181,7 +187,8 @@ internal static partial class ClutterForceTargets
     }
 
     internal static bool GatherNear(KittenEva owner, double3 centerCci, double radius,
-        List<ClutterForceCandidate> destination, int maximum, out string reason)
+        List<ClutterForceCandidate> destination, int maximum, out string reason,
+        HashSet<ClutterForceIdentity>? excluded = null)
     {
         destination.Clear();
         if (!TryContext(owner, out var bubble, out reason)) return reason.Length == 0;
@@ -193,33 +200,46 @@ internal static partial class ClutterForceTargets
         var center = centerCci.Transform(cci2Ccf) - ClutterForceNative.Origin(bubble.GroundClutterStatics);
         if (center.LengthSquared() > 4096.0 * 4096)
         { reason = "Ground objects must remain near the current physics bubble."; return false; }
-        var hits = new List<ProximityHit>(maximum);
-        var query = new NearQuery<NativeClutterPickFilter>(bubble.ConstraintSim!.Simulation,
-            new(bubble.GroundClutterStatics), center.ToBepu(), hits, MaximumCandidates);
-        var pose = new RigidPose(center.ToBepu()); var velocity = default(BodyVelocity);
-        // Zero motion and zero horizon perform exact native sphere overlap, including compounds.
-        // Explicit convergence settings avoid the convenience overload's division by zero for zero speed.
-        bubble.ConstraintSim!.Simulation.Sweep(new Sphere((float)radius), in pose, in velocity, 0,
-            bubble.ConstraintSim.BufferPool, ref query, .0001f, .00001f, 32);
-        if (query.Exceeded || query.Unsupported)
+        var hits = NearHits;
+        hits.Clear();
+        NearSeenCollidables.Clear();
+        NearSeenTargets.Clear();
+        try
         {
-            destination.Clear(); reason = query.Unsupported ? "A nearby ground collider cannot be queried safely."
-                : "Nearby ground geometry exceeds the Force proximity query budget; nothing was captured.";
-            return false;
-        }
-        SortNearest(hits);
-        var seen = new HashSet<ClutterForceIdentity>();
-        foreach (var hit in hits)
-        {
-            if (!TryTarget(bubble, owner.System, hit.Collidable, out var target) || target == null)
-            { destination.Clear(); reason = "A nearby ground object changed during the Force query."; return false; }
-            if (seen.Add(target.StableKey))
+            var query = new NearQuery<NativeClutterPickFilter>(bubble.ConstraintSim!.Simulation,
+                new(bubble.GroundClutterStatics), center.ToBepu(), hits, MaximumCandidates, NearSeenCollidables);
+            var pose = new RigidPose(center.ToBepu()); var velocity = default(BodyVelocity);
+            // Zero motion and zero horizon perform exact native sphere overlap, including compounds.
+            // Explicit convergence settings avoid the convenience overload's division by zero for zero speed.
+            bubble.ConstraintSim!.Simulation.Sweep(new Sphere((float)radius), in pose, in velocity, 0,
+                bubble.ConstraintSim.BufferPool, ref query, .0001f, .00001f, 32);
+            if (query.Exceeded || query.Unsupported)
             {
-                destination.Add(new(target, hit.DistanceSquared));
-                if (destination.Count == maximum) break;
+                destination.Clear(); reason = query.Unsupported ? "A nearby ground collider cannot be queried safely."
+                    : "Nearby ground geometry exceeds the Force proximity query budget; nothing was captured.";
+                return false;
             }
+            SortNearest(hits);
+            foreach (var hit in hits)
+            {
+                if (!TryIdentity(bubble.GroundClutterStatics, hit.Collidable, out var key))
+                { destination.Clear(); reason = "A nearby ground object changed during the Force query."; return false; }
+                if ((excluded == null || !excluded.Contains(key)) && NearSeenTargets.Add(key))
+                {
+                    if (!TryTarget(bubble, owner.System, hit.Collidable, out var target) || target == null)
+                    { destination.Clear(); reason = "A nearby ground object changed during the Force query."; return false; }
+                    destination.Add(new(target, hit.DistanceSquared));
+                    if (destination.Count == maximum) break;
+                }
+            }
+            reason = ""; return true;
         }
-        reason = ""; return true;
+        finally
+        {
+            hits.Clear();
+            NearSeenCollidables.Clear();
+            NearSeenTargets.Clear();
+        }
     }
 
     /// <summary>Settled-only forgiving pick, used only after exact vessel/clutter picking misses.</summary>
@@ -293,5 +313,20 @@ internal static partial class ClutterForceTargets
         }
         if (!ClutterForceNative.TryDynamic(native, collidable.BodyHandle, out var dynamicKey, out var dynamicShape)) return false;
         target = new(bubble, system, dynamicKey, dynamicShape, null, collidable.BodyHandle); return true;
+    }
+
+    private static bool TryIdentity(BubbleClutterStatics native, CollidableReference collidable,
+        out ClutterForceIdentity identity)
+    {
+        BubbleClutterStatics.ClutterInstanceKey key;
+        if (collidable.Mobility == CollidableMobility.Static)
+        {
+            if (!ClutterForceNative.TryStatic(native, collidable.StaticHandle, out key, out _))
+            { identity = default; return false; }
+        }
+        else if (!ClutterForceNative.TryDynamic(native, collidable.BodyHandle, out key, out _))
+        { identity = default; return false; }
+        identity = new(native, ClutterForceNative.Generation(native), key);
+        return true;
     }
 }

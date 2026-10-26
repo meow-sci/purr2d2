@@ -14,11 +14,13 @@ internal sealed class KittenProfile
     [JsonRequired] public SaberType Type { get; set; }
     [JsonRequired] public bool CapeEnabled { get; set; }
     [JsonRequired] public bool SaberEnabled { get; set; }
+    public float? BladeLengthOverride { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 
     internal void Validate()
     {
-        if (!ValidColor(Red) || !ValidColor(Green) || !ValidColor(Blue) || !Enum.IsDefined(Type))
+        if (!ValidColor(Red) || !ValidColor(Green) || !ValidColor(Blue) || !Enum.IsDefined(Type)
+            || BladeLengthOverride is { } length && (!float.IsFinite(length) || length < .25f || length > SaberLimits.MaximumBladeLength))
             throw new InvalidDataException("Invalid saved kitten appearance.");
     }
 

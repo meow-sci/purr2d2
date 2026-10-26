@@ -333,7 +333,8 @@ namespace Purr2D2.Force
         internal static void Install(HarmonyLib.Harmony harmony) { }
         internal static void Remove(HarmonyLib.Harmony harmony) { }
         internal static bool GatherNear(KittenEva owner, double3 center, double radius,
-            List<ClutterForceCandidate> destination, int maximum, out string reason)
+            List<ClutterForceCandidate> destination, int maximum, out string reason,
+            HashSet<ClutterForceIdentity>? excluded = null)
         {
             GatherCalls++; destination.Clear(); reason = "fixture native query refused";
             if (QueryFails) return false;
@@ -341,7 +342,8 @@ namespace Purr2D2.Force
             foreach (var target in Candidates)
             {
                 double distanceSquared = (target.State.Position - center).LengthSquared();
-                if (distanceSquared <= radius * radius + 1e-9 && seen.Add(target.StableKey))
+                if ((excluded == null || !excluded.Contains(target.StableKey))
+                    && distanceSquared <= radius * radius + 1e-9 && seen.Add(target.StableKey))
                 {
                     destination.Add(new(target, distanceSquared));
                 }

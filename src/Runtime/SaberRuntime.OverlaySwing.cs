@@ -14,6 +14,8 @@ internal sealed partial class SaberRuntime
             ResetOverlaySwing();
             return;
         }
+        // Preserve the exact displayed calibration while a clash holds the pose.
+        if (_pose.ClashHeld) return;
         // Preserve the displayed offset while paused or outside supported warp, including a return.
         if (!_overlayDrag.Advance(SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) ? playerDt : 0,
             out var grip, out var aim)) return;

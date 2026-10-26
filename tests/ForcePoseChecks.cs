@@ -153,9 +153,10 @@ internal static class ForcePoseChecks
             model.Sample();
             Check(force.Active && saber.Active, "tuck preserves independent ownership of both active hand poses");
             force.Unbind();
-            Check(model.AnimProcessors.Count == 3 && saber.Active && motion.Eligible
+            Check(model.AnimProcessors.Count == 4 && saber.Active && motion.Eligible
+                && SaberPoseController.IsClashTailFor(model.AnimProcessors[^1], kitten)
                 && !kitten.Renderable.Avatar.Attachments.Mmu.Enabled,
-                "Force unbind preserves the lit saber, motion processors and saber-owned MMU override");
+                "Force unbind preserves the lit hand/clash pair, motion processors and saber-owned MMU override");
             Check(force.Bind(kitten), "Force can attach again after the motion layer has already bound");
             force.Update(.1, true); force.Update(.1, true);
             saber.Unbind();
@@ -174,7 +175,9 @@ internal static class ForcePoseChecks
             saber.Update(.1, true); saber.Update(.1, true); model.Sample(); model.Publish();
             Near(emitter.Translation, uprightEmitter.Translation,
                 "reequipping the saber after a Force-only interval cannot inherit a stale somersault transform");
-            Check(model.AnimProcessors.Count == 2, "repeated layer transitions never duplicate either hand processor");
+            Check(model.AnimProcessors.Count == 3
+                && SaberPoseController.IsClashTailFor(model.AnimProcessors[^1], kitten),
+                "repeated layer transitions never duplicate hand or clash-tail processors");
         }
     }
 

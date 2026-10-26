@@ -14,7 +14,9 @@ public sealed unsafe partial class SaberRenderer
     private readonly SlagBurst[] _slag = new SlagBurst[DarkSaberSparkTuning.MaximumBursts];
     private readonly SlagSource[] _slagSources = new SlagSource[DarkSaberSparkTuning.MaximumSources];
     private int _slagCount;
+    private uint _clashSparkSequence;
     private DarkSaberSparkTuning _slagTuning = DarkSaberSparkTuning.FromEffects(SaberEffectSettings.Create(SaberType.Dark));
+    private static readonly DarkSaberSparkTuning ClashSparkTuning = new(8, 0, .8f, 2.4f, .24f, 1.45f);
 
     private struct SlagSource
     {
@@ -81,11 +83,39 @@ public sealed unsafe partial class SaberRenderer
                 && (owner.IsDisposed || now - _slagSources[i].LastSeen > 2)) _slagSources[i] = default;
     }
 
+    /// <summary>One bounded ballistic burst at a clash point, independent of Dark saber ambient sparkle settings.</summary>
+    internal void AddClashSparks(KittenEva owner, double3 pointBody, double now)
+    {
+        if (_disposed || owner.IsDisposed || !GameSettings.Current.Graphics.Particles
+            || !double.IsFinite(now) || now < 0 || !Finite(pointBody)) return;
+        try
+        {
+            Camera camera = GameAudio.GetAudioCamera();
+            double3 ownerEgo = camera.GetPositionEgo(owner);
+            double3 pointEgo = ownerEgo + pointBody.Transform(owner.Body2Cce);
+            double3 upEgo = double3.UnitY.Transform(owner.Body2Cce);
+            if (!DarkSaberSparkFrame.TryCreate(ownerEgo, pointEgo, upEgo, out var frame)) return;
+            uint sequence = _clashSparkSequence++ % 1024;
+            float seed = SaberVfx.Seed(owner.Id) * 97 + sequence * 13;
+            var burst = new SlagBurst(owner, frame, new float3(1f, .54f, .17f), now, seed, ClashSparkTuning);
+            if (_slagCount < _slag.Length) _slag[_slagCount++] = burst;
+            else
+            {
+                int oldest = 0;
+                for (int i = 1; i < _slagCount; i++)
+                    if (_slag[i].Born < _slag[oldest].Born) oldest = i;
+                _slag[oldest] = burst;
+            }
+        }
+        catch (Exception ex) { Report("clash spark submission", ex); }
+    }
+
     private void ClearSlag()
     {
         Array.Clear(_slag);
         Array.Clear(_slagSources);
         _slagCount = 0;
+        _clashSparkSequence = 0;
     }
 
     private void DrawSlag(Camera camera, CommandBuffer commands, float4x4 projection)

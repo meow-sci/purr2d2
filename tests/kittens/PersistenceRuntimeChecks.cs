@@ -4,11 +4,14 @@ using Purr2D2.Audio;
 using Purr2D2.Capes;
 using Purr2D2.Core;
 using Purr2D2.Pose;
+using RenderCore;
+using RenderCore.Animation;
 
 namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime
 {
+    private enum Command { CancelSlice }
     // A narrow fixture for the other runtime partials. Ownership/queue/pruning and
     // all avatar binding/publication code under test come from production sources.
     private BladeState _blade;
@@ -20,13 +23,22 @@ internal sealed partial class SaberRuntime
     private readonly AssistedSliceSequence _sliceSequence = new();
     private bool SliceWorkActive => _sliceSequence.Active;
     private readonly SaberSettings _settings = new();
+    private readonly SaberOverlayDrag _overlayDrag = new();
     private bool _ready = true, _enabled = true, _disposed, _selectingSlice, _freshPoseThisTick, _hasPreviousTip;
     private string? _fault;
     private float _swingSpeed;
     private ulong _consumedPoseGeneration;
     private KittenEva? _resetGestureOwner;
+    private KittenEva? _saberDeploymentDragOwner;
+    private KittenEva? _autoSwingDragOwner;
     private KittenEva? _kittenColorPickerOwner;
     private void DismissKittenColorPicker() => _kittenColorPickerOwner = null;
+    private void CancelSaberDeploymentDrag() => _saberDeploymentDragOwner = null;
+    private void CancelSaberAutoSwingDrag() => _autoSwingDragOwner = null;
+    private void RemoveClashOwner(KittenEva owner)
+    {
+        if (_kittenSabers.TryGetValue(owner, out var saber)) saber.Pose.ClearClash();
+    }
     private static void Report(string context, Exception error) { }
 
     private SaberRuntime()
@@ -34,9 +46,10 @@ internal sealed partial class SaberRuntime
         _blade = _idleSaber.Blade; _pose = _idleSaber.Pose; _audio = _idleSaber.Audio;
         _disposed = false; _fault = null; _selectingSlice = false;
     }
-    private void CancelAssistedSlice(string reason) { _sliceSequence.Cancel(); _pose.ClearSliceSwing(); }
+    private void CancelAssistedSlice(string reason) { _sliceSequence.Cancel(); _selectingSlice = false; _pose.ClearSliceSwing(); }
     private void ResetSomersault() { }
-    private void ResetOverlaySwing() => _resetGestureOwner = _pose.Kitten;
+    private void ResetOverlaySwing() { _overlayDrag.Reset(); _resetGestureOwner = _pose.Kitten; }
+    private void Queue(Command command) { }
     private void DrawSaber(KittenEva owner, IViewport viewport, float4x4 emitter)
     {
         if (!_kittenSabers.TryGetValue(owner, out var saber)) return;
@@ -73,12 +86,14 @@ internal sealed partial class SaberRuntime
         runtime.SetKittenSaberColor(leia, new(.3f, .7f, .2f));
         runtime.SetKittenSaberType(leia, SaberType.Dark);
         runtime.SetKittenCapeEnabled(leia, true);
+        runtime.SetKittenSaberLength(leia, 2.8f);
         runtime.QueueKittenSaber(leia, true);
         runtime.CaptureKittenChoices();
         Check(!runtime._hasPreviousTip && runtime._swingSpeed == 0, "restoration starts without historical blade contact velocity");
         var captured = runtime.SceneSaves.Profiles.Capture();
         var savedLeia = captured.Kittens.Single(item => item.Identity.Id == "Leia");
-        Check(savedLeia.Identity.Kind == "roster" && Read(savedLeia).SaberEnabled,
+        Check(savedLeia.Identity.Kind == "roster" && Read(savedLeia).SaberEnabled
+            && Read(savedLeia).BladeLengthOverride == 2.8f,
             "pending enable and all appearance choices capture before avatar mutation");
         Check(leia.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 0,
             "capturing queued intent does not execute the pose or allocate cape resources");
@@ -113,13 +128,18 @@ internal sealed partial class SaberRuntime
         runtime.RefreshOverlayKittens();
         Check(runtime.SaberColorFor(restored) == new float3(.3f, .7f, .2f)
             && runtime.SaberTypeFor(restored) == SaberType.Dark && runtime.CapeEnabledFor(restored)
-            && runtime.SaberEnabledFor(restored) && runtime._kittenSaberRequests.Count == 0,
-            "new EVA instance restores roster color, type, cape and equipment through normal ownership");
-        Check(restored.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 1 && runtime._capeControllers.Count == 0,
-            "restore creates one pose and leaves cape rendering and cloth lazy");
+            && runtime.SaberEnabledFor(restored) && runtime._kittenSaberRequests.Count == 0
+            && runtime.SaberLengthFor(restored) == 2.8f,
+            "new EVA instance restores roster appearance, blade length and equipment through normal ownership");
+        var restoredProcessors = restored.Renderable.Avatar.Core.CharacterModel.AnimProcessors;
+        Check(restoredProcessors.Count == 2 && SaberPoseController.IsProcessorFor(restoredProcessors[0], restored)
+            && SaberPoseController.IsClashTailFor(restoredProcessors[1], restored) && runtime._capeControllers.Count == 0,
+            "restore creates the pose/clash pair and leaves cape rendering and cloth lazy");
         runtime.ResetKittenSabers(); runtime.RefreshOverlayKittens();
-        Check(restored.Renderable.Avatar.Core.CharacterModel.AnimProcessors.Count == 1,
-            "disable/re-enable and repeated cleanup do not duplicate pose processors");
+        restoredProcessors = restored.Renderable.Avatar.Core.CharacterModel.AnimProcessors;
+        Check(restoredProcessors.Count == 2 && SaberPoseController.IsProcessorFor(restoredProcessors[0], restored)
+            && SaberPoseController.IsClashTailFor(restoredProcessors[1], restored),
+            "disable/re-enable and repeated cleanup do not duplicate pose/clash processors");
 
         runtime._kittenSabers[restored].Blade.Reset();
         runtime._kittenSabers[restored].TogglePhase = SaberTogglePhase.None;
@@ -132,6 +152,10 @@ internal sealed partial class SaberRuntime
         runtime.CaptureKittenChoices();
         Check(!Read(runtime.SceneSaves.Profiles.Capture().Kittens.Single(item => item.Identity.Id == "Leia")).SaberEnabled,
             "pending retraction captures final user intent rather than intermediate lit state");
+        runtime.QueueKittenBladeDeployment(restored, .4f);
+        runtime.CaptureKittenChoices();
+        Check(Read(runtime.SceneSaves.Profiles.Capture().Kittens.Single(item => item.Identity.Id == "Leia")).SaberEnabled,
+            "save capture includes the latest pending manual deployment intent before the safe handoff");
         runtime.ResetKittenSabers();
         runtime.SceneSaves.ObserveSystem(new CelestialSystem());
         Check(runtime.SceneSaves.Profiles.Capture().Kittens.Count == 0, "new scene clears logical profiles");
@@ -204,6 +228,120 @@ internal sealed partial class SaberRuntime
         runtime._discardUnavailableKittenRecords = true;
         runtime.ResetKittenSabers();
         Check(!runtime._discardUnavailableKittenRecords, "cleanup cancels a pending old-scene recovery action");
+
+        CheckRejectedIdentityWrites();
+        CheckDeferredIntentSurvivesCleanup();
+    }
+
+    private static void CheckRejectedIdentityWrites()
+    {
+        var length = NewBoundIdentityAction("Length setter");
+        var before = Read(length.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        AddSeatConflict(length.System, length.Kitten);
+        length.Runtime.SetKittenSaberLength(length.Kitten, 2.8f);
+        var after = Read(length.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        Check(!length.Runtime._profileBindings.ContainsKey(length.Kitten)
+            && after.BladeLengthOverride == before.BladeLengthOverride,
+            "a new seat conflict invalidates the length setter before it can rewrite the saved profile");
+        length.Runtime.ResetKittenSabers();
+
+        var reset = NewBoundIdentityAction("Length reset");
+        reset.Runtime.SetKittenSaberLength(reset.Kitten, 2.8f);
+        before = Read(reset.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        AddSeatConflict(reset.System, reset.Kitten);
+        reset.Runtime.UseDefaultKittenSaberLength(reset.Kitten);
+        after = Read(reset.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        Check(before.BladeLengthOverride == 2.8f && !reset.Runtime._profileBindings.ContainsKey(reset.Kitten)
+            && after.BladeLengthOverride == before.BladeLengthOverride,
+            "a new seat conflict invalidates the default-length reset before it can rewrite the saved profile");
+        reset.Runtime.ResetKittenSabers();
+
+        var toggle = NewBoundIdentityAction("Queued toggle");
+        before = Read(toggle.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        AddSeatConflict(toggle.System, toggle.Kitten);
+        toggle.Runtime.QueueKittenSaber(toggle.Kitten, true);
+        toggle.Runtime.ApplyKittenSaberRequests();
+        after = Read(toggle.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        Check(!before.SaberEnabled && !toggle.Runtime._profileBindings.ContainsKey(toggle.Kitten)
+            && after.SaberEnabled == before.SaberEnabled,
+            "a queued toggle revalidates its bound identity before writing enabled intent");
+        toggle.Runtime.ResetKittenSabers();
+
+        var manual = NewBoundIdentityAction("Cursor deployment");
+        before = Read(manual.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        AddSeatConflict(manual.System, manual.Kitten);
+        // Ordinary cursor motion carries RememberIntent:false; applying the changed
+        // manual state still updates enabled intent, so the binding must be checked.
+        manual.Runtime.QueueKittenBladeDeployment(manual.Kitten, .4f, rememberIntent: false);
+        manual.Runtime.ApplyKittenSaberRequests();
+        after = Read(manual.Runtime.SceneSaves.Profiles.Capture().Kittens.Single());
+        Check(!before.SaberEnabled && !manual.Runtime._profileBindings.ContainsKey(manual.Kitten)
+            && after.SaberEnabled == before.SaberEnabled,
+            "manual cursor deployment revalidates identity before its profile intent write");
+        manual.Runtime.ResetKittenSabers();
+    }
+
+    private static (SaberRuntime Runtime, KittenEva Kitten, CelestialSystem System) NewBoundIdentityAction(string name)
+    {
+        var runtime = new SaberRuntime();
+        var system = new CelestialSystem();
+        Universe.CurrentSystem = system;
+        Universe.KittenRoster = new();
+        var kitten = new KittenEva(name);
+        Universe.KittenRoster.Kittens.Add(new KittenRosterEntryData(name, "Stock"));
+        system.All.Items = [kitten];
+        runtime.SceneSaves.ObserveSystem(system);
+        runtime.RefreshOverlayKittens();
+        Check(runtime._profileBindings.ContainsKey(kitten), $"{name} scenario starts with a fresh live profile binding");
+        return (runtime, kitten, system);
+    }
+
+    private static void AddSeatConflict(CelestialSystem system, KittenEva kitten)
+    {
+        system.All.Items = [kitten, new Vehicle("Occupied") { Seats = [new IVASeat { AssignedKittenHash = kitten.Hash }] }];
+    }
+
+    private static void CheckDeferredIntentSurvivesCleanup()
+    {
+        var scenario = NewBoundIdentityAction("Deferred zero");
+        var runtime = scenario.Runtime;
+        var kitten = scenario.Kitten;
+        runtime.QueueKittenSaber(kitten, true);
+        runtime.ApplyKittenSaberRequests();
+        var saber = runtime._kittenSabers[kitten];
+        for (int i = 0; i < 6; i++)
+        {
+            runtime.ConfigureSaberPose(saber.Pose);
+            runtime.AdvanceKittenSaber(saber, .1);
+            Program.FrameNumber++;
+            PublishVisiblePose(kitten);
+        }
+        Check(saber.Pose.HasFreshClashSnapshot
+            && saber.Pose.TryBeginClash(Program.FrameNumber, runtime.VisibleBladeLength(saber)),
+            "fresh bound pose can hold the currently enabled saber during persistence cleanup setup");
+
+        runtime.QueueKittenBladeDeployment(kitten, 0, rememberIntent: false);
+        runtime.ApplyKittenSaberRequests();
+        Check(saber.DeferredManualDeployment == 0 && saber.Blade.Deployment > 0
+            && !Read(runtime.SceneSaves.Profiles.Capture().Kittens.Single()).SaberEnabled,
+            "a held zero deployment persists its off intent while the blade remains frozen");
+        runtime.ResetKittenSabers();
+        runtime.RefreshOverlayKittens();
+        Check(!runtime.SaberEnabledFor(kitten)
+            && !Read(runtime.SceneSaves.Profiles.Capture().Kittens.Single()).SaberEnabled,
+            "cleanup and profile rebind retain a deferred zero intent without an explicit gesture release");
+        runtime.ResetKittenSabers();
+    }
+
+    private static void PublishVisiblePose(KittenEva kitten)
+    {
+        Program.RenderedViewport = Program.MainViewport;
+        var model = kitten.Renderable.Avatar.Core.CharacterModel;
+        var localPose = new TransformTRS[model.Skeleton.BoneCount];
+        foreach (var processor in model.AnimProcessors)
+            processor.UpdateLocalPose(float4x4.Identity, model.Skeleton, localPose, 0);
+        foreach (var processor in model.AnimProcessors)
+            processor.UpdateSkeleton(float4x4.Identity, model.Skeleton, 0);
     }
 
     private static void CheckLargeRestore()

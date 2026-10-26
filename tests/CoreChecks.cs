@@ -56,6 +56,28 @@ internal static class CoreChecks
         blade.Advance(.15);
         Check(blade.Deployment > beforeInvalidDuration, "ignition can reverse during retraction");
 
+        Check(blade.HoldDeployment(.37f) && blade.ManualDeployment && blade.TargetOn
+            && blade.Deployment == .37f && blade.Phase == "Partial",
+            "manual deployment holds an exact partial fraction and reports a partial phase");
+        blade.Advance(.1);
+        Check(blade.Deployment == .37f, "automatic extension does not advance a held manual fraction");
+        Check(!blade.HoldDeployment(float.NaN) && blade.Deployment == .37f,
+            "nonfinite manual deployment is rejected without changing the held fraction");
+        Check(blade.HoldDeployment(2) && blade.Deployment == 1 && blade.TargetOn,
+            "manual deployment clamps above one to the fully extended endpoint");
+        Check(blade.HoldDeployment(0) && blade.ManualDeployment && !blade.TargetOn
+            && blade.Deployment == 0 && blade.Equipped && blade.Phase == "Retracted",
+            "manual zero keeps the saber equipped while lowering the blade exactly");
+        blade.SetIgnited(false);
+        Check(!blade.ManualDeployment && !blade.TargetOn,
+            "an unchanged off request resumes automatic deployment mode");
+        Check(blade.HoldDeployment(.4f), "a held fraction can be set again");
+        blade.SetIgnited(true);
+        Check(!blade.ManualDeployment && blade.TargetOn && blade.Deployment == .4f,
+            "an unchanged on request clears manual mode without snapping the blade");
+        blade.Advance(.1);
+        Check(blade.Deployment > .4f, "ignition after manual hold resumes ordinary extension");
+
         blade.Equip(false);
         Check(blade.Phase == "Unequipped" && blade.Deployment == 0 && !blade.TargetOn,
             "unequipping resets blade state and target");

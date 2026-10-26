@@ -141,9 +141,12 @@ internal sealed class SomersaultPoseController : IDisposable
     {
         if (_avatar is null || Kitten is null || _tuckProcessor is null || _rootProcessor is null) return;
         List<IAnimProcessor> processors = _avatar.Core.CharacterModel.AnimProcessors;
-        int start = processors.Count - _hands.Length - 2;
+        bool clashTailLast = processors.Count > 0 && SaberPoseController.IsClashTailFor(processors[^1], Kitten);
+        int coreCount = processors.Count - (clashTailLast ? 1 : 0);
+        int start = coreCount - _hands.Length - 2;
         if (start >= 0 && ReferenceEquals(processors[start], _tuckProcessor)
-            && ReferenceEquals(processors[^1], _rootProcessor))
+            && ReferenceEquals(processors[coreCount - 1], _rootProcessor)
+            && (!clashTailLast || ReferenceEquals(processors[^1], processors[coreCount])))
         {
             bool ordered = true;
             for (int i = 0; i < _hands.Length; i++)
@@ -159,6 +162,7 @@ internal sealed class SomersaultPoseController : IDisposable
         processors.Add(_tuckProcessor);
         foreach (IAnimProcessor saber in _hands) processors.Add(saber);
         processors.Add(_rootProcessor);
+        SaberPoseController.MoveClashTailLast(processors, Kitten);
     }
 
     private void SetSaberVisualTransform(float4x4 transform)

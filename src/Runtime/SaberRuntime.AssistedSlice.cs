@@ -40,6 +40,8 @@ internal sealed partial class SaberRuntime
         if (SomersaultActive && !_selectingSlice) return;
         if (SliceWorkActive) return;
         if (_selectingSlice) { CancelAssistedSlice("Slice selection cancelled."); return; }
+        if (_pose.ClashHeld)
+        { _sliceStatus = "Wait for the saber clash to finish before selecting a slice."; return; }
         if (_owner == null) return;
         if (_slicer.Busy) { _sliceStatus = "Finishing the previous slice; try again shortly."; _sliceMessageUntil = _playerTime + 5; return; }
         EnsureBlade(); _blade.SetIgnited(true);
@@ -49,7 +51,7 @@ internal sealed partial class SaberRuntime
 
     private void BeginAssistedSlice(SliceTarget? target, Ray? ray)
     {
-        if (SomersaultActive || SliceWorkActive || _owner == null || _slicer.Busy) return;
+        if (_pose.ClashHeld || SomersaultActive || SliceWorkActive || _owner == null || _slicer.Busy) return;
         if (!TrySliceReach(out var baseBody, out var reach, out var reason)
             || (target != null && !_targeting.CheckSliceTarget(_owner, target, baseBody, reach, out reason)))
         { _selectingSlice = true; _sliceStatus = reason; return; }
@@ -103,6 +105,10 @@ internal sealed partial class SaberRuntime
         }
         if (!_sliceStarted)
         {
+            // A click may have been accepted just before a clash began. Keep its
+            // selection/preparation alive, but do not start a new slice worker
+            // until the visual hit-stop has ended.
+            if (_pose.ClashHeld) return;
             if (!TrySliceReach(out var baseBody, out var reach, out var reason))
             { _sliceStatus = reason; return; }
             if (!_targeting.CheckSliceTarget(_owner, _sliceTarget, baseBody, reach, out reason))
@@ -177,6 +183,7 @@ internal sealed partial class SaberRuntime
         var io = ImGui.GetIO();
         if (OverlayCapturesPointer || io.WantCaptureMouse || io.WantTextInput || !CursorTarget.IsHitTestViewport(Program.MainViewport)) return;
         if (ImGui.IsMouseClicked(ImGuiMouseButton.Right)) { Queue(Command.CancelSlice); return; }
+        if (_pose.ClashHeld) return;
         if (!TrySliceReach(out var baseBody, out var reach, out var reachReason))
         { _sliceStatus = reachReason; return; }
         var ray = Cursor.GetEgoRay(Program.MainViewport);

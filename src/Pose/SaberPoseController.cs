@@ -11,7 +11,7 @@ namespace Purr2D2.Pose;
 /// Owns one EVA kitten's arm overlay. Bind, Update and Unbind must run on the main
 /// thread outside rendering; Draw runs during skeleton evaluation for each view.
 /// </summary>
-public sealed class SaberPoseController : IDisposable
+public sealed partial class SaberPoseController : IDisposable
 {
     // The equipment-independent acrobatics layer uses this main-thread notification
     // to keep tuck -> hand solve -> root rotation explicit even when equip changes.
@@ -24,7 +24,12 @@ public sealed class SaberPoseController : IDisposable
         bool Active { get; }
         bool LeftHand { get; }
     }
-    internal static void NotifyProcessorsChanged(KittenEva kitten) => ProcessorsChanged?.Invoke(kitten);
+    internal static void NotifyProcessorsChanged(KittenEva kitten)
+    {
+        if (AvatarField?.GetValue(kitten.Renderable) is CharacterAvatar avatar)
+            MoveClashTailLast(avatar.Core.CharacterModel.AnimProcessors, kitten);
+        ProcessorsChanged?.Invoke(kitten);
+    }
     internal static bool IsArmProcessorFor(IAnimProcessor processor, KittenEva kitten) =>
         processor is IArmPoseProcessor hand && ReferenceEquals(hand.Owner, kitten);
     internal static bool IsActiveArmProcessor(IAnimProcessor processor, bool left) =>
@@ -42,6 +47,7 @@ public sealed class SaberPoseController : IDisposable
 
     private CharacterAvatar? _avatar;
     private PoseProcessor? _processor;
+    private ClashTailProcessor? _clashTail;
     private bool _disposed;
     private bool _equipped;
     private bool _mmuWasEnabled;
@@ -109,8 +115,10 @@ public sealed class SaberPoseController : IDisposable
             _processor = new PoseProcessor(this, avatar.Core.CharacterModel.Skeleton);
             if (!_processor.Resolved)
                 return Fail("The kitten rig is missing Shoulder_R, Elbow_R or Wrist_R.");
+            _clashTail = new ClashTailProcessor(this, avatar, avatar.Core.CharacterModel.Skeleton);
             _mmuWasEnabled = avatar.Attachments.Mmu.Enabled;
             avatar.Core.CharacterModel.AnimProcessors.Add(_processor);
+            avatar.Core.CharacterModel.AnimProcessors.Add(_clashTail);
             NotifyProcessorsChanged(kitten);
             return true;
         }
@@ -195,12 +203,17 @@ public sealed class SaberPoseController : IDisposable
     {
         KittenEva? previousKitten = Kitten;
         // This list belongs to the render thread/main thread, never a solver worker.
-        if (_avatar is not null && _processor is not null)
-            _avatar.Core.CharacterModel.AnimProcessors.Remove(_processor);
+        if (_avatar is not null)
+        {
+            if (_processor is not null) _avatar.Core.CharacterModel.AnimProcessors.Remove(_processor);
+            if (_clashTail is not null) _avatar.Core.CharacterModel.AnimProcessors.Remove(_clashTail);
+        }
+        ClearClash();
         RestoreMmu();
         Kitten = null;
         _avatar = null;
         _processor = null;
+        _clashTail = null;
         _equipped = false;
         Blend = 0f;
         _swingTime = SaberSwing.Duration;
@@ -243,11 +256,17 @@ public sealed class SaberPoseController : IDisposable
 
     private void Publish(float4x4 emitterInModelCm, float4x4 modelToEgo)
     {
+        if (!Active || Kitten is null || _avatar is null) return;
+        // Model centimetres to emitter metres. The translation is already in model cm.
+        float4x4 metresToModel = float4x4.CreateScale(100f) * emitterInModelCm;
+        PublishMetresToModel(metresToModel, modelToEgo);
+    }
+
+    private void PublishMetresToModel(float4x4 metresToModel, float4x4 modelToEgo)
+    {
         if (!Active || Kitten is not { } kitten || _avatar is null) return;
         IViewport viewport = Program.RenderedViewport;
         if (!GameplayView(viewport)) return;
-        // Model centimetres to emitter metres. The translation is already in model cm.
-        float4x4 metresToModel = float4x4.CreateScale(100f) * emitterInModelCm;
         // Secondary cameras can render the saber, but only the gameplay main view
         // may refresh the pose used for audio and destructive contact.
         if (ReferenceEquals(viewport, Program.MainViewport) && viewport.Type == ViewportType.Main)
@@ -352,6 +371,11 @@ public sealed class SaberPoseController : IDisposable
             if (!_owner.Active || skeleton.BoneCount != _world.Length) return;
             try
             {
+                if (_owner.TryGetHeldEmitterToModel(out var heldEmitterToModel))
+                {
+                    _owner.PublishMetresToModel(heldEmitterToModel, transform);
+                    return;
+                }
                 Span<float4x4> world = skeleton.WorldTransforms;
                 float3 grip = Grip(world, final: true);
                 float3 direction = _owner.PublishedDirection;

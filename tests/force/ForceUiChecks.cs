@@ -36,6 +36,7 @@ internal sealed partial class SaberRuntime
     private bool KittenColorPickerContainsPointer(float2 pointer) => KittenColorPickerVisible && pointer.X < 200;
     private static void Report(string operation, Exception error) { }
     private static void ShowSaberTooltip(string text) => ImGui.SetTooltip(text);
+    private SaberType SaberTypeFor(KittenEva kitten) => SaberType.Light;
     private static readonly List<(float2 Center, string Text)> DrawnLabels = [];
     private static void CenterOverlayText(ImDrawListPtr draw, float2 center, ImColor8 color, string text,
         float maxWidth = float.MaxValue, float fontSize = 0)
@@ -53,6 +54,7 @@ internal sealed partial class SaberRuntime
         _forceLayout = default;
         _owner = new KittenEva(); Program.ControlledVehicle = _owner;
         Program.EditorFlag = Program.Modal = Program.HasMouseInputLatch = false;
+        Program.Window.LeftShift = Program.Window.RightShift = GlfwKeyAction.Release;
         Universe.SimulationSpeed = 1;
         Program.MainViewport = new(); CursorTarget.Hit = true;
         ImGui.Io.WantCaptureMouse = ImGui.Io.WantCaptureKeyboard = ImGui.Io.WantTextInput = ImGui.Io.AppFocusLost = false;
@@ -64,11 +66,14 @@ internal sealed partial class SaberRuntime
 
     public static void Main()
     {
+        ForceCaptureRadiusDragChecks.Run();
+        ForceCaptureBubbleChecks.Run();
         ForceOverlayChecks.Run();
         ForceThrowDragChecks.Run();
         NativeShiftSampling();
         ForcePickerButtons();
         ForceThrowSlider();
+        ForceCaptureRadiusGesture();
         ForceSettingSliders();
         ForceStatusBox();
         var runtime = new SaberRuntime { _selectingSlice = true };
@@ -76,7 +81,7 @@ internal sealed partial class SaberRuntime
         runtime._settings.ClutterPickTolerance = .375f;
         runtime._settings.ForceCaptureLimit = 256;
         runtime.BeginForcePicker(true);
-        Check(runtime._forceStatus.Contains("14 m"), "the Angry Force instruction displays the configured radius");
+        Check(runtime._forceStatus.Contains("2 m"), "the Angry Force instruction starts with the two metre capture radius");
         Check(runtime._sliceCancellations == 1 && runtime._selectingSlice,
             "Force selection queues slice-picker cancellation without mutating the settled saber state");
         runtime.HandleForcePickerPress(GlfwMouseButton.Left, new(100, 90));
@@ -94,7 +99,7 @@ internal sealed partial class SaberRuntime
         runtime.UpdateForceFrame();
         runtime.UpdateForceBeforePhysics(.016);
         Check(runtime.ForceHolding && runtime._force.CaptureCalls == 1 && ForceTargeting.Picks == 1
-            && ForceTargeting.LastRay.Origin == new double3(80, 60, 7) && runtime._force.CapturedRadius == 14
+            && ForceTargeting.LastRay.Origin == new double3(80, 60, 7) && runtime._force.CapturedRadius == 2
             && runtime._forceSpreadSmoother.Spread == ForceMath.DefaultGroupSpread
             && runtime._forceSpreadSmoother.Target == ForceMath.DefaultGroupSpread
             && runtime._forceSpreadSmoother.Velocity == 0,
@@ -898,6 +903,7 @@ internal sealed partial class SaberRuntime
         Check(runtime._forceRequests.TryPeek(out var release) && release.Action == ForceAction.Release,
             "the Force button still queues release while holding a group");
         runtime._forceRequests.Clear();
+        Program.Window.LeftShift = GlfwKeyAction.Press;
         runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, angryCenter);
         Check(runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed
             && runtime._forceRequests.Count == 0 && runtime.ForceHolding,
@@ -913,6 +919,7 @@ internal sealed partial class SaberRuntime
             "left release queues one maximum-speed throw snapshot and resets the transient slider");
         Check(!runtime.CompleteForceThrowSlider(angryCenter) && runtime._forceRequests.Count == 1,
             "a duplicate release cannot enqueue a second throw");
+        Program.Window.LeftShift = GlfwKeyAction.Release;
     }
 
     private static void ForceThrowSlider()
@@ -929,8 +936,8 @@ internal sealed partial class SaberRuntime
         var center = runtime._forceLayout.AngryCenter;
 
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center)
-            && runtime._forceThrowDrag.Speed == 25 && runtime._forceRequests.Count == 0,
-            "a fresh capture can begin with Shift-independent throw speed at 25 m/s");
+            && runtime._forceCaptureRadiusDrag.Held && runtime._forceRequests.Count == 0,
+            "a normal Angry press starts the radius gesture without enabling variable-speed throwing");
         Check(runtime.CompleteForceThrowSlider(center) && runtime._forceRequests.TryPeek(out var defaultRequest)
             && defaultRequest.Action == ForceAction.Throw && defaultRequest.ThrowSpeed == 25
             && runtime._forceThrowDrag.Speed == 25,
@@ -941,6 +948,7 @@ internal sealed partial class SaberRuntime
 
         runtime._forceRequests.Clear(); runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
         runtime._forceLayoutAvailable = true;
+        Program.Window.LeftShift = GlfwKeyAction.Press;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later capture can start a new throw drag");
         runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel * 4));
         Check(runtime._forceThrowDrag.Speed == 200 && runtime._forceRequests.Count == 0,
@@ -1022,6 +1030,7 @@ internal sealed partial class SaberRuntime
             SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080));
         errorRuntime._forceLayoutAvailable = true;
         errorRuntime._force.HasCapture = true; errorRuntime._force.Owner = errorRuntime._owner;
+        Program.Window.LeftShift = GlfwKeyAction.Press;
         errorRuntime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, errorRuntime._forceLayout.AngryCenter);
         errorRuntime._force.FailUpdate = true;
         errorRuntime.UpdateForceBeforePhysics(.016);
@@ -1034,6 +1043,7 @@ internal sealed partial class SaberRuntime
             SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080));
         disposeRuntime._forceLayoutAvailable = true;
         disposeRuntime._force.HasCapture = true; disposeRuntime._force.Owner = disposeRuntime._owner;
+        Program.Window.LeftShift = GlfwKeyAction.Press;
         disposeRuntime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, disposeRuntime._forceLayout.AngryCenter);
         disposeRuntime.DisposeForce();
         Check(!disposeRuntime._forceThrowDrag.Held && disposeRuntime._forceThrowDrag.Speed == 25
@@ -1046,6 +1056,7 @@ internal sealed partial class SaberRuntime
             SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080),
             ImGui.GetFontSize(), ImGui.CalcTextSize("200 m/s").X);
         runtime._forceLayoutAvailable = true;
+        Program.Window.LeftShift = GlfwKeyAction.Press;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, runtime._forceLayout.AngryCenter)
             && runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Matches(runtime._forceLayout),
             "the throw pill can be drawn for an active gesture");
@@ -1077,6 +1088,7 @@ internal sealed partial class SaberRuntime
 
         runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
         runtime._forceLayoutAvailable = true;
+        Program.Window.LeftShift = GlfwKeyAction.Press;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, runtime._forceLayout.AngryCenter),
             "delayed owner verification starts from a clean default slider");
         runtime.MoveForcePointer(new(runtime._forceLayout.AngryCenter.X,
@@ -1093,6 +1105,212 @@ internal sealed partial class SaberRuntime
             && runtime._forceRequests.Count == 0,
             "an owner change before the safe handoff cancels the queued throw instead of applying it");
         runtime._owner = oldOwner; Program.ControlledVehicle = oldOwner;
+    }
+
+    private static void ForceCaptureRadiusGesture()
+    {
+        var runtime = HeldRadiusRuntime();
+        var center = runtime._forceLayout.AngryCenter;
+        Program.Window.LeftShift = GlfwKeyAction.Release;
+        Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center)
+            && runtime._forceCaptureRadiusDrag.Held && !runtime._forceThrowDrag.Held,
+            "a non-Shift Angry press fixes the gesture as capture-radius control");
+        runtime.MoveForcePointer(center - new float2(0, runtime._forceLayout.SliderTravel * .5f));
+        Check(Math.Abs(runtime._forceCaptureRadiusDrag.Radius - 26) < 1e-9
+            && runtime._pendingForceGrowth is { Radius: 26 },
+            "upward movement coalesces the latest radius without touching the settled controller");
+        runtime.MoveForcePointer(center - new float2(0, runtime._forceLayout.SliderTravel));
+        ImGui.Io.MousePos = runtime._forceLayout.CaptureLimitCenter;
+        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear();
+        ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear(); ImGui.Tooltip = "";
+        runtime.DrawForceOverlayCore(default);
+        Check(ImGui.Tooltip == "" && runtime._forceCaptureRadiusDrag.Radius == 50
+            && runtime._forceRequests.Count == 0 && runtime._force.CaptureRadius == 2,
+            "part-count tooltips stay hidden while a click-drag grows the live preview to its 50 metre cap");
+        Check(ImDrawListPtr.Rects.Count == 2 && !DrawnLabels.Any(label => label.Text == "THROW")
+            && !ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == center),
+            "the active radius slider draws its pill without ghosting the Angry button or action label");
+        Check(runtime.CompleteForceThrowSlider(center - new float2(0, runtime._forceLayout.SliderTravel))
+            && !runtime._forceCaptureRadiusDrag.Held && runtime._pendingForceGrowth is { Radius: 50 }
+            && runtime._forceRequests.Count == 0,
+            "release after a radius drag keeps the hold and never queues a throw");
+        runtime._playerTime = .1;
+        runtime.UpdateForceBeforePhysics(.016);
+        Check(runtime.ForceHolding && runtime._force.GrowthCalls == 1
+            && runtime._force.LastGrowthRadius == 50 && runtime._force.LastGrowthLimit == runtime._settings.ForceCaptureLimit
+            && runtime._force.CaptureRadius == 50 && runtime._pendingForceGrowth == null,
+            "the settled handoff applies only the newest radius request using the current capture limit");
+
+        runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner;
+        Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center),
+            "a radius re-grab starts from the current hold radius");
+        runtime.MoveForcePointer(center - new float2(0, runtime._forceLayout.SliderTravel));
+        Check(runtime._forceCaptureRadiusDrag.Radius == 50 && runtime._pendingForceGrowth == null,
+            "a full-radius re-grab cannot lower the previous high-water value or enqueue duplicate work");
+        runtime.CancelForceThrowDrag();
+
+        var throttled = HeldRadiusRuntime();
+        center = throttled._forceLayout.AngryCenter;
+        throttled.MoveForcePointer(center);
+        Check(throttled.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a new hold starts a radius growth gesture");
+        throttled.MoveForcePointer(center - new float2(0, throttled._forceLayout.SliderTravel * .25f));
+        throttled.CompleteForceThrowSlider(center - new float2(0, throttled._forceLayout.SliderTravel * .25f));
+        throttled._playerTime = 0;
+        throttled.UpdateForceBeforePhysics(.016);
+        Check(throttled._force.GrowthCalls == 1 && throttled._force.CaptureRadius == 14,
+            "one released radius value is applied at the first settled handoff");
+        Check(throttled.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later radius increase can re-grab the same hold");
+        throttled.MoveForcePointer(center - new float2(0, throttled._forceLayout.SliderTravel * .5f));
+        throttled.CompleteForceThrowSlider(center - new float2(0, throttled._forceLayout.SliderTravel * .5f));
+        throttled.UpdateForceBeforePhysics(.016);
+        Check(throttled._force.GrowthCalls == 1 && throttled._pendingForceGrowth is { Radius: 38 },
+            "radius scans are throttled to ten per second while the newest request remains pending");
+        throttled._playerTime = .1;
+        throttled.UpdateForceBeforePhysics(.016);
+        Check(throttled._force.GrowthCalls == 2 && throttled._force.CaptureRadius == 38,
+            "a throttled radius request runs once when its scan window opens");
+
+        var hidden = HeldRadiusRuntime();
+        center = hidden._forceLayout.AngryCenter;
+        hidden.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        hidden.MoveForcePointer(center - new float2(0, hidden._forceLayout.SliderTravel * .5f));
+        hidden.OverlayVisible = false;
+        hidden.UpdateForceVisibility();
+        Check(!hidden._forceCaptureRadiusDrag.Held && hidden.ForceHolding
+            && hidden._forceCaptureRadius == 26 && hidden._pendingForceGrowth is { Radius: 26 },
+            "hiding the Force HUD cancels the pointer gesture while retaining the current hold radius");
+        hidden._playerTime = .1;
+        hidden.UpdateForceBeforePhysics(.016);
+        Check(hidden.ForceHolding && hidden._force.CaptureRadius == 26 && hidden._force.GrowthCalls == 1,
+            "a queued radius increase survives HUD hiding until the settled handoff");
+
+        var deferred = HeldRadiusRuntime();
+        center = deferred._forceLayout.AngryCenter;
+        deferred.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        deferred.MoveForcePointer(center - new float2(0, deferred._forceLayout.SliderTravel * .5f));
+        deferred.CompleteForceThrowSlider(center - new float2(0, deferred._forceLayout.SliderTravel * .5f));
+        deferred._force.BreakupActive = true;
+        deferred._playerTime = .1;
+        deferred.ProcessForceCaptureGrowthHandoff();
+        Check(deferred._force.GrowthCalls == 0 && deferred._pendingForceGrowth is { Radius: 26 }
+            && deferred._force.CaptureRadius == 2,
+            "a radius request waits intact while a breakup handoff still owns the current group");
+        deferred._force.BreakupActive = false;
+        deferred.ProcessForceCaptureGrowthHandoff();
+        Check(deferred._force.GrowthCalls == 1 && deferred._pendingForceGrowth == null,
+            "the newest deferred radius is applied once after breakup releases the group");
+
+        var failed = HeldRadiusRuntime();
+        center = failed._forceLayout.AngryCenter;
+        failed._force.FailGrowth = true;
+        failed.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        failed.MoveForcePointer(center - new float2(0, failed._forceLayout.SliderTravel * .5f));
+        failed.CompleteForceThrowSlider(center - new float2(0, failed._forceLayout.SliderTravel * .5f));
+        failed._playerTime = .1;
+        failed.UpdateForceBeforePhysics(.016);
+        failed._playerTime = .2;
+        failed.UpdateForceBeforePhysics(.016);
+        Check(failed.ForceHolding && failed._force.GrowthCalls == 1 && failed._pendingForceGrowth == null
+            && failed._force.Events.All(value => value != "Throw" && value != "Release"),
+            "a refused growth attempt is consumed and cannot repeat each frame or disturb the original hold");
+
+        var click = HeldRadiusRuntime();
+        center = click._forceLayout.AngryCenter;
+        click.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        Check(click.CompleteForceThrowSlider(center) && click._forceRequests.TryPeek(out var clickThrow)
+            && clickThrow.Action == ForceAction.Throw && clickThrow.ThrowSpeed == ForceMath.ThrowSpeed
+            && click._pendingForceGrowth == null,
+            "a normal Angry click retains the default 25 metre-per-second throw");
+
+        var shift = HeldRadiusRuntime();
+        center = shift._forceLayout.AngryCenter;
+        Program.Window.LeftShift = GlfwKeyAction.Press;
+        shift.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        Program.Window.LeftShift = GlfwKeyAction.Release;
+        shift.MoveForcePointer(center - new float2(0, shift._forceLayout.SliderTravel));
+        Check(shift._forceThrowDrag.Held && !shift._forceCaptureRadiusDrag.Held
+            && shift.CompleteForceThrowSlider(center - new float2(0, shift._forceLayout.SliderTravel))
+            && shift._forceRequests.TryPeek(out var shiftThrow) && shiftThrow.ThrowSpeed == ForceThrowDrag.MaximumSpeed,
+            "Shift sampled at press fixes the variable-speed throw gesture even after Shift is released");
+
+        var cancelled = HeldRadiusRuntime();
+        center = cancelled._forceLayout.AngryCenter;
+        cancelled.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        cancelled.MoveForcePointer(center - new float2(0, cancelled._forceLayout.SliderTravel));
+        Program.Modal = true; cancelled.UpdateForceVisibility(); Program.Modal = false;
+        Check(!cancelled._forceCaptureRadiusDrag.Held && cancelled.ForceHolding
+            && cancelled._forceRequests.Count == 0 && cancelled._force.Events.All(value => value != "Throw" && value != "Release"),
+            "a modal cancels a radius pointer gesture without throwing or releasing the capture");
+
+        var hoverBubble = new SaberRuntime();
+        hoverBubble._forceLayout = ForceOverlayLayout.Create(
+            SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080));
+        hoverBubble._forceLayoutAvailable = true;
+        hoverBubble.BeginForcePicker(true); hoverBubble._forceHover = ForceTargeting.Next;
+        ImDrawListPtr.Lines.Clear();
+        hoverBubble.DrawForceOverlayCore(default);
+        Check(ImDrawListPtr.Lines.Count > 0,
+            "the capture sphere appears around the selected hover point during Angry selection");
+        var heldBubble = HeldRadiusRuntime();
+        ImDrawListPtr.Lines.Clear();
+        heldBubble.DrawForceOverlayCore(default);
+        Check(ImDrawListPtr.Lines.Count > 0,
+            "the expanded sphere follows the selected held-group point while the Force HUD is visible");
+
+        var staleGeneration = HeldRadiusRuntime();
+        center = staleGeneration._forceLayout.AngryCenter;
+        staleGeneration.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        staleGeneration.MoveForcePointer(center - new float2(0, staleGeneration._forceLayout.SliderTravel * .5f));
+        staleGeneration.CompleteForceThrowSlider(center - new float2(0, staleGeneration._forceLayout.SliderTravel * .5f));
+        staleGeneration._forceCaptureGeneration++;
+        staleGeneration.ProcessForceCaptureGrowthHandoff();
+        Check(staleGeneration._pendingForceGrowth == null && staleGeneration._force.GrowthCalls == 0
+            && staleGeneration.ForceHolding,
+            "a queued radius from an earlier capture generation cannot modify a later hold");
+
+        var staleOwner = HeldRadiusRuntime();
+        center = staleOwner._forceLayout.AngryCenter;
+        staleOwner.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        staleOwner.MoveForcePointer(center - new float2(0, staleOwner._forceLayout.SliderTravel * .5f));
+        staleOwner.CompleteForceThrowSlider(center - new float2(0, staleOwner._forceLayout.SliderTravel * .5f));
+        staleOwner._owner = new KittenEva(); Program.ControlledVehicle = staleOwner._owner;
+        staleOwner.ProcessForceCaptureGrowthHandoff();
+        Check(staleOwner._pendingForceGrowth == null && staleOwner._force.GrowthCalls == 0,
+            "a pending growth request is discarded when the controlled owner changes");
+
+        var thrownBeforeGrowth = HeldRadiusRuntime();
+        center = thrownBeforeGrowth._forceLayout.AngryCenter;
+        thrownBeforeGrowth.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        thrownBeforeGrowth.MoveForcePointer(center - new float2(0, thrownBeforeGrowth._forceLayout.SliderTravel * .5f));
+        thrownBeforeGrowth.QueueForceAction(ForceAction.Throw);
+        thrownBeforeGrowth.UpdateForceBeforePhysics(.016);
+        Check(!thrownBeforeGrowth.ForceHolding && !thrownBeforeGrowth._forceCaptureRadiusDrag.Held
+            && thrownBeforeGrowth._pendingForceGrowth == null && thrownBeforeGrowth._force.GrowthCalls == 0
+            && thrownBeforeGrowth._force.Events.Count(value => value == "Throw") == 1,
+            "a queued throw cancels the radius gesture and takes priority over pending growth");
+
+        var escaped = HeldRadiusRuntime();
+        center = escaped._forceLayout.AngryCenter;
+        escaped.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center);
+        escaped.MoveForcePointer(center - new float2(0, escaped._forceLayout.SliderTravel * .5f));
+        Check(escaped.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Press)
+            && !escaped._forceCaptureRadiusDrag.Held && escaped._forceRequests.Count == 0
+            && escaped.ForceHolding
+            && escaped.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Release),
+            "Escape cancels a radius gesture without throwing or releasing the current group");
+
+        static SaberRuntime HeldRadiusRuntime()
+        {
+            var result = new SaberRuntime();
+            result._force.HasCapture = true;
+            result._force.Owner = result._owner;
+            result._force.CaptureRadius = ForceMath.DefaultCaptureRadius;
+            result._forceLayout = ForceOverlayLayout.Create(
+                SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080),
+                ImGui.GetFontSize(), ImGui.CalcTextSize("200 m/s").X);
+            result._forceLayoutAvailable = true;
+            return result;
+        }
     }
 
     private static void ForceSettingSliders()
@@ -1149,13 +1367,14 @@ internal sealed partial class SaberRuntime
             "the selected setting draws as a rounded black pill with the shared faint white rim");
         Check(ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == runtime._forceLayout.MoveCenter
                 && circle.Color == blackRim && circle.Thickness == Math.Max(.5f, runtime._forceLayout.Scale))
-            && ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == distance
-                && circle.Color == blackRim && circle.Thickness == Math.Max(.5f, runtime._forceLayout.Scale)),
-            "Move Force and the inactive distance setting use the same faint white rim");
+            && !ImDrawListPtr.Circles.Any(circle => circle.Center == distance),
+            "Move Force keeps its faint white rim while the obsolete distance setting remains hidden");
+        runtime.ReleaseForceSettingDrag();
         ImGui.Io.MousePos = count;
         runtime.DrawForceOverlayCore(default);
         Check(ImGui.Tooltip == "max # objects force can capture",
             "the capture-count tooltip uses the requested exact lowercase text");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count);
         runtime._forceLayout = originalLayout.WithControlsOffset(float2.Zero, new(1920, 1080), new(.02f, 0));
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
         runtime.DrawForceOverlayCore(default);
@@ -1168,51 +1387,35 @@ internal sealed partial class SaberRuntime
         Check(ImDrawListPtr.Rects.Count == 0
             && ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == count
                 && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf)
-            && ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == distance
-                && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf)
-            && ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == count && circle.Color == blackRim)
-            && ImDrawListPtr.Circles.Any(circle => !circle.Filled && circle.Center == distance && circle.Color == blackRim)
+            && !ImDrawListPtr.Circles.Any(circle => circle.Center == distance)
             && DrawnLabels.Any(label => label.Center.Y < count.Y && label.Text == "COUNT")
-            && DrawnLabels.Any(label => label.Center.Y < distance.Y && label.Text == "DIST")
             && DrawnLabels.Any(label => label.Center.Y > count.Y && label.Text == ForceCaptureLimits.Maximum.ToString())
-            && DrawnLabels.Any(label => label.Center.Y > distance.Y && label.Text == "15m")
+            && !DrawnLabels.Any(label => label.Text is "DIST" or "15m")
             && runtime._settings.AngryForceRadius == 14.6f,
-            "closed count and distance circles show caption above rounded current values while retaining the precise radius");
+            "the obsolete distance control is hidden while its serialized compatibility value remains untouched");
+        ImGui.Tooltip = "";
         ImGui.Io.MousePos = distance;
         runtime.DrawForceOverlayCore(default);
-        Check(ImGui.Tooltip == "force capture bubble size",
-            "the capture-radius tooltip uses the requested exact lowercase text");
+        Check(ImGui.Tooltip == "" && runtime.ForceOverlayHitAt(distance) == ForceOverlayHit.None,
+            "the hidden legacy distance slot has no tooltip or overlay hit target");
 
         runtime.HandleForceOverlayPress(ForceOverlayHit.AngryRadius, distance);
         runtime.MoveForcePointer(distance - new float2(0, 10000));
-        Check(runtime._settings.AngryForceRadius == 1 && runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Maximum,
-            "distance drag clamps its own shared setting without maintaining a separate value copy");
-        DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-        runtime.DrawForceOverlayCore(default);
-        var distancePill = ImDrawListPtr.Rects.Single(rect => rect.Filled);
-        var distanceRim = ImDrawListPtr.Rects.Single(rect => !rect.Filled);
-        var distanceThumb = ImDrawListPtr.Circles.Single(circle => circle.Filled
-            && circle.Center == runtime._forceSettingDrag.Thumb(runtime._settings.AngryForceRadius));
-        var distanceValue = ImDrawListPtr.Texts.Last(text => text.Value == "1m" && text.Position.X >= distancePill.Max.X);
-        int distanceValueForeground = ImDrawListPtr.Events.FindLastIndex(e => e.Kind == "text" && e.Text == "1m");
-        int distanceLastCircle = ImDrawListPtr.Events.FindLastIndex(e => e.Kind is "circle-filled" or "circle");
-        Check(distanceRim.Color == blackRim && distanceRim.Min == distancePill.Min && distanceRim.Max == distancePill.Max
-            && Math.Abs(distanceThumb.Radius * 2 - (distancePill.Max.X - distancePill.Min.X) * .8f) < 1e-3f
-            && distanceValue.Size == ImGui.GetFontSize() && distanceValue.Wrap == 0
-            && Math.Abs(distanceValue.Position.Y + distanceValue.Size * .5f - distanceThumb.Center.Y) < 1e-3f
-            && distanceValueForeground > distanceLastCircle,
-            "the active distance value and faint-rimmed pill draw after all circles, with the value centered on its 80% nub");
+        Check(!runtime._forceSettingDrag.Held && runtime._settings.AngryForceRadius == 14.6f
+            && runtime._settings.ForceCaptureLimit == ForceCaptureLimits.Maximum,
+            "pressing the hidden distance slot cannot change its compatibility value or the capture limit");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count);
         var replacement = new KittenEva(); runtime._owner = replacement; Program.ControlledVehicle = replacement;
         runtime.UpdateForceVisibility();
         Check(!runtime._forceSettingDrag.Held, "changing the controlled owner collapses an open settings pill");
 
         runtime._forceLayoutAvailable = true;
-        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryRadius, distance);
+        runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count);
         Program.Modal = true; runtime.UpdateForceVisibility(); Program.Modal = false;
         Check(!runtime._forceSettingDrag.Held, "opening a native modal collapses an open settings pill");
 
         runtime._forceLayoutAvailable = true;
-        runtime.HandleForceOverlayPress(ForceOverlayHit.AngryRadius, distance);
+        runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count);
         runtime.OverlayVisible = false; runtime.UpdateForceVisibility(); runtime.OverlayVisible = true;
         Check(!runtime._forceSettingDrag.Held, "hiding the overlay collapses an open settings pill");
 

@@ -2,7 +2,7 @@ using Brutal.Numerics;
 
 namespace Purr2D2.Core;
 
-public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite }
+public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite, AutoSwing }
 
 /// <summary>Viewport-relative geometry shared by drawing and exact pointer hit testing.</summary>
 public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax, float ListBodyTop,
@@ -16,18 +16,33 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
     public float IgniteRadius => SliceRadius;
     public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
-    public float2 IgniteCenter => SwingCenter + new float2(-94, 160)
-        * ((SliceCenter - SwingCenter).Length() / MathF.Sqrt(94 * 94 + 160 * 160));
+    public float2 IgniteCenter => SwingCenter + new float2(-94 * Scale, SwingRadius + IgniteRadius + 12 * Scale);
+    public float2 AutoSwingCenter => IgniteCenter + new float2(2 * IgniteRadius + 12 * Scale, 0);
+    public float AutoSwingPillTravel => 120 * Scale;
+    public float AutoSwingPillWidth => 2 * IgniteRadius;
+    public float2 AutoSwingPillMin => AutoSwingCenter - new float2(IgniteRadius);
+    public float2 AutoSwingPillMax => AutoSwingCenter + new float2(IgniteRadius,
+        IgniteRadius + AutoSwingPillTravel);
     public float SwingMarkerRadius => 5 * Scale;
     public float SwingTravelRadius => SwingRadius - SwingMarkerRadius;
     public float2 SwingIndicator(float2 offset) => SwingCenter + SaberOverlayDrag.ClampDisk(offset) * SwingTravelRadius;
     public float SomersaultRadius => SliceRadius;
-    public float ColorSwatchSize => RowHeight * .62f;
+    /// <summary>The checkbox, swatch and name area stays the original 28-pixel row height.</summary>
+    public float TopRowHeight => 28 * Scale;
+    public float ColorSwatchSize => TopRowHeight * .62f;
     public float2 ColorSwatchMin(int row, float scroll) => new(ListMax.X - Padding - ColorSwatchSize,
-        ListBodyTop + row * RowHeight - scroll + RowHeight * .18f);
-    public float2 ControlsMin => new(Math.Min(Math.Min(SwingCenter.X - SwingRadius, SliceCenter.X - SliceRadius), StatusMin.X),
-        Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y));
-    public float2 ControlsMax => new(StatusMax.X, StatusMax.Y);
+        ListBodyTop + row * RowHeight - scroll + TopRowHeight * .18f);
+    public float DeploymentBarHeight => 5 * Scale;
+    public float2 DeploymentBarMin(int row, float scroll) => new(ListMin.X + Padding,
+        ListBodyTop + row * RowHeight - scroll + TopRowHeight
+            + (RowHeight - TopRowHeight - DeploymentBarHeight) * .5f);
+    public float2 DeploymentBarMax(int row, float scroll) => new(ListMax.X - Padding,
+        DeploymentBarMin(row, scroll).Y + DeploymentBarHeight);
+    public float2 ControlsMin => new(Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
+            SliceCenter.X - SliceRadius), StatusMin.X), AutoSwingPillMin.X),
+        Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y));
+    public float2 ControlsMax => new(Math.Max(StatusMax.X, AutoSwingPillMax.X),
+        Math.Max(StatusMax.Y, AutoSwingPillMax.Y));
 
     /// <summary>Moves the action controls and their status together; offsets are fractions of the viewport.</summary>
     public SaberOverlayLayout WithControlsOffset(float2 origin, float2 size, float2 normalizedOffset, float topInset = 0)
@@ -65,6 +80,21 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         return point.X >= min.X && point.X <= min.X + ColorSwatchSize
             && point.Y >= min.Y && point.Y <= min.Y + ColorSwatchSize;
     }
+    public bool IsTopRow(float2 point, int row, float scroll)
+    {
+        if (!Valid || !ShowKittenList || row < 0 || !float.IsFinite(scroll) || !float.IsFinite(point.X) || !float.IsFinite(point.Y)
+            || point.Y < ListBodyTop || point.Y >= ListBodyTop + ListBodyHeight) return false;
+        float top = ListBodyTop + row * RowHeight - scroll;
+        return point.Y >= top && point.Y < top + TopRowHeight;
+    }
+    public bool IsDeploymentBar(float2 point, int row, float scroll)
+    {
+        if (!Valid || !ShowKittenList || row < 0 || !float.IsFinite(scroll) || !float.IsFinite(point.X) || !float.IsFinite(point.Y)
+            || point.Y < ListBodyTop || point.Y >= ListBodyTop + ListBodyHeight) return false;
+        float rowTop = ListBodyTop + row * RowHeight - scroll;
+        return point.X >= ListMin.X + Padding && point.X <= ListMax.X - Padding
+            && point.Y >= rowTop + TopRowHeight && point.Y < rowTop + RowHeight;
+    }
     public SaberOverlayHit Hit(float2 point)
     {
         if (!Valid) return SaberOverlayHit.None;
@@ -73,6 +103,7 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
             if (SaberOverlayDrag.ContainsCircle(point, SwingCenter, SwingRadius)) return SaberOverlayHit.Swing;
             if (SaberOverlayDrag.ContainsCircle(point, SliceCenter, SliceRadius)) return SaberOverlayHit.Slice;
             if (SaberOverlayDrag.ContainsCircle(point, IgniteCenter, IgniteRadius)) return SaberOverlayHit.Ignite;
+            if (SaberOverlayDrag.ContainsCircle(point, AutoSwingCenter, IgniteRadius)) return SaberOverlayHit.AutoSwing;
             if (ShowSomersaultButtons)
             {
                 if (SaberOverlayDrag.ContainsCircle(point, ForwardCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultForward;
@@ -98,8 +129,11 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         // Budget the list, both existing actions, all three diamond rows and status together.
         // Keep the familiar half-height swing anchor wherever the complete group fits.
         // Reserve a second large circle on the left for Force manipulation.
-        float scale = Math.Min(Math.Clamp(fontSize / 16f, .75f, 2), Math.Min(size.X / 840, availableHeight / 820));
-        float pad = 12 * scale, margin = 20 * scale, row = 28 * scale;
+        // The Auto Swing duration capsule extends below the new Ignite/Auto row.
+        // Reserve that vertical footprint, including the optional somersault rows,
+        // so compact 800x600 viewports still have a valid controls envelope.
+        float scale = Math.Min(Math.Clamp(fontSize / 16f, .75f, 2), Math.Min(size.X / 840, availableHeight / 824));
+        float pad = 12 * scale, margin = 20 * scale, row = 44 * scale;
         float radius = 132 * scale, smallRadius = 27 * scale;
         float listTop = origin.Y + Math.Max(margin, topInset);
         float minimumSwingY = listTop + (154 + 16) * scale + radius;
@@ -108,6 +142,11 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         float somersaultRaise = smallRadius * 1.5f; // 0.75 button diameters across the whole diamond.
         float centerOffset = radius + 16 * scale + originalStep + smallRadius * 2 - somersaultRaise;
         float forwardOffset = centerOffset - step;
+        if (showSomersaultButtons)
+        {
+            float autoRowBottom = radius + smallRadius * 2 + 12 * scale;
+            forwardOffset = Math.Max(forwardOffset, autoRowBottom + 12 * scale + smallRadius);
+        }
         const float statusGap = 25;
         const float statusHeight = 96;
         float maximumSwingY = origin.Y + size.Y

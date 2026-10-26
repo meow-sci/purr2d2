@@ -34,9 +34,10 @@ internal sealed partial class SaberRuntime
     private string? _sliceError;
     private string _sliceStatus = "";
     private double _sliceMessageUntil, _playerTime;
-    private sealed class FakeBlade { internal bool Equipped = true, TargetOn = true; internal float Deployment = 1; }
+    private sealed class FakeBlade
+    { internal bool Equipped = true, TargetOn = true, ManualDeployment; internal float Deployment = 1; }
     private sealed class FakePose
-    { internal bool Eligible = true; internal float3 GripOffsetFromChestCm, BladeDirectionModel; }
+    { internal bool Eligible = true, ClashHeld; internal float3 GripOffsetFromChestCm, BladeDirectionModel; }
     private KittenEva? _overlayDragOwner;
     private FakePose? _overlayDragPose;
     private bool OverlayCanSwing => OverlayVisible && _owner != null && _blade.Equipped && _pose.Eligible
@@ -111,9 +112,22 @@ internal sealed partial class SaberRuntime
         Check(r._slicer.Begins == 0, "runtime idle poses cannot query or cut");
         r.Begin(); r.Tick(-.1, .1, move: false); r.Tick(.1, .12, move: false);
         Check(r._slicer.Begins == 0, "runtime ignition or held-but-unmoved SWING cannot cut");
+        r = Scene(); r._pose.ClashHeld = true; r.Begin(); r.Tick(-.1, .0); r.Tick(.1, .02);
+        Check(r._slicer.Begins == 0 && !r._manualProbe.Pending,
+            "a clash hold blocks new contact sweeps and clears any pending probe");
+        r = Scene(); r._blade.ManualDeployment = true; r._blade.Deployment = .5f; r.Begin();
+        r.TickPose(new(-.1, -.25, 0), new(-.1, .25, 0), 0);
+        r.TickPose(new(.1, -.25, 0), new(.1, .25, 0), .02);
+        Check(r._manualSliceActive && r._slicer.Begins == 1,
+            "a stable partial manual blade can make contact using its shorter rendered segment");
         r = Scene(); r.Begin(); r.Tick(-.1, 0); r.Tick(-.1, .01, advancing: false, fresh: false); r.Tick(.1, .02);
         Check(r._manualSliceActive && r._sliceStarted && r._slicer.Begins == 1 && r._renderer.Sparks == 1 && !r._sliceSequence.Active,
             "runtime manual contact starts exactly one async cut without assisted animation across a no-step handoff");
+        int advancesBeforeClash = r._slicer.Advances;
+        r._pose.ClashHeld = true; r.Tick(.1, .025);
+        Check(r._manualSliceActive && r._slicer.Advances > advancesBeforeClash,
+            "an accepted manual slice keeps pumping its worker while a clash holds the pose");
+        r._pose.ClashHeld = false;
         for (int i = 0; i < 5; i++) r.Tick(.1, .03 + i * .01, advancing: false, fresh: false);
         Check(r._manualSliceActive && r._slicer.Begins == 1 && r._slicer.Isolations == 0,
             "accepted worker spans repeated no-step/no-render handoffs without cancellation or native isolation");

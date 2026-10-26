@@ -230,8 +230,9 @@ internal static class ForceClutterBepuChecks
             var expected = handles.Zip(placements).OrderBy(pair => pair.Second).Take(2)
                 .Select(pair => pair.First).ToHashSet();
             var hits = new List<ClutterForceTargets.ProximityHit>();
+            var seen = new HashSet<CollidableReference>();
             var query = new ClutterForceTargets.NearQuery<StaticPickFilter>(sim, new(null),
-                Vector3.Zero, hits, ClutterForceTargets.MaximumCandidates);
+                Vector3.Zero, hits, ClutterForceTargets.MaximumCandidates, seen);
             var pose = new RigidPose(Vector3.Zero); var velocity = default(BodyVelocity);
             sim.Sweep(new Sphere(10), in pose, in velocity, 0, pool, ref query, .0001f, .00001f, 32);
             ClutterForceTargets.SortNearest(hits);

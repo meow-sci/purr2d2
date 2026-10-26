@@ -70,7 +70,8 @@ internal sealed partial class SaberRuntime
     private void UpdateManualContact(bool simulationAdvancing)
     {
         bool eligible = _fault == null && _owner is { IsDisposed: false } && LightsaberUiVisible
-            && _blade.Equipped && _blade.TargetOn && _blade.Deployment >= .99f && _pose.Eligible
+            && _blade.Equipped && _blade.TargetOn
+            && (_blade.Deployment >= .99f || _blade.ManualDeployment && _blade.Deployment > .001f) && _pose.Eligible
             && !SomersaultActive && !ForceHolding && !ForcePicking;
         if (_manualSliceActive)
         {
@@ -85,6 +86,8 @@ internal sealed partial class SaberRuntime
             }
             UpdateManualSlice(simulationAdvancing && _freshPoseThisTick); return;
         }
+        // A clash blocks new contact gestures, but accepted native slice work above keeps pumping.
+        if (_pose.ClashHeld) { _manualProbe.Reset(); return; }
         if (!eligible || !_manualGesture.CanDetectAt(_playerTime) || !_overlayDrag.Held || !_manualPoseAvailable
             || _manualPose.Gesture != _manualGesture.Id || _playerTime < _manualPose.Time
             || _manualPose.Time < _manualGesture.CooldownUntil

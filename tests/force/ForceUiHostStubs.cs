@@ -1,6 +1,8 @@
 using Brutal.Numerics;
 using Purr2D2.Core;
 
+namespace Purr2D2.Core { public enum SaberType { Light, Dark } }
+
 namespace Purr2D2.Runtime
 {
     internal sealed class ManualForceBreakupClock : TimeProvider
@@ -88,10 +90,12 @@ namespace Brutal.ImGuiApi
         public readonly record struct Rect(float2 Min, float2 Max, uint Color, float Rounding, bool Filled, float Thickness);
         public readonly record struct Text(int Font, float Size, float2 Position, uint Color, string Value, float Wrap);
         public readonly record struct DrawEvent(string Kind, float2 Center, string Text);
+        public readonly record struct Line(float2 Start, float2 End, uint Color, float Thickness);
         public static readonly List<Circle> Circles = [];
         public static readonly List<Rect> Rects = [];
         public static readonly List<Text> Texts = [];
         public static readonly List<DrawEvent> Events = [];
+        public static readonly List<Line> Lines = [];
         public void AddCircleFilled(float2 point, float radius, ImColor8 color, int segments)
         {
             Circles.Add(new(point, radius, color.Value, 0, true));
@@ -120,12 +124,30 @@ namespace Brutal.ImGuiApi
             Texts.Add(new(font, size, position, color.Value, text, wrap));
             Events.Add(new("text", position, text));
         }
+        public void AddLine(float2 start, float2 end, ImColor8 color, float thickness)
+        {
+            Lines.Add(new(start, end, color.Value, thickness));
+            Events.Add(new("line", (start + end) * .5f, ""));
+        }
     }
 }
 namespace KSA
 {
+    public interface IParentBody { }
+    public sealed class CelestialSystem { }
     public class Vehicle { public string Id = "Target"; }
-    public sealed class KittenEva : Vehicle { public bool IsDisposed; public doubleQuat Body2Ego = doubleQuat.Identity; }
+    public sealed class KittenEva : Vehicle
+    {
+        public bool IsDisposed;
+        public doubleQuat Body2Ego = doubleQuat.Identity;
+        public CelestialSystem System = new();
+        public IParentBody Parent = new TestParentBody();
+    }
+    internal sealed class TestParentBody : IParentBody { }
+    internal static class Double3Ex
+    {
+        internal static double3 Transform(this double3 value, doubleQuat rotation) => double3.Transform(value, rotation);
+    }
     public static class Universe
     {
         public static double SimulationSpeed = 1;
@@ -143,11 +165,16 @@ namespace KSA
     public sealed class Camera
     {
         public int Generation;
+        public double NearPlane = .1;
+        public bool SphereOutsideFrustum;
         public int2 FramebufferSize => new(640, 480);
         public double3 GetForwardEcl() => -double3.UnitZ;
         public double3 GetRightEcl() => double3.UnitX;
         public double3 GetUpEcl() => double3.UnitY;
         public float2 EgoToScreen(double3 point) => new((float)point.X, (float)point.Y);
+        public double2 EgoToScreenDouble(double3 point, bool ignoreBehind = true) => new(point.X + 320, point.Y + 240);
+        public double3 GetPositionEgo(KittenEva position) => double3.Zero;
+        public bool IsSphereOutsideFrustum(double3 center, double radius) => SphereOutsideFrustum;
         public Ray ScreenToEgoRay(float2 point) => new() { Origin = new(point.X, point.Y, Generation), Direction = -double3.UnitZ };
     }
     public static class Cursor { public static float2 ToViewportLocal(TestViewport view, float2 point) => point - view.Position; }
@@ -196,6 +223,11 @@ namespace Purr2D2.Force
         internal bool CanBreakup, BreakupActive, BreakupPrepared = true, BreakupCompletesOnCommit = true;
         internal int CapturedLimit;
         internal double CapturedRadius;
+        internal double CaptureRadius = ForceMath.DefaultCaptureRadius;
+        internal int GrowthCalls;
+        internal double LastGrowthRadius;
+        internal int LastGrowthLimit;
+        internal bool FailGrowth;
         internal double GroupSpread = ForceMath.DefaultGroupSpread;
         internal int SimulatedCapturedCount = 1;
         internal int CapturedCount => HasCapture ? SimulatedCapturedCount : 0;
@@ -209,13 +241,23 @@ namespace Purr2D2.Force
         internal bool TryGetPoseTargetBody(KSA.KittenEva owner, out double3 target)
         { target = GroupOffsetBody; return HasCapture && ReferenceEquals(Owner, owner); }
         internal void Install(HarmonyLib.Harmony harmony) { Status = ""; StatusSeverity = ForceStatusSeverity.None; }
-        internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry, double angryRadius = 10,
+        internal bool Capture(KSA.KittenEva owner, ForcePick pick, bool angry, double angryRadius = ForceMath.DefaultAngryRadius,
             int captureLimit = Purr2D2.Core.ForceCaptureLimits.Default)
         {
             CaptureCalls++; CapturedRadius = angryRadius; CapturedLimit = captureLimit; Events.Add("Capture");
             if (HasCapture) { Status = "Already holding"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
             if (!pick.Live) { Status = "Stale target"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
-            HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
+            HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
+            CaptureRadius = angry ? angryRadius : ForceMath.DefaultCaptureRadius; Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
+        }
+        internal bool GrowCapture(KSA.KittenEva owner, double radius, int captureLimit = ForceCaptureLimits.Default)
+        {
+            GrowthCalls++; LastGrowthRadius = radius; LastGrowthLimit = captureLimit;
+            if (!HasCapture || !ReferenceEquals(Owner, owner) || BreakupActive || radius < CaptureRadius) return false;
+            CaptureRadius = radius;
+            Status = FailGrowth ? "Fixture growth query refused." : $"Holding {CapturedCount} objects.";
+            StatusSeverity = FailGrowth ? ForceStatusSeverity.Warning : ForceStatusSeverity.None;
+            return !FailGrowth;
         }
         internal void Update(KSA.KittenEva? owner)
         {
@@ -244,8 +286,8 @@ namespace Purr2D2.Force
         internal void CancelBreakup()
         { if (!BreakupActive) return; Events.Add("BreakupCancel"); BreakupCancels++; BreakupActive = false; }
         internal void Release(bool thrown, double throwSpeed = ForceMath.ThrowSpeed)
-        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
-        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
+        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; CaptureRadius = ForceMath.DefaultCaptureRadius; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
+        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; CaptureRadius = ForceMath.DefaultCaptureRadius; Status = ""; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
         public void Dispose() => Disposed = true;
     }
 }

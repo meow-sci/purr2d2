@@ -106,11 +106,10 @@ internal static partial class ClutterForceTargets
     // Collect native overlaps up to the independent safety budget. Sorting once
     // after the sweep avoids quadratic list insertion in a dense clutter scene.
     internal struct NearQuery<TFilter>(Simulation simulation, TFilter filter, Vector3 center,
-        List<ProximityHit> destination, int maximum) : ISweepHitHandler where TFilter : struct, IClutterPickFilter
+        List<ProximityHit> destination, int maximum, HashSet<CollidableReference> seen) : ISweepHitHandler where TFilter : struct, IClutterPickFilter
     {
         internal bool Exceeded, Unsupported;
         private int _candidates, _children;
-        private readonly HashSet<CollidableReference> _seen = [];
         public bool AllowTest(CollidableReference collidable)
         {
             if (Exceeded || Unsupported || !filter.Accept(collidable)) return false;
@@ -133,7 +132,7 @@ internal static partial class ClutterForceTargets
         public void OnHitAtZeroT(ref float maximumT, CollidableReference collidable) => Offer(collidable);
         private void Offer(CollidableReference collidable)
         {
-            if (Exceeded || Unsupported || !_seen.Add(collidable)) return;
+            if (Exceeded || Unsupported || !seen.Add(collidable)) return;
             var position = collidable.Mobility == CollidableMobility.Static
                 ? simulation.Statics[collidable.StaticHandle].Pose.Position
                 : simulation.Bodies[collidable.BodyHandle].Pose.Position;

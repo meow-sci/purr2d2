@@ -26,7 +26,8 @@ internal sealed partial class SaberRuntime
             var profile = SceneSaves.Profiles.GetOrCreate(identity, new()
             {
                 Red = saber.Color.X, Green = saber.Color.Y, Blue = saber.Color.Z, Type = saber.Type,
-                CapeEnabled = saber.CapeEnabled, SaberEnabled = SaberEnabledFor(pair.Key)
+                CapeEnabled = saber.CapeEnabled, SaberEnabled = SaberEnabledFor(pair.Key),
+                BladeLengthOverride = saber.BladeLengthOverride
             }, SceneSaves.Warn);
             if (profile is not null) _profileBindings.Add(pair.Key, (identity, profile));
         }
@@ -47,7 +48,8 @@ internal sealed partial class SaberRuntime
         var profile = SceneSaves.Profiles.GetOrCreate(identity, new()
         {
             Red = saber.Color.X, Green = saber.Color.Y, Blue = saber.Color.Z,
-            Type = saber.Type, CapeEnabled = saber.CapeEnabled
+            Type = saber.Type, CapeEnabled = saber.CapeEnabled,
+            BladeLengthOverride = saber.BladeLengthOverride
         }, SceneSaves.Warn);
         if (profile is null) return;
         _profileBindings.Add(kitten, (identity, profile));
@@ -56,6 +58,7 @@ internal sealed partial class SaberRuntime
         {
             saber.Color = new(profile.Red, profile.Green, profile.Blue);
             saber.Type = profile.Type;
+            saber.BladeLengthOverride = profile.BladeLengthOverride;
             SetKittenCapeEnabled(kitten, profile.CapeEnabled);
             // Discovery runs at the settled handoff. Restore directly through the same
             // equip stage as user requests; a large save must not overflow the UI queue.
@@ -82,6 +85,7 @@ internal sealed partial class SaberRuntime
         var profile = binding.Profile;
         profile.Red = saber.Color.X; profile.Green = saber.Color.Y; profile.Blue = saber.Color.Z;
         profile.Type = saber.Type; profile.CapeEnabled = saber.CapeEnabled;
+        profile.BladeLengthOverride = saber.BladeLengthOverride;
         // Intent survives missing poses and inactive resources. Only an explicit
         // equipment action changes it; cleanup/capture must not infer "off".
         if (enabled is { } requested) profile.SaberEnabled = requested;
@@ -109,7 +113,8 @@ internal sealed partial class SaberRuntime
         foreach (var pair in _kittenSabers)
             if (_profileBindings.TryGetValue(pair.Key, out var binding))
             {
-                if (index.Resolve(pair.Key) == binding.Identity) RememberKittenChoices(pair.Key, pair.Value);
+                if (index.Resolve(pair.Key) == binding.Identity)
+                    RememberKittenChoices(pair.Key, pair.Value, enabled: PendingSaberEnabledIntent(pair.Key));
                 else
                 {
                     _profileBindings.Remove(pair.Key);

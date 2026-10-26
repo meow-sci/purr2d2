@@ -102,13 +102,58 @@ namespace KSA
     {
         public readonly CharacterCore Core = new();
         public readonly CharacterAttachments Attachments = new();
+        public readonly CharacterExpressions Expressions = new();
         public sealed class CharacterCore
         {
             public readonly CharacterModel CharacterModel = new();
             public float Scale = .01f;
+            public int MaxBones = 256;
         }
         public sealed class CharacterAttachments { public readonly MmuAttachment Mmu = new(); }
         public sealed class MmuAttachment { public bool Enabled = true; }
+        public sealed class CharacterExpressions
+        {
+            public int ExpressionRootIndex;
+            public List<AnimationAssetRef>? Angry;
+        }
+    }
+    public sealed class AnimationAssetRef
+    {
+        public readonly AnimationDataRef AnimationData = new();
+    }
+    public sealed class AnimationDataRef
+    {
+        public static int SampleCalls;
+        public void SampleStepped(float time, Span<TransformTRS> output)
+        {
+            SampleCalls++;
+            output.Clear();
+            for (int i = 0; i < output.Length; i++) output[i].Scale = float3.One;
+        }
+    }
+    public abstract class CatPostAnim : IAnimProcessor
+    {
+        public required CharacterAvatar CharacterAvatar;
+        public float Priority { get; set; } = 1f;
+        public bool ShouldUpdate { get; set; } = true;
+        public bool CanCacheAnimation => true;
+        public virtual void UpdateLocalPose(float4x4 transform, Skeleton skeleton, Span<TransformTRS> localPose, float dt) { }
+        public virtual void UpdateSkeleton(float4x4 transform, Skeleton skeleton, float dt) { }
+        protected void MixPoseLocal(Skeleton skeleton, Span<TransformTRS> localPose,
+            Span<TransformTRS> pose, int rootBone, float weight)
+        {
+            if ((uint)rootBone >= (uint)skeleton.BoneCount || localPose.Length != skeleton.BoneCount
+                || pose.Length != skeleton.BoneCount) return;
+            Span<int> stack = stackalloc int[Math.Max(skeleton.BoneCount, 1)];
+            int count = 0; stack[count++] = rootBone;
+            while (count > 0)
+            {
+                int index = stack[--count];
+                localPose[index] = TransformTRS.Lerp(localPose[index], pose[index], weight);
+                for (int child = 0; child < skeleton.BoneCount; child++)
+                    if (skeleton.NodeInfo[child].ParentIndex == index) stack[count++] = child;
+            }
+        }
     }
     public sealed class CharacterModel
     {
@@ -243,10 +288,27 @@ namespace RenderCore
     // deliberately reject local-pose evaluation in this lifecycle-only harness.
     public struct TransformTRS
     {
+        public float3 Translation;
         public floatQuat Rotation;
-        public float4x4 CreateMatrix() => throw new NotSupportedException();
-        public static TransformTRS FromMatrix(float4x4 value) => throw new NotSupportedException();
-        public static TransformTRS Lerp(TransformTRS a, TransformTRS b, float t) => throw new NotSupportedException();
+        public float3 Scale;
+        public float4x4 CreateMatrix()
+        {
+            float4x4 result = float4x4.CreateFromQuaternion(Rotation);
+            result.X *= Scale.X; result.Y *= Scale.Y; result.Z *= Scale.Z;
+            result.Translation = Translation;
+            return result;
+        }
+        public static TransformTRS FromMatrix(float4x4 value)
+        {
+            float4x4.Decompose(value, out float3 scale, out floatQuat rotation, out float3 translation);
+            return new() { Translation = translation, Rotation = rotation, Scale = scale };
+        }
+        public static TransformTRS Lerp(TransformTRS a, TransformTRS b, float t) => new()
+        {
+            Translation = float3.Lerp(a.Translation, b.Translation, t),
+            Rotation = floatQuat.Slerp(a.Rotation, b.Rotation, t),
+            Scale = float3.Lerp(a.Scale, b.Scale, t),
+        };
     }
 }
 

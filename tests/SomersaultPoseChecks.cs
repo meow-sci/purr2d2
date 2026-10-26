@@ -74,9 +74,10 @@ internal static class SomersaultPoseChecks
             "one kitten's flip never moves another kitten's roots");
         model.Skeleton.BoneNames = names;
         using var saber = new SaberPoseController();
-        Check(saber.Bind(kitten) && model.AnimProcessors.Count == 3
-            && SaberPoseController.IsProcessorFor(model.AnimProcessors[1], kitten),
-            "equipping a saber after binding inserts the hand solve between tuck and final flip");
+        Check(saber.Bind(kitten) && model.AnimProcessors.Count == 4
+            && SaberPoseController.IsProcessorFor(model.AnimProcessors[1], kitten)
+            && SaberPoseController.IsClashTailFor(model.AnimProcessors[^1], kitten),
+            "equipping a saber after binding orders tuck, hand solve, final flip, then clash tail");
         saber.Unbind();
         Check(model.AnimProcessors.Count == 2 && motion.Eligible, "stowing saber preserves the motion layer");
         motion.Unbind();
@@ -140,7 +141,9 @@ internal static class SomersaultPoseChecks
         KSA.Program.RenderedViewport = KSA.Program.MainViewport;
 
         motion.Unbind();
-        Check(model.AnimProcessors.Count == 1 && saber.Eligible, "motion cleanup preserves an independently equipped saber");
+        Check(model.AnimProcessors.Count == 2 && saber.Eligible
+            && SaberPoseController.IsClashTailFor(model.AnimProcessors[^1], kitten),
+            "motion cleanup preserves the independently equipped hand and clash tail");
         model.Sample(); model.Publish();
         float4x4 upright = drawn;
         motion.Bind(kitten);
@@ -153,9 +156,10 @@ internal static class SomersaultPoseChecks
         model.Skeleton.NodeInfo[11].ParentIndex = 4;
         Check(motion.Bind(kitten) && !motion.SupportsTuck, "leg-name matches with a wrong ancestry disable only tuck");
         motion.Dispose();
-        Check(model.AnimProcessors.Count == 1, "dispose removes callbacks and keeps foreign/saber processors");
+        Check(model.AnimProcessors.Count == 2, "dispose removes callbacks and keeps the owned hand/clash pair");
         saber.Unbind();
-        Check(saber.Bind(kitten) && model.AnimProcessors.Count == 1, "disposed motion leaves no static callback that reinstalls its processors");
+        Check(saber.Bind(kitten) && model.AnimProcessors.Count == 2,
+            "disposed motion leaves no static callback that reinstalls its processors");
     }
 
     private static void Near(float3 actual, float3 expected, string message) => Check((actual - expected).Length() < .003f, message);

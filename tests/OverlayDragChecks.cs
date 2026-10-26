@@ -69,10 +69,136 @@ internal static class OverlayDragChecks
         drag.Reset();
         Check(!drag.Active && !drag.Held && drag.Offset == float2.Zero,
             "world or ownership reset clears the temporary gesture");
+        DeploymentDrag();
+        AutoSwingStateAndDrag();
         PointerOwnership();
         PairedConsumerOwnership();
         LayoutBounds();
         SomersaultPressOwnership();
+    }
+
+    private static void DeploymentDrag()
+    {
+        var drag = new SaberDeploymentDrag();
+        Check(!drag.Begin(float.NaN, .1f, 10, 110) && !drag.Begin(50, .1f, 110, 10)
+            && !drag.Begin(9, .1f, 10, 110), "deployment drag rejects nonfinite, reversed and outside-track starts");
+        Check(drag.Begin(50, .1f, 10, 110) && drag.Value == .1f,
+            "a logical-off press begins at ten percent without mapping the click position");
+        Check(drag.Move(float.NaN) == .1f, "nonfinite pointer motion keeps the last finite deployment");
+        Check(MathF.Abs(drag.Move(105) - .65f) < 1e-6f && drag.Move(200) == 1,
+            "press-relative horizontal motion changes the blade fraction and clamps at the upper endpoint");
+        Check(drag.MatchesTrack(10, 110) && !drag.MatchesTrack(10, 120),
+            "a resize invalidates the captured deployment track");
+        Check(drag.Release(10) == 0 && !drag.Held,
+            "release applies its final pointer coordinate and clamps at the lower endpoint");
+        Check(drag.Begin(70, .9f, 10, 110) && drag.Value == .9f,
+            "a logical-on press begins at ninety percent");
+        Check(drag.Release(float.NaN) == .9f, "a nonfinite release preserves the last valid fraction");
+        Check(drag.Begin(0, .5f, -float.MaxValue, float.MaxValue)
+            && drag.Move(float.MaxValue) == 1,
+            "finite extreme track coordinates use double precision and cannot overflow the deployment fraction");
+    }
+
+    private static void AutoSwingStateAndDrag()
+    {
+        var swing = new SaberAutoSwing();
+        Check(!swing.Enabled && swing.DurationSeconds == .5f && swing.Phase == 0,
+            "automatic swing starts disabled at the half-second default");
+        Check(!swing.SetDuration(float.NaN) && swing.SetDuration(0) && swing.DurationSeconds == .5f
+            && swing.SetDuration(4) && swing.DurationSeconds == 3,
+            "duration rejects nonfinite input and clamps to half through three seconds");
+        bool symmetricStroke = true;
+        foreach (double progress in new[] { 0d, .01, .1, .2, .35, .5, .65, .8, .9, .99, 1 })
+            symmetricStroke &= Math.Abs(SaberAutoSwing.StrokePosition(1 - progress)
+                - (1 - SaberAutoSwing.StrokePosition(progress))) < 1e-12;
+        double middleStep = SaberAutoSwing.StrokePosition(.4) - SaberAutoSwing.StrokePosition(.3);
+        bool steadyMiddle = Math.Abs(middleStep - (SaberAutoSwing.StrokePosition(.5) - SaberAutoSwing.StrokePosition(.4))) < 1e-12
+            && Math.Abs(middleStep - (SaberAutoSwing.StrokePosition(.7) - SaberAutoSwing.StrokePosition(.6))) < 1e-12;
+        double nearLeftVelocity = SaberAutoSwing.StrokePosition(.001) / .001;
+        double nearRightVelocity = (1 - SaberAutoSwing.StrokePosition(.999)) / .001;
+        Check(symmetricStroke && steadyMiddle && nearLeftVelocity < 1e-3 && nearRightVelocity < 1e-3
+            && middleStep > nearLeftVelocity * .1,
+            "horizontal stroke eases symmetrically to zero endpoint speed and moves steadily through its faster middle");
+        swing.SetDuration(1.25f);
+        swing.SetEnabled(true);
+        swing.GetOffset(out float x, out float y);
+        Check(swing.EntryBlend == 0 && x == 0 && y == 0,
+            "automatic swing enters from the neutral calibrated pose");
+        swing.Advance(.1); swing.Advance(.05);
+        Check(MathF.Abs(swing.EntryBlend - 1) < 1e-6f,
+            "the automatic pose eases fully in over roughly 0.15 player seconds");
+        swing.SetEnabled(false);
+        Check(swing.DurationSeconds == 1.25f && !swing.Enabled,
+            "disabling clears the transient phase while retaining the selected stroke duration");
+
+        swing.SetDuration(.5f);
+        swing.SetEnabled(true);
+        for (int i = 0; i < 5; i++) swing.Advance(.1);
+        swing.GetOffset(out x, out y);
+        Check(Math.Abs(swing.Phase - 1) < 1e-9 && MathF.Abs(x - .8f) < 1e-5f && MathF.Abs(y) < 1e-5f,
+            "a half-second one-way stroke reaches the opposite endpoint with a stationary turnaround");
+        swing.Advance(.1); swing.Advance(.1); swing.Advance(.05);
+        swing.GetOffset(out x, out y);
+        Check(Math.Abs(swing.Phase - 1.5) < 1e-9 && MathF.Abs(x) < 1e-5f && MathF.Abs(y + .18f) < 1e-5f,
+            "the middle of the stroke follows a shallow upward squared-sine arch");
+        swing.Advance(.1); swing.Advance(.1); swing.Advance(.05);
+        swing.GetOffset(out x, out y);
+        Check(Math.Abs(swing.Phase) < 1e-9 && MathF.Abs(x + .8f) < 1e-5f && MathF.Abs(y) < 1e-5f,
+            "the return stroke takes the same duration and wraps the bounded phase");
+        double heldPhase = swing.Phase;
+        for (int i = 0; i < 4; i++) { swing.Advance(0); swing.Advance(double.NaN); }
+        Check(swing.Phase == heldPhase, "pause, nonfinite time and a clash hold supplied as zero freeze phase and entry");
+        swing.Advance(.1);
+        Check(Math.Abs(swing.Phase - .2) < 1e-9,
+            "the first supported positive time resumes smoothly without catch-up");
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1024; i++) { swing.Advance(.01); swing.GetOffset(out _, out _); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check(allocated == 0, "warmed automatic swing phase and pose evaluation allocate no managed memory");
+        swing.Reset();
+        Check(!swing.Enabled && swing.DurationSeconds == .5f && swing.Phase == 0,
+            "full owner reset restores the transient per-kitten duration default");
+
+        var drag = new SaberAutoSwingDrag();
+        var center = new float2(200, 300);
+        float radius = 27;
+        var pillMin = center - new float2(radius);
+        var pillMax = center + new float2(radius, radius + 120);
+        Check(!drag.Begin(new(float.NaN, 0), .5f, center, radius, pillMin, pillMax, 4)
+            && !drag.Begin(center + new float2(radius + 1, 0), .5f, center, radius, pillMin, pillMax, 4)
+            && drag.Begin(center + new float2(1, 0), 1, center, radius, pillMin, pillMax, 4),
+            "duration gesture rejects invalid/outside presses and captures the current duration inside the circle");
+        Check(MathF.Abs(drag.Move(center + new float2(1, 3)) - 1) < 1e-6f && !drag.Dragged,
+            "motion below the scaled four-pixel threshold remains a click");
+        Check(drag.Release(center + new float2(1, 3)) && !drag.Dragged && !drag.Held
+            && drag.Value == 1 && !drag.Release(center),
+            "a click release is single-shot and keeps the original duration for the caller to toggle");
+
+        Check(drag.Begin(center, 1, center, radius, pillMin, pillMax, 4)
+            && MathF.Abs(drag.Move(center + new float2(0, 60)) - 2.25f) < 1e-6f
+            && drag.Dragged && drag.MatchesLayout(center, radius, pillMin, pillMax)
+            && !drag.MatchesLayout(center, radius, pillMin, pillMax + new float2(0, 1)),
+            "drag duration is press-relative across the 120-pixel capsule and its layout is captured");
+        Check(MathF.Abs(drag.Move(center + new float2(0, -120)) - .5f) < 1e-6f
+            && drag.Move(center + new float2(0, 120)) == 3,
+            "vertical movement reaches both duration limits and can reverse direction");
+        float last = drag.Value;
+        Check(drag.Move(new(float.NaN, 0)) == last && drag.Release(new(float.NaN, 0)) && !drag.Held,
+            "nonfinite motion or release preserves the last accepted duration and ends once");
+
+        Check(drag.Begin(center, .5f, center, radius, pillMin, pillMax, 4)
+            && drag.Release(center + new float2(0, 8)) && drag.Dragged
+            && MathF.Abs(drag.Value - (float)(.5 + 8d / 120 * 2.5)) < 1e-5f,
+            "the final release coordinate can cross the drag threshold and supplies the committed endpoint");
+        float selected = drag.Value;
+        drag.Reset();
+        Check(drag.Begin(center, selected, center, radius, pillMin, pillMax, 4)
+            && drag.Value == selected && MathF.Abs(drag.Move(center + new float2(0, 12)) - (selected + .25f)) < 1e-5f,
+            "a later gesture re-grabs the current per-kitten duration as its own baseline");
+        drag.Cancel();
+        Check(!drag.Held && drag.Value > selected,
+            "cancel stops capture without converting the duration gesture into an enable action");
     }
 
     private static void PairedConsumerOwnership()
@@ -127,20 +253,16 @@ internal static class OverlayDragChecks
                 && layout.SliceCenter.Y > layout.SwingCenter.Y
                 && (layout.SliceCenter - layout.SwingCenter).Length() > layout.SwingRadius + layout.SliceRadius,
                 "slice takes the upper action position below-left without touching swing");
-            float sliceEdgeGap = (layout.SliceCenter - layout.SwingCenter).Length()
-                - layout.SwingRadius - layout.SliceRadius;
-            float igniteEdgeGap = (layout.IgniteCenter - layout.SwingCenter).Length()
-                - layout.SwingRadius - layout.IgniteRadius;
-            Check(MathF.Abs(igniteEdgeGap - sliceEdgeGap) < 1e-3f,
-                "Ignite/Retract and Slice keep matching edge gaps from the Swing circle");
             Check(layout.Hit(layout.SwingCenter) == SaberOverlayHit.Swing
                 && layout.Hit(layout.SwingCenter + new float2(layout.SwingRadius * .9f)) == SaberOverlayHit.None
-                && layout.Hit(layout.SliceCenter) == SaberOverlayHit.Slice,
+                && layout.Hit(layout.SliceCenter) == SaberOverlayHit.Slice
+                && layout.Hit(layout.AutoSwingCenter) == SaberOverlayHit.AutoSwing,
                 "drawing geometry and pointer geometry agree without square corner capture");
             var circles = new[] {
                 (layout.SwingCenter, layout.SwingRadius, SaberOverlayHit.Swing),
                 (layout.SliceCenter, layout.SliceRadius, SaberOverlayHit.Slice),
                 (layout.IgniteCenter, layout.IgniteRadius, SaberOverlayHit.Ignite),
+                (layout.AutoSwingCenter, layout.IgniteRadius, SaberOverlayHit.AutoSwing),
                 (layout.ForwardCenter, layout.SomersaultRadius, SaberOverlayHit.SomersaultForward),
                 (layout.BackwardCenter, layout.SomersaultRadius, SaberOverlayHit.SomersaultBackward),
                 (layout.LeftCenter, layout.SomersaultRadius, SaberOverlayHit.SomersaultLeft),
@@ -167,8 +289,19 @@ internal static class OverlayDragChecks
                 && layout.IgniteRadius == layout.SliceRadius && layout.IgniteCenter.X < layout.SwingCenter.X
                 && layout.IgniteCenter.Y > layout.SwingCenter.Y
                 && layout.IgniteCenter.X > layout.SliceCenter.X && layout.IgniteCenter.Y > layout.SliceCenter.Y
-                && (layout.IgniteCenter - layout.SliceCenter).Length() < 64 * layout.Scale,
-                "seven separate circular hit regions fit; ignite tucks below and closer to slice");
+                && MathF.Abs((layout.IgniteCenter.X - layout.SwingCenter.X) / layout.Scale + 94) < 1e-3f
+                && MathF.Abs((layout.IgniteCenter.Y - layout.SwingCenter.Y) / layout.Scale
+                    - (132 + 27 + 12)) < 1e-3f
+                && MathF.Abs((layout.AutoSwingCenter.X - layout.IgniteCenter.X) / layout.Scale - (54 + 12)) < 1e-3f
+                && (layout.IgniteCenter - layout.SliceCenter).Length() > layout.IgniteRadius * 2
+                && layout.AutoSwingPillMin.X >= origin.X - 1e-3f
+                && layout.AutoSwingPillMax.X <= origin.X + size.X + 1e-3f
+                && layout.AutoSwingPillMax.Y <= origin.Y + size.Y + 1e-3f
+                && layout.AutoSwingPillMax.Y > layout.AutoSwingPillMin.Y + 2 * layout.IgniteRadius,
+                "Ignite and Auto Swing sit in a separate row, and the duration capsule fits the viewport");
+            Check(layout.ForwardCenter.Y - layout.SomersaultRadius
+                    >= layout.AutoSwingCenter.Y + layout.IgniteRadius + 12 * layout.Scale - 1e-3f,
+                "optional somersault buttons move below the Auto Swing row without overlapping idle hit targets");
             foreach (bool listVisible in new[] { false, true })
             foreach (bool controlsVisible in new[] { false, true })
             {
@@ -177,7 +310,8 @@ internal static class OverlayDragChecks
                         == (listVisible ? SaberOverlayHit.Kittens : SaberOverlayHit.None)
                     && visible.Hit(layout.SwingCenter) == (controlsVisible ? SaberOverlayHit.Swing : SaberOverlayHit.None)
                     && visible.Hit(layout.SliceCenter) == (controlsVisible ? SaberOverlayHit.Slice : SaberOverlayHit.None)
-                    && visible.Hit(layout.IgniteCenter) == (controlsVisible ? SaberOverlayHit.Ignite : SaberOverlayHit.None),
+                    && visible.Hit(layout.IgniteCenter) == (controlsVisible ? SaberOverlayHit.Ignite : SaberOverlayHit.None)
+                    && visible.Hit(layout.AutoSwingCenter) == (controlsVisible ? SaberOverlayHit.AutoSwing : SaberOverlayHit.None),
                     "list and lightsaber visibility independently remove hidden controls from pointer hit testing");
             }
             foreach (var direction in new[] { new float2(1, 0), new float2(0, 1), new float2(-1, 0), new float2(0, -1),
@@ -206,28 +340,48 @@ internal static class OverlayDragChecks
                 && layout.ControlsMin.X >= origin.X - 1e-3f && layout.ControlsMin.Y >= origin.Y - 1e-3f
                 && layout.ControlsMax.X <= origin.X + size.X + 1e-3f && layout.ControlsMax.Y <= origin.Y + size.Y + 1e-3f,
                 "forward/left/right/back form a diamond below swing/slice with a centered, bounded status area");
-            Check(MathF.Abs((layout.LeftCenter.Y - layout.SwingCenter.Y) / layout.Scale - 227.5f) < 1e-3f
+            float expectedFirstSomersaultOffset = 132 + 2 * 27 + 12 + 12 + 27 + (66 - 27 / MathF.Sqrt(2));
+            Check(MathF.Abs((layout.LeftCenter.Y - layout.SwingCenter.Y) / layout.Scale - expectedFirstSomersaultOffset) < 1e-3f
                 && MathF.Abs((layout.LeftCenter - layout.ForwardCenter).Length() / layout.Scale
                     - (66 * MathF.Sqrt(2) - 27)) < 1e-3f,
-                "the full somersault diamond moves up 40.5 scaled pixels while preserving its spacing");
+                "the optional somersault diamond clears the Auto Swing row while preserving button spacing");
             var hidden = SaberOverlayLayout.Create(origin, size, font, 100, showSomersaultButtons: false);
-            Check(hidden.Valid && !hidden.ShowSomersaultButtons && hidden.SwingCenter == layout.SwingCenter
-                && hidden.ListMax == layout.ListMax && hidden.StatusMin == layout.StatusMin
-                && hidden.Hit(layout.SwingCenter) == SaberOverlayHit.Swing && hidden.Hit(layout.SliceCenter) == SaberOverlayHit.Slice
-                && hidden.Hit(layout.IgniteCenter) == SaberOverlayHit.Ignite
-                && circles.Skip(3).All(circle => hidden.Hit(circle.Item1) == SaberOverlayHit.None),
-                "airborne somersault circles become click-through while the remaining overlay keeps stable anchors");
+            Check(hidden.Valid && !hidden.ShowSomersaultButtons
+                && hidden.Hit(hidden.SwingCenter) == SaberOverlayHit.Swing && hidden.Hit(hidden.SliceCenter) == SaberOverlayHit.Slice
+                && hidden.Hit(hidden.IgniteCenter) == SaberOverlayHit.Ignite
+                && hidden.Hit(hidden.AutoSwingCenter) == SaberOverlayHit.AutoSwing
+                && circles.Skip(4).All(circle => hidden.Hit(circle.Item1) == SaberOverlayHit.None),
+                "airborne somersault circles become click-through while Auto Swing remains available");
             var swatch = layout.ColorSwatchMin(0, 0);
             Check(swatch.X > layout.ListMin.X + layout.Padding + layout.ColorSwatchSize
                 && swatch.X + layout.ColorSwatchSize < layout.ListMax.X
                 && layout.IsColorSwatch(swatch + new float2(layout.ColorSwatchSize * .5f), 0, 0)
                 && !layout.IsColorSwatch(new(layout.ListMin.X + layout.Padding, swatch.Y), 0, 0),
                 "row swatches have independent square bounds away from the checkbox");
+            Check(MathF.Abs(layout.ColorSwatchSize - 28 * layout.Scale * .62f) < 1e-4f
+                && layout.RowHeight > layout.TopRowHeight,
+                "deployment bars add row height without changing checkbox or swatch dimensions");
+            var bar = layout.DeploymentBarMin(0, 0);
+            var barMax = layout.DeploymentBarMax(0, 0);
+            var barCenter = new float2((bar.X + barMax.X) * .5f, (bar.Y + barMax.Y) * .5f);
+            float leftInset = layout.ListMin.X + layout.Padding + 1;
+            float rowTop = layout.ListBodyTop;
+            Check(layout.IsDeploymentBar(barCenter, 0, 0)
+                && layout.IsDeploymentBar(new(leftInset, rowTop + layout.TopRowHeight + 1), 0, 0)
+                && !layout.IsDeploymentBar(new(leftInset, rowTop + layout.TopRowHeight - 1), 0, 0)
+                && !layout.IsDeploymentBar(new(layout.ListMin.X + 1, barCenter.Y), 0, 0),
+                "the full lower row strip hits the inset deployment control while the name row remains a toggle");
             var scrolled = layout.ColorSwatchMin(4, layout.RowHeight * 4);
             Check((scrolled - swatch).Length() < 1e-4f && layout.IsColorSwatch(scrolled, 4, layout.RowHeight * 4)
                 && !layout.IsColorSwatch(layout.ColorSwatchMin(0, layout.RowHeight), 0, layout.RowHeight)
                 && !layout.IsColorSwatch(new(float.NaN, 0), 0, 0),
                 "swatch hit testing follows scroll and rejects clipped rows or invalid pointers");
+            var scrolledBar = layout.DeploymentBarMin(4, layout.RowHeight * 4);
+            Check((scrolledBar - bar).Length() < 1e-4f
+                && layout.IsDeploymentBar(scrolledBar + new float2(1, layout.DeploymentBarHeight * .5f), 4, layout.RowHeight * 4)
+                && layout.IsDeploymentBar(new(leftInset, rowTop + layout.TopRowHeight + 1), 4, layout.RowHeight * 4)
+                && !layout.IsDeploymentBar(layout.DeploymentBarMin(0, layout.RowHeight) + new float2(1, 1), 0, layout.RowHeight),
+                "the lower deployment hit strip scrolls with rows and rejects rows clipped above the list viewport");
         }
         Check(!SaberOverlayLayout.Create(float2.Zero, new(100, 100), 16, 2).Valid
             && SaberOverlayLayout.Create(float2.Zero, new(100, 100), 16, 2).Hit(float2.Zero) == SaberOverlayHit.None,

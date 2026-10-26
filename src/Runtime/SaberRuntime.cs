@@ -42,7 +42,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private ulong _consumedPoseGeneration;
     private bool _freshPoseThisTick;
     private string? _fault;
-    private float Length => _blade.Deployment * _settings.BladeLength;
+    private float Length => VisibleBladeLength(_activeSaber ?? _idleSaber);
 
     internal SaberRuntime(string directory)
     {
@@ -120,7 +120,9 @@ internal sealed partial class SaberRuntime : IDisposable
             double speed = Universe.GetSimulationSpeed();
             bool supportedSpeed = SaberLimits.SupportsSpeed(speed);
             double simulationDt = SaberLimits.AppliedDelta(newStep, speed, applied.DeltaTime);
+            UpdateSaberClashes(supportedSpeed ? playerDt : 0);
             ConfigureSaberPose(_pose);
+            AdvanceSaberAutoSwing(_activeSaber ?? _idleSaber, supportedSpeed ? playerDt : 0);
             ApplyOverlaySwing(playerDt);
             // Equip/ignition and swings are visual: use player time, even between solver steps.
             var activeSaber = _activeSaber ?? _idleSaber;
@@ -128,10 +130,10 @@ internal sealed partial class SaberRuntime : IDisposable
             _freshPoseThisTick = activeSaber.FreshPoseThisTick;
             _consumedPoseGeneration = activeSaber.ConsumedPoseGeneration;
             // Assisted and intentional manual contact share the settled slice worker.
-            if (_sliceSequence.Active) UpdateAssistedSlice(playerDt);
+            if (_sliceSequence.Active) UpdateAssistedSlice(_pose.ClashHeld ? 0 : playerDt);
             UpdateManualContact(simulationDt > 0);
             if (!_overlayDrag.Held && !_manualSliceActive && (!_sliceSequence.Active || _sliceSequence.EndPresented)
-                && _owner != null && _blade.Equipped && simulationDt > 0 && _freshPoseThisTick
+                && _owner != null && _blade.Equipped && !_pose.ClashHeld && simulationDt > 0 && _freshPoseThisTick
                 && _pose.TryGetBladeSegment(Length, out var contactBase, out var contactTip)
                 && _contactProbe.TrySample(_owner, contactBase, contactTip, _playerTime, out var contact))
                 _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
@@ -182,7 +184,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private void DrawSaber(KittenEva owner, IViewport viewport, float4x4 emitterToEgo)
     {
         if (!_enabled || _disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped) return;
-        float length = saber.Blade.Deployment * _settings.BladeLength;
+        float length = VisibleBladeLength(saber);
         _renderer.DrawSaber(owner, viewport, emitterToEgo, length, saber.Color, saber.Type);
         if (ReferenceEquals(viewport, Program.MainViewport) && saber.Pose.TryGetBladeSegment(length, out var emitter, out var tip))
         {
@@ -212,6 +214,7 @@ internal sealed partial class SaberRuntime : IDisposable
     private void EnsureBlade()
     {
         if (_owner == null) return;
+        DisableSaberAutoSwing(_activeSaber);
         if (_activeSaber is { } equipment) RememberKittenChoices(_owner, equipment, revalidate: true, enabled: true);
         if (_activeSaber is { } saber) saber.TogglePhase = SaberTogglePhase.None;
         if (_blade.Equipped) return;
@@ -224,6 +227,7 @@ internal sealed partial class SaberRuntime : IDisposable
         ResetForce();
         _forcePose.Unbind();
         ResetSomersault();
+        ClearSaberClashes();
         CancelAssistedSlice(""); ResetOverlaySwing(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
         _renderer.ClearEffects(); _contactProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
         _renderer.ClearEmitters();

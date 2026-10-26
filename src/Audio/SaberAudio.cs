@@ -17,6 +17,7 @@ public sealed class SaberAudio : IDisposable
     private const float TransitionGain = 0.7f;
     private const float LightIgniteGain = 0.75f;
     private const float DarkAmbientGain = 0.7f;
+    private const float ClashGain = 0.8f;
     private SoundBehavior? _lightIgniteSound;
     private SoundBehavior? _darkIgniteSound;
     private SoundBehavior? _retractSound;
@@ -29,8 +30,11 @@ public sealed class SaberAudio : IDisposable
     private IChannel? _static;
     private SaberType _type;
     private IChannel? _contact;
+    private IChannel? _clash;
     private float _transitionGain = TransitionGain;
     private KittenEva? _owner;
+    private KittenEva? _clashOwner;
+    private double3 _clashPointBody;
     private bool _initializationAttempted;
     private bool _lastTargetOn;
     private bool _transitionPending;
@@ -94,10 +98,12 @@ public sealed class SaberAudio : IDisposable
             _nextHumStart = _nextStaticStart = _nextContactStart = 0;
         }
 
-        if (!Ready) return;
+        if (!Ready && _clash is null) return;
         try
         {
             Camera camera = GameAudio.GetAudioCamera();
+            if (_clash is not null) FollowClash(owner, camera, volume, paused);
+            if (!Ready) return;
             double3 position = camera.GetPositionEgo(owner) + emitterBody.Transform(owner.Body2Cce);
             double3 velocity = camera.GetVelocityEgo(owner);
             // Fictional suit/saber audio remains audible in vacuum. Coordinates still spatialize normally.
@@ -156,6 +162,9 @@ public sealed class SaberAudio : IDisposable
             Cut(ref _hum);
             Cut(ref _static);
             Cut(ref _contact);
+            Cut(ref _clash);
+            _clashOwner = null;
+            _clashPointBody = default;
         }
     }
 
@@ -199,6 +208,48 @@ public sealed class SaberAudio : IDisposable
             WarnPlayback("Saber audio could not acquire a loop channel; toggle the blade to retry.");
     }
 
+    /// <summary>Play one clash hit at the captured body-local contact point, independent of ignition transitions.</summary>
+    public void PlayClash(KittenEva owner, double3 pointBody, float volume)
+    {
+        if (_shutdown || _disposed || owner.IsDisposed || !Finite(pointBody)) return;
+        volume = Clamp(volume, 0, 1);
+        if (volume <= 0) return;
+        if (!ReferenceEquals(_owner, owner)) { Reset(); _owner = owner; }
+        Initialize();
+        // The runtime's pair latch already debounces overlap; a newly accepted clash
+        // replaces the one owned hit channel instead of being lost behind a long clip.
+        Cut(ref _clash);
+        try
+        {
+            Camera camera = GameAudio.GetAudioCamera();
+            double3 position = camera.GetPositionEgo(owner) + pointBody.Transform(owner.Body2Cce);
+            var spatial = new SpatialAudio(position, camera.GetVelocityEgo(owner), 1.0);
+            _clash = Play(_darkIgniteSound, spatial, volume * ClashGain);
+            if (_clash is null) return;
+            _clashOwner = owner;
+            _clashPointBody = pointBody;
+        }
+        catch (Exception ex)
+        {
+            Cut(ref _clash);
+            _clashOwner = null;
+            WarnPlayback(ex.Message);
+        }
+    }
+
+    private void FollowClash(KittenEva owner, Camera camera, float volume, bool paused)
+    {
+        if (!ReferenceEquals(_clashOwner, owner) || !Alive(_clash))
+        {
+            if (!Alive(_clash)) { Cut(ref _clash); _clashOwner = null; _clashPointBody = default; }
+            return;
+        }
+        double3 position = camera.GetPositionEgo(owner) + _clashPointBody.Transform(owner.Body2Cce);
+        var spatial = new SpatialAudio(position, camera.GetVelocityEgo(owner), 1.0);
+        Follow(ref _clash, spatial, volume * ClashGain, 1, paused);
+        if (!Alive(_clash)) { Cut(ref _clash); _clashOwner = null; _clashPointBody = default; }
+    }
+
     private static void Follow(ref IChannel? channel, SpatialAudio spatial, float volume, float pitch, bool paused)
     {
         if (!Alive(channel)) { Cut(ref channel); return; }
@@ -231,6 +282,7 @@ public sealed class SaberAudio : IDisposable
         PauseOwned(ref _hum);
         PauseOwned(ref _static);
         PauseOwned(ref _contact);
+        PauseOwned(ref _clash);
     }
 
     private static void PauseOwned(ref IChannel? channel)
@@ -248,9 +300,11 @@ public sealed class SaberAudio : IDisposable
             Cut(ref _hum);
             Cut(ref _static);
             Cut(ref _contact);
+            Cut(ref _clash);
         }
-        else _transition = _hum = _static = _contact = null;
+        else _transition = _hum = _static = _contact = _clash = null;
         _owner = null;
+        _clashOwner = null; _clashPointBody = default;
         _lastTargetOn = _transitionPending = false;
         _humStarts = _staticStarts = _contactStarts = 0;
         _nextHumStart = _nextStaticStart = _nextContactStart = 0;
