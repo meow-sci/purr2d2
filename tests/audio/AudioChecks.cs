@@ -76,7 +76,7 @@ internal static class AudioChecks
         ForceBreakupAudioGracefulFailures();
         SaberClashOneShot();
         SaberActionOneShots();
-        Console.WriteLine("PASS: audio layering, type switching, spatial follow, pause, mute, retraction and cleanup");
+        Console.WriteLine("PASS: audio layering, action and clash one-shots, type switching, pause, mute and cleanup");
     }
 
     private static void SaberActionOneShots()
@@ -148,29 +148,51 @@ internal static class AudioChecks
     private static void SaberClashOneShot()
     {
         int firstChannel = GameAudio.Channels.Count;
+        int darkIgnitionsBefore = GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberDarkIgnite");
         var owner = new KittenEva();
         GameAudio.CameraPosition = new double3(10, 20, 30);
         using var audio = new SaberAudio();
         audio.PlayClash(owner, new double3(2, 3, 4), .5f);
-        Check(GameAudio.Channels.Count == firstChannel + 1,
-            "a clash starts exactly one independent existing Dark ignition placeholder");
+        Check(GameAudio.Channels.Count == firstChannel + 1
+            && GameAudio.Channels.Count(c => c.Id == "Purr2D2SaberDarkIgnite") == darkIgnitionsBefore,
+            "a clash starts exactly one dedicated sound without starting Dark ignition");
         var first = GameAudio.Channels[^1];
-        Check(first.Id == "Purr2D2SaberDarkIgnite" && !first.Paused && first.VolumeMultiplier == .4f
+        Check(first.Id == "Purr2D2SaberClash" && !first.Paused && first.VolumeMultiplier == .4f
             && first.Spatial.Position == new double3(12, 23, 34),
             "clash configures its contact point, gain and playback before unpausing");
 
-        audio.Update(owner, double3.Zero, 1, targetOn: false, paused: true, volume: .25f);
+        audio.Update(owner, double3.Zero, 0, targetOn: true, paused: false, volume: .25f, type: SaberType.Dark);
+        var darkIgnition = GameAudio.Channels[^1];
+        Check(darkIgnition.Id == "Purr2D2SaberDarkIgnite" && !darkIgnition.Stopped && !first.Stopped,
+            "actual Dark ignition plays on its own channel while a clash continues");
+
+        audio.Update(owner, double3.Zero, 0, targetOn: true, paused: true, volume: .25f, type: SaberType.Dark);
         Check(first.Paused && first.VolumeMultiplier == .2f
             && first.Spatial.Position == new double3(12, 23, 34),
             "the hit follows its contact offset and pauses independently of the blade emitter");
 
         audio.PlayClash(owner, new double3(3, 4, 5), .5f);
         var second = GameAudio.Channels[^1];
-        Check(first.Stopped && second.Id == "Purr2D2SaberDarkIgnite" && !second.Paused
-            && second.Spatial.Position == new double3(13, 24, 35),
-            "a distinct accepted clash replaces a still-playing one-shot instead of losing its cue");
+        Check(first.Stopped && second.Id == "Purr2D2SaberClash" && !second.Paused
+            && second.Spatial.Position == new double3(13, 24, 35) && !darkIgnition.Stopped,
+            "a new clash replaces only the previous clash and leaves actual Dark ignition alone");
         audio.Reset();
-        Check(second.Stopped, "reset cleans up the separate clash channel");
+        Check(second.Stopped && darkIgnition.Stopped, "reset cleans up the separate clash and ignition channels");
+
+        int beforeMissingAsset = GameAudio.Channels.Count;
+        ModLibrary.MissingIds.Add("Purr2D2SaberClash");
+        using (var missingClash = new SaberAudio())
+        {
+            missingClash.PlayClash(owner, double3.Zero, 1);
+            Check(GameAudio.Channels.Count == beforeMissingAsset,
+                "a missing clash asset fails closed instead of falling back to Dark ignition");
+            missingClash.Update(owner, double3.Zero, 0, targetOn: true, paused: false, volume: .5f,
+                type: SaberType.Light);
+            Check(GameAudio.Channels.Count == beforeMissingAsset + 1
+                && GameAudio.Channels[^1].Id == "Purr2D2SaberLightIgnite",
+                "other saber audio remains available when the clash asset is missing");
+        }
+        ModLibrary.MissingIds.Clear();
     }
 
     private static void ForceBreakupOneShots()

@@ -113,7 +113,7 @@ def check_manifest() -> None:
     manifest = ET.parse(ROOT / "Assets" / "Sounds.xml").getroot()
     assert manifest.tag == "Assets"
     sounds = manifest.findall("Sound")
-    assert len(sounds) == 7, "expected seven saber sound declarations"
+    assert len(sounds) == 10, "expected ten sound declarations"
     for sound in sounds:
         assert sound.get("ChannelId") == "Sfx" and sound.get("SimSpeed") == "Ignore"
         file = sound.find("SoundFile")
@@ -129,9 +129,12 @@ def check_manifest() -> None:
                 "Purr2D2SaberRetract": "saber_close.ogg",
                 "Purr2D2SaberLightIgnite": "light_saber_on.ogg",
                 "Purr2D2SaberDarkIgnite": "dark_saber_on.ogg",
+                "Purr2D2SaberClash": "saber_clash.ogg",
+                "Purr2D2ForceCreak": "metal_creak.ogg",
+                "Purr2D2ForceBreak": "metal_bang.ogg",
             }
             if sound.get("Id") in one_shots:
-                assert path.name == one_shots[sound.get("Id")] and loop is None, "transition must play its supplied sound once"
+                assert path.name == one_shots[sound.get("Id")] and loop is None, "one-shot must use its expected Ogg file without loop data"
             else:
                 assert loop is not None and len(loop) == 0, "static recordings use whole-file loops"
             continue

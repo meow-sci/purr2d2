@@ -35,7 +35,7 @@ This is detection between the latest rendered blade segments. It does not claim 
 
 ### Effects
 
-- Play one spatial one-shot per contacting pair using the existing dark ignition asset. Give it a channel independent of ignition/retraction so clashes cannot cut those sounds short. Retain the contact offset when updating its spatial position.
+- Play one spatial one-shot per contacting pair using the supplied `saber_clash.ogg` recording. Give it a channel independent of ignition/retraction so clashes cannot cut those sounds short. Retain the contact offset when updating its spatial position.
 - Reuse the existing fixed-capacity ballistic spark pass. Clash sparks work for Light and Dark sabers, independently of the Dark ambient-spark settings, and respect the game's particle setting.
 
 ### Checks

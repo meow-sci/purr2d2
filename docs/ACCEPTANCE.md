@@ -717,3 +717,11 @@ The Release artifact is `artifacts/dist/purr2d2-0.2.0.zip`. No native in-game ac
 - [ ] Start an Angry capture at 2 m, drag upward, then downward and re-grab. Check the radius never shrinks, count tooltips stay hidden during drag, and release never throws. A plain click throws at default speed; Shift-drag retains adjustable throw speed.
 - [ ] Grow a mixed vessel/clutter group after moving and spreading it. The dashed sphere must follow its selected point; old pieces stay in place and eligible new pieces join without jumping. Repeat at the count cap, after reducing the cap below the held count, and while staged breakup is underway.
 - [ ] Move the camera through/behind the sphere and near its edge; verify finite 2-pixel dashes, eight distinct meridians and latitude rings, Light green/Dark red, and hidden-UI/modal behavior. Profile dense holds and many distant sabers in the native game.
+
+## Dedicated clash recording (2026-10-26)
+
+Clashes now use the supplied `saber_clash.ogg` as a non-looping spatial cue, with no ignition fallback. The source, repository, staged copy and ZIP entry have identical bytes (SHA-256 `dcf4da17373dee9117b47aa16bf718740e32acf16cc637227cb25e443873041f`). The recording is mono Vorbis at 44,100 Hz and lasts 1.190476 seconds.
+
+The focused `AudioChecks` harness passes, including independent clash/ignition playback, pause, gain, cleanup and missing-asset behavior. `tools/generate_audio.py --check` passes and leaves the synthesized contact WAV unchanged. The Release solution build has zero warnings/errors; source/stage validation passes, all 40 ZIP files match staging, the staged DLL matches Release, and the archive checksum agrees. Evidence: `artifacts/checks/clash-audio-release-build.log`, `clash-audio-package-validation.log`, and `clash-audio-package-integrity.log`. The complete managed suite was not rerun for this audio replacement.
+
+Native audition remains pending: check the new clash cue's balance and spatial position during repeated contacts, pause/resume and simultaneous ignition. The somersault swoosh still uses Light ignition as its placeholder; manual slices share the supplied metal bang with Force breakup, and contact sizzle remains synthesized.

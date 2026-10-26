@@ -23,6 +23,7 @@ public sealed class SaberAudio : IDisposable
     private SoundBehavior? _lightIgniteSound;
     private SoundBehavior? _darkIgniteSound;
     private SoundBehavior? _retractSound;
+    private SoundBehavior? _clashSound;
     private SoundBehavior? _humSound;
     private SoundBehavior? _lightStaticSound;
     private SoundBehavior? _darkStaticSound;
@@ -65,6 +66,7 @@ public sealed class SaberAudio : IDisposable
         _lightIgniteSound = Resolve("Purr2D2SaberLightIgnite");
         _darkIgniteSound = Resolve("Purr2D2SaberDarkIgnite");
         _retractSound = Resolve("Purr2D2SaberRetract");
+        _clashSound = Resolve("Purr2D2SaberClash");
         _humSound = Resolve("Purr2D2SaberHum");
         _lightStaticSound = Resolve("Purr2D2SaberLightStatic");
         _darkStaticSound = Resolve("Purr2D2SaberDarkStatic");
@@ -221,7 +223,7 @@ public sealed class SaberAudio : IDisposable
     public void PlayClash(KittenEva owner, double3 pointBody, float volume)
     {
         Initialize();
-        PlayOneShot(ref _clash, _darkIgniteSound, owner, pointBody, volume, ClashGain);
+        PlayOneShot(ref _clash, _clashSound, owner, pointBody, volume, ClashGain);
     }
 
     /// <summary>Use Light ignition as the somersault swoosh for either saber type.</summary>

@@ -11,7 +11,7 @@ The idle recording was supplied by the user in the feature directory.
 Their original files are unmodified. This project does not claim authorship or establish
 redistribution rights for those supplied recordings. The contact sound is
 original procedural synthesis generated from this repository's Python code. The Light/Dark
-ignition, static and saber close recordings were also supplied by the user and are copied unchanged from the workspace root.
+ignition, static, saber close, clash and metal recordings were also supplied by the user and are copied unchanged from the workspace root.
 
 | Runtime file | Source | Preparation |
 | --- | --- | --- |
@@ -19,6 +19,9 @@ ignition, static and saber close recordings were also supplied by the user and a
 | `Assets/Audio/dark_saber_on.ogg` | User-supplied `dark_saber_on.ogg` | Unmodified mono Vorbis, 22,050 Hz, 2.143673 s; plays once when a Dark saber ignites. |
 | `Assets/Audio/saber-hum.wav` | `feature/purr2d2-light-sabers/sounds/lightsaber-idle.wav` | Stereo averaged to mono; 35 ms cosine overlap joins end to beginning. Original 95,091 frames becomes 93,547 frames at 44,100 Hz (2.12125 s). No resampling or normalization. |
 | `Assets/Audio/saber_close.ogg` | User-supplied `saber_close.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.187392 s; plays once on retraction. |
+| `Assets/Audio/saber_clash.ogg` | User-supplied `saber_clash.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.190476 s; plays once per accepted clash. |
+| `Assets/Audio/metal_creak.ogg` | User-supplied `metal_creak.ogg` | Unmodified mono Vorbis, 48,000 Hz, 1.188521 s; plays once when Force breakup preparation starts. |
+| `Assets/Audio/metal_bang.ogg` | User-supplied `metal_bang.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.713787 s; plays once on visible Force breakup or an accepted manual slice. |
 | `Assets/Audio/light_side_static.ogg` | User-supplied `light_side_static.ogg` | Unmodified mono Vorbis, 44,100 Hz, 4.77059 s; full-file loop. |
 | `Assets/Audio/dark_side_static.ogg` | User-supplied `dark_side_static.ogg` | Unmodified mono Vorbis, 48,000 Hz, 8.422646 s; full-file loop. |
 | `Assets/Audio/saber-contact.wav` | `tools/generate_audio.py` | Original periodic oscillator/noise sizzle, fixed seed, mono 16-bit PCM, 48 kHz, 2 s. |
@@ -27,6 +30,7 @@ SHA-256 of original input recordings:
 
 ```text
 lightsaber-idle.wav   e30a4532683ab70c083d98ee17a0d6f18579c9d640715543022c660342c99c6b
+saber_clash.ogg       dcf4da17373dee9117b47aa16bf718740e32acf16cc637227cb25e443873041f
 ```
 
 SHA-256 of prepared runtime WAVs:
@@ -84,6 +88,9 @@ is still needed to assess the supplied loop seams and balance against the hum.
 
 ```csharp
 void Initialize();
+void PlayClash(KittenEva owner, double3 pointBody, float volume);
+void PlaySwoosh(KittenEva owner, double3 pointBody, float volume);
+void PlaySlice(KittenEva owner, double3 pointBody, float volume);
 void Update(KittenEva owner, double3 emitterBody, float deployment,
     bool targetOn, bool paused, float volume, float swingSpeed = 0, float contact = 0, SaberType type = SaberType.Light);
 void Suspend();
@@ -98,13 +105,20 @@ in body coordinates. `swingSpeed` is blade-tip speed relative to the kitten in m
 and `contact` is an optional 0–1 sizzle intensity. Update after camera/pose evaluation,
 once on the main thread per frame, including frames with the HUD hidden.
 
-The implementation resolves seven `SoundBehavior` assets, routes them through the
+The implementation resolves its `SoundBehavior` assets once, routes them through the
 game's SFX bus, starts channels paused while their first position is configured,
 and retains handles to move all active sounds. Activation/retraction play on target
 state transitions; the native hum loop follows deployment. A transition while paused
 is deferred until resume. Rapid reversal cuts the earlier transition. Hum pitch and
 gain can respond slightly to relative swing speed. The optional sizzle is a separate
 native loop. It is silent unless the caller supplies contact intensity.
+
+Clashes use the dedicated `Purr2D2SaberClash` one-shot on an independent spatial channel.
+There is no ignition fallback when that asset is missing. The only remaining placeholder
+cue is the somersault swoosh, which uses the Light ignition recording for either saber
+type. Accepted manual slices share the supplied metal bang with Force breakup; the
+contact sizzle remains a dedicated synthesized effect. Each action cue has its own
+channel, follows its accepted body-local point, and shares pause, volume and cleanup behavior.
 
 Ordinary **Swing / Alt+F7** uses the original motion-driven hum pitch/gain swoosh.
 Only the explicit slicing stroke supplies sizzle intensity; ordinary swing state

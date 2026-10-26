@@ -299,7 +299,7 @@ internal sealed partial class SaberRuntime
             ShowSaberControlTip($"Caps shared Shift+wheel Force group spacing; individual object sizes are unchanged. Default: {ForceSpreadLimits.DefaultMaximum:0.0}x. Larger spreads move objects farther from the group center. Saves automatically; changes apply immediately, and lowering the cap eases a held group back within it.");
             SaberSettingsRow("Force breakup groan (px)");
             changed |= ImGui.SliderFloat("##ForceBreakupGroanPixels", ref breakupGroan, 1, 64, "%.1f px");
-            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before the placeholder groan plays; inward Shift+scroll unwinds.");
+            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before the Force creak plays; inward Shift+scroll unwinds.");
             SaberSettingsRow("Force breakup split (px)");
             changed |= ImGui.SliderFloat("##ForceBreakupSplitPixels", ref breakupSplit, 2, 128, "%.1f px");
             ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before Force breakup occurs; inward Shift+scroll unwinds.");
