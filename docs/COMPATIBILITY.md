@@ -1,5 +1,9 @@
 # Compatibility and integration map
 
+## Runtime networking startup
+
+The entry module includes `Shared/RuntimeBootstrap.cs`, synchronized with gatOS/unscience. Its module initializer preloads the two networking framework assemblies into the default context; `AllModsLoaded` reports retained consumer bindings and non-default copies before Harmony installation/warmup. An incompatible networking report does not disable unrelated Purr2D2 gameplay. No game hook, save payload or scene-state ownership changes. The shared policy documents the early-loading limit and the isolated regression matrix.
+
 The authority for this build is the supplied `ksa-game-assemblies/current` snapshot, build `2026.10.19.5638`. Implementation articles in the downloaded KSA coffer target `2026.10.10.5554`; their names and behavior were verified in the newer decompiled sources. StarMap API package `0.3.6` and Harmony `2.4.2` are compile-only references; the actual game/loader installation must supply compatible assemblies.
 
 | Inspected source | Commit |

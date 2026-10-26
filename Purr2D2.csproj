@@ -16,6 +16,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src/**/*.cs" />
+    <Compile Include="Shared/RuntimeBootstrap.cs" Link="RuntimeBootstrap.cs" />
     <PackageReference Include="StarMap.API" Version="0.3.6" PrivateAssets="all" IncludeAssets="compile;build;analyzers" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" PrivateAssets="all" IncludeAssets="compile;build;analyzers" />
   </ItemGroup>

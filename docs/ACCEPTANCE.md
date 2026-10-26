@@ -1,5 +1,11 @@
 # Acceptance record
 
+## Runtime networking acceptance
+
+- [ ] On Windows, launch with gatOS/unscience/purrTTY enabled: each entry reports runtime networking ready and only default networking assemblies.
+- [ ] Start gatOS: its servers and VM initialize without missing TcpListener members. Repeat after changing mod order and with each mod alone.
+- [ ] Confirm normal Purr2D2 game hooks and save/load still work. Managed load-context checks do not establish this native acceptance.
+
 ## Generated debris editor visibility (2026-10-25)
 
 Sliced fragments and Force debris must stay registered in KSA's shared part library so native vehicles and saves can resolve their template IDs. The vehicle editor also enumerates that library, and our generated templates lacked its `Hidden` tag. This exposed debris roots in the parts catalog and generated visual subparts in the separate Add SubParts menu.

@@ -4,6 +4,7 @@ using Purr2D2.Rendering;
 using Purr2D2.Slicing;
 using Purr2D2.Core;
 using StarMap.API;
+using MeowSci.ModRuntime;
 
 namespace Purr2D2;
 
@@ -33,6 +34,7 @@ public sealed class Mod
     [StarMapAllModsLoaded]
     public void AllModsLoaded()
     {
+        RuntimeBootstrap.Report("purr2d2");
         try
         {
             _harmony = new Harmony("meow-sci.purr2d2");

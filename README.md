@@ -1,5 +1,7 @@
 # purr2d2
 
+Startup uses the [shared runtime bootstrap](Shared/README.md) to preload .NET networking in the default context and report assembly identities once. The mod stays independently installable. Run `python3 tools/check_runtime_bootstrap.py --entry-assembly bin/Release/net10.0/Purr2D2.dll` after building.
+
 Lightsabers and Force control for Kitten Space Agency: an authored hilt held in an EVA kitten's paw, extending/retracting blade, colored illumination, spatial sound, one-click and manual-contact part slicing, contact sparks and movable captured objects.
 
 Targets **KSA 2026.10.19.5638**, **StarMap.API 0.3.6**, and the loader's **Harmony 2.4.2**. This is an initial implementation with managed build/asset checks; native in-game acceptance is tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
