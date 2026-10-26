@@ -34,6 +34,9 @@ internal sealed class SomersaultMotionController : IDisposable
     internal float Tuck => _sequence.Tuck;
     internal string Status { get; private set; } = "";
     internal long CommandId { get; private set; }
+    // Retained across reset so settled presentation can observe an acknowledgement
+    // already processed by input polling without replaying an older command.
+    internal long AppliedCommandId { get; private set; }
     internal double InputTime => _inputTime();
     internal double ComboIntervalSeconds => _combo.PressWindowSeconds;
 
@@ -197,6 +200,7 @@ internal sealed class SomersaultMotionController : IDisposable
             }
             else _sequence.Acknowledge();
             _combo.Acknowledge();
+            AppliedCommandId = CommandId;
         }
         bool airborne = state.Mode == LocomotionMode.Airborne;
         bool terrain = Owner.Props.Situation.HasTerrainContact();

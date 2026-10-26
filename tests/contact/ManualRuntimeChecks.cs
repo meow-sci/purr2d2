@@ -18,6 +18,17 @@ internal sealed partial class SaberRuntime
     private readonly FakeBlade _blade = new();
     private readonly FakePose _pose = new();
     private readonly FakeRenderer _renderer = new();
+    private readonly FakeAudio _audio = new();
+    private readonly FakeSettings _settings = new();
+    private sealed class FakeSettings { internal float Volume = .6f; }
+    private sealed class FakeAudio
+    {
+        internal int Slices;
+        internal double3 Emitter;
+        internal float Volume;
+        internal void PlaySlice(KittenEva owner, double3 emitter, float volume)
+        { Slices++; Emitter = emitter; Volume = volume; }
+    }
     private sealed class FakeRenderer
     {
         internal int Sparks;
@@ -123,6 +134,8 @@ internal sealed partial class SaberRuntime
         r = Scene(); r.Begin(); r.Tick(-.1, 0); r.Tick(-.1, .01, advancing: false, fresh: false); r.Tick(.1, .02);
         Check(r._manualSliceActive && r._sliceStarted && r._slicer.Begins == 1 && r._renderer.Sparks == 1 && !r._sliceSequence.Active,
             "runtime manual contact starts exactly one async cut without assisted animation across a no-step handoff");
+        Check(r._audio.Slices == 1 && r._audio.Emitter == new double3(.1, -1, 0) && r._audio.Volume == .6f,
+            "a confirmed manual hit plays one slice cue at the rendered emitter with the configured volume");
         int advancesBeforeClash = r._slicer.Advances;
         r._pose.ClashHeld = true; r.Tick(.1, .025);
         Check(r._manualSliceActive && r._slicer.Advances > advancesBeforeClash,
@@ -131,6 +144,7 @@ internal sealed partial class SaberRuntime
         for (int i = 0; i < 5; i++) r.Tick(.1, .03 + i * .01, advancing: false, fresh: false);
         Check(r._manualSliceActive && r._slicer.Begins == 1 && r._slicer.Isolations == 0,
             "accepted worker spans repeated no-step/no-render handoffs without cancellation or native isolation");
+        Check(r._audio.Slices == 1, "repeated asynchronous slice updates do not replay the hit cue");
         r.ReleaseManualSwing();
         for (int i = 0; i < 4; i++) r.ApplyOverlaySwing(.1);
         r.Tick(.1, .3); Check(r._manualSliceActive && !r._overlayDrag.Active, "actual overlay recovery and subsequent idle update preserve accepted transaction"); r._slicer.Ready = true; r.Tick(.1, .32);
@@ -150,6 +164,7 @@ internal sealed partial class SaberRuntime
         double retryAt = r._manualGesture.CooldownUntil;
         r.Tick(-.1, retryAt, pointerX: -20); r.Tick(.1, retryAt + .02, pointerX: -20);
         Check(r._slicer.Begins == 2, "new gesture can cut after the cooldown and a fresh rendered pose");
+        Check(r._audio.Slices == 2, "a successive accepted cut receives its own hit cue");
         r.InvalidateManualContact(); Check(r._manualSliceActive, "UI cancellation defers native worker cleanup to settled update");
         r.ApplyManualContactReset(); Check(!r._manualSliceActive && !r._manualProbe.Pending, "settled cancellation clears pending worker and contact history");
         r = Scene(); r.Begin(); r.Tick(-.1, .0); r.Tick(.1, .02);
@@ -230,6 +245,7 @@ internal sealed partial class SaberRuntime
             && !r._manualGesture.CanDetectAt(refusedUntil - .001) && r._manualGesture.CanDetectAt(refusedUntil)
             && r._sliceMessageUntil > 9.02 && !r._manualProbe.Pending && !r._manualPoseAvailable,
             "refused physical contact stays cosmetic, clears its sweep, and throttles retry for exactly 250 ms");
+        Check(r._audio.Slices == 0, "a cosmetic or refused contact plays no slice cue");
         foreach (var gate in new (string Name, Action<SaberRuntime> Apply)[] {
             ("fault", x => x._fault = "test"), ("somersault", x => x.SomersaultActive = true),
             ("Force picker", x => x.ForcePicking = true), ("slice picker", x => x._selectingSlice = true),

@@ -18,6 +18,8 @@ public sealed class SaberAudio : IDisposable
     private const float LightIgniteGain = 0.75f;
     private const float DarkAmbientGain = 0.7f;
     private const float ClashGain = 0.8f;
+    private const float SwooshGain = TransitionGain * LightIgniteGain;
+    private const float SliceGain = 1f;
     private SoundBehavior? _lightIgniteSound;
     private SoundBehavior? _darkIgniteSound;
     private SoundBehavior? _retractSound;
@@ -25,16 +27,20 @@ public sealed class SaberAudio : IDisposable
     private SoundBehavior? _lightStaticSound;
     private SoundBehavior? _darkStaticSound;
     private SoundBehavior? _contactSound;
+    private SoundBehavior? _sliceSound;
     private IChannel? _transition;
     private IChannel? _hum;
     private IChannel? _static;
     private SaberType _type;
     private IChannel? _contact;
-    private IChannel? _clash;
+    private OneShot _clash, _swoosh, _slice;
+    private struct OneShot
+    {
+        internal IChannel? Channel;
+        internal double3 PointBody;
+    }
     private float _transitionGain = TransitionGain;
     private KittenEva? _owner;
-    private KittenEva? _clashOwner;
-    private double3 _clashPointBody;
     private bool _initializationAttempted;
     private bool _lastTargetOn;
     private bool _transitionPending;
@@ -63,6 +69,7 @@ public sealed class SaberAudio : IDisposable
         _lightStaticSound = Resolve("Purr2D2SaberLightStatic");
         _darkStaticSound = Resolve("Purr2D2SaberDarkStatic");
         _contactSound = Resolve("Purr2D2SaberContact");
+        _sliceSound = Resolve("Purr2D2ForceBreak");
     }
 
     /// <param name="emitterBody">Hilt/emitter position relative to the kitten's body origin, in body coordinates.</param>
@@ -98,11 +105,13 @@ public sealed class SaberAudio : IDisposable
             _nextHumStart = _nextStaticStart = _nextContactStart = 0;
         }
 
-        if (!Ready && _clash is null) return;
+        if (!Ready && _clash.Channel is null && _swoosh.Channel is null && _slice.Channel is null) return;
         try
         {
             Camera camera = GameAudio.GetAudioCamera();
-            if (_clash is not null) FollowClash(owner, camera, volume, paused);
+            FollowOneShot(ref _clash, owner, camera, volume * ClashGain, paused);
+            FollowOneShot(ref _swoosh, owner, camera, volume * SwooshGain, paused);
+            FollowOneShot(ref _slice, owner, camera, volume * SliceGain, paused);
             if (!Ready) return;
             double3 position = camera.GetPositionEgo(owner) + emitterBody.Transform(owner.Body2Cce);
             double3 velocity = camera.GetVelocityEgo(owner);
@@ -162,9 +171,9 @@ public sealed class SaberAudio : IDisposable
             Cut(ref _hum);
             Cut(ref _static);
             Cut(ref _contact);
-            Cut(ref _clash);
-            _clashOwner = null;
-            _clashPointBody = default;
+            Cut(ref _clash.Channel);
+            Cut(ref _swoosh.Channel);
+            Cut(ref _slice.Channel);
         }
     }
 
@@ -211,43 +220,55 @@ public sealed class SaberAudio : IDisposable
     /// <summary>Play one clash hit at the captured body-local contact point, independent of ignition transitions.</summary>
     public void PlayClash(KittenEva owner, double3 pointBody, float volume)
     {
+        Initialize();
+        PlayOneShot(ref _clash, _darkIgniteSound, owner, pointBody, volume, ClashGain);
+    }
+
+    /// <summary>Use Light ignition as the somersault swoosh for either saber type.</summary>
+    public void PlaySwoosh(KittenEva owner, double3 pointBody, float volume)
+    {
+        Initialize();
+        PlayOneShot(ref _swoosh, _lightIgniteSound, owner, pointBody, volume, SwooshGain);
+    }
+
+    /// <summary>Use the Force breakup bang for an accepted manual contact slice.</summary>
+    public void PlaySlice(KittenEva owner, double3 pointBody, float volume)
+    {
+        Initialize();
+        PlayOneShot(ref _slice, _sliceSound, owner, pointBody, volume, SliceGain);
+    }
+
+    private void PlayOneShot(ref OneShot shot, SoundBehavior? sound, KittenEva owner,
+        double3 pointBody, float volume, float gain)
+    {
         if (_shutdown || _disposed || owner.IsDisposed || !Finite(pointBody)) return;
         volume = Clamp(volume, 0, 1);
         if (volume <= 0) return;
         if (!ReferenceEquals(_owner, owner)) { Reset(); _owner = owner; }
-        Initialize();
-        // The runtime's pair latch already debounces overlap; a newly accepted clash
-        // replaces the one owned hit channel instead of being lost behind a long clip.
-        Cut(ref _clash);
+        // Runtime gesture/command gates debounce events. Each accepted event
+        // replaces its own channel without cutting ignition or another action.
+        Cut(ref shot.Channel);
         try
         {
             Camera camera = GameAudio.GetAudioCamera();
             double3 position = camera.GetPositionEgo(owner) + pointBody.Transform(owner.Body2Cce);
             var spatial = new SpatialAudio(position, camera.GetVelocityEgo(owner), 1.0);
-            _clash = Play(_darkIgniteSound, spatial, volume * ClashGain);
-            if (_clash is null) return;
-            _clashOwner = owner;
-            _clashPointBody = pointBody;
+            shot.PointBody = pointBody;
+            shot.Channel = Play(sound, spatial, volume * gain);
         }
         catch (Exception ex)
         {
-            Cut(ref _clash);
-            _clashOwner = null;
+            Cut(ref shot.Channel);
             WarnPlayback(ex.Message);
         }
     }
 
-    private void FollowClash(KittenEva owner, Camera camera, float volume, bool paused)
+    private static void FollowOneShot(ref OneShot shot, KittenEva owner, Camera camera, float volume, bool paused)
     {
-        if (!ReferenceEquals(_clashOwner, owner) || !Alive(_clash))
-        {
-            if (!Alive(_clash)) { Cut(ref _clash); _clashOwner = null; _clashPointBody = default; }
-            return;
-        }
-        double3 position = camera.GetPositionEgo(owner) + _clashPointBody.Transform(owner.Body2Cce);
+        if (!Alive(shot.Channel)) { Cut(ref shot.Channel); return; }
+        double3 position = camera.GetPositionEgo(owner) + shot.PointBody.Transform(owner.Body2Cce);
         var spatial = new SpatialAudio(position, camera.GetVelocityEgo(owner), 1.0);
-        Follow(ref _clash, spatial, volume * ClashGain, 1, paused);
-        if (!Alive(_clash)) { Cut(ref _clash); _clashOwner = null; _clashPointBody = default; }
+        Follow(ref shot.Channel, spatial, volume, 1, paused);
     }
 
     private static void Follow(ref IChannel? channel, SpatialAudio spatial, float volume, float pitch, bool paused)
@@ -282,7 +303,9 @@ public sealed class SaberAudio : IDisposable
         PauseOwned(ref _hum);
         PauseOwned(ref _static);
         PauseOwned(ref _contact);
-        PauseOwned(ref _clash);
+        PauseOwned(ref _clash.Channel);
+        PauseOwned(ref _swoosh.Channel);
+        PauseOwned(ref _slice.Channel);
     }
 
     private static void PauseOwned(ref IChannel? channel)
@@ -300,11 +323,13 @@ public sealed class SaberAudio : IDisposable
             Cut(ref _hum);
             Cut(ref _static);
             Cut(ref _contact);
-            Cut(ref _clash);
+            Cut(ref _clash.Channel);
+            Cut(ref _swoosh.Channel);
+            Cut(ref _slice.Channel);
         }
-        else _transition = _hum = _static = _contact = _clash = null;
+        else _transition = _hum = _static = _contact = null;
+        _clash = _swoosh = _slice = default;
         _owner = null;
-        _clashOwner = null; _clashPointBody = default;
         _lastTargetOn = _transitionPending = false;
         _humStarts = _staticStarts = _contactStarts = 0;
         _nextHumStart = _nextStaticStart = _nextContactStart = 0;

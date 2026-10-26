@@ -75,7 +75,74 @@ internal static class AudioChecks
         ForceBreakupOneShots();
         ForceBreakupAudioGracefulFailures();
         SaberClashOneShot();
+        SaberActionOneShots();
         Console.WriteLine("PASS: audio layering, type switching, spatial follow, pause, mute, retraction and cleanup");
+    }
+
+    private static void SaberActionOneShots()
+    {
+        using var audio = new SaberAudio();
+        var owner = new KittenEva();
+        GameAudio.CameraPosition = new double3(10, 20, 30);
+        audio.Update(owner, double3.Zero, 1, true, false, .8f, type: SaberType.Dark);
+        var ignition = GameAudio.Channels.Last(c => c.Id == "Purr2D2SaberDarkIgnite");
+        int before = GameAudio.Channels.Count;
+        audio.PlaySwoosh(owner, new double3(2, 3, 4), .8f);
+        var swoosh = GameAudio.Channels[^1];
+        audio.PlaySlice(owner, new double3(5, 6, 7), .8f);
+        var slice = GameAudio.Channels[^1];
+        Check(GameAudio.Channels.Count == before + 2 && swoosh.Id == "Purr2D2SaberLightIgnite"
+            && slice.Id == "Purr2D2ForceBreak" && !ignition.Stopped && !swoosh.Stopped,
+            "Dark and Light sabers use the Light swoosh and Force breakup bang on independent action channels");
+        Check(swoosh.VolumeMultiplier == .8f * (.7f * .75f) && slice.VolumeMultiplier == .8f
+            && !swoosh.Paused && !slice.Paused && swoosh.Channel.DopplerLevel == 0 && slice.Channel.DopplerLevel == 0,
+            "action sounds reuse their source gains, global volume and disabled orbital Doppler");
+        audio.Suspend();
+        Check(swoosh.Paused && slice.Paused, "a stale pose suspends action sounds");
+        GameAudio.CameraPosition = new double3(20, 30, 40);
+        audio.Update(owner, double3.Zero, 1, true, true, .4f, type: SaberType.Dark);
+        Check(GameAudio.Channels.Count == before + 2 && swoosh.Paused && slice.Paused
+            && swoosh.Spatial.Position == new double3(22, 33, 44)
+            && slice.Spatial.Position == new double3(25, 36, 47)
+            && swoosh.VolumeMultiplier == .4f * (.7f * .75f) && slice.VolumeMultiplier == .4f,
+            "paused updates follow each captured emitter and apply changed volume without replaying events");
+        audio.Update(owner, double3.Zero, 1, true, false, .4f, type: SaberType.Dark);
+        Check(!swoosh.Paused && !slice.Paused, "resume retains the original action channels");
+        audio.PlaySwoosh(owner, double3.Zero, .4f);
+        var nextSwoosh = GameAudio.Channels[^1];
+        audio.PlaySlice(owner, double3.Zero, .4f);
+        var nextSlice = GameAudio.Channels[^1];
+        Check(swoosh.Stopped && slice.Stopped && !nextSwoosh.Stopped && !nextSlice.Stopped && !ignition.Stopped,
+            "new combo jumps and manual cuts replace only their own still-playing clips");
+        before = GameAudio.Channels.Count;
+        audio.PlaySwoosh(owner, double3.Zero, 0);
+        audio.PlaySlice(owner, double3.Zero, float.NaN);
+        audio.PlaySwoosh(owner, new double3(double.NaN, 0, 0), 1);
+        Check(GameAudio.Channels.Count == before, "muted or invalid action events create no channels");
+        nextSlice.Finished = true;
+        audio.Update(owner, double3.Zero, 1, true, false, .4f, type: SaberType.Dark);
+        Check(nextSlice.Stopped && !nextSwoosh.Stopped, "completed slice clips release independently");
+        audio.Update(new KittenEva(), double3.Zero, 0, false, false, 0);
+        Check(nextSwoosh.Stopped && ignition.Stopped, "owner changes stop all old action channels");
+        audio.PlaySwoosh(owner, double3.Zero, 1);
+        audio.PlaySlice(owner, double3.Zero, 1);
+        var shutdownChannels = GameAudio.Channels.TakeLast(2).ToArray();
+        audio.Shutdown();
+        before = GameAudio.Channels.Count;
+        audio.PlaySwoosh(owner, double3.Zero, 1);
+        audio.PlaySlice(owner, double3.Zero, 1);
+        Check(shutdownChannels.All(c => c.Stopped) && GameAudio.Channels.Count == before,
+            "shutdown stops action sounds and rejects later events");
+
+        ModLibrary.MissingIds.Add("Purr2D2SaberHum");
+        using var withoutHum = new SaberAudio();
+        withoutHum.PlaySlice(owner, double3.Zero, 1);
+        var standaloneSlice = GameAudio.Channels[^1];
+        withoutHum.Update(owner, double3.Zero, 0, false, true, .5f);
+        Check(standaloneSlice.Paused && standaloneSlice.VolumeMultiplier == .5f,
+            "action channels still follow and pause when an unrelated ambient asset is unavailable");
+        ModLibrary.MissingIds.Clear();
+        GameAudio.CameraPosition = double3.Zero;
     }
 
     private static void SaberClashOneShot()

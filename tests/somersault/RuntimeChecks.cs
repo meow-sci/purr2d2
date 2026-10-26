@@ -18,6 +18,16 @@ internal sealed partial class SaberRuntime
     {
         internal float JumpComboIntervalSeconds = .75f;
         internal bool SpaceSomersaultEnabled = true;
+        internal float Volume = .6f;
+    }
+    private readonly FixtureBlade _blade = new();
+    private readonly FixtureAudio _audio = new();
+    private float Length => 1;
+    private sealed class FixtureBlade { internal bool Equipped = true, TargetOn = true; internal float Deployment = 1; }
+    private sealed class FixtureAudio
+    {
+        internal int Swooshes;
+        internal void PlaySwoosh(KittenEva owner, Brutal.Numerics.double3 emitter, float volume) => Swooshes++;
     }
     private readonly SaberPoseController _pose = new();
     private readonly AssistedSliceSequence _sliceSequence = new();
@@ -162,7 +172,36 @@ internal sealed partial class SaberRuntime
         Program.EditorFlag = false; second.IsDisposed = true;
         Check(!runtime.ShowSomersaultButtons, "a disposed EVA cannot retain movement controls");
         RunSpaceInputChecks();
+        RunSwooshChecks();
         Console.WriteLine("Somersault runtime arbitration checks passed.");
+    }
+
+    private static void RunSwooshChecks()
+    {
+        Universe.Speed = 1;
+        var runtime = new SaberRuntime();
+        var owner = new KittenEva();
+        runtime._owner = owner; Program.ControlledVehicle = owner;
+        runtime.UpdateSomersault();
+        runtime.QueueSomersault(SomersaultDirection.Forward); runtime.UpdateSomersault();
+        Check(runtime._audio.Swooshes == 0, "queued movement plays no sound before native acknowledgement");
+        runtime._somersaultMotion.AppliedCommandId++;
+        runtime.UpdateSomersault(); runtime.UpdateSomersault();
+        Check(runtime._audio.Swooshes == 1, "one acknowledged lit somersault plays one cue across repeated frames");
+
+        foreach (var gate in new (Action Apply, Action Restore)[] {
+            (() => runtime._blade.TargetOn = false, () => runtime._blade.TargetOn = true),
+            (() => runtime._blade.Equipped = false, () => runtime._blade.Equipped = true),
+            (() => runtime._blade.Deployment = 0, () => runtime._blade.Deployment = 1),
+            (() => Universe.Speed = 0, () => Universe.Speed = 1) })
+        {
+            gate.Apply(); runtime._somersaultMotion.AppliedCommandId++;
+            runtime.UpdateSomersault(); gate.Restore(); runtime.UpdateSomersault();
+            Check(runtime._audio.Swooshes == 1, "unlit, stowed, retracted or paused jumps never defer a stale cue");
+        }
+        runtime._somersaultMotion.AppliedCommandId++;
+        runtime.ResetSomersault(); runtime.UpdateSomersault();
+        Check(runtime._audio.Swooshes == 1, "reset discards an unobserved action cue with its old movement");
     }
 
     private static void RunSpaceInputChecks()

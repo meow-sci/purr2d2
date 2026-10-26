@@ -10,6 +10,7 @@ internal sealed partial class SaberRuntime
     private readonly SomersaultPoseController _somersaultPose = new();
     private KittenEva? _somersaultPoseOwner;
     private SomersaultRequest? _somersaultRequest;
+    private long _somersaultAudioCommandId;
     private readonly record struct SomersaultRequest(KittenEva Owner, SomersaultDirection Direction,
         double PressTime, bool FromSpace = false);
 
@@ -87,6 +88,21 @@ internal sealed partial class SaberRuntime
         if (!_somersaultPose.Eligible && _somersaultMotion.Active)
             _somersaultMotion.Reset();
 
+        // Observe native acknowledgement, including one consumed by input polling.
+        // Queued/rejected launches and repeated frames must never replay the cue.
+        if (_somersaultAudioCommandId != _somersaultMotion.AppliedCommandId)
+        {
+            _somersaultAudioCommandId = _somersaultMotion.AppliedCommandId;
+            if (_somersaultMotion.Active && ReferenceEquals(_somersaultMotion.Owner, _owner)
+                && _owner is { IsDisposed: false } owner && _blade.Equipped && _blade.TargetOn
+                && _blade.Deployment > .001f && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()))
+            {
+                // Offscreen/stale hands fall back to the kitten's body origin.
+                _pose.TryGetBladeSegment(Length, out var emitter, out _);
+                _audio.PlaySwoosh(owner, emitter, _settings.Volume);
+            }
+        }
+
         var request = _somersaultRequest;
         _somersaultRequest = null;
         if (request is { } queued && ReferenceEquals(queued.Owner, _owner)
@@ -107,6 +123,7 @@ internal sealed partial class SaberRuntime
     {
         _somersaultRequest = null;
         _somersaultMotion.Reset();
+        _somersaultAudioCommandId = _somersaultMotion.AppliedCommandId;
         _somersaultPose.Unbind();
         _somersaultPoseOwner = null;
     }

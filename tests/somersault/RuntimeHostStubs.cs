@@ -65,7 +65,12 @@ namespace KSA
 
 namespace Purr2D2.Pose
 {
-    internal sealed class SaberPoseController { internal bool Swinging; }
+    internal sealed class SaberPoseController
+    {
+        internal bool Swinging;
+        internal bool TryGetBladeSegment(double length, out Brutal.Numerics.double3 emitter, out Brutal.Numerics.double3 tip)
+        { emitter = Brutal.Numerics.double3.Zero; tip = Brutal.Numerics.double3.UnitY; return true; }
+    }
     internal sealed class SomersaultPoseController
     {
         internal KSA.KittenEva? Owner;
@@ -87,6 +92,8 @@ namespace Purr2D2.Runtime
         internal double ComboIntervalSeconds = .75;
         internal double InputTime => KSA.Program.PlayerTime;
         internal int Launches;
+        internal long AppliedCommandId;
+        internal KSA.KittenEva? Owner => LastOwner;
         internal SomersaultDirection Direction;
         internal KSA.KittenEva? LastOwner;
         internal float RotationRadians => 0;

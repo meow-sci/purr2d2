@@ -1,4 +1,5 @@
 using KSA;
+using Brutal.Numerics;
 using Brutal.GlfwApi;
 using Purr2D2.Core;
 using RenderCore.Input;
@@ -30,10 +31,25 @@ namespace Purr2D2.Runtime
         {
             internal float JumpComboIntervalSeconds = .75f;
             internal bool SpaceSomersaultEnabled = true;
+            internal float Volume = .6f;
+        }
+        private readonly FixtureBlade _blade = new();
+        private readonly FixtureAudio _audio = new();
+        private float Length => 1;
+        private sealed class FixtureBlade { internal bool Equipped = true, TargetOn = true; internal float Deployment = 1; }
+        private sealed class FixtureAudio
+        {
+            internal int Swooshes;
+            internal void PlaySwoosh(KittenEva owner, double3 emitter, float volume) => Swooshes++;
         }
         private readonly FixturePose _pose = new();
         private readonly FixtureSlice _sliceSequence = new();
-        private sealed class FixturePose { internal bool Swinging => false; }
+        private sealed class FixturePose
+        {
+            internal bool Swinging => false;
+            internal bool TryGetBladeSegment(double length, out double3 emitter, out double3 tip)
+            { emitter = double3.Zero; tip = double3.UnitY; return true; }
+        }
         private sealed class FixtureSlice { internal bool Active => false; internal bool EndPresented => false; }
         private void CancelAssistedSlice(string reason) => _selectingSlice = false;
         private SaberRuntime(SomersaultMotionController motion) => _somersaultMotion = motion;
@@ -56,6 +72,8 @@ namespace Purr2D2.Runtime
                 && runtime._somersaultRequest is { Direction: SomersaultDirection.Forward, PressTime: 10, FromSpace: true },
                 "the actual Space press captures the first grounded launch for the real worker controller");
             runtime.UpdateSomersault();
+            Check(runtime._audio.Swooshes == 0 && motion.AppliedCommandId == 0,
+                "accepting a somersault intent cannot play a swoosh before the native launch acknowledgement");
             var first = new SimStep(new(0), new(.02), .02);
             Universe.PrepareVehicleWorkers(first); Universe.Apply(first);
             Check(motion.Active && motion.RotationRadians == 0, "applied first launch awaits the next settled observation");
@@ -73,6 +91,10 @@ namespace Purr2D2.Runtime
             runtime.UpdateSomersault();
             Check(motion.CommandId == 2 && motion.Direction == SomersaultDirection.Forward,
                 "low-frame-rate settled processing retains press time and original direction");
+            Check(runtime._audio.Swooshes == 1 && motion.AppliedCommandId == 1,
+                "the first acknowledged launch plays once even when input polling consumed its acknowledgement");
+            runtime.UpdateSomersault();
+            Check(runtime._audio.Swooshes == 1, "repeated settled observations cannot replay a somersault cue");
             var second = new SimStep(new(.02), new(.12), .1);
             Universe.PrepareVehicleWorkers(second); Universe.Apply(second);
             Program.PlayerTime = 11;
@@ -84,6 +106,17 @@ namespace Purr2D2.Runtime
                 "real input boundary also observes an applied second boost before accepting the third press");
             runtime.UpdateSomersault();
             Check(motion.CommandId == 3, "input-to-worker integration accepts three deliberate requests once each");
+            Check(runtime._audio.Swooshes == 2 && motion.AppliedCommandId == 2,
+                "an acknowledged combo boost receives exactly one swoosh");
+            var third = new SimStep(new(.12), new(.22), .1);
+            Universe.PrepareVehicleWorkers(third); Universe.Apply(third);
+            runtime._blade.TargetOn = false;
+            runtime.UpdateSomersault();
+            Check(motion.AppliedCommandId == 3 && runtime._audio.Swooshes == 2,
+                "a completed somersault with an unlit saber is silent");
+            runtime._blade.TargetOn = true;
+            runtime.UpdateSomersault();
+            Check(runtime._audio.Swooshes == 2, "igniting later cannot replay a silent jump's cue");
         }
 
         private static void Check(bool value, string message)

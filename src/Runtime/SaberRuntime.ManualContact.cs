@@ -101,6 +101,7 @@ internal sealed partial class SaberRuntime
         // Consume before checking cut policy too: a refused surface gets one attempt
         // until the .25-second cooldown expires and fresh motion arrives, never a per-frame flood.
         if (!_manualGesture.Consume(_manualPose.Gesture, _playerTime)) return;
+        var emitter = _manualPose.BaseBody;
         _manualProbe.Reset(); ClearManualPose();
         _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
         if (!_targeting.TryContactTarget(_owner!, contact.Part, contact.PointLocal, contact.DistanceMeters,
@@ -114,7 +115,11 @@ internal sealed partial class SaberRuntime
         { CancelAssistedSlice("Cannot contact slice: " + reason, manualAttemptCompleted: true); return; }
         _manualSliceActive = true; _manualIsolated = false;
         _sliceTarget = confirmedTarget; _sliceStarted = true; _sliceError = null;
-        try { _slicer.Begin(confirmedTarget.Part, contactSlice); }
+        try
+        {
+            _slicer.Begin(confirmedTarget.Part, contactSlice);
+            _audio.PlaySlice(_owner!, emitter, _settings.Volume);
+        }
         catch (Exception error) { _sliceError = error.Message; }
         _sliceStatus = "Contact slicing " + confirmedTarget.Part.DisplayName + "...";
     }
