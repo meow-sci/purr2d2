@@ -374,19 +374,37 @@ internal sealed partial class SaberRuntime
             "rapid alternating toggle/manual commands compact to a bounded stream without losing the latest deployment endpoint");
         runtime.ApplyKittenSaberRequests();
         Check(firstSaber.Blade.Equipped && firstSaber.Blade.ManualDeployment
-            && firstSaber.Blade.Deployment == .73f && firstSaber.Blade.TargetOn
+            && firstSaber.Blade.Deployment == .4f && firstSaber.Blade.ManualTargetDeployment == .73f
+            && firstSaber.Blade.TargetOn
             && firstSaber.TogglePhase == SaberTogglePhase.None,
-            "the last manual request wins after an ordered toggle/manual burst and keeps its exact fraction");
+            "the last manual request wins after an ordered toggle/manual burst and keeps its exact target");
+        runtime.UpdateOtherSabers(.01);
+        Check(firstSaber.Blade.Deployment > .4f && firstSaber.Blade.Deployment < .73f
+            && firstSaber.Blade.ManualTargetDeployment == .73f && firstSaber.Blade.ManualDeployment,
+            "background saber advancement animates toward the retained manual fraction");
+        float beforeDuplicateRequest = firstSaber.Blade.Deployment;
+        Check(!runtime.ApplyManualDeploymentNow(first, firstSaber, .73f)
+            && firstSaber.Blade.Deployment == beforeDuplicateRequest
+            && firstSaber.Blade.ManualTargetDeployment == .73f,
+            "repeating a target during catch-up does not report a changed intent or restart motion");
         runtime.UpdateOtherSabers(.1);
-        Check(firstSaber.Blade.Deployment == .73f && firstSaber.Blade.ManualDeployment,
-            "manual fractions remain stable during ordinary background saber advancement");
+        Check(firstSaber.Blade.Deployment == .73f,
+            "manual background advancement reaches the exact partial target without overshoot");
 
         runtime.QueueKittenBladeDeployment(first, 0);
         runtime.ApplyKittenSaberRequests();
         Check(firstSaber.Blade.Equipped && firstSaber.Blade.ManualDeployment
-            && firstSaber.Blade.Deployment == 0 && !firstSaber.Blade.TargetOn
+            && firstSaber.Blade.Deployment == .73f && firstSaber.Blade.ManualTargetDeployment == 0
+            && !firstSaber.Blade.TargetOn && firstSaber.Blade.Phase == "Retracting"
             && firstSaber.Pose.Kitten == first,
-            "zero deployment keeps the kitten's raised hilt and pose equipped");
+            "zero deployment smoothly retracts the blade while keeping the kitten's hilt and pose equipped");
+        runtime.AdvanceKittenSaber(firstSaber, .1);
+        Check(firstSaber.Blade.Deployment > 0 && firstSaber.Blade.Deployment < .73f
+            && firstSaber.Blade.ManualTargetDeployment == 0,
+            "manual zero advances without snapping the current blade fraction");
+        runtime.AdvanceKittenSaber(firstSaber, .1);
+        Check(firstSaber.Blade.Deployment == 0 && firstSaber.Blade.Equipped,
+            "manual zero reaches exact retraction without lowering the equipped hilt");
         runtime.QueueKittenSaber(first, true);
         runtime.ApplyKittenSaberRequests();
         for (int i = 0; i < 20; i++) runtime.AdvanceKittenSaber(firstSaber, .1);
@@ -474,10 +492,14 @@ internal sealed partial class SaberRuntime
             && firstSaber.DeferredManualDeployment == .23f,
             "deferred manual deployment remains untouched throughout the 0.4-second visual hold");
         firstSaber.Pose.UpdateClash(.4);
-        runtime.AdvanceKittenSaber(firstSaber, .1);
+        runtime.AdvanceKittenSaber(firstSaber, .01);
         Check(!firstSaber.Pose.ClashHeld && firstSaber.DeferredManualDeployment is null
-            && firstSaber.Blade.ManualDeployment && firstSaber.Blade.Deployment == .23f,
-            "the latest deferred fraction applies once the clash hold expires");
+            && firstSaber.Blade.ManualDeployment && firstSaber.Blade.ManualTargetDeployment == .23f
+            && firstSaber.Blade.Deployment > .23f && firstSaber.Blade.Deployment < deploymentBeforeHold,
+            "the latest deferred target applies after clash and begins animating from the held fraction");
+        runtime.AdvanceKittenSaber(firstSaber, .1);
+        Check(firstSaber.Blade.Deployment == .23f,
+            "the deferred manual target settles exactly after the clash hold");
 
         firstSaber.Pose.Update(.1, true); Program.FrameNumber++; PublishVisiblePose(first);
         Check(firstSaber.Pose.TryBeginClash(.5, runtime.VisibleBladeLength(firstSaber)),

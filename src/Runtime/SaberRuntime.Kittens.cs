@@ -382,8 +382,8 @@ internal sealed partial class SaberRuntime
         if (!saber.Blade.Equipped) saber.Blade.Equip(true);
         if (!ReferenceEquals(saber.Pose.Kitten, kitten)) saber.Pose.Bind(kitten);
         saber.TogglePhase = SaberTogglePhase.None;
-        bool changed = !saber.Blade.ManualDeployment || saber.Blade.Deployment != deployment;
-        if (!saber.Blade.HoldDeployment(deployment)) return false;
+        bool changed = !saber.Blade.ManualDeployment || saber.Blade.ManualTargetDeployment != deployment;
+        if (!saber.Blade.SetManualDeploymentTarget(deployment)) return false;
         return changed;
     }
 

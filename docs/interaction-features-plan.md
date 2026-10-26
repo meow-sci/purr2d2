@@ -115,10 +115,10 @@ Checks: independent kittens, global inheritance versus override, reset to defaul
 
 ### State and input
 
-- Add an explicit manual deployment mode to `BladeState`. A finite clamped fraction becomes the actual deployment, remains unchanged by `Advance`, and counts as on whenever nonzero.
+- Manual deployment uses a finite clamped target fraction in `BladeState`. `SetManualDeploymentTarget` retains the displayed fraction and lets `Advance` approach the target at one full range per 0.15 seconds, clamping exactly without overshoot. `TargetOn` follows the requested target immediately; `HoldDeployment` remains an explicit immediate setter. Repeating the same target never restarts motion.
 - Ordinary `SetIgnited` always clears manual mode, even if the on/off target is unchanged. Automatic deployment then resumes from the existing fraction. Reset clears manual mode.
-- On a direct slider press, begin at 10% if logically off and 90% if logically on. Horizontal movement relative to the press changes that baseline; vertical movement has no effect. Release preserves the final fraction.
-- Manual zero may leave the raised hilt equipped. A later ordinary toggle uses the existing ignition/retraction state machine.
+- Press, drag and release map the absolute horizontal pointer position to `(pointerX - trackMinX) / trackWidth`, clamped to 0–1. Vertical movement has no effect. Release retains the final target, and the blade finishes its quick adjustment. This supersedes the original 10%/90% press baseline at the user's request.
+- Manual zero retains the raised hilt while the visible blade retracts quickly. A later ordinary toggle uses the existing ignition/retraction state machine and starts from the current displayed fraction.
 - Route updates through the existing settled per-kitten request stream with bounded coalescing. Preserve toggle/manual ordering and the release endpoint. Bind only at the settled handoff.
 - Track the dragged kitten by object identity, never row number or controlled-owner alias. Background kittens receive the same behavior.
 - Save ordinary enabled intent, length, and appearance; partial deployment itself stays transient. Explicit SLICE resumes full automatic ignition. Stable partial manual blades use their actual short segment for intentional contact.
@@ -126,11 +126,11 @@ Checks: independent kittens, global inheritance versus override, reset to defaul
 ### Layout and animation
 
 - Split each entry into its existing top row and a full-width deployment track below it. Keep checkbox and color-swatch dimensions unchanged.
-- Fill the bar directly from `Blade.Deployment`. This exactly matches live extension/retraction, including equip delay and existing .3/.22-second timing; do not add a competing UI animation timer.
+- Fill the bar directly from `Blade.Deployment`. This matches the quick manual adjustment as well as ordinary extension/retraction with the existing .3/.22-second timing; do not add a competing UI animation timer. Supported player time advances manual motion; pause and clash holds freeze it.
 - Use shared draw/hit bounds with scroll clipping. Test the deployment track before the row's equip action. Right-click camera targeting remains in the top/name row.
 - Consume pointer and scrolling during drag. Handle both release routes, fast press/release, focus/modal/hide/resize, owner removal/switch, world reset, and faults. Ordinary cancellation keeps the last accepted percentage; lifecycle cleanup removes stale references and commands.
 
-Checks: 10/90% press baseline, relative motion, endpoints/non-finite input, release retention, zero crossing/audio transition, automatic resume, background kittens, queue ordering, row clipping/scrolling, persistence compatibility.
+Checks: absolute click/drag/release mapping, endpoints/non-finite input, no press jump on re-grab, fast exact settling and reversal, zero crossing/audio transition, pause/clash freeze, automatic resume, independent background kittens, target-based intent coalescing, queue ordering, row clipping/scrolling and persistence compatibility.
 
 ## 6. Automatic swing
 

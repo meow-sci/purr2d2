@@ -81,21 +81,30 @@ internal static class OverlayDragChecks
     private static void DeploymentDrag()
     {
         var drag = new SaberDeploymentDrag();
-        Check(!drag.Begin(float.NaN, .1f, 10, 110) && !drag.Begin(50, .1f, 110, 10)
-            && !drag.Begin(9, .1f, 10, 110), "deployment drag rejects nonfinite, reversed and outside-track starts");
-        Check(drag.Begin(50, .1f, 10, 110) && drag.Value == .1f,
-            "a logical-off press begins at ten percent without mapping the click position");
-        Check(drag.Move(float.NaN) == .1f, "nonfinite pointer motion keeps the last finite deployment");
-        Check(MathF.Abs(drag.Move(105) - .65f) < 1e-6f && drag.Move(200) == 1,
-            "press-relative horizontal motion changes the blade fraction and clamps at the upper endpoint");
+        Check(!drag.Begin(float.NaN, 10, 110) && !drag.Begin(50, 110, 10)
+            && !drag.Begin(9, 10, 110) && !drag.Begin(50, float.NaN, 110)
+            && !drag.Begin(50, 10, float.PositiveInfinity),
+            "deployment drag rejects nonfinite, reversed and outside-track starts");
+        Check(drag.Begin(35, 10, 110) && drag.Value == .25f
+            && drag.Release(35) == .25f
+            && drag.Begin(60, 10, 110) && drag.Value == .5f
+            && drag.Release(60) == .5f
+            && drag.Begin(85, 10, 110) && drag.Value == .75f,
+            "absolute clicks select 25, 50 and 75 percent independently of the prior target");
+        Check(drag.Move(85) == .75f && drag.Release(85) == .75f,
+            "re-grabbing and releasing at the current fraction does not jump");
+        Check(drag.Begin(50, 10, 110) && drag.Move(float.NaN) == .4f,
+            "nonfinite pointer motion keeps the last finite deployment");
+        Check(MathF.Abs(drag.Move(70) - .6f) < 1e-6f && drag.Move(200) == 1,
+            "absolute horizontal motion maps directly to the blade fraction and clamps at the upper endpoint");
         Check(drag.MatchesTrack(10, 110) && !drag.MatchesTrack(10, 120),
             "a resize invalidates the captured deployment track");
         Check(drag.Release(10) == 0 && !drag.Held,
             "release applies its final pointer coordinate and clamps at the lower endpoint");
-        Check(drag.Begin(70, .9f, 10, 110) && drag.Value == .9f,
-            "a logical-on press begins at ninety percent");
-        Check(drag.Release(float.NaN) == .9f, "a nonfinite release preserves the last valid fraction");
-        Check(drag.Begin(0, .5f, -float.MaxValue, float.MaxValue)
+        Check(drag.Begin(70, 10, 110) && drag.Value == .6f,
+            "a later press selects the absolute track position instead of an on/off baseline");
+        Check(drag.Release(float.NaN) == .6f, "a nonfinite release preserves the last valid fraction");
+        Check(drag.Begin(0, -float.MaxValue, float.MaxValue) && drag.Value == .5f
             && drag.Move(float.MaxValue) == 1,
             "finite extreme track coordinates use double precision and cannot overflow the deployment fraction");
     }

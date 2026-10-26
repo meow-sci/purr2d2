@@ -580,8 +580,7 @@ internal sealed partial class SaberRuntime
     {
         var min = _overlayLayout.DeploymentBarMin(row, _overlayListScroll);
         var max = _overlayLayout.DeploymentBarMax(row, _overlayListScroll);
-        float baseline = SaberEnabledFor(owner) ? .9f : .1f;
-        if (_fault != null || !_saberDeploymentDrag.Begin(pointer.X, baseline, min.X, max.X)) return;
+        if (_fault != null || !_saberDeploymentDrag.Begin(pointer.X, min.X, max.X)) return;
         _saberDeploymentDragOwner = owner;
         _saberDeploymentDragRow = row;
         _saberDeploymentBarTop = min.Y;

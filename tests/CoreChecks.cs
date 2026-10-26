@@ -21,6 +21,8 @@ internal static class CoreChecks
         var blade = new BladeState();
         Check(blade.Phase == "Unequipped" && blade.Deployment == 0 && !blade.TargetOn,
             "blade starts unequipped and retracted");
+        Check(!blade.SetManualDeploymentTarget(.5f) && blade.ManualTargetDeployment == 0,
+            "manual target changes are rejected while the saber is unequipped");
 
         blade.SetIgnited(true);
         blade.Advance(.1);
@@ -57,15 +59,15 @@ internal static class CoreChecks
         Check(blade.Deployment > beforeInvalidDuration, "ignition can reverse during retraction");
 
         Check(blade.HoldDeployment(.37f) && blade.ManualDeployment && blade.TargetOn
-            && blade.Deployment == .37f && blade.Phase == "Partial",
-            "manual deployment holds an exact partial fraction and reports a partial phase");
+            && blade.ManualTargetDeployment == .37f && blade.Deployment == .37f && blade.Phase == "Partial",
+            "the immediate setup API holds an exact partial fraction and reports a partial phase");
         blade.Advance(.1);
         Check(blade.Deployment == .37f, "automatic extension does not advance a held manual fraction");
-        Check(!blade.HoldDeployment(float.NaN) && blade.Deployment == .37f,
+        Check(!blade.HoldDeployment(float.NaN) && blade.Deployment == .37f && blade.ManualTargetDeployment == .37f,
             "nonfinite manual deployment is rejected without changing the held fraction");
-        Check(blade.HoldDeployment(2) && blade.Deployment == 1 && blade.TargetOn,
+        Check(blade.HoldDeployment(2) && blade.ManualTargetDeployment == 1 && blade.Deployment == 1 && blade.TargetOn,
             "manual deployment clamps above one to the fully extended endpoint");
-        Check(blade.HoldDeployment(0) && blade.ManualDeployment && !blade.TargetOn
+        Check(blade.HoldDeployment(0) && blade.ManualDeployment && !blade.TargetOn && blade.ManualTargetDeployment == 0
             && blade.Deployment == 0 && blade.Equipped && blade.Phase == "Retracted",
             "manual zero keeps the saber equipped while lowering the blade exactly");
         blade.SetIgnited(false);
@@ -78,9 +80,74 @@ internal static class CoreChecks
         blade.Advance(.1);
         Check(blade.Deployment > .4f, "ignition after manual hold resumes ordinary extension");
 
+        float beforeManualTarget = blade.Deployment;
+        Check(blade.SetManualDeploymentTarget(.25f) && blade.ManualDeployment && blade.TargetOn
+            && blade.ManualTargetDeployment == .25f && blade.Deployment == beforeManualTarget
+            && blade.Phase == "Retracting",
+            "the animated manual setter records a lower target without snapping the visible blade");
+        blade.Advance(0); blade.Advance(-.1); blade.Advance(double.NaN); blade.Advance(double.PositiveInfinity);
+        Check(blade.Deployment == beforeManualTarget,
+            "pause and invalid time keep an in-flight manual blade frozen");
+        blade.Advance(.05);
+        float beforeRetarget = blade.Deployment;
+        Check(blade.Deployment < beforeManualTarget && blade.Deployment > .25f,
+            "manual travel moves monotonically toward a lower partial target without overshooting");
+        Check(blade.SetManualDeploymentTarget(.8f) && blade.Deployment == beforeRetarget
+            && blade.ManualTargetDeployment == .8f && blade.Phase == "Extending",
+            "retargeting reverses from the current fraction without a discontinuity");
+        blade.Advance(.05);
+        float afterRetargetStep = blade.Deployment;
+        Check(afterRetargetStep > beforeRetarget && afterRetargetStep < .8f,
+            "a reversed manual target continues at the fixed deployment rate");
+        Check(blade.SetManualDeploymentTarget(.8f), "repeating the same manual target remains accepted");
+        blade.Advance(.05);
+        Check(blade.Deployment == .8f && blade.Phase == "Partial",
+            "manual travel clamps exactly at its target and reports a settled partial phase");
+        for (int i = 0; i < 20; i++) blade.Advance(.1);
+        Check(blade.Deployment == .8f,
+            "a settled manual fraction holds indefinitely without a transition timer");
+        Check(!blade.SetManualDeploymentTarget(float.NaN) && blade.ManualTargetDeployment == .8f
+            && blade.Deployment == .8f,
+            "nonfinite animated targets are rejected without changing current or target deployment");
+
+        Check(blade.SetManualDeploymentTarget(0) && !blade.TargetOn && blade.Phase == "Retracting"
+            && blade.Equipped && blade.Deployment == .8f,
+            "manual zero begins a smooth retraction while preserving the equipped hilt");
+        blade.Advance(.1);
+        Check(blade.Deployment > 0 && blade.Deployment < .8f,
+            "manual zero retracts at the same fixed rate as extension");
+        blade.Advance(.05);
+        Check(blade.Deployment == 0 && blade.Phase == "Retracted" && blade.Equipped,
+            "manual retraction reaches exact zero and retains the raised hilt");
+
+        Check(blade.SetManualDeploymentTarget(1) && blade.Deployment == 0
+            && blade.Phase == "Extending", "full-range manual deployment starts from the current zero fraction");
+        blade.Advance(.1);
+        Check(Math.Abs(blade.Deployment - 2f / 3f) < 1e-6f && blade.Phase == "Extending",
+            "manual deployment advances by a capped fixed-rate step");
+        blade.Advance(.05);
+        Check(blade.Deployment == 1 && blade.Phase == "Lit",
+            "full-range manual deployment reaches the exact endpoint in 0.15 player seconds");
+        blade.SetIgnited(false);
+        Check(!blade.ManualDeployment && !blade.TargetOn && blade.Deployment == 1,
+            "ordinary toggles supersede a manual target without snapping the visible fraction");
+        blade.Advance(.1);
+        Check(blade.Deployment < 1 && blade.Deployment > 0,
+            "ordinary retraction resumes from the actual manual fraction using its normal timing");
+
+        blade.HoldDeployment(.4f);
+        Check(blade.ManualTargetDeployment == .4f && blade.Deployment == .4f,
+            "the immediate setup API continues to snap actual state and synchronizes its target");
+        long beforeManualAllocations = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1024; i++) blade.Advance(.01);
+        long manualAllocations = GC.GetAllocatedBytesForCurrentThread() - beforeManualAllocations;
+        Check(manualAllocations == 0,
+            "warmed manual target advancement allocates no managed memory");
+
         blade.Equip(false);
-        Check(blade.Phase == "Unequipped" && blade.Deployment == 0 && !blade.TargetOn,
-            "unequipping resets blade state and target");
+        Check(blade.Phase == "Unequipped" && blade.Deployment == 0 && !blade.TargetOn
+            && !blade.ManualDeployment && blade.ManualTargetDeployment == 0,
+            "unequipping resets blade fraction, target and mode");
         Pass("blade state transitions");
     }
 
