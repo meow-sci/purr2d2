@@ -147,7 +147,7 @@ internal static partial class ClutterForceTargets
     private static bool TryContext(KittenEva owner, out PhysicsBubble? bubble, out string reason)
     {
         bubble = null; reason = "";
-        if (!_installed) { reason = "Ground-object Force physics is unavailable."; return false; }
+        if (!_installed) { reason = "Ground-object Furce physics is unavailable."; return false; }
         if (!ForceTargeting.IsLive(owner) || !ReferenceEquals(owner, Program.ControlledVehicle) || Program.EditorFlag)
         { reason = "The controlled kitten changed."; return false; }
         bubble = ClutterForceNative.OwnerBubble(owner);
@@ -158,7 +158,7 @@ internal static partial class ClutterForceTargets
         if (!ClutterForceNative.Describes(bubble.GroundClutterStatics, (Celestial)bubble.Parent))
         { bubble = null; return false; }
         if (bubble.GroundClutterStatics.StaticCount + bubble.GroundClutterStatics.DynamicBodyCount > MaximumCandidates)
-        { bubble = null; reason = "Nearby ground geometry exceeds the Force query budget."; return false; }
+        { bubble = null; reason = "Nearby ground geometry exceeds the Furce query budget."; return false; }
         return true;
     }
 
@@ -168,18 +168,18 @@ internal static partial class ClutterForceTargets
         target = null; distance = double.PositiveInfinity; hitCci = default;
         if (!TryContext(owner, out var bubble, out reason)) return false;
         if (!ForceMath.Finite(rayCci.Origin) || !ForceMath.Finite(rayCci.Direction) || rayCci.Direction.LengthSquared() < .5)
-        { reason = "The Force pick ray is invalid."; return false; }
+        { reason = "The Furce pick ray is invalid."; return false; }
         var cci2Ccf = bubble!.Parent.GetCci2Ccf(bubble.Origin.Time);
         var origin = rayCci.Origin.Transform(cci2Ccf) - ClutterForceNative.Origin(bubble.GroundClutterStatics);
         var direction = double3.NormalizeOrZero(rayCci.Direction).Transform(cci2Ccf);
         if (origin.LengthSquared() > 4096.0 * 4096)
         { reason = "Ground objects must be selected near the current physics bubble."; return false; }
         if (!TryPickRange(rayCci.Origin - owner.GetPositionCci(), out float maximumDistance))
-        { reason = "The Force pick range is invalid."; return false; }
+        { reason = "The Furce pick range is invalid."; return false; }
         var query = new PickQuery(bubble, owner.System);
         bubble.ConstraintSim!.Simulation.RayCast(origin.ToBepu(), direction.ToBepu(), maximumDistance,
             bubble.ConstraintSim.BufferPool, ref query);
-        if (query.Exceeded) { reason = "Ground geometry exceeds the Force pick budget."; return false; }
+        if (query.Exceeded) { reason = "Ground geometry exceeds the Furce pick budget."; return false; }
         if (query.Target == null) { reason = ""; return false; }
         target = query.Target; distance = query.Distance;
         hitCci = rayCci.Origin + double3.NormalizeOrZero(rayCci.Direction) * distance;
@@ -216,18 +216,18 @@ internal static partial class ClutterForceTargets
             if (query.Exceeded || query.Unsupported)
             {
                 destination.Clear(); reason = query.Unsupported ? "A nearby ground collider cannot be queried safely."
-                    : "Nearby ground geometry exceeds the Force proximity query budget; nothing was captured.";
+                    : "Nearby ground geometry exceeds the Furce proximity query budget; nothing was captured.";
                 return false;
             }
             SortNearest(hits);
             foreach (var hit in hits)
             {
                 if (!TryIdentity(bubble.GroundClutterStatics, hit.Collidable, out var key))
-                { destination.Clear(); reason = "A nearby ground object changed during the Force query."; return false; }
+                { destination.Clear(); reason = "A nearby ground object changed during the Furce query."; return false; }
                 if ((excluded == null || !excluded.Contains(key)) && NearSeenTargets.Add(key))
                 {
                     if (!TryTarget(bubble, owner.System, hit.Collidable, out var target) || target == null)
-                    { destination.Clear(); reason = "A nearby ground object changed during the Force query."; return false; }
+                    { destination.Clear(); reason = "A nearby ground object changed during the Furce query."; return false; }
                     destination.Add(new(target, hit.DistanceSquared));
                     if (destination.Count == maximum) break;
                 }
@@ -251,7 +251,7 @@ internal static partial class ClutterForceTargets
         { reason = "Ground-object pick tolerance must be between 0 and 0.5 m."; return false; }
         if (tolerance == 0 || !TryContext(owner, out var bubble, out reason)) return false;
         if (!ForceMath.Finite(rayCci.Origin) || !ForceMath.Finite(rayCci.Direction) || rayCci.Direction.LengthSquared() < .5)
-        { reason = "The Force pick ray is invalid."; return false; }
+        { reason = "The Furce pick ray is invalid."; return false; }
         var cci2Ccf = bubble!.Parent.GetCci2Ccf(bubble.Origin.Time);
         var originCcf = ClutterForceNative.Origin(bubble.GroundClutterStatics);
         var origin = rayCci.Origin.Transform(cci2Ccf) - originCcf;
@@ -259,7 +259,7 @@ internal static partial class ClutterForceTargets
         if (!ForceMath.Finite(origin) || origin.LengthSquared() > 4096.0 * 4096)
         { reason = "Ground objects must be selected near the current physics bubble."; return false; }
         if (!TryPickRange(rayCci.Origin - owner.GetPositionCci(), out float maximumDistance))
-        { reason = "The Force pick range is invalid."; return false; }
+        { reason = "The Furce pick range is invalid."; return false; }
         var sim = bubble.ConstraintSim!;
         var query = new NearPickQuery<NativeClutterPickFilter>(sim.Simulation,
             new(bubble.GroundClutterStatics), origin.ToBepu(), direction.ToBepu(), (float)tolerance);
@@ -269,9 +269,9 @@ internal static partial class ClutterForceTargets
             sim.BufferPool, ref query, .0001f, .00001f, 32);
         if (query.Exceeded || query.Unsupported || query.OriginOverlap)
         {
-            reason = query.Exceeded ? "Ground geometry exceeds the forgiving Force pick budget."
+            reason = query.Exceeded ? "Ground geometry exceeds the forgiving Furce pick budget."
                 : query.Unsupported ? "A nearby ground collider cannot be picked safely."
-                : "The forgiving Force pick starts inside a ground object; move the camera clear of it.";
+                : "The forgiving Furce pick starts inside a ground object; move the camera clear of it.";
             return false;
         }
         if (query.Hit is not { } collider) return false;

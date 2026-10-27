@@ -415,7 +415,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
     {
         if (!IsCapturedSourceCurrent()) throw new InvalidOperationException("The source topology or local assembly transforms changed during breakup capture.");
         _assetDirectory = (AuthoredDebrisAssets.CaptureDirectory
-            ?? throw new InvalidOperationException("Persistent Force debris assets are unavailable."))();
+            ?? throw new InvalidOperationException("Persistent Furce debris assets are unavailable."))();
         _rawSnapshotComplete = true;
         _state = PreparationState.Worker;
     }
@@ -427,7 +427,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
         {
             if (!_rawSnapshotComplete) throw new InvalidOperationException("Debris planning began before source capture completed.");
             var prepare = AuthoredDebrisAssets.PrepareOnWorker
-                ?? throw new InvalidOperationException("Persistent Force debris preparation is unavailable.");
+                ?? throw new InvalidOperationException("Persistent Furce debris preparation is unavailable.");
             if (Interlocked.CompareExchange(ref _backgroundWorkerActive, 1, 0) != 0) return true;
             var sourceNodes = _sourceNodes;
             int maximumPieces = _maximumPieces;
@@ -495,7 +495,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
         if (_registration == null)
         {
             _registration = (AuthoredDebrisAssets.BeginRegistration
-                ?? throw new InvalidOperationException("Persistent Force debris registration is unavailable."))(_preparedAssets[_assetIndex]);
+                ?? throw new InvalidOperationException("Persistent Furce debris registration is unavailable."))(_preparedAssets[_assetIndex]);
             return;
         }
         if (!_registration.Done)
@@ -605,7 +605,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
                 try { RollBack(vehicle); }
                 catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force debris cleanup failed: {cleanup}"); }
             if (sourceTeardownStarted)
-                throw new InvalidOperationException("Force breakup teardown failed after source draining began; stored contents may already have been released.", error);
+                throw new InvalidOperationException("Furce breakup teardown failed after source draining began; stored contents may already have been released.", error);
             throw;
         }
     }
@@ -633,7 +633,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
     private void EnsureMainThread()
     {
         if (Thread.CurrentThread.ManagedThreadId != _mainThreadId)
-            throw new InvalidOperationException("Force breakup preparation must be advanced on its captured main thread.");
+            throw new InvalidOperationException("Furce breakup preparation must be advanced on its captured main thread.");
     }
 
     public void Dispose()

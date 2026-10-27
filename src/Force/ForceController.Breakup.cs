@@ -75,7 +75,7 @@ internal sealed partial class ForceController
         {
             DisposePlans(plans);
             _breakupRefused = true;
-            SetStatus("Force breakup could not start: " + error.Message, ForceStatusSeverity.Warning);
+            SetStatus("Furce breakup could not start: " + error.Message, ForceStatusSeverity.Warning);
             Console.WriteLine($"[purr2d2] {Status}");
             return false;
         }
@@ -266,7 +266,7 @@ internal sealed partial class ForceController
         CancelBreakupPlans();
         _breakupRefused = true;
         RefreshBreakupEligibility();
-        SetStatus("Force breakup stopped: " + error.Message, ForceStatusSeverity.Warning);
+        SetStatus("Furce breakup stopped: " + error.Message, ForceStatusSeverity.Warning);
         Console.WriteLine($"[purr2d2] {Status}");
     }
 

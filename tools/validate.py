@@ -751,9 +751,12 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/force/ForceCaptureRadiusDragChecks.cs", source / "tests/force/ForceCaptureBubbleChecks.cs",
         source / "tests/force/ForceThrowDragChecks.cs",
         source / "tests/force/ForceOverlayChecks.cs"]
+    furce_scroll_routing_sources = [source / "src/Runtime/SaberRuntime.OverlayScroll.cs",
+        source / "src/Core/SaberOverlayDrag.cs", source / "src/Core/SaberOverlayLayout.cs",
+        source / "src/Core/ForceOverlayLayout.cs", source / "tests/input/FurceScrollRoutingHostStubs.cs",
+        source / "tests/input/FurceScrollRoutingChecks.cs"]
     force_controller_sources = [source / "src/Force/ForceController.cs", source / "src/Force/ForceController.Follow.cs",
         source / "src/Force/ForceController.Breakup.cs",
-        source / "src/Force/ForceController.Growth.cs",
         source / "src/Core/ForceBreakupSequence.cs",
         source / "src/Force/ForceTarget.cs", source / "src/Force/ForceTargeting.Proximity.cs",
         source / "src/Force/ForcePhysicsPatches.cs", source / "src/Force/ForceMath.cs",
@@ -816,6 +819,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
          "internal static class Program { static void Main() { OverlayTextChecks.Run(); } }"),
         ("SliceOverlayLayoutChecks", slice_overlay_sources,
          "internal static class Program { static void Main() { SliceOverlayLayoutChecks.Run(); } }"),
+        ("FurceScrollRoutingChecks", furce_scroll_routing_sources,
+         "namespace Purr2D2.Checks { internal static class Program { static void Main() { FurceScrollRoutingChecks.Run(); } } }"),
         ("ForceUiChecks", force_ui_sources, None),
         ("ForceControllerChecks", force_controller_sources, None),
         ("ForceTargetingChecks", force_targeting_sources, None),

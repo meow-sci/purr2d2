@@ -26,9 +26,9 @@ internal static partial class ForceTargeting
         reason = "The selected object changed; pick again.";
         if (!Valid(owner, pick)) return false;
         if (!ForceCaptureLimits.Valid(captureLimit))
-        { reason = "The Force capture limit must be between 1 and 512 objects; nothing was captured."; return false; }
+        { reason = "The Furce capture limit must be between 1 and 512 objects; nothing was captured."; return false; }
         if (angry && !ForceMath.ValidAngryRadius(angryRadius))
-        { reason = "Angry Force radius must be between 1 and 50 m; nothing was captured."; return false; }
+        { reason = "Angry Furce radius must be between 1 and 50 m; nothing was captured."; return false; }
         var vesselIds = new HashSet<string>(StringComparer.Ordinal);
         var clutterIds = new HashSet<ClutterForceIdentity>();
         ForceTarget primary;
@@ -39,7 +39,7 @@ internal static partial class ForceTargeting
         InitialAdditionalTargets.Clear();
         try
         {
-            if (!GatherAdditional(owner, pick.HitCci, angryRadius, vesselIds, clutterIds,
+            if (!GatherNearby(owner, pick.HitCci, angryRadius, vesselIds, clutterIds,
                 InitialAdditionalTargets, captureLimit - 1, out reason))
             { destination.Clear(); return false; }
             destination.Add(primary);
@@ -50,11 +50,11 @@ internal static partial class ForceTargeting
     }
 
     /// <summary>
-    /// Finds nearest eligible objects around a moving selected-point center. Held identities are excluded
+    /// Finds nearest eligible objects around the initial selected-point center. Already-selected identities are excluded
     /// before vessel surface traversal and before clutter's nearest-count result is capped.
     /// This synchronous method is called only in the settled BeforePhysics handoff.
     /// </summary>
-    internal static bool GatherAdditional(KittenEva owner, double3 centerCci, double radius,
+    private static bool GatherNearby(KittenEva owner, double3 centerCci, double radius,
         HashSet<string> excludedVehicleIds, HashSet<ClutterForceIdentity> excludedClutterIds,
         List<ForceTarget> destination, int maximum, out string reason)
     {
@@ -63,7 +63,7 @@ internal static partial class ForceTargeting
         if (!IsLive(owner) || !ReferenceEquals(owner, Program.ControlledVehicle) || Program.EditorFlag
             || !ForceMath.Finite(centerCci) || !ForceMath.ValidAngryRadius(radius)
             || maximum < 0 || maximum > ForceCaptureLimits.Maximum)
-        { reason = "The Force growth query is invalid; no additional objects were captured."; return false; }
+        { reason = "The Angry Furce query is invalid; nothing was captured."; return false; }
         if (maximum == 0) { reason = ""; return true; }
 
         var nearby = ProximityCandidates;
@@ -81,7 +81,7 @@ internal static partial class ForceTargeting
                 if (item is not Vehicle vehicle || vehicle is KittenEva || excludedVehicleIds.Contains(vehicle.Id)
                     || !IsLive(vehicle) || !ReferenceEquals(vehicle.Parent, owner.Parent)) continue;
                 if (++vehicles > MaximumVehicles)
-                { reason = "Too many objects for a safe Force growth query; nothing was added."; return false; }
+                { reason = "Too many objects for a safe Angry Furce query; nothing was captured."; return false; }
                 var origin = vehicle.GetPositionCci();
                 double originDistanceSquared = (origin - centerCci).LengthSquared();
                 double bound = vehicle.BoundingSphereRadiusBody + radius;
@@ -95,13 +95,13 @@ internal static partial class ForceTargeting
                     if (SurfaceNear(vehicle, full, query, radiusSquared, meshes, ref triangles, ref parts, out bool budgetExceeded))
                     { found = true; break; }
                     if (budgetExceeded)
-                    { reason = "Nearby geometry exceeds the Force growth surface budget; nothing was added."; return false; }
+                    { reason = "Nearby geometry exceeds the Angry Furce surface budget; nothing was captured."; return false; }
                     foreach (var sub in full.SubParts)
                     {
                         if (SurfaceNear(vehicle, sub, query, radiusSquared, meshes, ref triangles, ref parts, out budgetExceeded))
                         { found = true; break; }
                         if (budgetExceeded)
-                        { reason = "Nearby geometry exceeds the Force growth surface budget; nothing was added."; return false; }
+                        { reason = "Nearby geometry exceeds the Angry Furce surface budget; nothing was captured."; return false; }
                     }
                     if (found) break;
                 }

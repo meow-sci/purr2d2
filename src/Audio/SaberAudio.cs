@@ -16,7 +16,7 @@ public sealed class SaberAudio : IDisposable
     private const float AudibleDeployment = 0.001f;
     private const float TransitionGain = 0.7f;
     private const float LightIgniteGain = 0.75f;
-    private const float DarkAmbientGain = 0.7f;
+    private const float DarkAmbientGain = 0.49f;
     private const float ClashGain = 0.8f;
     private const float SwooshGain = 0.525f;
     private const float ManualSwingGain = 0.525f;

@@ -99,7 +99,7 @@ internal static class AuthoredDebrisAssets
             var size = shape.Extents;
             var inertia = new double3(size.Y * size.Y + size.Z * size.Z,
                 size.X * size.X + size.Z * size.Z, size.X * size.X + size.Y * size.Y) / 12;
-            var root = new XElement("Part", new XAttribute("Id", name), new XAttribute("DisplayName", "Force debris"));
+            var root = new XElement("Part", new XAttribute("Id", name), new XAttribute("DisplayName", "Furce debris"));
             if (compoundNodes is null)
             {
                 root.Add(new XElement("SubPart", new XAttribute("InstanceOf", name + "_surface"),

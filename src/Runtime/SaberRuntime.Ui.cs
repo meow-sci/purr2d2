@@ -100,7 +100,7 @@ internal sealed partial class SaberRuntime
 
                 if (ImGui.CollapsingHeader("Global lightsaber settings")) DrawSaberAppearanceSettings();
                 if (ImGui.CollapsingHeader("Cape settings")) DrawCapeSettings();
-                if (ImGui.CollapsingHeader("Force settings")) DrawForceSettings();
+                if (ImGui.CollapsingHeader("Furce settings")) DrawForceSettings();
                 if (ImGui.CollapsingHeader("Overlay UI Positions")) DrawControlPositionSettings();
                 if (ImGui.CollapsingHeader("Character & grip")) DrawSaberCharacterSettings();
                 if (ImGui.CollapsingHeader("Slice diagnostics"))
@@ -279,7 +279,7 @@ internal sealed partial class SaberRuntime
 
     private void DrawForceSettings()
     {
-        if (!BeginSaberSettingsTable("##ForceSettings", "Force breakup split (px)")) return;
+        if (!BeginSaberSettingsTable("##ForceSettings", "Furce breakup split (px)")) return;
         float tolerance = _settings.ClutterPickTolerance;
         float maximumSpread = _settings.ForceMaximumSpread;
         float breakupGroan = _settings.ForceBreakupGroanPixels, breakupSplit = _settings.ForceBreakupSplitPixels;
@@ -287,22 +287,22 @@ internal sealed partial class SaberRuntime
         bool changed;
         try
         {
-            SaberSettingsRow("Force capture limit");
+            SaberSettingsRow("Furce capture limit");
             changed = ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
-            ShowSaberControlTip($"Maximum vessels, debris, and ground objects per Angry Force capture (default {ForceCaptureLimits.Default}); applies next capture.\n\nThe selected target is included first, then nearest objects fill remaining slots.");
+            ShowSaberControlTip($"Maximum vessels, debris, and ground objects per Angry Furce capture (default {ForceCaptureLimits.Default}); applies next capture.\n\nThe selected target is included first, then nearest objects fill remaining slots.");
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
             ShowSaberControlTip("After an exact miss, this radius catches nearby physical clutter.\n\nExact hits take priority; 0 allows exact hits only.");
-            SaberSettingsRow("Maximum Force spread");
+            SaberSettingsRow("Maximum Furce spread");
             changed |= ImGui.SliderFloat("##ForceMaximumSpread", ref maximumSpread,
                 ForceSpreadLimits.MinimumMaximum, ForceSpreadLimits.Maximum, "%.1fx");
-            ShowSaberControlTip($"Caps shared Shift+wheel Force group spacing; individual object sizes are unchanged. Default: {ForceSpreadLimits.DefaultMaximum:0.0}x. Larger spreads move objects farther from the group center. Saves automatically; changes apply immediately, and lowering the cap eases a held group back within it.");
-            SaberSettingsRow("Force breakup groan (px)");
+            ShowSaberControlTip($"Caps shared Shift+wheel Furce group spacing; individual object sizes are unchanged. Default: {ForceSpreadLimits.DefaultMaximum:0.0}x. Larger spreads move objects farther from the group center. Saves automatically; changes apply immediately, and lowering the cap eases a held group back within it.");
+            SaberSettingsRow("Furce breakup groan (px)");
             changed |= ImGui.SliderFloat("##ForceBreakupGroanPixels", ref breakupGroan, 1, 64, "%.1f px");
-            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before the Force creak plays; inward Shift+scroll unwinds.");
-            SaberSettingsRow("Force breakup split (px)");
+            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before the Furce creak plays; inward Shift+scroll unwinds.");
+            SaberSettingsRow("Furce breakup split (px)");
             changed |= ImGui.SliderFloat("##ForceBreakupSplitPixels", ref breakupSplit, 2, 128, "%.1f px");
-            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before Force breakup occurs; inward Shift+scroll unwinds.");
+            ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before Furce breakup occurs; inward Shift+scroll unwinds.");
             SaberSettingsRow("Breakup debris limit");
             changed |= ImGui.SliderInt("##ForceBreakupPieceLimit", ref breakupPieceLimit,
                 ForceBreakupLimits.Minimum, ForceBreakupLimits.Maximum);
@@ -328,9 +328,9 @@ internal sealed partial class SaberRuntime
         bool changed = false;
         try
         {
-            SaberSettingsRow("Force (left) X");
+            SaberSettingsRow("Furce (left) X");
             changed |= ImGui.SliderFloat("##ForceControlsOffsetX", ref forceX, -1, 1, "%.2f width");
-            SaberSettingsRow("Force (left) Y");
+            SaberSettingsRow("Furce (left) Y");
             changed |= ImGui.SliderFloat("##ForceControlsOffsetY", ref forceY, -1, 1, "%.2f height");
             SaberSettingsRow("Saber (right) X");
             changed |= ImGui.SliderFloat("##SaberControlsOffsetX", ref saberX, -1, 1, "%.2f width");

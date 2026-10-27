@@ -124,8 +124,9 @@ internal sealed partial class SaberRuntime
             var viewport = ImGui.GetMainViewport();
             var kittens = OverlayKittens;
             float menuInset = OverlayMenuBarInset(viewport);
-            var baseLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(), kittens.Count,
-                menuInset, ShowSomersaultButtons && SomersaultOverlayControlsEnabled) with
+            var baseLayout = WithAutoSwingValueMetrics(OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize,
+                ImGui.GetFontSize(), kittens.Count, menuInset,
+                ShowSomersaultButtons && SomersaultOverlayControlsEnabled)) with
             {
                 ShowKittenList = KittenListVisible,
                 ShowLightsaberControls = LightsaberUiVisible,
@@ -139,7 +140,7 @@ internal sealed partial class SaberRuntime
                 CancelSaberDeploymentDrag();
             if (_autoSwingDrag.Held && !SaberAutoSwingDragLayoutStillValid(layout)) CancelSaberAutoSwingDrag();
             _forceLayout = ForceOverlayLayout.Create(baseLayout, viewport.WorkPos, viewport.WorkSize,
-                ImGui.GetFontSize(), ImGui.CalcTextSize("200 m/s").X)
+                ImGui.GetFontSize(), ImGui.CalcTextSize("250 m/s").X)
                 .WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
                     new(_settings.ForceControlsOffsetX, _settings.ForceControlsOffsetY), menuInset);
             _forceLayoutAvailable = ForceUiVisible && _forceLayout.Valid;
@@ -156,6 +157,8 @@ internal sealed partial class SaberRuntime
             void DrawControls(float2 clipMin, float2 clipMax)
             {
                 if (clipMin.X >= clipMax.X || clipMin.Y >= clipMax.Y) return;
+                KittenSaber? autoSwingValueSaber = null;
+                float autoSwingValueMarkerY = 0;
                 draw.PushClipRect(clipMin, clipMax);
                 try
                 {
@@ -251,7 +254,10 @@ internal sealed partial class SaberRuntime
                             "SWING", layout.IgniteRadius * 1.6f, fontSize);
                         if (_autoSwingDrag.Held && _autoSwingDragOwner is { } dragOwner
                             && _kittenSabers.TryGetValue(dragOwner, out var dragSaber))
-                            DrawSaberAutoSwingPill(draw, layout, dragSaber, fontSize);
+                        {
+                            autoSwingValueSaber = dragSaber;
+                            autoSwingValueMarkerY = DrawSaberAutoSwingPill(draw, layout, dragSaber);
+                        }
                         var swingText = OverlayCanStartSwing ? dragCircleWhite : dragCircleMuted;
                         CenterOverlayText(draw, layout.SwingCenter - new float2(0, fontSize * .55f), swingText, "SWING", layout.SwingRadius * 1.6f, fontSize);
                         CenterOverlayText(draw, layout.SwingCenter + new float2(0, fontSize * .65f), swingText, "hold + drag", layout.SwingRadius * 1.6f, fontSize);
@@ -271,6 +277,8 @@ internal sealed partial class SaberRuntime
                         if (!string.IsNullOrWhiteSpace(status))
                             DrawCenteredOverlayStatus(draw, status, layout.StatusMin, layout.StatusMax, fontSize, layout.Scale);
                     }
+                    if (autoSwingValueSaber is { } valueSaber)
+                        DrawSaberAutoSwingValueLabel(draw, layout, valueSaber, autoSwingValueMarkerY);
                 }
                 finally { draw.PopClipRect(); }
             }
@@ -333,14 +341,21 @@ internal sealed partial class SaberRuntime
     {
         var viewport = ImGui.GetMainViewport();
         float menuInset = OverlayMenuBarInset(viewport);
-        var baseLayout = OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize, ImGui.GetFontSize(),
-            OverlayKittens.Count, menuInset, ShowSomersaultButtons && SomersaultOverlayControlsEnabled) with
+        var baseLayout = WithAutoSwingValueMetrics(OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize,
+            ImGui.GetFontSize(), OverlayKittens.Count, menuInset,
+            ShowSomersaultButtons && SomersaultOverlayControlsEnabled)) with
         {
             ShowKittenList = KittenListVisible,
             ShowLightsaberControls = LightsaberUiVisible,
         };
         return baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
             new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset);
+    }
+
+    private static OverlayLayout WithAutoSwingValueMetrics(OverlayLayout layout)
+    {
+        var size = ImGui.CalcTextSize("3.00 s", false, 0);
+        return layout with { AutoSwingValueWidth = size.X, AutoSwingValueHeight = size.Y };
     }
 
     /// <summary>Called from Program.OnMouseButton before its viewport latch or game dispatch.</summary>
@@ -552,7 +567,7 @@ internal sealed partial class SaberRuntime
         _autoSwingDragOwner = null;
     }
 
-    private static void DrawSaberAutoSwingPill(ImDrawListPtr draw, OverlayLayout layout, KittenSaber saber, float fontSize)
+    private static float DrawSaberAutoSwingPill(ImDrawListPtr draw, OverlayLayout layout, KittenSaber saber)
     {
         var min = layout.AutoSwingPillMin;
         var max = layout.AutoSwingPillMax;
@@ -571,9 +586,20 @@ internal sealed partial class SaberRuntime
         draw.AddCircleFilled(new(trackX, markerY), thumbRadius, MovementButtonFill, 24);
         draw.AddCircle(new(trackX, markerY), thumbRadius, new ImColor8(255, 255, 255, 235),
             24, Math.Max(.5f, layout.Scale));
-        CenterOverlayText(draw, new(trackX, markerY), new ImColor8(255, 255, 255, 255),
-            saber.AutoSwingDurationText, thumbRadius * 1.8f,
-            Math.Min(fontSize, 10 * layout.Scale));
+        return markerY;
+    }
+
+    private static void DrawSaberAutoSwingValueLabel(ImDrawListPtr draw, OverlayLayout layout,
+        KittenSaber saber, float markerY)
+    {
+        var position = layout.AutoSwingValueLabelPosition(markerY);
+        var shadowOffset = new float2(layout.AutoSwingValueShadowOffset);
+        var font = ImGui.GetFont();
+        float fontSize = ImGui.GetFontSize();
+        draw.AddText(font, fontSize, position + shadowOffset, new ImColor8(0, 0, 0, 255),
+            saber.AutoSwingDurationText, 0);
+        draw.AddText(font, fontSize, position, new ImColor8(255, 255, 255, 255),
+            saber.AutoSwingDurationText, 0);
     }
 
     private void BeginSaberDeploymentDrag(KittenEva owner, int row, float2 pointer)
@@ -707,56 +733,6 @@ internal sealed partial class SaberRuntime
         _overlayUiButtons = 0;
         _overlayUiEventFrame = ulong.MaxValue;
         DismissKittenColorPicker();
-    }
-
-    internal bool FilterOverlayScroll(GlfwWindow window, double2 offset)
-    {
-        if (_autoSwingDrag.Held) return true;
-        if (_saberDeploymentDrag.Held) return true;
-        if (_forceCaptureRadiusDrag.Held) return true;
-        if (window == Program.GetWindow() && _forceThrowDrag.Held)
-        {
-            if (!ForceUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
-                || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner))
-                CancelForceThrowDrag();
-            return true;
-        }
-        if (Program.HasMouseInputLatch) return false;
-        if (window == Program.GetWindow() && !_overlayPointerCapture.AnyHeld
-            && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return true;
-        if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse) return false;
-        if (window == Program.GetWindow() && ForceUiVisible && !Program.IsModalOpen()
-            && !Program.HasMouseInputLatch && double.IsFinite(offset.Y)
-            && (_forceDrag.Held || (!_overlayPointerCapture.AnyHeld && _overlayLayoutAvailable && _forceLayoutAvailable
-                && _overlayLayout.Hit(OverlayPointer(window)) == OverlayHit.None
-                && ForceOverlayHitAt(OverlayPointer(window)) == ForceOverlayHit.Move)))
-        {
-            ScrollForcePointer(offset.Y, ForceShiftHeld(window));
-            return true;
-        }
-        if (!OverlayOwnsScroll(window, out var hit)) return false;
-        if (hit == OverlayHit.Kittens && double.IsFinite(offset.Y))
-            _overlayListScroll = Math.Clamp(_overlayListScroll - (float)offset.Y * _overlayLayout.RowHeight * 3,
-                0, Math.Max(0, OverlayKittens.Count * _overlayLayout.RowHeight - _overlayLayout.ListBodyHeight));
-        return true;
-    }
-
-    // This query shares the raw scroll decision without applying the list scroll a second time.
-    internal bool SuppressOverlayImGuiScroll(GlfwWindow window) => OverlayOwnsScroll(window, out _);
-
-    private bool OverlayOwnsScroll(GlfwWindow window, out OverlayHit hit)
-    {
-        hit = OverlayHit.None;
-        if (_autoSwingDrag.Held || _saberDeploymentDrag.Held || _forceCaptureRadiusDrag.Held) return true;
-        if (window == Program.GetWindow() && _forceThrowDrag.Held) return true;
-        if (Program.HasMouseInputLatch) return false;
-        if (!_overlayPointerCapture.AnyHeld
-            && (KittenColorPickerContainsPointer(OverlayPointer(window)) || SettingsContainsPointer(OverlayPointer(window)) || _overlayUiButtons != 0)) return false;
-        if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse) return false;
-        if (window != Program.GetWindow() || !OverlayVisible || !_overlayLayoutAvailable || Program.IsModalOpen()) return false;
-        hit = _overlayLayout.Hit(OverlayPointer(window));
-        return _overlayPointerCapture.OwnsScroll(ForcePicking || hit != OverlayHit.None
-            || ForceOverlayHitAt(OverlayPointer(window)) != ForceOverlayHit.None);
     }
 
     private static float2 OverlayPointer(GlfwWindow window)

@@ -4,6 +4,7 @@ using KSA;
 namespace Purr2D2.Force;
 
 internal readonly record struct ForcePickRay(CelestialSystem System, IParentBody Parent, Ray OwnerRelativeCci);
+internal readonly record struct ForceHoverPreview(Vehicle Vehicle, Part Part, double3 HitEgo);
 
 /// <summary>Capture position plus render anchors, so the UI never reads native clutter state.</summary>
 internal sealed record ForcePick(Vehicle? Vehicle, Part? Part, ClutterForceTarget? Clutter,
@@ -59,6 +60,57 @@ internal static partial class ForceTargeting
         return true;
     }
 
+    /// <summary>
+    /// Reconstruct a rendered native-surface hit for hover feedback. This uses only the
+    /// current mesh candidate, ray and rendered camera frame; settled TryPick remains the
+    /// authority for every capture and performs its own current native query.
+    /// </summary>
+    internal static bool TryPreviewNativeHit(KittenEva owner, Part part, double distance, Ray egoRay,
+        Camera camera, out ForceHoverPreview preview)
+    {
+        preview = default;
+        if (part is null || !double.IsFinite(distance) || distance < 0
+            || !ForceMath.Finite(egoRay.Origin) || !TryNormalizeDirection(egoRay.Direction, out var direction)
+            || !IsLive(owner) || !ReferenceEquals(owner, Program.ControlledVehicle) || Program.EditorFlag)
+            return false;
+
+        Part? structural = part.StructuralPart;
+        if (structural is null) return false;
+        PartTree? tree = structural.Tree;
+        if (part.IsAttachedInternal || structural.IsAttachedInternal
+            || tree?.OwningVehicle is not { } vehicle
+            || !ReferenceEquals(part.Tree?.OwningVehicle, vehicle)
+            || !IsLive(vehicle) || vehicle is KittenEva || ReferenceEquals(vehicle, owner)
+            || !ReferenceEquals(vehicle.System, owner.System) || !ReferenceEquals(vehicle.Parent, owner.Parent))
+            return false;
+
+        double3 hitEgo = egoRay.Origin + direction * distance;
+        double3 ownerEgo = camera.GetPositionEgo(owner);
+        if (!ForceMath.Finite(hitEgo) || !ForceMath.Finite(ownerEgo)) return false;
+        double3 ownerToHit = hitEgo - ownerEgo;
+        double distanceSquared = ownerToHit.LengthSquared();
+        if (!ForceMath.Finite(ownerToHit) || !double.IsFinite(distanceSquared)
+            || distanceSquared > MaximumRange * MaximumRange)
+            return false;
+
+        preview = new(vehicle, structural, hitEgo);
+        return true;
+    }
+
+    private static bool TryNormalizeDirection(double3 direction, out double3 normalized)
+    {
+        normalized = double3.Zero;
+        if (!ForceMath.Finite(direction)) return false;
+        double scale = Math.Max(Math.Abs(direction.X), Math.Max(Math.Abs(direction.Y), Math.Abs(direction.Z)));
+        if (!double.IsFinite(scale) || scale <= 0) return false;
+        double3 scaled = direction / scale;
+        double lengthSquared = scaled.LengthSquared();
+        if (!double.IsFinite(lengthSquared) || lengthSquared <= 0) return false;
+        normalized = scaled / Math.Sqrt(lengthSquared);
+        return ForceMath.Finite(normalized) && double.IsFinite(normalized.LengthSquared())
+            && normalized.LengthSquared() >= .5;
+    }
+
     // Compatibility entry point; the actual native query must still be called only in the settled handoff.
     internal static bool TryPick(KittenEva owner, Ray ray, out ForcePick? pick, out string reason,
         double clutterTolerance = .2)
@@ -112,7 +164,7 @@ internal static partial class ForceTargeting
         {
             if (item is not Vehicle vehicle || ReferenceEquals(vehicle, owner) || !IsLive(vehicle)
                 || !ReferenceEquals(vehicle.Parent, owner.Parent)) continue;
-            if (++vehicles > MaximumVehicles) { reason = "Too many objects for a safe Force pick."; return false; }
+            if (++vehicles > MaximumVehicles) { reason = "Too many objects for a safe Furce pick."; return false; }
             var position = (vehicle.GetPositionCci() - owner.GetPositionCci()).Transform(rotation);
             double radius = vehicle.BoundingSphereRadiusBody;
             if (!ForceMath.Finite(position) || !double.IsFinite(radius) || radius <= 0
@@ -126,7 +178,7 @@ internal static partial class ForceTargeting
             var matrix = vehicle.GetMatrixAsmb2Ego(position);
             foreach (var part in vehicle.Parts.Parts)
             {
-                if (++parts > MaximumParts) { reason = "Nearby geometry exceeds the Force pick budget."; return false; }
+                if (++parts > MaximumParts) { reason = "Nearby geometry exceeds the Furce pick budget."; return false; }
                 if (part.IsAttachedInternal || !ReferenceEquals(part.Tree?.OwningVehicle, vehicle)) continue;
                 if (part.RayCastEgo(in matrix, ray, out double distance, out _, out _, out _, out _, out _, out _, out _)
                     && distance >= 0 && distance < best)
@@ -165,7 +217,7 @@ internal static partial class ForceTargeting
             reason = pick.DisplayName;
             return true;
         }
-        if (bestPart == null) { if (kittenBlocked) reason = "Kittens cannot be captured with Force."; return false; }
+        if (bestPart == null) { if (kittenBlocked) reason = "Kittens cannot be captured with the Furce."; return false; }
         return TryCciPick(owner, bestPart, rayCci.Origin + rayCci.Direction * best, out pick, out reason);
     }
 
@@ -177,7 +229,7 @@ internal static partial class ForceTargeting
             || ReferenceEquals(vehicle, owner) || !ReferenceEquals(vehicle.Parent, owner.Parent)
             || Program.EditorFlag || !ReferenceEquals(owner, Program.ControlledVehicle)) return false;
         if ((hitCci - owner.GetPositionCci()).Length() > MaximumRange)
-        { reason = "The selected surface is beyond Force range (1000 m)."; return false; }
+        { reason = "The selected surface is beyond Furce range (1000 m)."; return false; }
         var local = (hitCci - vehicle.GetPositionCci()).Transform(vehicle.GetBody2Cci().Inverse());
         if (!ForceMath.Finite(local)) return false;
         pick = new(vehicle, part.StructuralPart, vehicle.Parent, vehicle.System, local);

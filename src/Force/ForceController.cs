@@ -25,7 +25,6 @@ internal sealed partial class ForceController : IDisposable
     {
         internal Vehicle? Source => Target.Vehicle;
         internal ClutterForceHold? ClutterHold { get; set; }
-        internal bool GrowthMutationStarted { get; set; }
         internal string DisplayName => Source?.Id ?? Target.Clutter?.DisplayName ?? "Unavailable object";
     }
 
@@ -34,7 +33,6 @@ internal sealed partial class ForceController : IDisposable
     internal KittenEva? Owner { get; private set; }
     internal double3 GroupOffsetBody { get; private set; }
     internal double GroupSpread { get; private set; } = ForceMath.DefaultGroupSpread;
-    internal double CaptureRadius { get; private set; } = ForceMath.DefaultCaptureRadius;
     internal string Status { get; private set; } = "";
     internal ForceStatusSeverity StatusSeverity { get; private set; }
 
@@ -54,7 +52,7 @@ internal sealed partial class ForceController : IDisposable
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter patch cleanup failed: {cleanup}"); }
             try { ForcePhysicsPatches.Remove(harmony); }
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force patch cleanup failed: {cleanup}"); }
-            SetStatus("Force physics is incompatible with this game build.", ForceStatusSeverity.Error);
+            SetStatus("Furce physics is incompatible with this game build.", ForceStatusSeverity.Error);
             Console.WriteLine($"[purr2d2] Force installation failed: {ex}");
         }
     }
@@ -62,19 +60,19 @@ internal sealed partial class ForceController : IDisposable
     internal bool Capture(KittenEva owner, ForcePick target, bool angry, double angryRadius = ForceMath.DefaultAngryRadius,
         int captureLimit = ForceCaptureLimits.Default)
     {
-        if (!_available || _disposed) { SetStatus("Force physics is unavailable.", ForceStatusSeverity.Warning); return false; }
+        if (!_available || _disposed) { SetStatus("Furce physics is unavailable.", ForceStatusSeverity.Warning); return false; }
         if (HasCapture) { SetStatus("Release the held objects before another capture.", ForceStatusSeverity.Warning); return false; }
         if (!ForceCaptureLimits.Valid(captureLimit))
-        { SetStatus("The Force capture limit must be between 1 and 512 objects; nothing was captured.", ForceStatusSeverity.Warning); return false; }
+        { SetStatus("The Furce capture limit must be between 1 and 512 objects; nothing was captured.", ForceStatusSeverity.Warning); return false; }
         var candidates = new List<ForceTarget>(captureLimit);
         try
         {
             if (!ForceTargeting.Gather(owner, target, angry, candidates, out var refusal, angryRadius, captureLimit))
             { SetStatus(refusal, ForceStatusSeverity.Warning); return false; }
             if (candidates.Count < 1 || candidates.Count > captureLimit)
-            { SetStatus($"The Force target group exceeds the {captureLimit}-object capture limit; nothing was captured.", ForceStatusSeverity.Warning); return false; }
+            { SetStatus($"The Furce target group exceeds the {captureLimit}-object capture limit; nothing was captured.", ForceStatusSeverity.Warning); return false; }
         }
-        catch (Exception ex) { SetStatus("Force target query failed: " + ex.Message, ForceStatusSeverity.Error); return false; }
+        catch (Exception ex) { SetStatus("Furce target query failed: " + ex.Message, ForceStatusSeverity.Error); return false; }
         try
         {
             var ownerRotation = owner.GetBody2Cci().NormalizedOrZero();
@@ -110,14 +108,14 @@ internal sealed partial class ForceController : IDisposable
             for (int i = 1; i < _held.Count; i++)
             {
                 var delta = _held[i].PositionBody - groupCenterBody;
-                if (!ForceMath.Finite(delta)) throw new InvalidOperationException("The Force group frame is invalid.");
+                if (!ForceMath.Finite(delta)) throw new InvalidOperationException("The Furce group frame is invalid.");
                 groupCenterBody += delta / (i + 1d);
-                if (!ForceMath.Finite(groupCenterBody)) throw new InvalidOperationException("The Force group frame is invalid.");
+                if (!ForceMath.Finite(groupCenterBody)) throw new InvalidOperationException("The Furce group frame is invalid.");
             }
             for (int i = 0; i < _held.Count; i++)
             {
                 var centered = _held[i].PositionBody - groupCenterBody;
-                if (!ForceMath.Finite(centered)) throw new InvalidOperationException("The Force group frame is invalid.");
+                if (!ForceMath.Finite(centered)) throw new InvalidOperationException("The Furce group frame is invalid.");
                 _held[i] = _held[i] with { PositionBody = centered };
             }
             _primaryCenteredOffsetBody = _held[0].PositionBody;
@@ -126,7 +124,6 @@ internal sealed partial class ForceController : IDisposable
             GroupSpread = ForceMath.DefaultGroupSpread;
             _groupCenterBody = groupCenterBody;
             _spreadDirty = false;
-            CaptureRadius = angry ? angryRadius : ForceMath.DefaultCaptureRadius;
             _anchorBody = (target.HitCci - ownerPosition).Transform(ownerRotation.Inverse());
             foreach (var held in _held)
                 if (held.Target.Clutter is { } clutter)
@@ -160,7 +157,7 @@ internal sealed partial class ForceController : IDisposable
             }
             catch (Exception restoreError) { Console.WriteLine($"[purr2d2] Force capture rollback failed: {restoreError}"); }
             finally { Clear(); }
-            SetStatus("Force capture failed: " + ex.Message, ForceStatusSeverity.Error);
+            SetStatus("Furce capture failed: " + ex.Message, ForceStatusSeverity.Error);
             Console.WriteLine($"[purr2d2] {Status}");
             return false;
         }
@@ -175,7 +172,7 @@ internal sealed partial class ForceController : IDisposable
         {
             Release(false);
             if (StatusSeverity == ForceStatusSeverity.None)
-                SetStatus("Force released after an owner, world or object change.", ForceStatusSeverity.Warning);
+                SetStatus("Furce released after an owner, world or object change.", ForceStatusSeverity.Warning);
             return;
         }
         try { Follow(Universe.GetLastSimStep().NextTime); }
@@ -183,7 +180,7 @@ internal sealed partial class ForceController : IDisposable
         {
             // Never strand a vehicle outside the next ordinary worker-adoption pass.
             try { Release(false); }
-            finally { Clear(); SetStatus("Force ended: " + ex.Message, ForceStatusSeverity.Error); }
+            finally { Clear(); SetStatus("Furce ended: " + ex.Message, ForceStatusSeverity.Error); }
             Console.WriteLine($"[purr2d2] {Status}");
         }
         if (HasCapture && StatusSeverity != ForceStatusSeverity.None && !_breakupRefused)
@@ -247,7 +244,7 @@ internal sealed partial class ForceController : IDisposable
         }
         catch (Exception ex) { failure = ex.Message; joinFailed = true; Console.WriteLine($"[purr2d2] Force release could not join native readers: {ex}"); }
         finally { Clear(); }
-        SetStatus(failure != null ? "Force released; an object could not be updated: " + failure
+        SetStatus(failure != null ? "Furce released; an object could not be updated: " + failure
             : $"{(throwObjects ? "Threw" : "Released")} {count} object{(count == 1 ? "" : "s")}.",
             failure == null ? ForceStatusSeverity.None : joinFailed ? ForceStatusSeverity.Error : ForceStatusSeverity.Warning);
     }
@@ -274,7 +271,6 @@ internal sealed partial class ForceController : IDisposable
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter release cleanup failed: {cleanup}"); }
         _held.Clear(); Owner = null; _system = null; _parent = null;
         GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
-        CaptureRadius = ForceMath.DefaultCaptureRadius;
         _anchorBody = _groupCenterBody = _primaryCenteredOffsetBody = double3.Zero;
         _hasFrame = false; _offsetDirty = _spreadDirty = false;
         _breakupEligible = false; _breakupRefused = false;

@@ -71,6 +71,7 @@ internal static class OverlayDragChecks
             "world or ownership reset clears the temporary gesture");
         DeploymentDrag();
         AutoSwingStateAndDrag();
+        AutoSwingValueLayout();
         PointerOwnership();
         PairedConsumerOwnership();
         LayoutBounds();
@@ -409,6 +410,67 @@ internal static class OverlayDragChecks
             && !SaberOverlayLayout.Create(float2.Zero, new(240, 220), 16, 100, float.NaN).Valid,
             "insufficient work area or nonfinite UI inputs cannot leave invisible controls");
         LayoutOffsets();
+    }
+
+    private static void AutoSwingValueLayout()
+    {
+        foreach (var (size, font) in new[]
+        {
+            (new float2(1920, 1080), 16f),
+            (new float2(800, 600), 16f),
+            (new float2(420, 820), 24f),
+            (new float2(240, 220), 32f),
+            (new float2(1920, 220), 32f),
+        })
+        {
+            var origin = new float2(120, 80);
+            const float topInset = 24;
+            var measured = SaberOverlayLayout.Create(origin, size, font, 20, topInset) with
+            {
+                // Represents the regular ImGui measurement supplied by the runtime.
+                AutoSwingValueWidth = font * 2.8f,
+                AutoSwingValueHeight = font,
+            };
+            foreach (float duration in new[] { .5f, 1.75f, 3f })
+            {
+                float fraction = (duration - .5f) / 2.5f;
+                float markerY = measured.AutoSwingCenter.Y + measured.AutoSwingPillTravel * fraction;
+                var label = measured.AutoSwingValueLabelPosition(markerY);
+                Check(MathF.Abs(label.X - measured.AutoSwingPillMax.X - measured.AutoSwingValueLabelGap) < 1e-4f
+                    && MathF.Abs(label.Y + measured.AutoSwingValueHeight * .5f - markerY) < 1e-4f,
+                    $"Auto Swing value sits to the right of its pill and centers on the {duration:0.00}s thumb");
+            }
+
+            Check(measured.AutoSwingValueEnvelopeMin.X == measured.AutoSwingValueLabelPosition(measured.AutoSwingCenter.Y).X
+                && MathF.Abs(measured.AutoSwingValueEnvelopeMax.X - measured.AutoSwingValueEnvelopeMin.X
+                    - measured.AutoSwingValueWidth - measured.AutoSwingValueShadowOffset) < 1e-4f
+                && measured.ControlsMin.X <= measured.AutoSwingValueEnvelopeMin.X
+                && measured.ControlsMin.Y <= measured.AutoSwingValueEnvelopeMin.Y
+                && measured.ControlsMax.X >= measured.AutoSwingValueEnvelopeMax.X
+                && measured.ControlsMax.Y >= measured.AutoSwingValueEnvelopeMax.Y,
+                "the label's full width and all possible thumb positions belong to the controls envelope");
+
+            foreach (var offset in new[] { new float2(-1, -1), new float2(1, 1), new float2(1, -1) })
+            {
+                var moved = measured.WithControlsOffset(origin, size, offset, topInset);
+                var min = origin + new float2(0, topInset);
+                var max = origin + size;
+                Check(moved.Valid && moved.ControlsMin.X >= min.X - 1e-3f
+                    && moved.ControlsMin.Y >= min.Y - 1e-3f
+                    && moved.ControlsMax.X <= max.X + 1e-3f
+                    && moved.ControlsMax.Y <= max.Y + 1e-3f,
+                    $"Auto Swing value stays inside the viewport with {font:0}-pixel text and a custom group offset");
+                foreach (float duration in new[] { .5f, 3f })
+                {
+                    float markerY = moved.AutoSwingCenter.Y + moved.AutoSwingPillTravel * ((duration - .5f) / 2.5f);
+                    var labelMin = moved.AutoSwingValueLabelPosition(markerY);
+                    var labelMax = labelMin + new float2(moved.AutoSwingValueWidth, moved.AutoSwingValueHeight);
+                    Check(labelMin.X >= min.X - 1e-3f && labelMin.Y >= min.Y - 1e-3f
+                        && labelMax.X <= max.X + 1e-3f && labelMax.Y <= max.Y + 1e-3f,
+                        $"Auto Swing endpoint value remains visible at {duration:0.00}s");
+                }
+            }
+        }
     }
 
     private static void LayoutOffsets()

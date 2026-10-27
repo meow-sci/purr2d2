@@ -28,9 +28,9 @@ internal sealed class ForcePoseController : IDisposable
         && Kitten is { IsDisposed: false } kitten && kitten.LocomotionState.Mode is
             LocomotionMode.Grounded or LocomotionMode.Airborne or LocomotionMode.Mmu
             or LocomotionMode.Tumbling or LocomotionMode.Rightening;
-    public string Status => _failure ?? (Kitten is null ? "Control an EVA kitten to use the Force."
-        : !Eligible ? "The Force hand pose is unavailable during this movement."
-        : Active ? "Force held in the left paw." : "Force hand at rest.");
+    public string Status => _failure ?? (Kitten is null ? "Control an EVA kitten to use the Furce."
+        : !Eligible ? "The Furce hand pose is unavailable during this movement."
+        : Active ? "Furce held in the left paw." : "Furce hand at rest.");
 
     public bool Bind(KittenEva kitten)
     {
@@ -54,7 +54,7 @@ internal sealed class ForcePoseController : IDisposable
             if (_avatar is not null && _processor is not null)
                 _avatar.Core.CharacterModel.AnimProcessors.Remove(_processor);
             _processor = null;
-            return Fail($"The Force hand could not attach: {error.Message}");
+            return Fail($"The Furce hand could not attach: {error.Message}");
         }
     }
 
@@ -186,7 +186,7 @@ internal sealed class ForcePoseController : IDisposable
                     localPose[_shoulder] = shoulderBefore; localPose[_elbow] = elbowBefore; localPose[_wrist] = wristBefore;
                     for (int i = 0; i < _fingers.Length; i++) localPose[_fingers[i]].Rotation = _fingerBefore[i];
                 }
-                _owner.Fail($"The Force hand stopped safely: {error.Message}");
+                _owner.Fail($"The Furce hand stopped safely: {error.Message}");
             }
         }
 

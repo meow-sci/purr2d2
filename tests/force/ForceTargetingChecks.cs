@@ -13,6 +13,7 @@ internal static class ForceTargetingChecks
             ("frames", FollowingCameraFrameEquivalence),
             ("range", ZoomedCameraAndOwnerRange),
             ("marker", VesselMarkerFollowsSurface),
+            ("preview", NativeHoverPreview),
             ("clutter", ClutterUsesRebasedRayAndImmutableMarker),
             ("ground-rotation", RotatingGroundMarkerUsesBubbleEpoch),
             ("stale", StaleSnapshotsAndMarkers),
@@ -24,7 +25,7 @@ internal static class ForceTargetingChecks
         foreach (var check in checks)
             if (arguments.Length == 0 || arguments.Contains(check.Name, StringComparer.Ordinal))
             { check.Run(); Console.WriteLine("PASS: Force targeting " + check.Name); }
-        Console.WriteLine("Force targeting checks passed (production snapshots/picking, orbital drift, frame rotations, camera movement/range, following markers and stale identities).");
+        Console.WriteLine("Force targeting checks passed (production snapshots/picking, native hover previews, orbital drift, frame rotations, camera movement/range, following markers and stale identities).");
     }
 
     private static void OrbitalTranslation()
@@ -82,7 +83,7 @@ internal static class ForceTargetingChecks
         f = new Fixture(cameraOffset: new(0, 2000, 0), targetOffset: new(0, 1002, 0));
         Check(ForceTargeting.TrySnapshotRay(f.Owner, f.AimRay(), out snapshot), "out-of-range aim still snapshots safely");
         Check(!ForceTargeting.TryPick(f.Owner, snapshot, out pick, out var reason) && pick == null
-            && reason.Contains("beyond Force range", StringComparison.Ordinal),
+            && reason.Contains("beyond Furce range", StringComparison.Ordinal),
             "camera-relative proximity cannot bypass the final owner-to-surface range guard");
     }
 
@@ -129,6 +130,153 @@ internal static class ForceTargetingChecks
         Check((marker - (f.Parent.PositionCce - f.Camera.PositionCce + immutableHitCci.Transform(rotation))).Length() > 100,
             "the marker is not projected from the stale absolute CCI capture position");
         Equal(pick.HitCci, immutableHitCci, "following the vessel does not mutate the settled capture snapshot");
+    }
+
+    private static void NativeHoverPreview()
+    {
+        var f = new Fixture();
+        var ray = f.AimRay();
+        Check(ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, 12, ray, f.Camera, out var first),
+            "a live native candidate produces a rendered hover preview");
+        Check(ReferenceEquals(first.Vehicle, f.Target) && ReferenceEquals(first.Part, f.Part),
+            "the preview returns the canonical structural part and its vehicle");
+        Equal(first.HitEgo, ray.Origin + double3.NormalizeOrZero(ray.Direction) * 12,
+            "the preview reconstructs the current ray point from its supplied distance");
+
+        var movedRay = new Ray { Origin = ray.Origin + new double3(3, -2, 5), Direction = ray.Direction * 4 };
+        Check(ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, 19, movedRay, f.Camera, out var moved),
+            "a later rendered ray and distance update the same candidate preview");
+        Equal(moved.HitEgo, movedRay.Origin + double3.NormalizeOrZero(movedRay.Direction) * 19,
+            "the preview follows the latest rendered ray and distance");
+        Check((moved.HitEgo - first.HitEgo).Length() > 1,
+            "successive frames do not reuse a stale hover point");
+
+        int meshReads = f.Part.RayCalls;
+        int clutterReads = ClutterForceTargets.QueryCalls + ClutterForceTargets.NearQueryCalls;
+        Check(meshReads == 0 && clutterReads == 0,
+            "render previews do not raycast meshes or query physical clutter");
+
+        var rangeRay = new Ray { Origin = f.Camera.GetPositionEgo(f.Owner), Direction = new(0, 7, 0) };
+        Check(ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, ForceTargeting.MaximumRange,
+                rangeRay, f.Camera, out var atLimit)
+            && Math.Abs((atLimit.HitEgo - f.Camera.GetPositionEgo(f.Owner)).LengthSquared()
+                - ForceTargeting.MaximumRange * ForceTargeting.MaximumRange) < 1e-6,
+            "a rendered preview exactly at the owner range limit remains valid");
+        Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, ForceTargeting.MaximumRange + .01,
+                rangeRay, f.Camera, out _),
+            "a rendered preview past the owner range limit is rejected");
+
+        foreach (double distance in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity, -1d })
+            Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, distance, ray, f.Camera, out _),
+                "nonfinite or negative ray distances are rejected");
+        foreach (var invalidRay in new[]
+        {
+            new Ray { Origin = new(double.NaN, 0, 0), Direction = double3.UnitX },
+            new Ray { Origin = new(double.PositiveInfinity, 0, 0), Direction = double3.UnitX },
+            new Ray { Origin = double3.Zero, Direction = double3.Zero },
+            new Ray { Origin = double3.Zero, Direction = new(double.NaN, 0, 0) },
+            new Ray { Origin = double3.Zero, Direction = new(0, double.PositiveInfinity, 0) },
+        })
+            Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, 1, invalidRay, f.Camera, out _),
+                "nonfinite origins and zero or nonfinite directions are rejected");
+        Check(ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, 3,
+                new Ray { Origin = ray.Origin, Direction = new(0, 25, 0) }, f.Camera, out var normalized)
+            && normalized.HitEgo == ray.Origin + new double3(0, 3, 0),
+            "finite non-unit directions are normalized before applying the rendered hit distance");
+
+        f.Part.IsAttachedInternal = true;
+        Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, 1, ray, f.Camera, out _),
+            "internal parts cannot produce a preview");
+        f.Part.IsAttachedInternal = false;
+        Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, new Part(), 1, ray, f.Camera, out _),
+            "a stale part without a live vehicle tree cannot produce a preview");
+
+        var ownerPart = new Part { Tree = f.Owner.Parts };
+        f.Owner.Parts.Parts.Add(ownerPart);
+        Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, ownerPart, 1, ray, f.Camera, out _),
+            "the controlled kitten itself cannot be previewed as a target");
+
+        var kittenTarget = new KittenEva(f.System, f.Parent, "other kitten", f.Owner.PositionCci + new double3(0, 5, 0));
+        var kittenPart = new Part { Tree = kittenTarget.Parts };
+        kittenTarget.Parts.Parts.Add(kittenPart);
+        Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, kittenPart, 1, ray, f.Camera, out _),
+            "another kitten cannot be previewed as a target");
+
+        var otherControlled = new KittenEva(f.System, f.Parent, "other controlled kitten", f.Owner.PositionCci);
+        KSA.Program.ControlledVehicle = otherControlled;
+        Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, 1, ray, f.Camera, out _),
+            "a preview owner must still be the controlled kitten");
+        KSA.Program.ControlledVehicle = f.Owner;
+        KSA.Program.EditorFlag = true;
+        Check(!ForceTargeting.TryPreviewNativeHit(f.Owner, f.Part, 1, ray, f.Camera, out _),
+            "previews are disabled in the editor");
+        KSA.Program.EditorFlag = false;
+
+        var staleOwner = new Fixture();
+        staleOwner.System.All.Items.Remove(staleOwner.Owner);
+        Check(!ForceTargeting.TryPreviewNativeHit(staleOwner.Owner, staleOwner.Part, 1,
+                staleOwner.AimRay(), staleOwner.Camera, out _),
+            "an unregistered controlled kitten cannot produce a preview");
+
+        var disposedOwner = new Fixture();
+        disposedOwner.Owner.IsDisposed = true;
+        Check(!ForceTargeting.TryPreviewNativeHit(disposedOwner.Owner, disposedOwner.Part, 1,
+                disposedOwner.AimRay(), disposedOwner.Camera, out _),
+            "a disposed controlled kitten cannot produce a preview");
+
+        var wrongOwnerSystem = new Fixture();
+        wrongOwnerSystem.Owner.System = new CelestialSystem();
+        Check(!ForceTargeting.TryPreviewNativeHit(wrongOwnerSystem.Owner, wrongOwnerSystem.Part, 1,
+                wrongOwnerSystem.AimRay(), wrongOwnerSystem.Camera, out _),
+            "an owner outside the current system cannot produce a preview");
+
+        var unregisteredTarget = new Fixture();
+        unregisteredTarget.System.All.Items.Remove(unregisteredTarget.Target);
+        Check(!ForceTargeting.TryPreviewNativeHit(unregisteredTarget.Owner, unregisteredTarget.Part, 1,
+                unregisteredTarget.AimRay(), unregisteredTarget.Camera, out _),
+            "an unregistered target cannot produce a preview");
+
+        var disposedTarget = new Fixture();
+        disposedTarget.Target.IsDisposed = true;
+        Check(!ForceTargeting.TryPreviewNativeHit(disposedTarget.Owner, disposedTarget.Part, 1,
+                disposedTarget.AimRay(), disposedTarget.Camera, out _),
+            "a disposed target cannot produce a preview");
+
+        var wrongParent = new Fixture();
+        wrongParent.Target.Parent = new ParentBody();
+        Check(!ForceTargeting.TryPreviewNativeHit(wrongParent.Owner, wrongParent.Part, 1,
+                wrongParent.AimRay(), wrongParent.Camera, out _),
+            "a target in a different parent frame cannot produce a preview");
+
+        var wrongSystem = new Fixture();
+        wrongSystem.Target.System = new CelestialSystem();
+        Check(!ForceTargeting.TryPreviewNativeHit(wrongSystem.Owner, wrongSystem.Part, 1,
+                wrongSystem.AimRay(), wrongSystem.Camera, out _),
+            "a target outside the current system cannot produce a preview");
+
+        var noQuery = new Fixture();
+        _ = ForceTargeting.TryPreviewNativeHit(noQuery.Owner, noQuery.Part, 1, noQuery.AimRay(), noQuery.Camera, out _);
+        Check(noQuery.Part.RayCalls == 0 && ClutterForceTargets.QueryCalls == 0 && ClutterForceTargets.NearQueryCalls == 0,
+            "all preview guards leave native mesh and clutter query counters unchanged");
+
+        var allocation = new Fixture();
+        var allocationRay = new Ray
+        {
+            Origin = allocation.Camera.GetPositionEgo(allocation.Owner),
+            Direction = double3.UnitX,
+        };
+        for (int i = 0; i < 16; i++)
+            Check(ForceTargeting.TryPreviewNativeHit(allocation.Owner, allocation.Part, 10 + i,
+                    allocationRay, allocation.Camera, out _),
+                "the repeated preview fixture remains valid during warmup");
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 128; i++)
+            if (!ForceTargeting.TryPreviewNativeHit(allocation.Owner, allocation.Part, 10 + i,
+                    allocationRay, allocation.Camera, out _))
+                throw new InvalidOperationException("Force targeting regression: warmed native preview unexpectedly failed.");
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check(allocated == 0,
+            $"warmed native hover previews allocate no frame memory in a stable scene; allocated {allocated} bytes");
     }
 
     private static void ClutterUsesRebasedRayAndImmutableMarker()

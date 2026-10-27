@@ -28,15 +28,32 @@ internal sealed partial class SaberRuntime
     private ForceOverlayLayout _forceLayout;
     private bool _forceLayoutAvailable, _selectingForce, _angryForce, _forceDisposed, _forceEscapeHeld;
     private KittenEva? _forcePickOwner, _forceMoveOwner, _forceSettingOwner, _forceThrowOwner, _forceCaptureRadiusOwner;
+    private CelestialSystem? _forceCaptureRadiusSystem;
+    private IParentBody? _forceCaptureRadiusParent;
     private KittenEva? _forceCaptureLiftOwner;
     private ForcePick? _forceHover;
+    private ForceHoverPreview? _forceHoverPreview;
+    private KittenEva? _forceHoverPreviewOwner;
+    private CelestialSystem? _forceHoverPreviewSystem;
+    private IParentBody? _forceHoverPreviewParent;
+    private bool _forceHoverPreviewContextActive;
+    private Vehicle? _forceHoverLabelVehicle;
+    private Part? _forceHoverLabelPart;
+    private ForcePick? _forceHoverLabelClutter;
+    private string? _forceHoverLabelName;
+    private string _forceHoverLabelText = string.Empty;
+    private float2 _forceHoverLabelSize;
+    private int _forceHoverLabelRadiusTenths = -1;
+    private uint _forceHoverLabelFontId;
+    private float _forceHoverLabelFontSize = float.NaN, _forceHoverLabelWrap = float.NaN;
+    private bool _forceHoverLabelAngry, _forceHoverLabelConfirmed, _forceHoverLabelValid;
     private double3 _forceMoveOffset;
     private double _forceSpreadTarget = ForceMath.DefaultGroupSpread;
-    private double _forceCaptureRadius = ForceMath.DefaultCaptureRadius, _forceNextGrowthQueryTime;
+    private double _forceCaptureRadius = ForceMath.DefaultCaptureRadius;
     private int _forceCaptureRadiusLabelTenths = -1;
-    private string _forceCaptureRadiusButtonLabel = "2m", _forceCaptureRadiusSliderLabel = "2 m";
+    private string _forceCaptureRadiusSliderLabel = "2 m";
     private long _forceCaptureGeneration;
-    private ForceGrowthRequest? _pendingForceGrowth;
+    private long _forceCaptureRadiusGeneration;
     private bool _forceBreakupCancelPending, _forceBreakupAudioActive, _forceBreakupSplitCuePlayed;
     private bool _forceMovePending;
     private bool _forceClickPending;
@@ -51,8 +68,8 @@ internal sealed partial class SaberRuntime
         double ThrowSpeed = ForceMath.ThrowSpeed);
     private readonly record struct ForceQuery(KittenEva Owner, ForcePickRay Ray, bool Capture, bool Angry,
         double AngryRadius, double ClutterTolerance = .2, int CaptureLimit = ForceCaptureLimits.Default);
-    private readonly record struct ForceGrowthRequest(KittenEva Owner, CelestialSystem System,
-        IParentBody Parent, long Generation, double Radius);
+    private readonly record struct ForceHoverPresentation(double3 HitEgo, Vehicle? Vehicle, Part? Part,
+        ForcePick? Clutter, bool Confirmed);
 
     internal bool ForceHolding => !_forceDisposed && _force.HasCapture;
     internal KittenEva? ForceOwner => !_forceDisposed ? _force.Owner : null;
@@ -128,8 +145,7 @@ internal sealed partial class SaberRuntime
             if (_forceThrowDrag.Held && (!ForceHolding || !ForceCanUse
                 || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner)))
                 CancelForceThrowDrag();
-            if (_forceCaptureRadiusDrag.Held && (!ForceHolding || !ForceCanUse
-                || !ReferenceEquals(_forceCaptureRadiusOwner, _owner) || !ReferenceEquals(_force.Owner, _owner)))
+            if (_forceCaptureRadiusDrag.Held && !ForceCaptureRadiusGestureValid())
                 CancelForceThrowDrag();
             if (_force.StatusSeverity != ForceStatusSeverity.None) SyncForceStatusFromController();
             else if (wasHolding) SetForceStatus(_force.Status, ForceStatusSeverity.None);
@@ -145,7 +161,7 @@ internal sealed partial class SaberRuntime
                 if (!ForceCanUse || !ReferenceEquals(request.Owner, _owner) || request.Owner.IsDisposed)
                 {
                     if (request.Action == ForceAction.Throw) CancelForceThrowDrag();
-                    SetForceStatus("Force request cancelled: the controlled kitten changed.", ForceStatusSeverity.None);
+                    SetForceStatus("Furce request cancelled: the controlled kitten changed.", ForceStatusSeverity.None);
                     continue;
                 }
                 if (request.Action == ForceAction.Capture && request.Target is { } pick)
@@ -153,7 +169,7 @@ internal sealed partial class SaberRuntime
                     if (_force.Capture(request.Owner, pick, request.Angry, request.AngryRadius, request.CaptureLimit))
                     {
                         ResetForceMovement();
-                        BeginForceCaptureSession(request.Owner, _force.CaptureRadius);
+                        ResetForceCaptureSession();
                         StartForceCaptureLift(request.Owner);
                     }
                     else if (!_force.HasCapture)
@@ -174,21 +190,20 @@ internal sealed partial class SaberRuntime
             }
             if (!_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)) _forceDrag.Release();
             ProcessForceBreakupHandoff();
-            ProcessForceCaptureGrowthHandoff();
         }
         catch (Exception error)
         {
-            SetForceStatus("Force suspended: " + error.Message, ForceStatusSeverity.Error);
+            SetForceStatus("Furce suspended: " + error.Message, ForceStatusSeverity.Error);
             _forceRequests.Clear();
             ResetForceMovement();
             ResetForceGestures();
             ResetForceCaptureSession();
             try { _force.Reset(); }
-            catch (Exception cleanup) { Report("Force cleanup failed", cleanup); }
+            catch (Exception cleanup) { Report("Furce cleanup failed", cleanup); }
             ResetForceSpreadSmoother();
             try { ResetForceBreakupAudio(); }
-            catch (Exception cleanup) { Report("Force breakup audio cleanup failed", cleanup); }
-            Report("Force handoff failed", error);
+            catch (Exception cleanup) { Report("Furce breakup audio cleanup failed", cleanup); }
+            Report("Furce handoff failed", error);
         }
     }
 
@@ -269,43 +284,9 @@ internal sealed partial class SaberRuntime
         if (_force.StatusSeverity != ForceStatusSeverity.None) SyncForceStatusFromController();
     }
 
-    private void ProcessForceCaptureGrowthHandoff()
-    {
-        if (_pendingForceGrowth is not { } pending) return;
-        if (!ForceCanUse || !_force.HasCapture || !ReferenceEquals(_force.Owner, pending.Owner)
-            || !ReferenceEquals(pending.Owner, _owner) || pending.Owner.IsDisposed
-            || !ReferenceEquals(pending.Owner.System, pending.System) || !ReferenceEquals(pending.Owner.Parent, pending.Parent)
-            || pending.Generation != _forceCaptureGeneration)
-        {
-            _pendingForceGrowth = null;
-            return;
-        }
-        // A breakup may replace vehicles over several settled handoffs. Keep only the newest
-        // radius until its complete replacement set is current, then resolve it against that group.
-        if (_force.BreakupActive || _playerTime < _forceNextGrowthQueryTime) return;
-
-        _pendingForceGrowth = null;
-        _forceNextGrowthQueryTime = _playerTime + .1;
-        _force.GrowCapture(pending.Owner, pending.Radius, _settings.ForceCaptureLimit);
-        _forceCaptureRadius = _force.CaptureRadius;
-        if (_force.StatusSeverity != ForceStatusSeverity.None) SyncForceStatusFromController();
-        else SetForceStatus(_force.Status, ForceStatusSeverity.None);
-    }
-
-    private void BeginForceCaptureSession(KittenEva owner, double radius)
-    {
-        _forceCaptureGeneration = unchecked(_forceCaptureGeneration + 1);
-        _pendingForceGrowth = null;
-        _forceNextGrowthQueryTime = 0;
-        _forceCaptureRadius = ForceMath.ValidAngryRadius(radius) ? radius : ForceMath.DefaultCaptureRadius;
-        _forceCaptureRadiusOwner = owner;
-    }
-
     private void ResetForceCaptureSession()
     {
         _forceCaptureGeneration = unchecked(_forceCaptureGeneration + 1);
-        _pendingForceGrowth = null;
-        _forceNextGrowthQueryTime = 0;
         _forceCaptureRadius = ForceMath.DefaultCaptureRadius;
         _forceCaptureRadiusOwner = null;
     }
@@ -316,18 +297,29 @@ internal sealed partial class SaberRuntime
         int tenths = (int)Math.Clamp(Math.Round(radius * 10, MidpointRounding.AwayFromZero), 20, 500);
         if (_forceCaptureRadiusLabelTenths == tenths) return;
         _forceCaptureRadiusLabelTenths = tenths;
-        string value = (tenths / 10d).ToString("0.#");
-        _forceCaptureRadiusButtonLabel = value + "m";
-        _forceCaptureRadiusSliderLabel = value + " m";
+        _forceCaptureRadiusSliderLabel = (tenths / 10d).ToString("0.#") + " m";
     }
 
-    private void QueueForceCaptureGrowth(double radius)
+    private void SetForceCaptureRadiusGestureOwner(KittenEva owner)
     {
-        if (!ForceCanUse || !ForceHolding || _owner is not { } owner || !ReferenceEquals(_force.Owner, owner)
-            || (!ReferenceEquals(_forceCaptureRadiusOwner, owner) && !_forceCaptureRadiusDrag.Held)
-            || !ForceMath.ValidAngryRadius(radius) || radius <= _force.CaptureRadius) return;
-        _forceCaptureRadius = radius;
-        _pendingForceGrowth = new(owner, owner.System, owner.Parent, _forceCaptureGeneration, radius);
+        _forceCaptureRadiusOwner = owner;
+        _forceCaptureRadiusSystem = owner.System;
+        _forceCaptureRadiusParent = owner.Parent;
+        _forceCaptureRadiusGeneration = _forceCaptureGeneration;
+    }
+
+    private bool ForceCaptureRadiusGestureValid(bool requirePointer = false, float2 pointer = default)
+    {
+        if (!_forceCaptureRadiusDrag.Held || !ForceUiVisible || Program.IsModalOpen()
+            || Program.HasMouseInputLatch || ImGui.GetIO().AppFocusLost || !ForceCanUse
+            || !_forceLayoutAvailable || !_forceCaptureRadiusDrag.Matches(_forceLayout)
+            || _owner is not { } owner || !ReferenceEquals(_forceCaptureRadiusOwner, owner)
+            || !ReferenceEquals(owner.System, _forceCaptureRadiusSystem)
+            || !ReferenceEquals(owner.Parent, _forceCaptureRadiusParent)
+            || _forceCaptureRadiusGeneration != _forceCaptureGeneration
+            || (requirePointer && (!float.IsFinite(pointer.X) || !float.IsFinite(pointer.Y)))) return false;
+
+        return !ForceHolding;
     }
 
     private void UpdateForceBreakupAudio(KittenEva owner)
@@ -393,7 +385,7 @@ internal sealed partial class SaberRuntime
         {
             ForceTargeting.TryPick(pending.Owner, pending.Ray, out _forceHover, out var reason, pending.ClutterTolerance);
             if (pending.Capture && _forceHover == null)
-                SetForceStatus(string.IsNullOrWhiteSpace(reason) ? "Force could not find a target." : reason,
+                SetForceStatus(string.IsNullOrWhiteSpace(reason) ? "Furce could not find a target." : reason,
                     ForceStatusSeverity.Warning);
             if (pending.Capture && _forceHover != null && _forceRequests.Count < 32)
             {
@@ -404,17 +396,181 @@ internal sealed partial class SaberRuntime
         }
         catch (Exception error)
         {
-            SetForceStatus("Force picker failed: " + error.Message, ForceStatusSeverity.Error);
+            SetForceStatus("Furce picker failed: " + error.Message, ForceStatusSeverity.Error);
             CancelForcePicker();
-            Report("Force picker failed", error);
+            Report("Furce picker failed", error);
         }
+    }
+
+    private void RefreshForceHoverPreview()
+    {
+        var io = ImGui.GetIO();
+        if (!ForcePicking || !ForceCanUse || _owner is not { } owner
+            || !ReferenceEquals(_forcePickOwner, owner) || ForceHolding
+            || _forceCaptureRadiusDrag.Held || _forceThrowDrag.Held
+            || Program.IsModalOpen() || Program.HasMouseInputLatch || io.AppFocusLost
+            || io.WantCaptureMouse || io.WantTextInput || !_forceLayoutAvailable
+            || !CursorTarget.IsHitTestViewport(Program.MainViewport))
+        {
+            ClearForceHoverPreview();
+            return;
+        }
+
+        var pointer = io.MousePos;
+        if (KittenColorPickerContainsPointer(pointer) || SettingsContainsPointer(pointer)
+            || (_overlayLayoutAvailable && _overlayLayout.Hit(pointer) != SaberOverlayHit.None)
+            || ForceOverlayHitAt(pointer) != ForceOverlayHit.None)
+        {
+            ClearForceHoverPreview();
+            return;
+        }
+
+        var viewport = Program.MainViewport;
+        var local = Cursor.ToViewportLocal(viewport, pointer);
+        if (!float.IsFinite(local.X) || !float.IsFinite(local.Y)
+            || local.X < 0 || local.Y < 0 || local.X >= viewport.Width || local.Y >= viewport.Height)
+        {
+            ClearForceHoverPreview();
+            return;
+        }
+
+        var camera = viewport.GetCamera();
+        var picker = viewport.PartPicker;
+        if (picker.Part is not { } part || !double.IsFinite(picker.Distance))
+        {
+            ClearForceHoverPreviewForNoHit(owner);
+            return;
+        }
+
+        var ray = camera.ScreenToEgoRay(local);
+        ray.Direction = double3.NormalizeOrZero(ray.Direction);
+        if (!ForceTargeting.TryPreviewNativeHit(owner, part, picker.Distance, ray, camera, out var preview))
+        {
+            ClearForceHoverPreviewForNoHit(owner);
+            return;
+        }
+
+        _forceHoverPreview = preview;
+        SetForceHoverPreviewContext(owner);
+    }
+
+    private void SetForceHoverPreviewContext(KittenEva owner)
+    {
+        _forceHoverPreviewOwner = owner;
+        _forceHoverPreviewSystem = owner.System;
+        _forceHoverPreviewParent = owner.Parent;
+        _forceHoverPreviewContextActive = true;
+    }
+
+    private void ClearForceHoverPreviewForNoHit(KittenEva owner)
+    {
+        _forceHoverPreview = null;
+        SetForceHoverPreviewContext(owner);
+    }
+
+    private void ClearForceHoverPreview()
+    {
+        _forceHoverPreview = null;
+        _forceHoverPreviewOwner = null;
+        _forceHoverPreviewSystem = null;
+        _forceHoverPreviewParent = null;
+        _forceHoverPreviewContextActive = false;
+        ClearForceHoverLabelCache();
+    }
+
+    private void ClearForceHoverLabelCache()
+    {
+        _forceHoverLabelVehicle = null;
+        _forceHoverLabelPart = null;
+        _forceHoverLabelClutter = null;
+        _forceHoverLabelName = null;
+        _forceHoverLabelText = string.Empty;
+        _forceHoverLabelSize = float2.Zero;
+        _forceHoverLabelRadiusTenths = -1;
+        _forceHoverLabelFontId = 0;
+        _forceHoverLabelFontSize = float.NaN;
+        _forceHoverLabelWrap = float.NaN;
+        _forceHoverLabelValid = false;
+    }
+
+    private bool TryGetForceHoverPresentation(Camera camera, out ForceHoverPresentation presentation)
+    {
+        presentation = default;
+        if (!_forceHoverPreviewContextActive || !ForcePicking || !ForceCanUse
+            || _owner is not { } owner || !ReferenceEquals(_forcePickOwner, owner)
+            || !ReferenceEquals(_forceHoverPreviewOwner, owner)
+            || !ReferenceEquals(_forceHoverPreviewSystem, owner.System)
+            || !ReferenceEquals(_forceHoverPreviewParent, owner.Parent)) return false;
+
+        if (_forceHoverPreview is { } preview
+            && !preview.Vehicle.IsDisposed
+            && ReferenceEquals(preview.Vehicle.System, owner.System)
+            && ReferenceEquals(preview.Vehicle.Parent, owner.Parent)
+            && ForceTargeting.IsLive(preview.Vehicle))
+        {
+            bool confirmed = _forceHover is { } settled
+                && ReferenceEquals(settled.Vehicle, preview.Vehicle)
+                && ReferenceEquals(settled.Part, preview.Part)
+                && ForceTargeting.Valid(owner, settled);
+            presentation = new(preview.HitEgo, preview.Vehicle, preview.Part, null, confirmed);
+            return true;
+        }
+
+        if (_forceHover is { Vehicle: null, Part: null, Clutter: not null } clutter
+            && ReferenceEquals(clutter.System, owner.System)
+            && ReferenceEquals(clutter.Parent, owner.Parent)
+            && ForceTargeting.TryHitEgo(clutter, camera, out var hitEgo))
+        {
+            presentation = new(hitEgo, null, null, clutter, true);
+            return true;
+        }
+        return false;
+    }
+
+    private void GetForceHoverLabel(Vehicle? vehicle, Part? part, ForcePick? clutter, string name,
+        bool confirmed, float wrap, out string label, out float2 size)
+    {
+        int radiusTenths = (int)Math.Clamp(Math.Round(_forceCaptureRadius * 10, MidpointRounding.AwayFromZero), 20, 500);
+        uint fontId = ImGui.GetFont().FontId;
+        float fontSize = ImGui.GetFontSize();
+        if (_forceHoverLabelValid
+            && ReferenceEquals(_forceHoverLabelVehicle, vehicle)
+            && ReferenceEquals(_forceHoverLabelPart, part)
+            && ReferenceEquals(_forceHoverLabelClutter, clutter)
+            && string.Equals(_forceHoverLabelName, name, StringComparison.Ordinal)
+            && _forceHoverLabelAngry == _angryForce && _forceHoverLabelRadiusTenths == radiusTenths
+            && _forceHoverLabelConfirmed == confirmed && _forceHoverLabelFontId == fontId
+            && _forceHoverLabelFontSize == fontSize && _forceHoverLabelWrap == wrap)
+        {
+            label = _forceHoverLabelText;
+            size = _forceHoverLabelSize;
+            return;
+        }
+
+        string radius = (radiusTenths / 10d).ToString("0.#");
+        _forceHoverLabelText = name + (_angryForce
+            ? $" + objects within {radius} m" : " — click to hold");
+        _forceHoverLabelSize = ImGui.CalcTextSize(_forceHoverLabelText, false, wrap);
+        _forceHoverLabelVehicle = vehicle;
+        _forceHoverLabelPart = part;
+        _forceHoverLabelClutter = clutter;
+        _forceHoverLabelName = name;
+        _forceHoverLabelAngry = _angryForce;
+        _forceHoverLabelRadiusTenths = radiusTenths;
+        _forceHoverLabelConfirmed = confirmed;
+        _forceHoverLabelFontId = fontId;
+        _forceHoverLabelFontSize = fontSize;
+        _forceHoverLabelWrap = wrap;
+        _forceHoverLabelValid = true;
+        label = _forceHoverLabelText;
+        size = _forceHoverLabelSize;
     }
 
     // Frame visibility can change even when KSA skips the overlay drawing hook.
     private void UpdateForceVisibility()
     {
         if (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner))
-            SetForceStatus("Force selection cancelled: the controlled kitten changed.", ForceStatusSeverity.None);
+            SetForceStatus("Furce selection cancelled: the controlled kitten changed.", ForceStatusSeverity.None);
         if (!ForceUiVisible || Program.IsModalOpen() || !ForceCanUse
             || (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner)))
             ResetForceGestures();
@@ -423,8 +579,7 @@ internal sealed partial class SaberRuntime
         if (_forceThrowDrag.Held && (!ForceHolding || !ForceCanUse
             || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner)))
             CancelForceThrowDrag();
-        if (_forceCaptureRadiusDrag.Held && (!ForceHolding || !ForceCanUse
-            || !ReferenceEquals(_forceCaptureRadiusOwner, _owner) || !ReferenceEquals(_force.Owner, _owner)))
+        if (_forceCaptureRadiusDrag.Held && !ForceCaptureRadiusGestureValid())
             CancelForceThrowDrag();
     }
 
@@ -434,15 +589,16 @@ internal sealed partial class SaberRuntime
         try { UpdateForceFrameCore(); }
         catch (Exception error)
         {
-            SetForceStatus("Force picker failed: " + error.Message, ForceStatusSeverity.Error);
+            SetForceStatus("Furce picker failed: " + error.Message, ForceStatusSeverity.Error);
             CancelForcePicker();
-            Report("Force picker failed", error);
+            Report("Furce picker failed", error);
         }
     }
 
     private void UpdateForceFrameCore()
     {
         UpdateForceVisibility();
+        RefreshForceHoverPreview();
         if (!ForcePicking || !ForceCanUse) return;
         var io = ImGui.GetIO();
         if (io.AppFocusLost) { ResetForceGestures(); return; }
@@ -471,21 +627,30 @@ internal sealed partial class SaberRuntime
         _forceClickPending = false;
     }
 
-    private void BeginForcePicker(bool angry)
+    private void BeginForcePicker(bool angry, double radius = ForceMath.DefaultCaptureRadius)
     {
         if (!ForceCanUse || _force.HasCapture) return;
+        // A direct mode switch can arrive before the pointer's paired release.
+        // Retire the press gesture without carrying it into the picker.
+        if (_forceCaptureRadiusDrag.Held) CancelForceThrowDrag();
+        ClearForceHoverPreview();
         if (_selectingSlice) Queue(Command.CancelSlice);
-        _forceCaptureRadius = ForceMath.DefaultCaptureRadius;
+        _forceCaptureRadius = angry && ValidForceCaptureRadius(radius)
+            ? radius : ForceMath.DefaultCaptureRadius;
         _forcePickOwner = _owner; _angryForce = angry; _selectingForce = true;
         _forceHover = null; _forceClickPending = false; _forceQuery = null; _forceNextHoverTime = 0;
-        SetForceStatus(angry ? $"Angry Force: select a target and objects within {_forceCaptureRadius:0.#} m of the hit. Right-click or Esc cancels."
-            : "Force: point at a vessel, debris, rock or tree trunk and click. Right-click or Esc cancels.", ForceStatusSeverity.None);
+        SetForceStatus(angry ? $"Angry Furce: select a target and objects within {_forceCaptureRadius:0.#} m of the hit. Right-click or Esc cancels."
+            : "Furce: point at a vessel, debris, rock or tree trunk and click. Right-click or Esc cancels.", ForceStatusSeverity.None);
         SyncForceStatusFromController();
     }
+
+    private static bool ValidForceCaptureRadius(double radius) => double.IsFinite(radius)
+        && radius >= ForceCaptureRadiusDrag.MinimumRadius && radius <= ForceCaptureRadiusDrag.MaximumRadius;
 
     private void CancelForcePicker()
     {
         _selectingForce = false; _forcePickOwner = null; _forceHover = null; _forceClickPending = false; _forceQuery = null;
+        ClearForceHoverPreview();
     }
 
     private void QueueForceAction(ForceAction action, double throwSpeed = ForceMath.ThrowSpeed)
@@ -503,7 +668,7 @@ internal sealed partial class SaberRuntime
         if (ForcePicking && _angryForce == angry)
         {
             CancelForcePicker();
-            SetForceStatus("Force selection cancelled.", ForceStatusSeverity.None);
+            SetForceStatus("Furce selection cancelled.", ForceStatusSeverity.None);
         }
         else BeginForcePicker(angry);
     }
@@ -525,7 +690,7 @@ internal sealed partial class SaberRuntime
                 _forceSettingOwner = _owner;
             return true;
         }
-        if (!ForceCanUse) { SetForceStatus("Control an EVA kitten to use the Force.", ForceStatusSeverity.None); return true; }
+        if (!ForceCanUse) { SetForceStatus("Control an EVA kitten to use the Furce.", ForceStatusSeverity.None); return true; }
         switch (hit)
         {
             case ForceOverlayHit.Force:
@@ -534,11 +699,13 @@ internal sealed partial class SaberRuntime
                 break;
             case ForceOverlayHit.AngryForce:
                 if (_force.HasCapture)
+                    BeginForceThrowSlider(pointer);
+                else if (ForcePicking && _angryForce)
                 {
-                    if (ForceShiftHeld(Program.GetWindow())) BeginForceThrowSlider(pointer);
-                    else BeginForceCaptureRadiusDrag(pointer);
+                    CancelForcePicker();
+                    SetForceStatus("Furce selection cancelled.", ForceStatusSeverity.None);
                 }
-                else ToggleForcePicker(true);
+                else BeginForceCaptureRadiusSelection(pointer);
                 break;
             case ForceOverlayHit.Move:
                 if (!_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)) break;
@@ -568,7 +735,10 @@ internal sealed partial class SaberRuntime
         if (_forceCaptureRadiusDrag.Held)
         {
             if (_forceCaptureRadiusDrag.Move(pointer) && _forceCaptureRadiusDrag.Dragged)
-                QueueForceCaptureGrowth(_forceCaptureRadiusDrag.Radius);
+            {
+                _forceCaptureRadius = _forceCaptureRadiusDrag.Radius;
+                UpdateForceCaptureRadiusLabels(_forceCaptureRadius);
+            }
             return;
         }
         if (_forceThrowDrag.Held)
@@ -598,24 +768,24 @@ internal sealed partial class SaberRuntime
         _forceThrowOwner = _owner;
     }
 
-    private void BeginForceCaptureRadiusDrag(float2 pointer)
+    private void BeginForceCaptureRadiusSelection(float2 pointer)
     {
         CancelForcePicker();
+        CancelForceThrowDrag();
         _forceDrag.Release();
-        if (!ForceCanUse || !_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)
-            || !_forceLayoutAvailable || !_forceCaptureRadiusDrag.Begin(pointer, _forceLayout.AngryCenter,
-                _forceLayout.ButtonRadius, _forceLayout.SliderTravel, _forceCaptureRadius)) return;
-        _forceCaptureRadiusOwner = _owner;
+        _forceCaptureRadius = ForceMath.DefaultCaptureRadius;
+        if (!ForceCanUse || _force.HasCapture || !_forceLayoutAvailable
+            || !_forceCaptureRadiusDrag.BeginSelection(pointer, _forceLayout.AngryCenter,
+                _forceLayout.ButtonRadius, _forceLayout.SliderTravel)) return;
+        SetForceCaptureRadiusGestureOwner(_owner!);
+        UpdateForceCaptureRadiusLabels(_forceCaptureRadius);
     }
 
-    /// <summary>Called from the overlay cursor hook while the fixed normal Angry radius gesture owns the pointer.</summary>
+    /// <summary>Called from the overlay cursor hook while an Angry radius gesture owns the pointer.</summary>
     internal bool FilterForceRadiusCursor(float2 pointer)
     {
         if (!_forceCaptureRadiusDrag.Held) return false;
-        if (!ForceUiVisible || Program.IsModalOpen() || Program.HasMouseInputLatch || ImGui.GetIO().AppFocusLost
-            || !ForceCanUse || !ForceHolding || !ReferenceEquals(_forceCaptureRadiusOwner, _owner)
-            || !ReferenceEquals(_force.Owner, _owner) || !_forceLayoutAvailable
-            || !_forceCaptureRadiusDrag.Matches(_forceLayout) || !float.IsFinite(pointer.X) || !float.IsFinite(pointer.Y))
+        if (!ForceCaptureRadiusGestureValid(requirePointer: true, pointer))
         {
             CancelForceThrowDrag();
             return true;
@@ -631,23 +801,19 @@ internal sealed partial class SaberRuntime
         return hit == ForceOverlayHit.AngryRadius ? ForceOverlayHit.None : hit;
     }
 
-    // Called only by the captured left-button release. Snapshot the transient
-    // speed into the settled request before resetting the slider to its default.
+    // Called only by the captured left-button release. Snapshot the radius or
+    // speed before resetting the press-time gesture.
     private bool CompleteForceThrowSlider(float2 pointer)
     {
         if (_forceCaptureRadiusDrag.Held)
         {
-            bool validRadius = ForceUiVisible && !Program.IsModalOpen() && !Program.HasMouseInputLatch
-                && !ImGui.GetIO().AppFocusLost && ForceCanUse && ForceHolding
-                && _forceLayoutAvailable && _forceCaptureRadiusDrag.Matches(_forceLayout)
-                && ReferenceEquals(_forceCaptureRadiusOwner, _owner) && ReferenceEquals(_force.Owner, _owner)
-                && float.IsFinite(pointer.X) && float.IsFinite(pointer.Y);
+            bool validRadius = ForceCaptureRadiusGestureValid(requirePointer: true, pointer);
             if (validRadius) MoveForcePointer(pointer);
-            bool finished = _forceCaptureRadiusDrag.Finish(out bool dragged, out _);
-            _forceCaptureRadiusOwner = null;
+            bool finished = _forceCaptureRadiusDrag.Finish(out _, out double radius);
+            ClearForceCaptureRadiusGestureOwner();
             if (!finished) return false;
             if (!validRadius) return true;
-            if (!dragged) QueueForceAction(ForceAction.Throw);
+            BeginForcePicker(true, radius);
             return true;
         }
         if (!_forceThrowDrag.Held) return false;
@@ -669,7 +835,15 @@ internal sealed partial class SaberRuntime
         _forceThrowDrag.Cancel();
         _forceThrowOwner = null;
         _forceCaptureRadiusDrag.Cancel();
+        ClearForceCaptureRadiusGestureOwner();
+    }
+
+    private void ClearForceCaptureRadiusGestureOwner()
+    {
         _forceCaptureRadiusOwner = null;
+        _forceCaptureRadiusSystem = null;
+        _forceCaptureRadiusParent = null;
+        _forceCaptureRadiusGeneration = 0;
     }
 
     private static double SanitizeThrowSpeed(double speed) => double.IsFinite(speed)
@@ -847,22 +1021,51 @@ internal sealed partial class SaberRuntime
         finally { _forceBreakupAudio.Dispose(); }
     }
 
-    private void DrawForceCaptureBubble(ImDrawListPtr draw)
+    private void DrawForceCaptureBubble(ImDrawListPtr draw, Camera camera, bool hasHoverPresentation,
+        ForceHoverPresentation hoverPresentation)
     {
-        if (!ForceUiVisible || Program.IsModalOpen() || !ForceCanUse || _owner is not { } owner
-            || Program.GetMainCamera() is not { } camera) return;
-        double3 centerEgo;
-        if (ForceHolding && ReferenceEquals(_force.Owner, owner)
-            && _force.TryGetPoseTargetBody(owner, out var selectedPointBody))
-            centerEgo = camera.GetPositionEgo(owner) + selectedPointBody.Transform(owner.Body2Ego);
-        else if (ForcePicking && _angryForce && _forceHover is { } hover
-            && ForceTargeting.TryHitEgo(hover, camera, out centerEgo))
-        { }
+        if (!ForceUiVisible || Program.IsModalOpen() || !ForceCanUse
+            || _owner is not { IsDisposed: false } owner || ForceHolding) return;
+
+        double3 center;
+        if (_forceCaptureRadiusDrag.Held)
+            center = camera.GetPositionEgo(owner);
+        else if (ForcePicking && _angryForce && hasHoverPresentation)
+            center = hoverPresentation.HitEgo;
         else return;
 
         var viewport = ImGui.GetMainViewport();
-        ForceCaptureBubble.Draw(draw, camera, centerEgo, _forceCaptureRadius,
+        ForceCaptureBubble.Draw(draw, camera, center, _forceCaptureRadius,
             viewport.Pos, viewport.Size, SaberTypeFor(owner) == SaberType.Dark);
+    }
+
+    private void DrawForceHoverMarker(ImDrawListPtr draw, Camera camera, ForceHoverPresentation presentation)
+    {
+        if (double3.Dot(presentation.HitEgo, camera.GetForwardEcl()) <= .001) return;
+        var ui = ImGui.GetMainViewport();
+        var buffer = camera.FramebufferSize;
+        if (buffer.X <= 0 || buffer.Y <= 0) return;
+        var pixels = camera.EgoToScreen(presentation.HitEgo);
+        var position = ui.Pos + new float2(pixels.X * ui.Size.X / buffer.X, pixels.Y * ui.Size.Y / buffer.Y);
+        if (!float.IsFinite(position.X) || !float.IsFinite(position.Y)) return;
+
+        var markerColor = presentation.Confirmed
+            ? new ImColor8(100, 255, 180, 255)
+            : new ImColor8(195, 200, 210, 230);
+        draw.AddCircle(position, 19, new ImColor8(0, 0, 0, 220), 48, 5);
+        draw.AddCircle(position, 19, markerColor, 48, presentation.Confirmed ? 2 : 1.5f);
+        draw.AddCircleFilled(position, 3, markerColor, 16);
+
+        string name = presentation.Vehicle?.Id ?? presentation.Clutter?.DisplayName ?? "Unavailable object";
+        float wrap = Math.Max(100, Math.Min(320, ui.Size.X - 24));
+        GetForceHoverLabel(presentation.Vehicle, presentation.Part, presentation.Clutter, name,
+            presentation.Confirmed, wrap, out string label, out var labelSize);
+        var labelPosition = new float2(Math.Clamp(position.X + 25, ui.Pos.X + 8,
+            ui.Pos.X + Math.Max(8, ui.Size.X - wrap - 8)), Math.Clamp(position.Y,
+            ui.Pos.Y + 8, ui.Pos.Y + Math.Max(8, ui.Size.Y - labelSize.Y - 8)));
+        draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), labelPosition + new float2(1),
+            new ImColor8(0, 0, 0, 255), label, wrap);
+        draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), labelPosition, markerColor, label, wrap);
     }
 
     private void DrawForceOverlay(ImDrawListPtr draw)
@@ -870,16 +1073,17 @@ internal sealed partial class SaberRuntime
         try { DrawForceOverlayCore(draw); }
         catch (Exception error)
         {
-            SetForceStatus("Force overlay failed: " + error.Message, ForceStatusSeverity.Error);
+            SetForceStatus("Furce overlay failed: " + error.Message, ForceStatusSeverity.Error);
             CancelForcePicker();
             ReleaseForceSettingDrag();
             CancelForceThrowDrag();
-            Report("Force overlay failed", error);
+            Report("Furce overlay failed", error);
         }
     }
 
     private void DrawForceOverlayCore(ImDrawListPtr draw)
     {
+        RefreshForceHoverPreview();
         if (!_forceLayoutAvailable) return;
         var layout = _forceLayout;
         // A resize, DPI change or custom offset invalidates press-time geometry.
@@ -887,7 +1091,12 @@ internal sealed partial class SaberRuntime
         if (_forceSettingDrag.Held && !_forceSettingDrag.Matches(layout)) ReleaseForceSettingDrag();
         if (_forceThrowDrag.Held && !_forceThrowDrag.Matches(layout)) CancelForceThrowDrag();
         if (_forceCaptureRadiusDrag.Held && !_forceCaptureRadiusDrag.Matches(layout)) CancelForceThrowDrag();
-        DrawForceCaptureBubble(draw);
+        Camera? frameCamera = Program.GetMainCamera();
+        ForceHoverPresentation hoverPresentation = default;
+        bool hasHoverPresentation = frameCamera is { } cameraForPreview
+            && TryGetForceHoverPresentation(cameraForPreview, out hoverPresentation);
+        if (frameCamera is { } camera)
+            DrawForceCaptureBubble(draw, camera, hasHoverPresentation, hoverPresentation);
         var white = new ImColor8(255, 255, 255, 255);
         var muted = new ImColor8(195, 200, 210, 255);
         var color = ForceCanUse ? white : muted;
@@ -903,17 +1112,11 @@ internal sealed partial class SaberRuntime
                 angryPicking ? new ImColor8(224, 24, 24, 210) : new ImColor8(224, 24, 24, 128), 48);
         draw.AddCircle(layout.ForceCenter, layout.ButtonRadius, faintWhiteRim, 48,
             forcePicking ? Math.Max(2, 3 * layout.Scale) : Math.Max(.5f, layout.Scale));
-        CenterOverlayText(draw, layout.ForceCenter, buttonColor, ForceHolding ? "RELEASE" : forcePicking ? "CANCEL" : "FORCE", layout.ButtonRadius * 1.75f);
+        CenterOverlayText(draw, layout.ForceCenter, buttonColor, ForceHolding ? "RELEASE" : forcePicking ? "CANCEL" : "FURCE", layout.ButtonRadius * 1.75f);
         if (!angrySliderHeld)
         {
             if (ForceHolding)
-            {
                 CenterOverlayText(draw, layout.AngryCenter, color, "THROW", layout.ButtonRadius * 1.75f);
-                float radiusFont = Math.Min(ImGui.GetFontSize(), 10 * layout.Scale);
-                UpdateForceCaptureRadiusLabels(_forceCaptureRadius);
-                CenterOverlayText(draw, layout.AngryCenter + new float2(0, radiusFont * .72f), color,
-                    _forceCaptureRadiusButtonLabel, layout.ButtonRadius * 1.75f, radiusFont);
-            }
             else if (angryPicking)
                 CenterOverlayText(draw, layout.AngryCenter, color, "CANCEL", layout.ButtonRadius * 1.75f);
             else
@@ -922,7 +1125,7 @@ internal sealed partial class SaberRuntime
                 CenterOverlayText(draw, layout.AngryCenter - new float2(0, labelFont * .5f), color,
                     "ANGRY", layout.ButtonRadius * 1.75f, labelFont);
                 CenterOverlayText(draw, layout.AngryCenter + new float2(0, labelFont * .5f), color,
-                    "FORCE", layout.ButtonRadius * 1.75f, labelFont);
+                    "FURCE", layout.ButtonRadius * 1.75f, labelFont);
             }
         }
         draw.AddCircleFilled(layout.MoveCenter, layout.MoveRadius, new ImColor8(0, 0, 0, 128), 64);
@@ -950,33 +1153,12 @@ internal sealed partial class SaberRuntime
         {
             var overlayHit = ForceOverlayHitAt(overlayPointer);
             if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
-                ShowSaberTooltip("Click to throw at 25 m/s. Drag up to grow the capture radius; release keeps the held objects. Hold Shift and drag to choose a throw speed.");
+                ShowSaberTooltip("Hold and drag up to choose a throw speed; release to throw.");
             else if (overlayHit == ForceOverlayHit.CaptureLimit)
-                ShowSaberTooltip("max # objects force can capture");
+                ShowSaberTooltip("max # objects Furce can capture");
         }
-        if (_forceHover != null && ForcePicking && Program.GetMainCamera() is { } camera
-            && ForceTargeting.TryHitEgo(_forceHover, camera, out var hit) && double3.Dot(hit, camera.GetForwardEcl()) > .001)
-        {
-            var ui = ImGui.GetMainViewport();
-            var buffer = camera.FramebufferSize;
-            if (buffer.X <= 0 || buffer.Y <= 0) return;
-            var pixels = camera.EgoToScreen(hit);
-            var position = ui.Pos + new float2(pixels.X * ui.Size.X / buffer.X, pixels.Y * ui.Size.Y / buffer.Y);
-            if (!float.IsFinite(position.X) || !float.IsFinite(position.Y)) return;
-            var green = new ImColor8(100, 255, 180, 255);
-            draw.AddCircle(position, 19, new ImColor8(0, 0, 0, 220), 48, 5);
-            draw.AddCircle(position, 19, green, 48, 2);
-            draw.AddCircleFilled(position, 3, green, 16);
-            string label = _forceHover.DisplayName + (_angryForce ? $" + objects within {_forceCaptureRadius:0.#} m" : " — click to hold");
-            float wrap = Math.Max(100, Math.Min(320, ui.Size.X - 24));
-            var labelSize = ImGui.CalcTextSize(label, false, wrap);
-            var labelPosition = new float2(Math.Clamp(position.X + 25, ui.Pos.X + 8,
-                ui.Pos.X + Math.Max(8, ui.Size.X - wrap - 8)), Math.Clamp(position.Y,
-                ui.Pos.Y + 8, ui.Pos.Y + Math.Max(8, ui.Size.Y - labelSize.Y - 8)));
-            draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), labelPosition + new float2(1),
-                new ImColor8(0, 0, 0, 255), label, wrap);
-            draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), labelPosition, green, label, wrap);
-        }
+        if (hasHoverPresentation && frameCamera is { } markerCamera)
+            DrawForceHoverMarker(draw, markerCamera, hoverPresentation);
         if (_forceThrowDrag.Held)
             DrawForceThrowSlider(draw, layout, settingsFill, faintWhiteRim, white, muted);
         else if (_forceCaptureRadiusDrag.Held)
@@ -991,9 +1173,9 @@ internal sealed partial class SaberRuntime
                 currentLayout.ButtonRadius, ImDrawFlags.None, Math.Max(.5f, currentLayout.Scale));
             float endpointFont = Math.Min(ImGui.GetFontSize(), 9 * currentLayout.Scale);
             CenterOverlayText(list, new(currentLayout.AngryCenter.X, _forceThrowDrag.TrackTop), endpointColor,
-                "200", currentLayout.ButtonRadius * 1.65f, endpointFont);
+                $"{ForceThrowDrag.MaximumSpeed:0}", currentLayout.ButtonRadius * 1.65f, endpointFont);
             CenterOverlayText(list, new(currentLayout.AngryCenter.X, _forceThrowDrag.TrackBottom), endpointColor,
-                "25", currentLayout.ButtonRadius * 1.65f, endpointFont);
+                $"{ForceThrowDrag.MinimumSpeed:0}", currentLayout.ButtonRadius * 1.65f, endpointFont);
             float pillWidth = _forceThrowDrag.PillMax.X - _forceThrowDrag.PillMin.X;
             float thumbRadius = Math.Max(2, pillWidth * .4f);
             list.AddCircleFilled(_forceThrowDrag.Thumb, thumbRadius, new ImColor8(45, 105, 210, 230), 24);

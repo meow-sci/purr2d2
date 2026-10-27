@@ -57,7 +57,7 @@ internal sealed partial class SaberRuntime
             if (requested)
             {
                 if (!CanMaintainSliceResources || !ReferenceEquals(requestSystem, Universe.CurrentSystem))
-                    _sliceResourceStatus = "Cleanup cancelled: the world changed or a slice/Force hold is active.";
+                    _sliceResourceStatus = "Cleanup cancelled: the world changed or a slice/Furce hold is active.";
                 else
                 {
                     CancelForcePicker();

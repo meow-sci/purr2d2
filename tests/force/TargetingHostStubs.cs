@@ -44,8 +44,11 @@ namespace KSA
         internal ReadOnlySpan<object> AsSpan() => CollectionsMarshal.AsSpan(Items);
         internal bool TryGet(string id, out object? registered)
         {
-            registered = Items.OfType<Vehicle>().FirstOrDefault(vehicle => vehicle.Id == id);
-            return registered != null;
+            for (int i = 0; i < Items.Count; i++)
+                if (Items[i] is Vehicle vehicle && vehicle.Id == id)
+                { registered = vehicle; return true; }
+            registered = null;
+            return false;
         }
     }
 

@@ -2,7 +2,7 @@ using Brutal.Numerics;
 
 namespace Purr2D2.Core;
 
-/// <summary>A transient upward Angry-button gesture that grows the current Force capture radius.</summary>
+/// <summary>A transient upward gesture that selects the pre-capture Angry radius.</summary>
 internal sealed class ForceCaptureRadiusDrag
 {
     internal const double MinimumRadius = 2;
@@ -10,7 +10,6 @@ internal sealed class ForceCaptureRadiusDrag
     internal const float DragThreshold = 4;
 
     private float _pressX, _pressY;
-    private double _pressRadius, _highWater;
 
     internal bool Held { get; private set; }
     internal bool Dragged { get; private set; }
@@ -32,12 +31,11 @@ internal sealed class ForceCaptureRadiusDrag
         }
     }
 
-    /// <summary>Begins from the current radius so a later drag can only grow this hold.</summary>
-    internal bool Begin(float2 pointer, float2 center, float buttonRadius, float travel, double currentRadius)
+    /// <summary>Begins a fresh radius selection at two metres.</summary>
+    internal bool BeginSelection(float2 pointer, float2 center, float buttonRadius, float travel)
     {
         if (Held || !Finite(pointer) || !Finite(center) || !float.IsFinite(buttonRadius) || buttonRadius <= 0
-            || !float.IsFinite(travel) || travel <= 0 || !double.IsFinite(currentRadius)
-            || currentRadius < MinimumRadius || currentRadius > MaximumRadius) return false;
+            || !float.IsFinite(travel) || travel <= 0) return false;
 
         var pillMin = center - new float2(buttonRadius, travel + buttonRadius);
         var pillMax = center + new float2(buttonRadius, buttonRadius);
@@ -55,13 +53,13 @@ internal sealed class ForceCaptureRadiusDrag
         PillMax = pillMax;
         _pressX = pointer.X;
         _pressY = pointer.Y;
-        _pressRadius = _highWater = Radius = currentRadius;
+        Radius = MinimumRadius;
         Dragged = false;
         Held = true;
         return true;
     }
 
-    /// <summary>Uses the press-relative upward distance; once the 4 px threshold is crossed it stays a drag.</summary>
+    /// <summary>Uses press-relative upward travel, allowing the chosen value to move either way.</summary>
     internal bool Move(float2 pointer)
     {
         if (!Held || !Finite(pointer)) return false;
@@ -71,16 +69,13 @@ internal sealed class ForceCaptureRadiusDrag
         if (!Dragged) return true;
 
         double upward = (double)_pressY - pointer.Y;
-        double candidate = _pressRadius + Math.Clamp(upward / Travel, 0, 1) * (MaximumRadius - MinimumRadius);
-        if (double.IsFinite(candidate) && candidate > _highWater)
-        {
-            _highWater = Math.Clamp(candidate, MinimumRadius, MaximumRadius);
-            Radius = _highWater;
-        }
+        double candidate = MinimumRadius
+            + Math.Clamp(upward / Travel, 0, 1) * (MaximumRadius - MinimumRadius);
+        if (double.IsFinite(candidate)) Radius = Math.Clamp(candidate, MinimumRadius, MaximumRadius);
         return true;
     }
 
-    /// <summary>Finishes once, reporting whether this was a drag and its monotone radius.</summary>
+    /// <summary>Finishes once, returning whether this was a drag and the selected radius.</summary>
     internal bool Finish(out bool dragged, out double radius)
     {
         if (!Held)
@@ -108,7 +103,6 @@ internal sealed class ForceCaptureRadiusDrag
         Center = float2.Zero;
         ButtonRadius = Travel = TrackTop = TrackBottom = _pressX = _pressY = 0;
         PillMin = PillMax = float2.Zero;
-        _pressRadius = _highWater = MinimumRadius;
     }
 
     private static bool Finite(float2 value) => float.IsFinite(value.X) && float.IsFinite(value.Y);

@@ -27,21 +27,28 @@ internal static class AudioChecks
         var contact = Latest("Contact");
         Check(GameAudio.Channels.Count == 4 && !light.Stopped && !hum.Stopped && !contact.Stopped,
             "static layers alongside ignition, hum and contact");
-        Check(light.VolumeMultiplier == .3f && light.Spatial.Position == new double3(2, 3, 4),
-            "static uses the moving emitter and configured gain");
+        Check(light.VolumeMultiplier == .3f && hum.VolumeMultiplier == .42f
+            && light.Spatial.Position == new double3(2, 3, 4),
+            "Light ambient loops use the moving emitter and their unchanged configured gains");
         Tick();
         Check(GameAudio.Channels.Count == 4, "repeated updates retain the loop");
         Tick(SaberType.Dark);
         var dark = Latest("DarkStatic");
         Check(light.Stopped && !dark.Stopped && !hum.Stopped && !contact.Stopped
-            && GameAudio.Channels.Count == 5, "style change replaces only static without reigniting");
+            && GameAudio.Channels.Count == 5
+            && Math.Abs(dark.VolumeMultiplier / (.3f * .7f) - .7f) < 1e-6f
+            && Math.Abs(hum.VolumeMultiplier / (.42f * .7f) - .7f) < 1e-6f
+            && contact.VolumeMultiplier == .35f,
+            "Dark hum and static each run at 70% of their previous gain while type changes preserve other loops");
         Tick(SaberType.Dark, paused: true);
         Check(dark.Paused && hum.Paused && GameAudio.Channels.Count == 5, "pause retains channels");
         Tick(paused: true);
         Check(dark.Stopped && GameAudio.Channels.Count == 5, "paused type change defers new playback");
         Tick(deployment: .5f, volume: .5f);
         light = Latest("LightStatic");
-        Check(light.VolumeMultiplier == .075f && !light.Paused, "gain follows deployment and volume");
+        Check(light.VolumeMultiplier == .075f && hum.VolumeMultiplier == .105f
+            && contact.VolumeMultiplier == .0875f && !light.Paused,
+            "Light hum, static and contact gains follow deployment and volume unchanged");
         audio.Suspend();
         Check(light.Paused, "stale pose suspends static");
         Tick();

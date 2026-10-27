@@ -14,7 +14,6 @@ internal static class ForceControllerChecks
         RollbackContinuesAfterFailure();
         InvalidOwnerAndJoinFailure();
         MixedAngryEitherPrimary();
-        CaptureGrowthTransactions();
         GroupSpreadAroundCentroid();
         BreakupKeepsMixedHold();
         BreakupPreflightAndPartialFailure();
@@ -50,132 +49,6 @@ internal static class ForceControllerChecks
     }
 
     private static ForcePick Pick(Vehicle target) => new(target, target.Parts.Items[0], target.Parent, target.System, double3.Zero);
-
-    private static void CaptureGrowthTransactions()
-    {
-        var (controller, owner, target) = Setup("growth-transforms");
-        using (controller)
-        {
-            var first = new Vehicle(owner.System, owner.Parent, "growth-first", new(4.5, 0, 0), new(2, 3, 0))
-                { Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .35) };
-            var second = new Vehicle(owner.System, owner.Parent, "growth-second", new(5, 0, 0), double3.Zero);
-            Check(controller.Capture(owner, Pick(target), true, angryRadius: 2, captureLimit: 1),
-                "a two metre Angry capture holds only the selected primary at its one object limit");
-            controller.SetOffset(new(1, 2, 0)); controller.SetSpread(.5); controller.Update(owner);
-            var targetBefore = target.GetPositionCci();
-            var firstBefore = first.GetPositionCci();
-            var secondBefore = second.GetPositionCci();
-            var firstRotation = first.GetBody2Cci();
-            var oldOffset = controller.GroupOffsetBody;
-            double oldSpread = controller.GroupSpread;
-            Check(controller.TryGetCaptureCenterCci(owner, out var center) && center == new double3(3, 2, 0),
-                "the expanded sphere is centered on the selected point translated with the held group");
-            Check(controller.GrowCapture(owner, 4, captureLimit: 3) && controller.CaptureRadius == 4
-                && controller.CapturedCount == 3,
-                "growth appends every nearest newly eligible source within the remaining configured capacity");
-            Equal(target.GetPositionCci(), targetBefore, "growth preserves the old held transform");
-            Equal(first.GetPositionCci(), firstBefore, "growth initializes the first addition at its exact pre-hold pose");
-            Equal(second.GetPositionCci(), secondBefore, "growth initializes the second addition at its exact pre-hold pose");
-            var grownRotation = first.GetBody2Cci();
-            Check(Math.Abs(grownRotation.X - firstRotation.X) < 1e-9
-                && Math.Abs(grownRotation.Y - firstRotation.Y) < 1e-9
-                && Math.Abs(grownRotation.Z - firstRotation.Z) < 1e-9
-                && Math.Abs(grownRotation.W - firstRotation.W) < 1e-9,
-                "growth preserves the new source's original orientation");
-            Equal(controller.GroupOffsetBody, oldOffset, "growth keeps the selected group translation");
-            Check(controller.GroupSpread == oldSpread && !first.HasPhysicsBubble && !second.HasPhysicsBubble
-                && ForcePhysicsPatches.FilterCapturedWorker(first.TakeUpdateStateIfOrphaned()) == null
-                && ForcePhysicsPatches.FilterCapturedWorker(second.TakeUpdateStateIfOrphaned()) == null,
-                "the complete new source set is detached and published only after all additions commit");
-            int firstWrites = first.PlanWrites, secondWrites = second.PlanWrites;
-            Check(controller.GrowCapture(owner, 5, captureLimit: 3) && controller.CapturedCount == 3
-                && first.PlanWrites == firstWrites && second.PlanWrites == secondWrites,
-                "a later growth excludes already held identities before geometry traversal and does not duplicate them");
-            controller.Release(false);
-        }
-
-        (controller, owner, target) = Setup("growth-failed-transaction");
-        using (controller)
-        {
-            var first = new Vehicle(owner.System, owner.Parent, "rollback-first", new(4.5, 0, 0), double3.Zero);
-            var second = new Vehicle(owner.System, owner.Parent, "rollback-second", new(5, 0, 0), double3.Zero);
-            Check(controller.Capture(owner, Pick(target), true, angryRadius: 2, captureLimit: 1),
-                "a single held source sets up an isolated growth rollback");
-            var heldBefore = target.GetPositionCci();
-            var firstBefore = first.GetPositionCci(); var secondBefore = second.GetPositionCci();
-            second.FailPlanWrite = second.PlanWrites + 1;
-            Check(!controller.GrowCapture(owner, 4, captureLimit: 3) && controller.HasCapture
-                && controller.CapturedCount == 1 && controller.CaptureRadius == 4
-                && controller.StatusSeverity == ForceStatusSeverity.Warning,
-                "a later addition failure keeps the old hold while accepting the visible radius");
-            Equal(target.GetPositionCci(), heldBefore, "growth rollback never rewrites or clears the original held source");
-            Equal(first.GetPositionCci(), firstBefore, "growth rollback restores the already-written addition");
-            Equal(second.GetPositionCci(), secondBefore, "growth rollback restores the failing addition after its partial detach");
-            Check(ForcePhysicsPatches.FilterCapturedWorker(target.TakeUpdateStateIfOrphaned()) == null
-                && ForcePhysicsPatches.FilterCapturedWorker(first.TakeUpdateStateIfOrphaned()) != null
-                && ForcePhysicsPatches.FilterCapturedWorker(second.TakeUpdateStateIfOrphaned()) != null,
-                "a failed growth leaves the published worker set unchanged at the commit boundary");
-            controller.Release(false);
-        }
-
-        (controller, owner, target) = Setup("growth-native-exclusion");
-        using (controller)
-        {
-            var heldClutter = new ClutterForceTarget(owner, "held-near", new(2, 0, 0), double3.Zero);
-            var newClutter = new ClutterForceTarget(owner, "new-far", new(6, 0, 0), double3.Zero);
-            ClutterForceTargets.Candidates = [heldClutter, newClutter];
-            Check(controller.Capture(owner, Pick(target), true, angryRadius: 2, captureLimit: 2)
-                && controller.CapturedCount == 2 && heldClutter.Captured && !newClutter.Captured,
-                "the initial bounded capture holds the nearest physical clutter beside its selected vessel");
-            Check(controller.GrowCapture(owner, 4, captureLimit: 3) && controller.CapturedCount == 3
-                && heldClutter.Captured && newClutter.Captured,
-                "held native identities are filtered before the nearest clutter result is capped");
-            Check(heldClutter.Captures == 1 && newClutter.Captures == 1,
-                "growth promotes only the newly selected native object");
-            controller.Release(false);
-        }
-
-        (controller, owner, target) = Setup("growth-refusal");
-        using (controller)
-        {
-            var nearby = new Vehicle(owner.System, owner.Parent, "growth-refusal-near", new(4.5, 0, 0), double3.Zero);
-            Check(controller.Capture(owner, Pick(target), true, angryRadius: 2, captureLimit: 1),
-                "a held source sets up an incomplete-query refusal");
-            var original = nearby.GetPositionCci();
-            ClutterForceTargets.QueryFails = true;
-            Check(!controller.GrowCapture(owner, 4, captureLimit: 3) && controller.CapturedCount == 1
-                && nearby.HasPhysicsBubble && nearby.GetPositionCci() == original,
-                "a refused clutter query commits none of the vessels gathered earlier in the same scan");
-            ClutterForceTargets.QueryFails = false;
-            controller.Release(false);
-        }
-
-        (controller, owner, target) = Setup("growth-breakup-deferral");
-        using (controller)
-        {
-            target.BreakupOffsets = [new(-.5, 0, 0), new(.5, 0, 0)];
-            Check(controller.Capture(owner, Pick(target), true, angryRadius: 2, captureLimit: 1)
-                && controller.BeginBreakup(owner), "a breakup starts before a pending radius increase");
-            ClutterForceTargets.GatherCalls = 0;
-            Check(!controller.GrowCapture(owner, 4, captureLimit: 1) && controller.CaptureRadius == 2
-                && ClutterForceTargets.GatherCalls == 0,
-                "growth defers before advancing its radius or scanning while breakup owns the group");
-            controller.CancelBreakup();
-            Check(controller.GrowCapture(owner, 4, captureLimit: 1) && controller.CaptureRadius == 4
-                && ClutterForceTargets.GatherCalls == 0,
-                "the deferred radius remains valid and a full configured cap skips the native query");
-            Check(controller.BeginBreakup(owner), "a cancelled breakup can be staged again after growth settles");
-            PrepareBreakup(controller, owner);
-            Check(controller.AdvanceBreakup(owner, splitRequested: true, delayElapsed: true).Completed
-                && controller.CapturedCount == 2,
-                "breakup replacements form the complete current group before a later growth gesture");
-            ClutterForceTargets.GatherCalls = 0;
-            Check(controller.GrowCapture(owner, 5, captureLimit: 2) && controller.CapturedCount == 2
-                && controller.CaptureRadius == 5 && ClutterForceTargets.GatherCalls == 0,
-                "capture capacity is computed from the breakup replacement group and avoids a needless query");
-            controller.Release(false);
-        }
-    }
 
     private static void BreakupKeepsMixedHold()
     {
@@ -588,13 +461,13 @@ internal static class ForceControllerChecks
             Check(controller.Capture(owner, Pick(target), false), "throw capture");
             var inherited = target.GetVelocityCci();
             controller.Release(true);
-            Equal(target.GetVelocityCci() - inherited, new(25, 0, 0), "throw adds considerable outward velocity once");
+            Equal(target.GetVelocityCci() - inherited, new(10, 0, 0), "throw adds the 10m/s default outward velocity once");
             var thrown = target.GetVelocityCci(); controller.Release(true);
             Equal(target.GetVelocityCci(), thrown, "second release never throws twice");
             Check(controller.Capture(owner, Pick(target), false), "recapture after throw");
             inherited = target.GetVelocityCci();
-            controller.Release(true, 200);
-            Equal(target.GetVelocityCci() - inherited, new(200, 0, 0),
+            controller.Release(true, ForceMath.MaximumThrowSpeed);
+            Equal(target.GetVelocityCci() - inherited, new(250, 0, 0),
                 "release snapshots and applies a selected maximum throw speed");
             Check(controller.Capture(owner, Pick(target), false), "recapture after a selected-speed throw");
             target.Parts.Items.Add(new() { Tree = target.Parts });

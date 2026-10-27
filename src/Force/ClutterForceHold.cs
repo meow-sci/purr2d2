@@ -70,7 +70,7 @@ internal sealed class ClutterForceHold : IDisposable
         // A native body is deliberately confined to its resident local bubble. Streaming or orbital
         // promotion is a separate feature; do not write inaccurate floats or leave an unserviced body.
         if (!ForceMath.Finite(local) || local.LengthSquared() > 4096.0 * 4096)
-            throw new InvalidOperationException("The ground object exceeded the local Force physics range.");
+            throw new InvalidOperationException("The ground object exceeded the local Furce physics range.");
         var rotationCcf = doubleQuat.Concatenate(state.Body2Cci, cci2Ccf).NormalizedOrZero();
         var angularCci = state.BodyRates.Transform(state.Body2Cci) - target.Parent.GetAngularVelocityCci();
         var angularCcf = angularCci.Transform(cci2Ccf);
@@ -142,7 +142,7 @@ internal sealed class ClutterForceHold : IDisposable
         JobSystems.VehicleSolver.Wait();
         foreach (var entry in Volatile.Read(ref _active)) entry.Release();
         if (Volatile.Read(ref _active).Length != 0)
-            throw new InvalidOperationException("A native ground object could not leave its Force hold; its contact hook must remain installed.");
+            throw new InvalidOperationException("A native ground object could not leave its Furce hold; its contact hook must remain installed.");
     }
     private static void Register(ClutterForceHold hold)
     { lock (RegistryLock) Volatile.Write(ref _active, [.. _active, hold]); }

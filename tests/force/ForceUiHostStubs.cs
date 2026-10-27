@@ -68,16 +68,22 @@ namespace Brutal.ImGuiApi
     public readonly struct ImColor8(byte r, byte g, byte b, byte a) { public uint Value => (uint)(r | g << 8 | b << 16 | a << 24); }
     public sealed class TestIo { public bool WantCaptureMouse, WantCaptureKeyboard, WantTextInput, AppFocusLost; public float2 MousePos; }
     public sealed class TestViewport { public float2 Pos = float2.Zero, Size = new(640, 480); }
+    public readonly record struct ImFontPtr(uint FontId)
+    {
+        public static implicit operator int(ImFontPtr font) => unchecked((int)font.FontId);
+    }
     public static class ImGui
     {
         public static readonly TestIo Io = new();
         public static string Tooltip = "";
+        public static int CalcTextSizeCalls;
         public static TestIo GetIO() => Io;
         public static TestViewport GetMainViewport() => new();
         public static float GetFontSize() => 16;
-        public static int GetFont() => 0;
+        public static ImFontPtr GetFont() => new(1);
         public static float2 CalcTextSize(string text, bool hide = false, float wrap = 0)
         {
+            CalcTextSizeCalls++;
             float width = text.Length * GetFontSize() * .5f;
             if (wrap > 0 && width > wrap) return new(wrap, GetFontSize() * MathF.Ceiling(width / wrap));
             return new(width, GetFontSize());
@@ -135,15 +141,34 @@ namespace KSA
 {
     public interface IParentBody { }
     public sealed class CelestialSystem { }
-    public class Vehicle { public string Id = "Target"; }
-    public sealed class KittenEva : Vehicle
+    public class Vehicle
     {
-        public bool IsDisposed;
-        public doubleQuat Body2Ego = doubleQuat.Identity;
+        public string Id = "Target";
+        public bool IsDisposed, IsEditedVehicle;
         public CelestialSystem System = new();
         public IParentBody Parent = new TestParentBody();
     }
+    public sealed class KittenEva : Vehicle
+    {
+        public doubleQuat Body2Ego = doubleQuat.Identity;
+    }
     internal sealed class TestParentBody : IParentBody { }
+    public sealed class PartTree { public Vehicle? OwningVehicle; }
+    public sealed class Part
+    {
+        private Part? _structuralPart;
+        public bool IsAttachedInternal;
+        public PartTree? Tree;
+        public Part StructuralPart => _structuralPart ?? this;
+        public void SetStructuralPart(Part? structuralPart) => _structuralPart = structuralPart;
+    }
+    public sealed class ViewportPartPicker
+    {
+        public Part? Part;
+        public double Distance = double.MaxValue;
+        public void Offer(Part? part, double distance) { Part = part; Distance = distance; }
+        public void Reset() { Part = null; Distance = double.MaxValue; }
+    }
     internal static class Double3Ex
     {
         internal static double3 Transform(this double3 value, doubleQuat rotation) => double3.Transform(value, rotation);
@@ -160,6 +185,7 @@ namespace KSA
         public int Width => 640;
         public int Height => 480;
         public Camera Camera = new();
+        public ViewportPartPicker PartPicker = new();
         public Camera GetCamera() => Camera;
     }
     public sealed class Camera
@@ -167,6 +193,9 @@ namespace KSA
         public int Generation;
         public double NearPlane = .1;
         public bool SphereOutsideFrustum;
+        public double3 LastSphereCenter;
+        public double LastSphereRadius;
+        public int SphereFrustumChecks;
         public int2 FramebufferSize => new(640, 480);
         public double3 GetForwardEcl() => -double3.UnitZ;
         public double3 GetRightEcl() => double3.UnitX;
@@ -174,7 +203,8 @@ namespace KSA
         public float2 EgoToScreen(double3 point) => new((float)point.X, (float)point.Y);
         public double2 EgoToScreenDouble(double3 point, bool ignoreBehind = true) => new(point.X + 320, point.Y + 240);
         public double3 GetPositionEgo(KittenEva position) => double3.Zero;
-        public bool IsSphereOutsideFrustum(double3 center, double radius) => SphereOutsideFrustum;
+        public bool IsSphereOutsideFrustum(double3 center, double radius)
+        { LastSphereCenter = center; LastSphereRadius = radius; SphereFrustumChecks++; return SphereOutsideFrustum; }
         public Ray ScreenToEgoRay(float2 point) => new() { Origin = new(point.X, point.Y, Generation), Direction = -double3.UnitZ };
     }
     public static class Cursor { public static float2 ToViewportLocal(TestViewport view, float2 point) => point - view.Position; }
@@ -195,17 +225,61 @@ namespace Purr2D2.Force
     using Purr2D2.Core;
     internal enum ForceStatusSeverity { None, Warning, Error }
 
-    internal sealed record ForcePick(KSA.Vehicle Vehicle) { internal bool Live = true; internal string DisplayName => Vehicle.Id; }
+    internal sealed class ClutterForceTarget
+    {
+        internal string DisplayName = "Rock";
+        internal bool IsValid = true;
+    }
+    internal sealed record ForcePick(KSA.Vehicle? Vehicle, KSA.Part? Part = null,
+        ClutterForceTarget? Clutter = null, KSA.IParentBody? Parent = null, KSA.CelestialSystem? System = null)
+    {
+        internal bool Live = true;
+        internal double3 HitEgo { get; init; } = new(0, 0, -5);
+        internal string DisplayName => Vehicle?.Id ?? Clutter?.DisplayName ?? "Target";
+    }
+    internal readonly record struct ForceHoverPreview(KSA.Vehicle Vehicle, KSA.Part Part, double3 HitEgo);
     internal readonly record struct ForcePickRay(KSA.Ray Cci);
     internal static class ForceTargeting
     {
         internal static int Picks;
+        internal static int PreviewCalls;
+        internal static int ValidCalls;
         internal static KSA.Ray LastRay;
         internal static double LastTolerance;
         internal static ForcePick? Next;
         internal static bool FailPick;
         internal static bool TrySnapshotRay(KSA.KittenEva owner, KSA.Ray ray, out ForcePickRay snapshot)
         { snapshot = new(ray); return true; }
+        internal static bool IsLive(KSA.Vehicle vehicle) => !vehicle.IsDisposed && !vehicle.IsEditedVehicle;
+        internal static bool Valid(KSA.KittenEva owner, ForcePick pick)
+        {
+            ValidCalls++;
+            if (!pick.Live || !IsLive(owner) || !ReferenceEquals(owner, KSA.Program.ControlledVehicle)) return false;
+            if (pick.Vehicle is { } vehicle && pick.Clutter == null && pick.Part is { } part)
+                return IsLive(vehicle) && !ReferenceEquals(vehicle, owner)
+                    && ReferenceEquals(vehicle.System, owner.System) && ReferenceEquals(vehicle.Parent, owner.Parent)
+                    && ReferenceEquals(pick.System, owner.System) && ReferenceEquals(pick.Parent, owner.Parent)
+                    && ReferenceEquals(part.StructuralPart.Tree?.OwningVehicle, vehicle);
+            return pick.Vehicle == null && pick.Part == null && pick.Clutter is { IsValid: true }
+                && ReferenceEquals(pick.System, owner.System) && ReferenceEquals(pick.Parent, owner.Parent);
+        }
+        internal static bool TryPreviewNativeHit(KSA.KittenEva owner, KSA.Part part, double distance,
+            KSA.Ray egoRay, KSA.Camera camera, out ForceHoverPreview preview)
+        {
+            PreviewCalls++;
+            preview = default;
+            var structural = part.StructuralPart;
+            if (part.IsAttachedInternal || structural.IsAttachedInternal || !double.IsFinite(distance) || distance < 0
+                || !IsLive(owner) || !ReferenceEquals(owner, KSA.Program.ControlledVehicle)
+                || structural.Tree?.OwningVehicle is not { } vehicle || !IsLive(vehicle)
+                || vehicle is KSA.KittenEva || ReferenceEquals(vehicle, owner)
+                || !ReferenceEquals(vehicle.System, owner.System) || !ReferenceEquals(vehicle.Parent, owner.Parent)) return false;
+            var direction = double3.NormalizeOrZero(egoRay.Direction);
+            var point = egoRay.Origin + direction * distance;
+            if (!double.IsFinite(point.X) || !double.IsFinite(point.Y) || !double.IsFinite(point.Z)) return false;
+            preview = new(vehicle, structural, point);
+            return true;
+        }
         internal static bool TryPick(KSA.KittenEva owner, ForcePickRay ray, out ForcePick? pick, out string reason,
             double clutterTolerance = .2)
         {
@@ -213,7 +287,7 @@ namespace Purr2D2.Force
             Picks++; LastRay = ray.Cci; LastTolerance = clutterTolerance;
             pick = Next; reason = "No target"; return pick != null;
         }
-        internal static bool TryHitEgo(ForcePick pick, KSA.Camera camera, out double3 point) { point = new(0, 0, -5); return true; }
+        internal static bool TryHitEgo(ForcePick pick, KSA.Camera camera, out double3 point) { point = pick.HitEgo; return true; }
     }
     internal sealed class ForceController : IDisposable
     {
@@ -223,11 +297,6 @@ namespace Purr2D2.Force
         internal bool CanBreakup, BreakupActive, BreakupPrepared = true, BreakupCompletesOnCommit = true;
         internal int CapturedLimit;
         internal double CapturedRadius;
-        internal double CaptureRadius = ForceMath.DefaultCaptureRadius;
-        internal int GrowthCalls;
-        internal double LastGrowthRadius;
-        internal int LastGrowthLimit;
-        internal bool FailGrowth;
         internal double GroupSpread = ForceMath.DefaultGroupSpread;
         internal int SimulatedCapturedCount = 1;
         internal int CapturedCount => HasCapture ? SimulatedCapturedCount : 0;
@@ -248,16 +317,7 @@ namespace Purr2D2.Force
             if (HasCapture) { Status = "Already holding"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
             if (!pick.Live) { Status = "Stale target"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
             HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
-            CaptureRadius = angry ? angryRadius : ForceMath.DefaultCaptureRadius; Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
-        }
-        internal bool GrowCapture(KSA.KittenEva owner, double radius, int captureLimit = ForceCaptureLimits.Default)
-        {
-            GrowthCalls++; LastGrowthRadius = radius; LastGrowthLimit = captureLimit;
-            if (!HasCapture || !ReferenceEquals(Owner, owner) || BreakupActive || radius < CaptureRadius) return false;
-            CaptureRadius = radius;
-            Status = FailGrowth ? "Fixture growth query refused." : $"Holding {CapturedCount} objects.";
-            StatusSeverity = FailGrowth ? ForceStatusSeverity.Warning : ForceStatusSeverity.None;
-            return !FailGrowth;
+            Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
         }
         internal void Update(KSA.KittenEva? owner)
         {
@@ -286,8 +346,8 @@ namespace Purr2D2.Force
         internal void CancelBreakup()
         { if (!BreakupActive) return; Events.Add("BreakupCancel"); BreakupCancels++; BreakupActive = false; }
         internal void Release(bool thrown, double throwSpeed = ForceMath.ThrowSpeed)
-        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; CaptureRadius = ForceMath.DefaultCaptureRadius; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
-        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; CaptureRadius = ForceMath.DefaultCaptureRadius; Status = ""; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
+        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
+        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
         public void Dispose() => Disposed = true;
     }
 }

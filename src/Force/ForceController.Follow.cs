@@ -67,7 +67,7 @@ internal sealed partial class ForceController
     {
         if (!ForceMath.Finite(state.Position) || !ForceMath.Finite(state.Velocity) || !ForceMath.Finite(state.BodyRates)
             || !ForceMath.Finite(state.Body2Cci) || state.Body2Cci.NormalizedOrZero() == default)
-            throw new InvalidOperationException("The Force state is not finite.");
+            throw new InvalidOperationException("The Furce state is not finite.");
         // Full Teleport(orbit,...) forecasts up to 100 conics and may silently reject a ground orbit.
         // Stock separation uses these same native single-conic/analytic building blocks instead.
         var orbit = Orbit.CreateFromStateCci(source.Parent, time, state.Position, state.Velocity, source.Orbit.OrbitLineColor);
@@ -78,7 +78,7 @@ internal sealed partial class ForceController
         // Null orbit: use native attitude setters/analytic-state overwrite without forecasting again.
         source.Teleport(null, body2Cce, state.BodyRates);
         if (!ReferenceEquals(source.FlightPlan, plan) || source.HasPhysicsBubble || source.Orbit.StateVectors.StateTime != time)
-            throw new InvalidOperationException("KSA did not accept the Force state.");
+            throw new InvalidOperationException("KSA did not accept the Furce state.");
         source.UpdatePerFrameData();
     }
 }

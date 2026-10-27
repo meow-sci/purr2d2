@@ -7,7 +7,7 @@ Requested 2026-10-26. Research: GPT-6.1 Sol / xhigh. Implementation: GPT-6 Luna 
 - Use the existing audited `GameHooks` insertion in `Program.PrepareFrame`. It runs after prior solver results and input events have been applied, before new worker dispatch. UI callbacks publish intent; only the settled handoff binds avatars, reads native clutter, or changes capture membership.
 - Use each kitten's existing `KittenSaber` record. Rendering, lights, audio, clash detection, and cutting must agree on its effective, deployed blade length.
 - Reuse fixed or warmed storage in frame loops. No new physics colliders, native particle emitters, extra light sources, per-frame reflection, LINQ, or unbounded event queues for these features.
-- Preserve pending transaction cleanup, particularly accepted manual cuts and staged Force breakup. Visual hit-stop must not strand worker results or partially isolated vessels.
+- Preserve pending transaction cleanup, particularly accepted manual cuts and staged Furce breakup. Visual hit-stop must not strand worker results or partially isolated vessels.
 - Clear transient owner references and gestures on removal, boarding, world changes, disable, faults, and shutdown. Respect pause and unsupported warp.
 
 The existing Debug build passed with no warnings before changes. Current reference DLLs identify KSA 2026.10.19.5638. Native visual acceptance remains distinct from a managed build or test pass.
@@ -48,56 +48,39 @@ Crossing/parallel/end contacts; variable and partial length; no overlap spam; se
 - Restore ordinary hover tips after release/cancel.
 - Avoid unrelated structural removal of the old Distance layout, which the user assigned to another task. Its capture-radius behavior moves to Angry Furce as part of the requested feature.
 
-## 3. Growing Angry Furce radius
+## 3. Angry Furce session radius and throw pills
 
-The user confirmed that the sphere follows the captured group's selected point.
+The corrected workflow chooses the radius before any object is captured. The former after-capture growth feature is removed.
 
 ### Gesture contract
 
 | State and gesture | Result |
 | --- | --- |
-| Empty hold, normal Angry click | Enter/cancel Angry target selection |
-| Held group, normal Angry click | Throw at the existing default speed |
-| Normal upward Angry drag | Increase capture radius; release retains the group |
-| Shift held when pressing Angry with a held group | Existing adjustable throw-speed drag; release throws |
-| Downward motion during radius adjustment | Keep the largest radius reached |
-| Escape/right-click/focus loss/modal/invalid layout | Cancel gesture without throwing |
+| Empty hold, Angry press/hold | Open an upward radius pill, initially 2 m at the bottom and 50 m at the top |
+| Radius pill drag up/down | Choose any radius in the 2–50 m range; preview sphere remains centered on the kitten |
+| Radius pill release | Enter Angry target selection with that radius; the sphere follows the hovered target |
+| Separate target click | Capture the initial nearby group, then hide the sphere |
+| Angry target mode, CANCEL press | Cancel target selection and hide the preview |
+| Held group, THROW press/hold | Open a separate upward speed pill, initially 10 m/s and bounded by 250 m/s |
+| THROW release | Throw at the chosen speed; a plain click/release uses 10 m/s |
+| Escape/right-click/focus loss/modal/invalid layout | Cancel the gesture without entering a picker or throwing |
 
-- Start each new capture session at 2 m, bounded by 50 m. Radius is transient session state, not the old saved radius preference.
-- Use a small drag threshold to distinguish click and drag. Once crossed, returning to the button must never turn release into a throw.
-- Anchor motion to the press and current session radius. Re-grabbing cannot shrink or reset an existing hold's radius. Lock gesture type from press-time Shift.
-- Complete the gesture idempotently from either existing native/backend pointer-release path. Retain the final requested value even if release occurs before the next settled handoff.
-
-### Incremental capture
-
-1. Publish only the highest pending radius from pointer movement, tagged with owner and capture generation. Coalesce movement and limit growth queries to at most ten per second. Unchanged, idle, and full-cap holds need no proximity scan.
-2. Process release/throw before growth. Defer growth through staged breakup and apply it to the resulting current group, whose replacement pieces count against the capture cap.
-3. Query around the maintained selected point, obtained from `ForceController.TryGetPoseTargetBody`. Use that same point for the sphere. It already follows group translation, spread, and breakup replacement.
-4. Exclude held vehicle identities before mesh traversal and held clutter identities before nearest-result truncation. Otherwise existing objects can consume all candidate slots and prevent new captures.
-5. Keep exact surface/collider eligibility and bounded traversal. Reuse scratch lists and sets. An incomplete or refused query must not append partially validated candidates, and must not repeat until another radius increase.
-6. Snapshot all additions before promoting or detaching them. Do not call initial `Capture` again and do not recenter the old group. Preserve every original held record and group transform.
-7. Store each new body's offset using the inverse of the displayed group transform:
-
-   ```text
-   centered = (ownerRelativeOriginalPosition - groupCenter - groupOffset) / groupSpread
-   ```
-
-   This keeps new and old pieces in their current displayed positions when spread or movement is active.
-8. Publish updated immutable vehicle ownership only when membership changes. On failure, restore only the additions; retain the original group's capture, position, spread, and ability to move/release.
-9. If the configured cap is below the already-held count, add nothing and release nothing. Preserve the existing absolute 512-object limit.
+- Start every radius selection at 2 m and every throw-speed selection at 10 m/s. Neither requires Shift. Radius and speed are transient session values.
+- The radius can increase or decrease before capture. Once captured, no proximity growth or additional-object capture runs for that hold.
+- Do no targeting, capture or proximity queries while the radius pill is held. Only pointer movement, cached label changes and preview drawing occur.
+- Snapshot the selected radius before resetting the pill. Complete idempotently through either native/backend release path; the release cannot leak into a target click.
+- Validate press-time owner, world, parent and capture generation. Cancellation clears gesture references and prevents a later release from starting target mode.
+- Keep the initial capture's existing exact surface/collider eligibility, nearest mixed ordering, primary-target inclusion, capture cap and rollback. Retain breakup replacement, spread and movement behavior.
+- Display radius and throw speed to the right of their respective pills in regular-size text, centered on the thumb, with a dark shadow and no wrapping. Include the value labels in viewport bounds, matching Count.
 
 ### Sphere visualization
 
-- Precompute unit-sphere dash endpoints once: approximately eight meridians and eight latitude rings. Transform/project with bounded loops; no per-frame trigonometry, geometry allocation, or native capture query.
-- Use green for Light and red for Dark, based on the current kitten's type, with approximately 2-pixel lines.
-- Draw the same actual sphere used by selection/growth, around the hovered point before capture and maintained selected point while held.
-- Clip segments at the camera near plane and viewport, including when the camera is inside the sphere. Reject non-finite projections.
-- Draw beneath overlay controls. Hide with Force UI, invalid owner/camera, or modal state. Hiding the UI cancels the gesture but retains a held session's radius.
-- Remove the obsolete editable global radius row; preserve old serialized data compatibility without presenting a setting that no longer applies.
+- Show a sparse sphere while selecting radius, centered on the kitten. During target picking, center it on the current hovered surface point. Hide it after capture or cancellation.
+- Retain eight distinct meridians and eight latitude rings, using precomputed directions and fixed work bounds. Render filled 2-pixel dots instead of connecting dashes, green for Light kittens and red for Dark kittens.
+- Reject points behind the near plane, outside the viewport or with invalid projection. Reject the entire sphere outside the frustum. Camera-inside and partially visible spheres must remain finite and bounded.
+- Reuse stored geometry and draw through the existing overlay without per-frame collections, physics queries or native particle emitters.
 
-### Checks
-
-High-water drag and re-grab; 2 m reset; click/drag/Shift distinction; two release paths; tooltip visibility; coalescing and query throttling; no idle retries; old/new positions under nontrivial offset and spread; held-identity exclusion; cap after breakup; additions-only rollback; stale generation/owner rejection; near-plane and camera-inside projection; warmed geometry allocations.
+Checks: initial 2 m thumb/bottom and upward geometry; reversible selection; kitten-centered preview; selected-radius retention and target preview; separate click capture and immediate sphere hide; duplicate release/cancellation; throw reset 10 m/s and 250 m/s maximum; shared pointer ownership; no after-capture growth; initial mixed capture and rollback; finite 2-pixel dots and zero warmed projection allocations.
 
 ## 4. Per-kitten length
 
@@ -139,7 +122,7 @@ Checks: absolute click/drag/release mapping, endpoints/non-finite input, no pres
 - Add an Auto Swing circle immediately to the right of Ignite, with the same radius. Use the existing translucent black fill when off and blue when on. Keep the row below the large Swing circle so hit targets do not overlap.
 - A click toggles the controlled kitten's automatic swing. A drag opens a downward duration pill, with 0.5 seconds at the top and 3 seconds at the bottom. Start each kitten at 0.5 seconds per one-way stroke.
 - Preserve the duration at press and adjust relative to vertical pointer travel. A small movement threshold distinguishes click from drag; once crossed, release enables automatic swing even if the pointer returns to its starting point.
-- Keep the duration label visible inside the pill, without a covering tooltip. Cache its formatted text until the value changes.
+- Draw the duration in regular-size text to the right of the pill, vertically centered on the thumb, with a dark shadow and no wrapping. Include the value label in viewport clamping and draw it above overlapping controls. Cache its formatted text until the value changes.
 - Bind the gesture to its kitten and layout. Both release routes complete it once; focus loss, modal UI, hidden controls, owner changes, invalid geometry, or removal cancel it without enabling a different kitten.
 - Enabling auto swing on a retracted saber queues the ordinary ignition sequence. It preserves an already visible partial deployment. Retraction disables auto swing.
 
@@ -167,13 +150,23 @@ Requested after the dedicated clash and somersault recordings. Research: GPT-6.1
 
 Checks: click/subthreshold silence; first motion; duplicate input paths; stationary hold; 1,249/1,250 ms boundary; no cooldown backlog; release/repress; stale and invalid samples; pause/warp/clash and fresh-motion rearm; owner/visibility/modal cleanup; no automatic, keyboard or return-animation cue; zero warmed gate allocations; independent spatial audio lifetimes.
 
+## 8. Responsive Furce hover presentation
+
+- Refresh vessel preview hits every overlay frame from KSA's current native part picker. Store the result as a value type and perform no scene scans, mesh raycasts or native physics queries in the drawing path.
+- Keep capture authority in the existing settled query. Its bounded 20 Hz hover work also remains the fallback for physical ground clutter; visual previews never enqueue a capture.
+- Use the current native surface point for both marker and radius sphere. A newly encountered vessel is shown as pending until the settled query confirms its identity; the sphere still previews the chosen radius there.
+- Hide stale vessel feedback immediately when the native hit disappears. Retain clutter's existing world-anchored render metadata, without calling native body validity checks from drawing. Full clutter validation remains at the settled handoff.
+- Cache label text and measurement by target, mode, radius and font/layout state. Stable native and clutter presentation must not allocate per frame. UI blocking, cancellation, owner/world changes and successful capture clear preview references.
+
+Checks: current-frame hit changes without increasing full-query count; pending/confirmed identity transitions; marker/sphere agreement; click snapshot remains independent; no native clutter validation on draw; lifecycle clearing; warmed native and clutter cache allocations.
+
 ## Integration and verification
 
-Feature ownership separates Force code, per-kitten controls/persistence, and clash pose/audio/rendering. Shared runtime hooks and isolated test source registration receive a final integration pass.
+Feature ownership separates Furce code, per-kitten controls/persistence, and clash pose/audio/rendering. Shared runtime hooks and isolated test source registration receive a final integration pass.
 
 1. Build against the supplied game DLL snapshot with warnings treated as errors.
-2. Run focused managed checks for new geometry/state, capture append, UI scheduling, profile compatibility, and audio lifetimes.
-3. Run `python3 tools/validate.py --run-tests` for existing regressions and shader validation, plus `python3 tools/check_force_host.py` for changed Force host contracts.
+2. Run focused managed checks for new geometry/state, initial capture, UI scheduling, profile compatibility, and audio lifetimes.
+3. Run `python3 tools/validate.py --run-tests` for existing regressions and shader validation, plus `python3 tools/check_force_host.py` for changed Furce host contracts.
 4. Build the Release distribution and validate its staged payload.
 5. Record native checks still requiring KSA: visual hit-stop and expression ordering, contact sparkle appearance/sound, exact UI drag behavior, sphere clipping/color, and mixed vessel/clutter growth during breakup.
 

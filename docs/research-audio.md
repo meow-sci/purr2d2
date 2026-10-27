@@ -22,8 +22,8 @@ ignition, static, saber close, clash, mouse swing, somersault swoosh and metal r
 | `Assets/Audio/saber_clash.ogg` | User-supplied `saber_clash.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.190476 s; plays once per accepted clash. |
 | `Assets/Audio/sommersault_swoosh.ogg` | User-supplied `sommersault_swoosh.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.024580 s; plays once per acknowledged somersault jump with a lit saber. |
 | `Assets/Audio/saber_swoosh.ogg` | User-supplied `saber_swoosh.ogg` | Unmodified mono Vorbis, 22,050 Hz, 0.780771 s; plays on eligible mouse swing movement, at most once every 1.25 s. |
-| `Assets/Audio/metal_creak.ogg` | User-supplied `metal_creak.ogg` | Unmodified mono Vorbis, 48,000 Hz, 1.188521 s; plays once when Force breakup preparation starts. |
-| `Assets/Audio/metal_bang.ogg` | User-supplied `metal_bang.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.713787 s; plays once on visible Force breakup or an accepted manual slice. |
+| `Assets/Audio/metal_creak.ogg` | User-supplied `metal_creak.ogg` | Unmodified mono Vorbis, 48,000 Hz, 1.188521 s; plays once when Furce breakup preparation starts. |
+| `Assets/Audio/metal_bang.ogg` | User-supplied `metal_bang.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.713787 s; plays once on visible Furce breakup or an accepted manual slice. |
 | `Assets/Audio/light_side_static.ogg` | User-supplied `light_side_static.ogg` | Unmodified mono Vorbis, 44,100 Hz, 4.77059 s; full-file loop. |
 | `Assets/Audio/dark_side_static.ogg` | User-supplied `dark_side_static.ogg` | Unmodified mono Vorbis, 48,000 Hz, 8.422646 s; full-file loop. |
 | `Assets/Audio/saber-contact.wav` | `tools/generate_audio.py` | Original periodic oscillator/noise sizzle, fixed seed, mono 16-bit PCM, 48 kHz, 2 s. |
@@ -78,8 +78,9 @@ ignition/retraction and contact effects. Light uses the calmer recording; Dark u
 the more violent recording. Type is independent of blade color. Changing type stops
 only the previous static channel and starts the new one on the next unpaused update.
 The layer uses the moving hilt's 3D position, the existing 1–35 m spatial range and
-Sfx routing, with base gain `Volume × Deployment × 0.30`. Dark playback reduces both
-the shared hum and Dark static by another 30%; Light ignition uses 75% of the normal
+Sfx routing, with base gain `Volume × Deployment × 0.30`. Dark playback applies a
+0.49 multiplier to both the shared hum and Dark static, 30% below their previous
+0.70 multiplier. Light ignition uses 75% of the normal
 transition gain, while Dark ignition and retraction keep the existing level. Thus the
 loops grow with extension, recede with distance, and respect both the mod and game volume controls. It shares
 the hum's pause, suspension, retry limits, mute, retraction and cleanup behavior.
@@ -122,7 +123,7 @@ Clashes use the dedicated `Purr2D2SaberClash` one-shot on an independent spatial
 Somersaults use the dedicated `Purr2D2SomersaultSwoosh` one-shot with the supplied
 `sommersault_swoosh.ogg` recording for either saber type, at base gain 0.525. Neither
 cue falls back to ignition when its asset is missing. No audio placeholders remain.
-Accepted manual slices share the supplied metal bang with Force breakup; the
+Accepted manual slices share the supplied metal bang with Furce breakup; the
 contact sizzle remains a dedicated synthesized effect. Each action cue has its own
 channel, follows its accepted body-local point, and shares pause, volume and cleanup behavior.
 

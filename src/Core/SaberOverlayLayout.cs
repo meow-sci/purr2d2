@@ -13,6 +13,9 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
 {
     public bool ShowKittenList { get; init; } = true;
     public bool ShowLightsaberControls { get; init; } = true;
+    /// <summary>Regular-font dimensions for the no-wrap Auto Swing duration label.</summary>
+    public float AutoSwingValueWidth { get; init; } = 48;
+    public float AutoSwingValueHeight { get; init; } = 16;
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
     public float IgniteRadius => SliceRadius;
     public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
@@ -23,6 +26,15 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public float2 AutoSwingPillMin => AutoSwingCenter - new float2(IgniteRadius);
     public float2 AutoSwingPillMax => AutoSwingCenter + new float2(IgniteRadius,
         IgniteRadius + AutoSwingPillTravel);
+    public float AutoSwingValueLabelGap => Math.Max(4, 6 * Scale);
+    public float AutoSwingValueShadowOffset => Math.Max(1, Scale);
+    public float2 AutoSwingValueLabelPosition(float markerY) => new(
+        AutoSwingPillMax.X + AutoSwingValueLabelGap, markerY - AutoSwingValueHeight * .5f);
+    public float2 AutoSwingValueEnvelopeMin => AutoSwingValueLabelPosition(AutoSwingCenter.Y);
+    public float2 AutoSwingValueEnvelopeMax => AutoSwingValueLabelPosition(
+        AutoSwingCenter.Y + AutoSwingPillTravel)
+        + new float2(AutoSwingValueWidth + AutoSwingValueShadowOffset,
+            AutoSwingValueHeight + AutoSwingValueShadowOffset);
     public float SwingMarkerRadius => 5 * Scale;
     public float SwingTravelRadius => SwingRadius - SwingMarkerRadius;
     public float2 SwingIndicator(float2 offset) => SwingCenter + SaberOverlayDrag.ClampDisk(offset) * SwingTravelRadius;
@@ -39,10 +51,10 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public float2 DeploymentBarMax(int row, float scroll) => new(ListMax.X - Padding,
         DeploymentBarMin(row, scroll).Y + DeploymentBarHeight);
     public float2 ControlsMin => new(Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
-            SliceCenter.X - SliceRadius), StatusMin.X), AutoSwingPillMin.X),
-        Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y));
-    public float2 ControlsMax => new(Math.Max(StatusMax.X, AutoSwingPillMax.X),
-        Math.Max(StatusMax.Y, AutoSwingPillMax.Y));
+            SliceCenter.X - SliceRadius), Math.Min(StatusMin.X, AutoSwingValueEnvelopeMin.X)), AutoSwingPillMin.X),
+        Math.Min(Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y), AutoSwingValueEnvelopeMin.Y));
+    public float2 ControlsMax => new(Math.Max(Math.Max(StatusMax.X, AutoSwingPillMax.X), AutoSwingValueEnvelopeMax.X),
+        Math.Max(Math.Max(StatusMax.Y, AutoSwingPillMax.Y), AutoSwingValueEnvelopeMax.Y));
 
     /// <summary>Moves the action controls and their status together; offsets are fractions of the viewport.</summary>
     public SaberOverlayLayout WithControlsOffset(float2 origin, float2 size, float2 normalizedOffset, float topInset = 0)

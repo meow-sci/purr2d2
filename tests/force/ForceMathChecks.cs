@@ -11,7 +11,7 @@ internal static class ForceMathChecks
         GroupSpreadArithmetic();
         ActualSurfaceDistance();
         InvalidFrames();
-        Console.WriteLine("Force math checks passed (rigid position/spin, inertial tangential velocity, 25m/s throws, bounded movement and exact surface proximity).");
+        Console.WriteLine("Force math checks passed (rigid position/spin, inertial tangential velocity, 10–250m/s throws, bounded movement and exact surface proximity).");
     }
 
     private static void RigidVelocityAndFrames()
@@ -38,15 +38,15 @@ internal static class ForceMathChecks
     {
         var state = new ForceRigidState(new(3, 4, 0), new(10, -2, 7), doubleQuat.Identity, double3.Zero);
         var thrown = ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity);
-        Equal(thrown, new(25, 18, 7), "throw adds 25m/s outward, retaining inherited velocity");
+        Equal(thrown, new(16, 6, 7), "throw adds the 10m/s default outward, retaining inherited velocity");
         Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity, 200), new(130, 158, 7),
-            "a chosen 200m/s throw speed adds the requested outward velocity");
+            "a chosen 200m/s throw speed remains within the expanded bounds");
         Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity, double.PositiveInfinity), thrown,
-            "nonfinite throw speed falls back to the safe 25m/s default");
-        Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity, 500), new(130, 158, 7),
-            "throw speed is clamped to the 200m/s control maximum");
+            "nonfinite throw speed falls back to the safe 10m/s default");
+        Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity, 500), new(160, 198, 7),
+            "throw speed is clamped to the 250m/s control maximum");
         state = state with { Position = double3.Zero };
-        Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity), new(35, -2, 7), "coincident object throws along kitten forward");
+        Equal(ForceMath.ThrowVelocity(state, double3.Zero, doubleQuat.Identity), new(20, -2, 7), "coincident object throws along kitten forward");
         Check(ForceMath.ValidOffset(new(15, 20, 0)), "25m diagonal is legal");
         Check(ForceMath.ValidOffset(new(25.000001, 0, 0)), "floating point widget boundary is tolerated");
         Check(!ForceMath.ValidOffset(new(25.001, 0, 0)), "real offset excess rejected");

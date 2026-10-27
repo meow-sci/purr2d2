@@ -114,7 +114,7 @@ internal sealed partial class SaberRuntime
             finally { ImGui.EndDisabled(); }
         }
         finally { ImGui.EndDisabled(); }
-        if (!maintain) ImGui.TextDisabled("Cleanup is available in an active world when slicing and Force are idle.");
+        if (!maintain) ImGui.TextDisabled("Cleanup is available in an active world when slicing and Furce are idle.");
 
         if (_confirmSliceDebrisRemoval)
         {
