@@ -76,11 +76,11 @@ The corrected workflow chooses the radius before any object is captured. The for
 ### Sphere visualization
 
 - Show a sparse sphere while selecting radius, centered on the kitten. During target picking, center it on the current hovered surface point. Hide it after capture or cancellation.
-- Retain eight distinct meridians and eight latitude rings, using precomputed directions and fixed work bounds. Render filled 2-pixel dots instead of connecting dashes, green for Light kittens and red for Dark kittens.
+- Retain eight distinct meridians and eight latitude rings, using precomputed directions and fixed work bounds. Render short, 2-pixel-wide dashes, green for Light kittens and red for Dark kittens.
 - Reject points behind the near plane, outside the viewport or with invalid projection. Reject the entire sphere outside the frustum. Camera-inside and partially visible spheres must remain finite and bounded.
 - Reuse stored geometry and draw through the existing overlay without per-frame collections, physics queries or native particle emitters.
 
-Checks: initial 2 m thumb/bottom and upward geometry; reversible selection; kitten-centered preview; selected-radius retention and target preview; separate click capture and immediate sphere hide; duplicate release/cancellation; throw reset 10 m/s and 250 m/s maximum; shared pointer ownership; no after-capture growth; initial mixed capture and rollback; finite 2-pixel dots and zero warmed projection allocations.
+Checks: initial 2 m thumb/bottom and upward geometry; reversible selection; kitten-centered preview; selected-radius retention and target preview; separate click capture and immediate sphere hide; duplicate release/cancellation; throw reset 10 m/s and 250 m/s maximum; shared pointer ownership; no after-capture growth; initial mixed capture and rollback; finite clipped dashes and zero warmed projection allocations.
 
 ## 4. Per-kitten length
 
