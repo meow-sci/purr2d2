@@ -60,6 +60,7 @@ static class HostInspection
                     "KSA.IViewport", "Brutal.VulkanApi.CommandBuffer", "System.Boolean"),
                 new("KSA.PartModel", "AddInstance", "System.Void", false, MethodAttributes.Private,
                     "KSA.PartModel+PerInstanceData", "KSA.Deformation.PerInstanceDent", "KSA.IViewport", "System.Int32"),
+                new("KSA.PartModel", "WriteInstancesToGpu", "System.Void", false, MethodAttributes.Public, "KSA.IViewport", "System.Int32"),
                 new("KSA.Vehicle", "DepleteConsumables", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Vehicle", "UpdateVehicleConfiguration", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Vehicle", "UpdateAfterPartTreeModification", "System.Void", false, MethodAttributes.Public),
@@ -93,6 +94,11 @@ static class HostInspection
             CheckParameterNames(host, "KSA.Program", "OnKey", "window", "key", "scanCode", "action", "mods");
             CheckParameterNames(host, "KSA.Program", "OnFocus", "window", "focusEvent");
             CheckParameterNames(host, "KSA.ImGuiBackendGlfwImpl", "OnMouseButton", "window", "button", "action", "mods");
+            // Cut-cap emission binds the submitted value and the uploaded view by name.
+            CheckOverloadParameterNames(host, "KSA.PartModel", "AddInstance",
+                ["KSA.PartModel+PerInstanceData", "KSA.Deformation.PerInstanceDent", "KSA.IViewport", "System.Int32"],
+                "instanceData", "dentInstance", "viewport", "frameIndex");
+            CheckParameterNames(host, "KSA.PartModel", "WriteInstancesToGpu", "viewport", "frameIndex");
             CheckAvatarField(host);
             CheckPrivateField(host, "KSA.Vehicle", "_threadWorkerUpdateState", "KSA.VehicleUpdateState");
             CheckDeviceMeshFields(host);
@@ -136,10 +142,17 @@ static class HostInspection
         return matches[0];
     }
 
-    private static void CheckParameterNames(Image image, string type, string name, params string[] expected)
+    private static void CheckParameterNames(Image image, string type, string name, params string[] expected) =>
+        CheckParameterNames(image, type, name, image.Methods(type, name).Where(h => image.Reader.GetMethodDefinition(h)
+            .DecodeSignature(image.Types, (object?)null).ParameterTypes.Length == expected.Length).ToArray(), expected);
+
+    // For overloads sharing a parameter count, select the exact patched signature.
+    private static void CheckOverloadParameterNames(Image image, string type, string name, string[] parameterTypes, params string[] expected) =>
+        CheckParameterNames(image, type, name, image.Methods(type, name).Where(h => image.Reader.GetMethodDefinition(h)
+            .DecodeSignature(image.Types, (object?)null).ParameterTypes.SequenceEqual(parameterTypes)).ToArray(), expected);
+
+    private static void CheckParameterNames(Image image, string type, string name, MethodDefinitionHandle[] methods, string[] expected)
     {
-        var methods = image.Methods(type, name).Where(h => image.Reader.GetMethodDefinition(h)
-            .DecodeSignature(image.Types, (object?)null).ParameterTypes.Length == expected.Length).ToArray();
         if (methods.Length != 1) return; // The exact signature check above reports a changed/ambiguous target.
         var names = image.Reader.GetMethodDefinition(methods[0]).GetParameters()
             .Select(image.Reader.GetParameter).Where(p => p.SequenceNumber > 0)

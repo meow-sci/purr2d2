@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Xml.Linq;
 using Brutal;
@@ -27,6 +28,7 @@ internal static partial class RuntimeFragmentAssets
     private static bool _initialized, _installed;
     private static double _now;
     private static readonly Dictionary<string, double> HotCaps = new(StringComparer.Ordinal);
+    private static readonly Dictionary<PartModel, string> CapFragments = new(ReferenceEqualityComparer.Instance);
     private static readonly Dictionary<string, PreparedFragment> Prepared = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> FailedPreparations = new(StringComparer.Ordinal);
 
@@ -98,7 +100,10 @@ internal static partial class RuntimeFragmentAssets
         var target = AccessTools.Method(typeof(PartModel), nameof(PartModel.AddInstance),
             [typeof(PartModel.PerInstanceData), typeof(PerInstanceDent), typeof(IViewport), typeof(int)])
             ?? throw new MissingMethodException("The native cap-emission submission method changed.");
+        var upload = AccessTools.Method(typeof(PartModel), nameof(PartModel.WriteInstancesToGpu), [typeof(IViewport), typeof(int)])
+            ?? throw new MissingMethodException("The native part-model instance upload method changed.");
         harmony.Patch(target, prefix: new HarmonyMethod(typeof(RuntimeFragmentAssets), nameof(BeforePartInstance)));
+        harmony.Patch(upload, prefix: new HarmonyMethod(typeof(RuntimeFragmentAssets), nameof(BeforePartInstanceUpload)));
         _installed = true;
     }
 
@@ -114,24 +119,45 @@ internal static partial class RuntimeFragmentAssets
         _now = nowPlayerSeconds;
     }
 
+    // Raytraced IVA submissions leave through this overload without entering InstanceList.
     private static void BeforePartInstance(PartModel __instance, ref PartModel.PerInstanceData instanceData)
     {
-        string id = __instance.Template.Mesh?.Id ?? "";
-        if (!id.StartsWith(Prefix, StringComparison.Ordinal) || !id.EndsWith("_cap", StringComparison.Ordinal)) return;
-        int solidMarker = id.IndexOf("_s", Prefix.Length, StringComparison.Ordinal);
-        string fragmentId = solidMarker < 0 ? id[..^4] : id[..solidMarker];
-        // These flags are changed on this submitted value only, never on templates/other models.
-        if (!HotCaps.TryGetValue(fragmentId, out var born) || _now - born >= 18)
+        if (TryGetCapFragment(__instance, out string fragmentId))
+            ApplyCapEmission(fragmentId, new Span<PartModel.PerInstanceData>(ref instanceData));
+    }
+
+    // Batched PartTreeRenderData.Compose writes InstanceList directly in every other view,
+    // bypassing AddInstance. Rewrite generated cap entries immediately before their upload.
+    private static void BeforePartInstanceUpload(PartModel __instance, IViewport viewport)
+    {
+        if (!TryGetCapFragment(__instance, out string fragmentId)) return;
+        var instances = PartModel.ViewportData.Get(__instance, viewport).InstanceList;
+        if (instances.Count != 0) ApplyCapEmission(fragmentId, CollectionsMarshal.AsSpan(instances));
+    }
+
+    // Main render thread only. The upload prefix runs for every model in every view each
+    // frame, so ordinary models exit on the mesh id and cap ids are parsed once per model.
+    private static bool TryGetCapFragment(PartModel model, out string fragmentId)
+    {
+        string? id = model.Template.Mesh?.Id;
+        fragmentId = "";
+        if (!SliceCapEmission.IsCapMesh(id)) return false;
+        if (CapFragments.TryGetValue(model, out fragmentId!)) return true;
+        if (!SliceCapEmission.TryGetFragmentId(id, out fragmentId)) return false;
+        CapFragments.Add(model, fragmentId);
+        return true;
+    }
+
+    private static void ApplyCapEmission(string fragmentId, Span<PartModel.PerInstanceData> instances)
+    {
+        uint color = 0;
+        bool hot = HotCaps.TryGetValue(fragmentId, out double born) && SliceCapEmission.TryGetGlow(_now - born, out color);
+        // These flags are changed on submitted values only, never on templates/other models.
+        foreach (ref var instance in instances)
         {
-            instanceData.StateBitFlag = (instanceData.StateBitFlag | 64) & ~128;
-            return;
+            instance.StateBitFlag = SliceCapEmission.Flags(instance.StateBitFlag, hot);
+            if (hot) instance.EmissiveColor = color;
         }
-        double age = Math.Max(0, _now - born);
-        uint r = (uint)Math.Clamp(255 * Math.Exp(-age / 7), 0, 255);
-        uint g = (uint)Math.Clamp(165 * Math.Exp(-age / 3), 0, 255);
-        uint b = (uint)Math.Clamp(40 * Math.Exp(-age / 1.7), 0, 255);
-        instanceData.StateBitFlag = (instanceData.StateBitFlag & ~64) | 128;
-        instanceData.EmissiveColor = (r << 16) | (g << 8) | b;
     }
 
     private static DeviceMeshInterleaved MakeDeviceMesh(MeshAsset mesh, uint vertexOffset, uint indexOffset)

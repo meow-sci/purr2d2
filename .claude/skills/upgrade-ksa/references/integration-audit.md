@@ -172,10 +172,14 @@ HDR/depth/MSAA targets, native light systems and stock forward-light GLSL.
   actual `WriteForwardLights(IViewport,ref UboLightingData)` branch, private `_forwardCandidates`,
   all CPU array capacities, native packing and stock shader array sizes/dynamic loop. Rejection
   must preserve incoming IL, selection logic and secondary-view budgets; setting defaults off.
-- Cap emission prefix is the exact private
-  `PartModel.AddInstance(PerInstanceData,PerInstanceDent,IViewport,int)` overload. Preserve struct
-  meaning and target only generated cap instances; saved caps reload cold. Check `Dispose` timing
-  before Vulkan teardown and ownership of shared assets versus mod-owned GPU objects.
+- Cap emission has two prefixes: public `PartModel.WriteInstancesToGpu(IViewport,int)` rewrites the
+  per-view `ViewportData.InstanceList` that batched `PartTreeRenderData.Compose` fills directly, and
+  the private `PartModel.AddInstance(PerInstanceData,PerInstanceDent,IViewport,int)` covers
+  raytraced IVA submissions that bypass that list. Re-prove both paths, the upload of that list and
+  the stock state bits (6 no emissive, 7 add emissive color); `tests/CapEmissionHostChecks.cs`
+  checks the upload contract. Preserve struct meaning and target only generated cap instances;
+  saved caps reload cold. Check `Dispose` timing before Vulkan teardown and ownership of shared
+  assets versus mod-owned GPU objects.
 
 **Checks/docs:** saber shader script via validator, blend/VFX/light tests and fragment host check;
 `docs/research-rendering.md`, `docs/COMPATIBILITY.md`, water/lighting acceptance entries.

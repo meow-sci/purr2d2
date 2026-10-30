@@ -828,3 +828,36 @@ Native gameplay acceptance remains pending: exercise the complete radius/aim/cap
 - [ ] Slice the shielded `MediumCapsuleVariantA` with crew and a gas-holding tank. Mass checks must pass with no "Native fragment mass changed" refusal.
 - [ ] Let an equipped, Furce-holding EVA kitten (with a background equipped kitten) die of radiation, including just after a somersault launch. Expect no fault, released holds, stopped audio and removed pose/cape owners. Save and reload with sick, dead and retired kittens, with both 5638- and 5707-written sidecars.
 - [ ] Windows multi-monitor: overlay hit-testing and click/scroll suppression after a primary-monitor reconnect and a DPI change. Use MMU left/right thrust with a deployed saber, and audition every FMOD cue and its cleanup.
+
+## Cut-cap cooling glow in every raster view (2026-10-29)
+
+This supersedes the "pre-existing defect found, not fixed here" paragraph of the KSA 2026.10.25.5707 upgrade record above.
+
+Generated cut caps use the `Purr2D2_CutSurface` material, whose emissive map is the stock uniform `EmptyWhite`. The cooling effect therefore depends on per-instance state bits from stock `MeshIndirect.frag`: bit 6 suppresses emission, and bit 7 replaces the sampled emission with the instance color. In 5638 and 5707, the only hook was a prefix on private `PartModel.AddInstance(PerInstanceData, PerInstanceDent, IViewport, int)`. Batched `PartTreeRenderData.Compose` reaches that overload only for raytraced IVA. Every other view writes `PartModel.ViewportData.InstanceList` directly, so exterior, map, secondary and non-raytraced IVA caps were submitted with neither bit set. Going by the shader code, they were probably shown at the full white emissive sample instead of glowing orange and cooling to dark. No native screenshot of that defect was recorded.
+
+A second prefix on public `PartModel.WriteInstancesToGpu(IViewport viewport, int frameIndex)` now rewrites that view's generated cap entries in `InstanceList` immediately before upload. The existing `AddInstance` prefix remains for raytraced IVA, which bypasses the list. The pure state logic lives in `src/Core/SliceCapEmission.cs` and applies the same rule to both paths:
+- A cap cut less than 18 seconds ago gets bit 7, with the unchanged cooling color: 0xFFA528 when fresh, fading through orange to a dim red.
+- Older and saved caps get bit 6 and are drawn dark.
+- Other native bits are preserved, and reapplying the rule is idempotent, so instances that pass through both hooks are unaffected.
+
+The upload prefix runs for every part model in every view each frame. Ordinary models exit on an allocation-free mesh-id test, and each cap's heat-owner id is parsed once per model and cached (main render thread only).
+
+Verification:
+- `SliceCapEmissionChecks` (CoreChecks) covers heat-owner parsing for merged and older cap names, rejection of non-cap names, the fresh color, monotonic cooling, cold and invalid ages, the stock bit values, bit preservation and idempotence.
+- `CapEmissionHostChecks` (`check_fragment_templates.py`) verifies on actual 5707 IL that `PartModelRenderer.UpdateRenderData` uploads every static part model through `WriteInstancesToGpu`, and that this method uploads the per-viewport `ViewportData.InstanceList` the prefix rewrites.
+- `inspect_host.cs` checks both hook signatures and the Harmony argument names `instanceData` and `viewport`.
+
+The complete matrix passes on these sources (`artifacts/checks/capglow-final-*.log`):
+- Debug and Release builds have zero warnings and errors.
+- The validator runs 40 suites with 2,388 PASS lines, plus shaders and ABI.
+- Host checks: the inspector passes 146 checks, the fragment harness 13, Force host 289; mesh growth, cape cloth, bootstrap with peer parity, and warmup (1,300/1,300) all pass.
+- Stock slices pass 36 checks.
+- Archive integrity passes: 42 files, SHA-256 `02c9ae4153466e8d2ee3ddae68f6846357a4b99e4c9457af59c8fd6ae4d24e72`.
+
+No GPU work runs in these checks.
+
+Native visual acceptance remains pending:
+
+- [ ] Slice a part in an exterior view, then watch the new cap faces glow orange, fade through red within about 18 seconds, and stay dark. Repeat in a secondary viewport, in map view, and in IVA with ray tracing off and on.
+- [ ] Reload a save containing older fragments. Their caps must stay dark, with no white emissive faces. Recut a fragment and confirm only the new caps glow.
+- [ ] Profile a scene with many fragments; the upload prefix must not add measurable frame time.

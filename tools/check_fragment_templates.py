@@ -74,7 +74,7 @@ for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/Fragmen
                'src/Slicing/SliceCommitTimings.cs', 'src/Runtime/GameHooks.cs',
                'tests/SliceDiagnosticsChecks.cs', 'tests/FrameHooksChecks.cs', 'tests/FrameHooksHostStubs.cs',
                'tests/SliceWorkerDiagnosticsChecks.cs', 'tests/SliceWorkerHooksChecks.cs',
-               'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs']:
+               'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs', 'tests/CapEmissionHostChecks.cs']:
     ET.SubElement(items, 'Compile', Include=str(root / source))
 for dll in host.glob('*.dll'):
     if dll.stem.startswith(('System.', 'Microsoft.')) or dll.stem in ('mscorlib', 'netstandard'):

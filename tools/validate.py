@@ -610,6 +610,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SomersaultMotion.cs",
         source / "src/Core/SomersaultSequence.cs",
         source / "tests/SomersaultMotionChecks.cs",
+        source / "src/Core/SliceCapEmission.cs",
+        source / "tests/SliceCapEmissionChecks.cs",
     ]
     target_sources = [
         source / "src/Cutting/PartSliceTargeting.cs",
@@ -637,7 +639,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/contact/ManualRuntimeChecks.cs", source / "tests/contact/ManualRuntimeHostStubs.cs"]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); SliceCapEmissionChecks.Run(); } }\n"
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",
