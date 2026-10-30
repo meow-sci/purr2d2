@@ -769,3 +769,62 @@ Focused cached checks passed: `CoreChecks`, `ForceUiChecks` (radius, dots, spher
 The final Release solution build passed with zero warnings/errors. Source/stage validation passes; all 42 ZIP files match staging, packaged assets and README match source, the staged DLL matches Release, and the archive checksum agrees. The removed growth source is absent from production and validator inputs. Evidence: `artifacts/checks/furce-flow-release-build.log`, `furce-flow-package-validation.log` and `furce-flow-package-integrity.log`.
 
 Native gameplay acceptance remains pending: exercise the complete radius/aim/capture/throw sequence, verify dot size and right-side values at the current UI scale, test world Shift-wheel on a multi-object hold, and audition the quieter Dark loops. Vessel previews are updated each frame; physical clutter still uses bounded lookup cadence.
+
+## KSA 2026.10.25.5707 upgrade (2026-10-29)
+
+**Span.** OLD is the recorded baseline, KSA 2026.10.19.5638 (`ksa-game-assemblies` commit `edda844`, read from the `ksa-game-assemblies_prev` worktree). NEW is KSA 2026.10.25.5707 (`4b3e9e2281c6eec25c9ab77ddf2961ec53ec3dc8`, `../ksa-game-assemblies/current`). `version.json` covers revisions 5638→5707 contiguously, but its changelog lists only 5639–5703; revisions 5704–5707 have no entries and were covered only by the decomp/IL/Content review. Both snapshots hold the same 38 DLL filenames. Every Brutal and Planet module changed (changelog 5652, Brutal package update), as did KSA (MVID `a6318490-1e4f-4d4c-9f1a-b48f97f44be4`); BepuPhysics, BepuUtilities and CommunityToolkit.HighPerformance are identical. Assembly versions other than KSA remain 1.0.0.0, so no reference or package changes were needed. StarMap.API 0.3.6 and Harmony 2.4.2 are unchanged compile-only references; no loader change is required.
+
+**Fixes for confirmed 5707 breaks.**
+
+- *Legacy saved-fragment picking (regression).* In 5638, `Part(PartInstance, Part)` chained into the patched `Part(string, PartTemplate, PartInstance, Part)` constructor. In 5707, it and the new editor-clone `Part(Part, Part)` call a private initializer directly. Save loading (`PartTree.Deserialize` → `RegenerateFromPartInstance`) therefore skipped `RepairLegacyFragmentPicker`, and pre-v3 fragments with a root pick mesh lost native hover, click-to-slice and Furce ray picking. All three public entry constructors are now postfixed. A new real-IL check follows each public constructor's `: this(...)` chain and requires exactly one postfix per construction. Its negative control shows the 5638 hook set leaves save loading unpatched.
+- *Picker module registration (latent regression, exposed by the fix above).* `Part.SubtreeModules` now aliases `Modules` for childless subparts, so the old three `Add` calls would have registered the picker twice. The repair now uses native `Module<T>.AddNewTo`. The contact stub models the 5707 alias, and the focused test asserts single registration. Against the old code, that test fails.
+- *Render-order contract.* Changelog 5663 replaced `PlanetTransparenciesRenderer.RenderAtmosphereOnly` with `RenderAtmosphereAndClouds`, called at the same `RenderViewport` position: after the opaque pass, before sunbloom, the MSAA bridge, the saber translucency pass and `ResolveAttachments`. Secondary views now composite clouds before the blade, as the main view already did. `tools/inspect_host.cs` expects the new name. The unmodified inspector failed only this stage, and the updated one still rejects the 5638 host.
+- *Mesh growth re-audit.* The five pinned modules all changed, so growth was correctly refused until it was audited. These were unchanged: `DeviceMeshInterleaved`, `Device`, `Queue`, `StagingPool`, `CommandBufferPool`, `RaytracingRenderer`, `RaytraceBlasSystem` and the top-level `RaytraceAllocator`. Every raster, thumbnail and raytracing draw still binds the current shared handles. RT shaders still read geometry through set 0 bindings 3/4 (no buffer references). Changelog 5670 (scratch, SBT and acceleration-structure address alignment) caches no shared-buffer address, and BLAS creation still waits on its staging submit. The new timeline `Submit` overload still goes through the locked queue wrapper. The `Core.Renderer` changes are limited to the HDR swapchain and UI image. All existing structural IL contracts pass against 5707, so the pins now name the 5707 modules. `DeviceEx` gained an `AllocationInfo.CreateInfo.AllocateFlags` channel; `DedicatedMeshBufferAllocator` now refuses it rather than dropping flags. The host check proves `RaytraceAllocator` still chains `DEVICE_ADDRESS` through `Next`, and it rejects the 5638 identities. A negative control without the allocator guard fails.
+
+**Audited as compatible, no change required.**
+
+- *Frame and workers.* `PrepareFrame` is unchanged, with identical IL offsets, and so are the worker preparation order, `KittenEva`, `InputEvents`, `JobSystems`, `VehicleUpdateTask`, `PhysicsBubble`, `ConstraintSim`, `NarrowPhaseCallbacks` and `BubbleClutterStatics`.
+- *Saves and roster.* `GameSave`, `UncompressedSave` and `UniverseData` are unchanged.
+- *Rendering and assets.*
+  - The ImGui backend mouse and scroll hook bodies are unchanged.
+  - The saber pipeline's offscreen color, depth and sample formats are unchanged, including with HDR output.
+  - Point and forward lights are unchanged, including the stock 16-light arrays and the environment-light transpiler.
+  - `ShaderReloader.GetModPath` is unchanged.
+  - The source-generated GLTF JSON reader accepts every shipped GLB.
+  - The cape hook's arguments are unchanged, and the cape GLB loads with zero inverse-bind error.
+- *Slicing physics.*
+  - The `Vehicle.Split`/adoption/worker bindings are unchanged.
+  - The capsule's new 500 kg `RadiationShield` is part of both source and native mass.
+  - `Tank.DepleteAll` also empties stored gas.
+  - The cap `AddInstance` overload body is identical.
+- *Radiation.* `Universe.ApplyVehicleSolvers` can now destroy a lethally dosed EVA kitten. This happens before the settled update, on the same ordering as existing in-solver destruction, so existing owner cleanup applies. Retired kittens cannot be on EVA, and the new roster dose/retired data only adds bytes to the hashed `universe.xml`.
+- *Clutter.* Furce reflection targets are unchanged.
+
+**Pre-existing defect found, not fixed here.** `PartTreeRenderData.Compose` reaches the private `PartModel.AddInstance(PerInstanceData, PerInstanceDent, IViewport, int)` overload only in the raytraced IVA branch; every other view writes `PartModel.ViewportData.InstanceList` directly. The same code is in 5638, so the cooling-cap emission prefix cannot tint caps in ordinary exterior views on either build. No native observation of glowing caps is recorded. A candidate fix is a prefix on public `PartModel.WriteInstancesToGpu(IViewport, int)` that rewrites generated `_cap` entries in that list, keeping the existing prefix for raytraced IVA. It needs native visual confirmation first.
+
+**Automated results** on final sources (`b68124a` plus working tree), all logged under `artifacts/checks/ksa5707-final-*.log` with commands and target paths:
+
+- *Builds.* Debug and Release solution builds have zero warnings and errors.
+- *Validator.* `validate.py --run-tests` passes all 40 managed suites (2,380 PASS lines), source and staged Light/Dark shader compile/link, the 128-byte push-constant ABI, and source/stage metadata.
+- *Host checks.*
+  - `inspect_host.cs` passes 142 checks on the Release DLL.
+  - `check_fragment_templates.py` passes, including the new Part-constructor coverage.
+  - `check_force_host.py` passes 289 checks.
+  - `check_mesh_growth.py` and `check_mesh_growth_host.py` pass.
+  - `check_cape_cloth.py` passes: zero inverse-bind error; two capes take 0.414 ms median per update with 0 B allocated (standalone CPU).
+  - `check_runtime_bootstrap.py` passes all 19 isolated cases, plus source parity with gatOS `399456f` and unscience `8c07ef0`.
+- *JIT warmup.* `check_slice_warmup.py` prepares 1,300/1,300 bodies (98,061 IL bytes, 795 boundaries, failed 0). It needs MathNet.Numerics 5.0.0, which both snapshots omit; the copy used, NuGet `lib/net6.0` (SHA-256 `83b41a60…`), is identical to the installed game's. The same HEAD against 5638 selects 1,303 bodies. The delta comes entirely from changed host bodies (PartTree module save/derived paths, crew dose crediting) and is recorded in `ksa5707-slice-warmup-graph-diff.log`; roots and budgets are unchanged.
+- *Stock slices.* `check_stock_slices.py` passes 36 checks on seven fixtures, including small-tank contact recovery after 24 and 26 attempts. This is historical-geometry coverage, not proof of 5707 meshes: the run uses 5707 `Content/Core` XML plus the 19 mesh atlases from the private 2026.10.19.5638 asset set (`flexo-private-assets` `ed6aa28`). Those atlases are byte-identical to the installed 2026.10.13.5602 and 2026.8.19.5261 sets, and the tank/capsule/service-module asset XML is byte-identical across that set, 5638 and 5707. The 5707 GLBs themselves are absent from the snapshot. The fixture stays under ignored `artifacts/`.
+- *Package.* The archive integrity check is separate from stage validation. `purr2d2-0.2.0.zip` has 42 files under one `purr2d2/` root, every file is identical to stage, the staged DLL matches the Release DLL, Purr2D2.dll is the only binary, no host, test or stock files are present, and the checksum verifies (SHA-256 `da319724366e91cdbb6de992b0675c4281eba4e9a8940efae7cdaafe1d949550`).
+
+**Native acceptance remains pending.** The local installations are 2026.10.13.5602 (macOS) and 2025.12.31.3103 (Wine), so no 5707 game was run and nothing was installed. Managed and host checks passed; that does not establish native support. In addition to the existing pending checklists, run these with disposable save copies, keeping `settings.json`, per-save `purr2d2.json` and every file under `Generated/Slices/`:
+
+- [ ] Startup, standalone and with Unscience in both load orders: no patch failures, mesh growth status Ready, and extended environment lighting available.
+- [ ] Load a save containing a pre-v3 fragment with a root pick mesh. Native hover, click-to-slice, Furce hover and Furce ray must select it, with exactly one picker module on its visual subpart. Reload v3/merged fragments and newly exported fragments.
+- [ ] Force several mesh growths with small initial arenas, with ray tracing off and on (including raytraced IVA). Inspect stock and cut opaque/glass fragments, shadows, thumbnails, picking and secondary views. Resize or rebuild the renderer and toggle HDR after growth; use Vulkan synchronization validation if available.
+- [ ] Toggle HDR off, then on live, at MSAA 1× and 4×. Check Light/Dark blades, arcs, slag and cut sparks, bloom/CMAA haloes, Furce sphere colors over the HDR scene, and shutdown with sabers lit.
+- [ ] On the ground, push the blade into terrain and grass (now in the depth-normal pre-pass), with AO on and off. In a secondary viewport with clouds, check the blade, hilt, cape and point lights together.
+- [ ] Watch cap cooling in an exterior view and in raytraced IVA, to confirm the pre-existing emission gap above.
+- [ ] Slice the shielded `MediumCapsuleVariantA` with crew and a gas-holding tank. Mass checks must pass with no "Native fragment mass changed" refusal.
+- [ ] Let an equipped, Furce-holding EVA kitten (with a background equipped kitten) die of radiation, including just after a somersault launch. Expect no fault, released holds, stopped audio and removed pose/cape owners. Save and reload with sick, dead and retired kittens, with both 5638- and 5707-written sidecars.
+- [ ] Windows multi-monitor: overlay hit-testing and click/scroll suppression after a primary-monitor reconnect and a DPI change. Use MMU left/right thrust with a deployed saber, and audition every FMOD cue and its cleanup.

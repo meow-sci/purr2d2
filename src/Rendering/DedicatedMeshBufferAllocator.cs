@@ -17,6 +17,10 @@ internal sealed class DedicatedMeshBufferAllocator(DeviceEx device) : IBufferAll
 
     public unsafe BufferAllocationInfo AllocateBuffer(in string name, in VkBufferCreateInfo bufferInfo, in AllocationInfo.CreateInfo allocationInfo)
     {
+        // RaytraceAllocator chains its device-address flags through Next. Flags in
+        // the separate AllocateFlags channel would be dropped here, so refuse them.
+        if (allocationInfo.AllocateFlags != VkMemoryAllocateFlags.None)
+            throw new NotSupportedException("Shared mesh growth cannot preserve allocation flags supplied outside the native Next chain.");
         VkBuffer buffer = default; VkDeviceMemory memory = default;
         try
         {

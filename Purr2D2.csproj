@@ -28,7 +28,7 @@
     </Reference>
   </ItemGroup>
   <Target Name="ValidateHostReferences" BeforeTargets="ResolveAssemblyReferences">
-    <Error Condition="!Exists('$(KSAFolder)/%(HostAssembly.Identity).dll')" Text="Missing KSA reference %(HostAssembly.Identity).dll. Set KSA_DLL_DIR or KSAFolder to the complete 2026.10.19.5638 snapshot DLL directory." />
+    <Error Condition="!Exists('$(KSAFolder)/%(HostAssembly.Identity).dll')" Text="Missing KSA reference %(HostAssembly.Identity).dll. Set KSA_DLL_DIR or KSAFolder to the complete 2026.10.25.5707 snapshot DLL directory." />
   </Target>
   <!-- Release builds always recreate the installable payload, including incremental builds. -->
   <Target Name="BuildModDistribution" AfterTargets="Build"

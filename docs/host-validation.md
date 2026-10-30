@@ -13,12 +13,11 @@ Use `--file` explicitly: without it, `dotnet run tools/inspect_host.cs` selects 
 
 ## Checks performed
 
-- Exact parameter/return types, visibility, static/instance flags and non-generic status for all patched methods: `Program.PrepareFrame`, `OnFrameEditor`, `OnDrawUiThreadSafe`, `OnMouseButton`, `OnGameLoaded`, `Dispose`, `UpdateRenderingResources`, `Universe.DeserializeSave`, `SuperMeshRenderSystem.ClearBuckets` and `RenderTranslucencyPass`. Cursor slicing runs after `OnDrawUiThreadSafe`, where native main-view picking has been refreshed; `OnFrameViewports` is too early for current-frame hover hits.
-- Render-hook parameter names that Harmony binds by name.
-- Actual host IL order for `RenderGame`, `RenderViewport` and `RenderEditor`: translucency follows the opaque scene and applicable atmosphere/MSAA composition, and precedes bloom or attachment resolve. This guards the late saber pass against host render-order changes; it does not execute GPU commands.
-- The private instance field `KittenRenderable._characterAvatar : KSA.CharacterAvatar`.
-- The private instance field `Vehicle._manualControlInputs : KSA.ManualControlInputs` used to publish native EVA MMU pulse commands.
-- The internal static native fragmentation method `PartFailure.IsolateAndDestroy(Vehicle, Part, List<Vehicle>) : void`.
+- Exact parameter/return types, visibility, static/instance flags and non-generic status for all patched methods: `Program.PrepareFrame`, `OnFrameEditor`, `OnDrawUiThreadSafe`, `OnMouseButton`, `OnCursorPos`, `OnScroll`, `OnFocus`, `OnKey`, `OnGameLoaded`, `Dispose`, `UpdateRenderingResources`, `ImGuiBackendGlfwImpl.OnMouseButton`/`OnScroll`, `Universe.DeserializeSave`, `SuperMeshRenderSystem.ClearBuckets` and `RenderTranslucencyPass`. Cursor slicing runs after `OnDrawUiThreadSafe`, where native main-view picking has been refreshed; `OnFrameViewports` is too early for current-frame hover hits.
+- Render and input hook parameter names that Harmony binds by name.
+- Actual host IL order for `RenderGame`, `RenderViewport` and `RenderEditor`: translucency follows the opaque scene and applicable atmosphere/MSAA composition, and precedes bloom or attachment resolve. This guards the late saber pass against host render-order changes; it does not execute GPU commands. Since 2026.10.25.5707, secondary viewports call `PlanetTransparenciesRenderer.RenderAtmosphereAndClouds` (formerly `RenderAtmosphereOnly`) at the same position, so their saber pass now also follows cloud composition.
+- The private instance fields `KittenRenderable._characterAvatar : KSA.CharacterAvatar` and `Vehicle._threadWorkerUpdateState : KSA.VehicleUpdateState`. Somersault motion writes prepared-worker `ManualControlInputs`; no private `_manualControlInputs` binding remains.
+- Native replacement physics members: `Vehicle.DepleteConsumables`, `UpdateVehicleConfiguration`, `UpdateAfterPartTreeModification`, private `AdoptSeparatedVehicle(Vehicle, PhysicsBubble, double3)`, `CreateVehicle`, `GenerateSplitId`, `PartTree.CreateFromNewPartTree`, `Part.StructuralPart` and `LookupCollection<T>.Deregister`. Quiet subpart breakup prepares authored subparts itself; `PartFailure.IsolateAndDestroy` is no longer a production binding.
 - The public native `Vehicle.Split(Connection, IConnector, double, out PoseChange, string)` overload and `PartTree.BeginBulkChange` / `EndBulkChange` methods used by staged source isolation.
 - The exact private PartModel submission overload used for generated cap cooling, and the complete plain-public-field layout of `DeviceMeshInterleaved` used to initialize objects inside the startup-reserved fragment arena without growing native counters at runtime.
 - The actual decoded `Program.PrepareFrame` IL contains exactly one call to each apply/input/dispatch method in the production hook's required order. Vehicle membership refresh and dirty derived/resource flushes must run after the hook and before vehicle dispatch, so early isolation receives that engine follow-up before the next swap update. The inspector reads operands correctly, including two-byte opcodes and variable-size switch tables, and resolves call tokens through metadata. Negative controls ensure the same validator rejects missing, duplicate and reordered calls.
@@ -29,7 +28,7 @@ The tool exits `0` when the checks pass, `1` when inputs cannot be read or compa
 
 ## Verified result
 
-The local host reports `KSA 2026.10.19.5638`, PE machine `Amd64`. The built mod reports `Purr2D2 0.2.0.0`; references include `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0`, and the matching KSA version. All checks passed. The decoded frame call positions were:
+The local host reports `KSA 2026.10.25.5707` (assembly-repo commit `4b3e9e2`, module MVID `a6318490-1e4f-4d4c-9f1a-b48f97f44be4`), PE machine `Amd64`. The built mod reports `Purr2D2 0.2.0.0`; references include `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0`, and the matching KSA version. All checks passed after the `RenderViewport` stage was updated to `RenderAtmosphereAndClouds`; the unmodified inspector failed only that stage (`artifacts/checks/ksa5707-initial-inspect-host.log`), and the updated inspector rejects the 2026.10.19.5638 host. The decoded frame call positions are unchanged from 2026.10.19.5638:
 
 | IL offset | Method |
 | --- | --- |

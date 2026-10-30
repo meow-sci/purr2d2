@@ -54,7 +54,7 @@ def check_shader_includes(shaders: Path) -> list[str]:
             except ValueError:
                 issues.append(f"{relative}: include escapes the packaged shader tree: {include!r}")
                 continue
-            # KSA 2026.10.19.5638 GetModPath uses Substring(IndexOf("Content")),
+            # KSA GetModPath (unchanged through 2026.10.25.5707) uses Substring(IndexOf("Content")),
             # even when shaders compile from the user's mods folder. Do not let
             # an incidental "Content" in this checkout's parent hide the bug.
             if "Content" not in target_relative.parts[:-1]:

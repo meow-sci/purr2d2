@@ -83,7 +83,8 @@ internal static class FrameHooksChecks
         try { waitWrapper.Invoke(null, [null]); throw new Exception("Native null scheduler exception was swallowed."); }
         catch (TargetInvocationException error) when (error.InnerException is NullReferenceException) { }
         CheckSpaceSomersaultInputHook();
-        Console.WriteLine("PASS: actual KSA PrepareFrame IL preserves four exact call stacks, all other instructions and labels; missing/ambiguous/reordered/prefixed seams rejected; native wait exception preserved; Space somersault hook delegates safely at KittenEva.OnKey");
+        CheckPartConstructionHooks();
+        Console.WriteLine("PASS: actual KSA PrepareFrame IL preserves four exact call stacks, all other instructions and labels; missing/ambiguous/reordered/prefixed seams rejected; native wait exception preserved; Space somersault hook delegates safely at KittenEva.OnKey; every public Part constructor reaches exactly one fragment-picker postfix");
 
         void Reject(Action<List<CodeInstruction>> mutate, string description)
         {
@@ -187,6 +188,38 @@ internal static class FrameHooksChecks
         GameHooks.Runtime = null;
 
         Console.WriteLine("PASS: actual KSA keyboard guard/controller ordering and KittenEva.OnKey signature verified; accepted, declined, absent and failing runtime paths preserve native input contract; main-window focus loss cancels pending keyboard intent");
+    }
+
+    // Legacy fragment picking is repaired in a constructor postfix. Follow each public
+    // constructor's `: this(...)` chain in host IL: a bypassed postfix leaves old saved
+    // fragments unpickable, and a doubled one would run the repair twice.
+    private static void CheckPartConstructionHooks()
+    {
+        var hooks = GameHooks.PartConstructionHooks();
+        Require(hooks.Select(h => h.MethodHandle).Distinct().Count() == hooks.Length, "Part construction hooks must be distinct.");
+        var constructors = typeof(Part).GetConstructors(BindingFlags.Instance | BindingFlags.Public);
+        Require(constructors.Length > 0 && constructors.All(c => Reached(c, hooks) == 1),
+            "Every public Part constructor must reach exactly one fragment-picker postfix.");
+        var saveLoad = AccessTools.Constructor(typeof(Part), [typeof(PartInstance), typeof(Part)])!;
+        Require(Reached(saveLoad, [hooks[0]]) == 0,
+            "Constructor-chain analysis must detect that the string/template hook alone misses save-load construction.");
+        var subtree = PatchProcessor.GetOriginalInstructions(AccessTools.PropertyGetter(typeof(Part), nameof(Part.SubtreeModules))!);
+        Require(subtree.Any(c => c.LoadsField(AccessTools.Field(typeof(Part), "_subtreeModules")))
+            && subtree.Any(c => c.operand is MemberInfo m && m.Name is "Modules" or "get_Modules"),
+            "Part.SubtreeModules must still fall back to Modules, as the picker-repair stub models.");
+    }
+
+    private static int Reached(ConstructorInfo constructor, ConstructorInfo[] hooks)
+    {
+        int reached = 0;
+        for (int depth = 0; constructor != null && depth < 8; depth++)
+        {
+            var handle = constructor.MethodHandle;
+            if (hooks.Any(h => h.MethodHandle == handle)) reached++;
+            constructor = (PatchProcessor.GetOriginalInstructions(constructor).FirstOrDefault(c => c.opcode == OpCodes.Call
+                && c.operand is ConstructorInfo next && next.DeclaringType == typeof(Part))?.operand as ConstructorInfo)!;
+        }
+        return reached;
     }
 
     private static void Require(bool value, string message) { if (!value) throw new Exception(message); }

@@ -25,9 +25,10 @@ internal static class TargetSelectionChecks
         Check(PartSliceTargeting.RepairLegacyFragmentPicker(root), "legacy fragment gains native subpart picking before tree creation");
         var view = first.Modules.Get<MeshViewModule>()[0];
         Check(view.Parent == first && ReferenceEquals(view.MeshView, pickMesh)
-            && first.SubtreeModules.Get<MeshViewModule>()[0] == view && root.SubtreeModules.Get<MeshViewModule>()[0] == view
+            && ReferenceEquals(first.SubtreeModules, first.Modules) && Occurrences(first.Modules.Get<MeshViewModule>(), view) == 1
+            && Occurrences(root.SubtreeModules.Get<MeshViewModule>(), view) == 1
             && first.BoundsUpdates == 1 && root.BoundsUpdates == 1,
-            "compatibility picker uses the complete hull mesh and updates native module ownership and bounds");
+            "compatibility picker uses the complete hull mesh, registers once with its aliased visual subpart and the full part, and updates bounds");
         Check(!PartSliceTargeting.RepairLegacyFragmentPicker(root)
             && first.Modules.Get<MeshViewModule>().Length == 1 && second.Modules.Get<MeshViewModule>().IsEmpty,
             "repeated compatibility repair cannot add duplicate pick modules to another visual child");
@@ -41,6 +42,12 @@ internal static class TargetSelectionChecks
         Check(!PartSliceTargeting.RepairLegacyFragmentPicker(transformed), "a transformed child cannot misplace a legacy hull picker");
         transformed.Tree = new Vehicle().Parts; moved.PositionParentAsmb = default;
         Check(!PartSliceTargeting.RepairLegacyFragmentPicker(transformed), "compatibility repair cannot mutate an owned native tree");
+    }
+    private static int Occurrences(Span<MeshViewModule> modules, MeshViewModule module)
+    {
+        int count = 0;
+        foreach (var item in modules) if (ReferenceEquals(item, module)) count++;
+        return count;
     }
     private static void BladeReach()
     {

@@ -262,7 +262,8 @@ static class HostInspection
             ("RenderGame", ["KSA.SuperMeshRenderSystem.RenderMainPass", "KSA.PlanetTransparenciesRenderer.Render",
                 "KSA.Rendering.Atmosphere.Rendering.TransparenciesMsaaResolve.ApplyTransparenciesMsaaIfEnabled",
                 "KSA.SuperMeshRenderSystem.RenderTranslucencyPass", "KSA.OverallBloomRenderer.Render"]),
-            ("RenderViewport", ["KSA.SuperMeshRenderSystem.RenderMainPass", "KSA.PlanetTransparenciesRenderer.RenderAtmosphereOnly",
+            // Since 2026.10.25.5707 secondary views composite clouds with their atmosphere.
+            ("RenderViewport", ["KSA.SuperMeshRenderSystem.RenderMainPass", "KSA.PlanetTransparenciesRenderer.RenderAtmosphereAndClouds",
                 "KSA.SuperMeshRenderSystem.RenderTranslucencyPass", "KSA.Rendering.RenderTarget.ResolveAttachments"]),
             ("RenderEditor", ["KSA.SuperMeshRenderSystem.RenderMainPass", "KSA.SuperMeshRenderSystem.RenderTranslucencyPass",
                 "KSA.Rendering.RenderTarget.ResolveAttachments", "KSA.OverallBloomRenderer.Render"]),

@@ -56,10 +56,8 @@ internal static class GameHooks
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiMouseButton)));
         harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnScroll", typeof(GlfwWindow), typeof(double2)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiScroll)));
-        harmony.Patch(AccessTools.Constructor(typeof(Part),
-                [typeof(string), typeof(PartTemplate), typeof(PartInstance), typeof(Part)])
-            ?? throw new MissingMethodException(typeof(Part).FullName, ".ctor(string, PartTemplate, PartInstance, Part)"),
-            postfix: new HarmonyMethod(typeof(GameHooks), nameof(RepairFragmentPicker)));
+        foreach (var constructor in PartConstructionHooks())
+            harmony.Patch(constructor, postfix: new HarmonyMethod(typeof(GameHooks), nameof(RepairFragmentPicker)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnGameLoaded)),
             postfix: new HarmonyMethod(typeof(GameHooks), nameof(WorldChanged)));
         harmony.Patch(Require(typeof(Universe), nameof(Universe.DeserializeSave), typeof(UniverseData)),
@@ -71,6 +69,20 @@ internal static class GameHooks
 
     private static MethodInfo Require(Type type, string name, params Type[] parameters) =>
         AccessTools.Method(type, name, parameters) ?? throw new MissingMethodException(type.FullName, name);
+
+    // Since KSA 2026.10.25.5707 the save-load and editor-clone constructors call a private
+    // initializer directly instead of the string/template constructor. Each public
+    // constructor must reach exactly one of these postfixes; validation checks host IL.
+    internal static ConstructorInfo[] PartConstructionHooks() =>
+    [
+        RequirePartConstructor(typeof(string), typeof(PartTemplate), typeof(PartInstance), typeof(Part)),
+        RequirePartConstructor(typeof(PartInstance), typeof(Part)),
+        RequirePartConstructor(typeof(Part), typeof(Part)),
+    ];
+
+    private static ConstructorInfo RequirePartConstructor(params Type[] parameters) =>
+        AccessTools.Constructor(typeof(Part), parameters) ?? throw new MissingMethodException(typeof(Part).FullName,
+            $".ctor({string.Join(", ", parameters.Select(p => p.Name))})");
 
     // Kept internal so validation can inspect the exact production transformation using real game IL.
     internal static IEnumerable<CodeInstruction> InsertSettledUpdate(IEnumerable<CodeInstruction> instructions)

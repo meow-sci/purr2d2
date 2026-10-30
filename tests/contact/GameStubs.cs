@@ -97,7 +97,12 @@ namespace KSA
         public PartTree? Tree;
         public readonly HostList<Part> TreeChildren = [], SubParts = [];
         public readonly List<Connection> Connections = [];
-        public readonly ModuleCollection Modules = new(), SubtreeModules = new();
+        public readonly ModuleCollection Modules = new();
+        private ModuleCollection? _subtreeModules;
+        // KSA 2026.10.25.5707: full parts and subparts with children own a subtree list;
+        // a childless subpart's SubtreeModules aliases its Modules.
+        public ModuleCollection? OwnSubtreeModules => PartParent == null || SubParts.Count > 0 ? _subtreeModules ??= new() : null;
+        public ModuleCollection SubtreeModules => OwnSubtreeModules ?? Modules;
         public readonly PartTemplate Template = new();
         public int BoundsUpdates;
         public void UpdateBounds() => BoundsUpdates++;
@@ -159,6 +164,12 @@ namespace KSA
         public MeshReference MeshView = mesh;
         public Part? Parent;
         public MeshViewModule(string id, MeshReference mesh) : this(mesh) { }
+        // Mirrors Module<T>.AddNewTo; the native tree list is absent before tree creation.
+        public void AddNewTo(Part part)
+        {
+            part.Modules.Add(this);
+            part.FullPart.OwnSubtreeModules?.Add(this);
+        }
     }
 
     public sealed class PartModelModule

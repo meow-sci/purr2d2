@@ -55,9 +55,9 @@ internal sealed partial class PartSliceTargeting
                 || !(sub.Modules.HasAny<PartModelModule>() || sub.Modules.HasAny<PartModelDynamicModule>()
                     || sub.Modules.HasAny<PartModelGlassModule>())) continue;
             var picker = new MeshViewModule(full.Template.Id + "_legacy_pick", mesh) { Parent = sub };
-            sub.Modules.Add(picker);
-            sub.SubtreeModules.Add(picker);
-            full.SubtreeModules.Add(picker);
+            // A childless subpart's SubtreeModules aliases its Modules; the native helper
+            // registers the module once with the subpart and once with the full part.
+            picker.AddNewTo(sub);
             sub.UpdateBounds();
             full.UpdateBounds();
             return true;

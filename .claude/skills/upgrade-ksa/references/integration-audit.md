@@ -3,7 +3,8 @@
 Read every section for a KSA upgrade, including unchanged and optional features. Paths below are
 relative to the purr2d2 root; host names are search targets, not promises about future versions.
 Discover new production consumers with the searches in SKILL.md. The initial inventory was read
-from code targeting KSA 2026.10.19.5638; current source and actual NEW DLLs win over this snapshot.
+from code targeting KSA 2026.10.19.5638 and revised for 2026.10.25.5707; current source and actual
+NEW DLLs win over this snapshot.
 
 ## 1. Entry, frame handoff, input and diagnostics
 
@@ -57,8 +58,9 @@ and `Shared/RuntimeBootstrap.cs`.
   scopes, connection direction/root reversal, separation/adoption ownership and resource flushes.
 - Private bindings: `Vehicle._threadWorkerUpdateState : VehicleUpdateState`, the non-public
   `BodyRates` setter, and `AdoptSeparatedVehicle(Vehicle,PhysicsBubble,double3)`; its cached open
-  instance delegate also takes the receiver. Check `PartFailure.IsolateAndDestroy` used for native
-  subpart breakup, source disposal and crew/content transfer. Follow all native adoption effects.
+  instance delegate also takes the receiver. Quiet subpart breakup prepares authored subparts in the
+  mod; `PartFailure.IsolateAndDestroy` is no longer a production binding (only a test stub). Check
+  source disposal and crew/content transfer, and follow all native adoption effects.
 - A generated replacement is inert wreckage, not a functional tank/engine/seat. Validate positive
   dry mass, custom mass/inertia/principal axes, convex hulls and current bubble ownership. Preserve
   CCI linear/angular motion and Galilean invariance at high orbital velocity. Resample motion at
@@ -128,6 +130,11 @@ templates, host primitives/`PositionsCompare`, `XmlLoader`, `AssetBundle`, `ModL
 - Private field contracts: `Device._queues`, `Queue._lock`, `RaytracePipeline._createInfo`,
   `_descriptorSet`; RT cached vertex/index arrays and descriptor bindings historically 3/4.
   Check dictionary/lock types, queue discovery, lock order, submit/wait behavior and native rebuilds.
+- Allocation flags: `DedicatedMeshBufferAllocator` forwards only `AllocationInfo.CreateInfo.Next`
+  and refuses the `AllocateFlags` channel added in 2026.10.25.5707. Re-prove that the top-level
+  `KSA.Rendering.Raytracing.RaytraceAllocator` still supplies `DEVICE_ADDRESS` through `Next`, that
+  RT shaders still read geometry through those descriptors (not buffer references), and that no BLAS,
+  TLAS or instance data caches shared-buffer device addresses.
 - Existing raster draws, GLB meshes, thumbnails, BLAS and secondary views must read current shared
   handles or have every cache updated. Re-prove absence of newly cached VkBuffer/device addresses.
 - Drain private uploads before growth; exclude submissions, wait device idle, copy **full old
@@ -150,6 +157,9 @@ in `docs/ACCEPTANCE.md`, `docs/slice-performance.md` and the compatibility recor
 `Program.UpdateRenderingResources`, RenderGame/Viewport/Editor ordering, `ShaderReference`,
 HDR/depth/MSAA targets, native light systems and stock forward-light GLSL.
 
+- `tools/inspect_host.cs` pins each render path's call order by exact callee name. In 5707,
+  `RenderAtmosphereOnly` became `RenderAtmosphereAndClouds` at the same `RenderViewport` position;
+  confirm semantics before renaming an expected stage, never just to make the check pass.
 - Recheck Harmony-bound callback argument names as well as signatures, per-view submission,
   command-buffer ownership, formats/sample counts, reverse-Z/depth, blend state, atmosphere/water
   composition, bloom/resolve order and pipeline recreation/disposal. Only native views prove draw

@@ -196,6 +196,20 @@ internal static class MeshGrowthHostChecks
             && il.Any(c => c.StoresField(AccessTools.DeclaredField(typeof(VkMemoryDedicatedAllocateInfo), "Buffer")))
             && il.Any(c => c.StoresField(AccessTools.DeclaredField(typeof(VkMemoryAllocateInfo), "Next"))),
             "Dedicated allocation must preserve the incoming raytracing allocation flag chain.");
+        int flags = il.FindIndex(c => c.operand is MethodInfo m && m.Name == "get_AllocateFlags"
+            && m.DeclaringType == typeof(AllocationInfo.CreateInfo));
+        int create = il.FindIndex(c => c.operand is MethodInfo m && m.Name == "CreateBuffer");
+        Check(flags >= 0 && create > flags && il.Take(create).Any(c => c.opcode == OpCodes.Newobj
+            && c.operand is ConstructorInfo ctor && ctor.DeclaringType == typeof(NotSupportedException)),
+            "Dedicated allocation must refuse AllocateFlags it cannot chain, before creating any native buffer.");
+        // The native RT wrapper must keep supplying DEVICE_ADDRESS through Next, the
+        // only flag path the dedicated replacement allocator forwards.
+        var raytrace = Il(Method(typeof(RaytraceAllocator), "AllocateBuffer"));
+        var flagField = AccessTools.DeclaredField(typeof(VkMemoryAllocateFlagsInfo), "Flags");
+        Check(flagField != null && StoresConstant(raytrace, flagField, (long)VkMemoryAllocateFlags.DeviceAddressBit)
+            && raytrace.Any(c => c.operand is MethodInfo m && m.Name == "set_Next" && m.DeclaringType == typeof(AllocationInfo.CreateInfo))
+            && !raytrace.Any(c => c.operand is MethodInfo m && m.Name == "set_AllocateFlags"),
+            "RaytraceAllocator must chain its device-address allocation flag through AllocationInfo.CreateInfo.Next.");
         var freeIl = Il(Method(typeof(DedicatedMeshBufferAllocator), "FreeAllocation"));
         Check(freeIl.Any(c => c.operand is MethodInfo m && m.Name == "get_Allocator")
             && freeIl.Any(c => c.opcode.FlowControl == FlowControl.Cond_Branch)
@@ -224,6 +238,14 @@ internal static class MeshGrowthHostChecks
             catch (NotSupportedException) { continue; }
             throw new Exception("The production adapter accepted an unsupported module combination.");
         }
+        // The previous audited build (2026.10.19.5638) must not be accepted by this audit.
+        try
+        {
+            NativeMeshGrowthHost.ValidateBuild(new("80bf516c-4284-4284-9ce1-a0462e9664e1"), new("72531e11-98ac-4f77-afd9-b9130e71655c"),
+                new("3b2d5dbf-8d4a-4533-81db-d19bce4736a3"), new("333349df-2847-43e8-9a59-edc42cca6673"), new("2c27b4cd-7d63-415f-8516-bec2ab985fc2"));
+            throw new Exception("The production adapter accepted the previous audited host build.");
+        }
+        catch (NotSupportedException) { }
         try { NativeMeshGrowthHost.RequireField(typeof(Device), "_queues", typeof(object)); }
         catch (NotSupportedException) { return; }
         throw new Exception("The production adapter accepted an incorrect private field type.");
