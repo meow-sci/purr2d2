@@ -13,6 +13,7 @@ internal static class ForceCaptureBubbleChecks
         Check(ForceCaptureBubble.CircleCount == 16 && ForceCaptureBubble.SegmentsPerCircle == 64,
             "the dashed sphere uses eight meridians and eight latitude rings with fixed tessellation");
         VisibleDashesHaveFixedWidthAndColors();
+        ConfigurableLengthsStayBetweenThreePixelsAndOriginal();
         FrustumBehindNearPlaneAndOffscreenAreRejected();
         PartialAndCameraInsideSpheresStayFiniteAndBounded();
         WarmProjectionIsBoundedAndAllocationFree();
@@ -77,6 +78,40 @@ internal static class ForceCaptureBubbleChecks
             float2.Zero, ViewportSize, dark: false);
         Check(ImDrawListPtr.Lines.Count == 0,
             "projected dashes outside the viewport are culled");
+    }
+
+    private static void ConfigurableLengthsStayBetweenThreePixelsAndOriginal()
+    {
+        var camera = new Camera();
+        var draw = default(ImDrawListPtr);
+        ResetDrawLists();
+        ForceCaptureBubble.Draw(draw, camera, new(0, 0, -200), 100,
+            float2.Zero, ViewportSize, dark: false);
+        var original = ImDrawListPtr.Lines.ToArray();
+        Check(original.Any(line => (line.End - line.Start).Length() > 3),
+            "the fixture includes dashes longer than the minimum");
+
+        foreach (float percent in new[] { -10f, 0f, 50f, 100f, 200f, float.NaN, float.PositiveInfinity })
+        {
+            ResetDrawLists();
+            ForceCaptureBubble.Draw(draw, camera, new(0, 0, -200), 100,
+                float2.Zero, ViewportSize, dark: false, lineLengthPercent: percent);
+            Check(ImDrawListPtr.Lines.Count == original.Length, "shortening preserves the dash count");
+            double fraction = float.IsFinite(percent) ? Math.Clamp(percent, 0, 100) / 100d : 1;
+            for (int i = 0; i < original.Length; i++)
+            {
+                var line = ImDrawListPtr.Lines[i];
+                float length = (original[i].End - original[i].Start).Length();
+                double expected = Math.Min(3, length) + Math.Max(0, length - 3) * fraction;
+                Check(Math.Abs((line.End - line.Start).Length() - expected) < .0001,
+                    "the slider interpolates from three pixels to original without enlarging short dashes");
+                Check(((line.Start + line.End) - (original[i].Start + original[i].End)).Length() < .0001,
+                    "shortening keeps each dash centered");
+                Check(line.Thickness == original[i].Thickness && line.Color == original[i].Color,
+                    "line length leaves width and color unchanged");
+            }
+            CheckDashesStayInsideViewport();
+        }
     }
 
     private static void PartialAndCameraInsideSpheresStayFiniteAndBounded()

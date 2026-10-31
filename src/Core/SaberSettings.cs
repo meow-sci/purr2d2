@@ -105,6 +105,7 @@ public sealed class SaberSettings
     // Legacy JSON property retained for compatibility; overlay-wide MMU hiding supersedes it.
     public bool HideMmu { get; set; } = true;
     public float AngryForceRadius { get; set; } = 10;
+    public float ForceBubbleLineLengthPercent { get; set; } = 100;
     public int ForceCaptureLimit { get; set; } = ForceCaptureLimits.Default;
     public float ForceMaximumSpread { get; set; } = ForceSpreadLimits.DefaultMaximum;
     public float ClutterPickTolerance { get; set; } = .2f;
@@ -153,6 +154,7 @@ public sealed class SaberSettings
         FingerCurl = Clamp(FingerCurl, 0, .5f, .12f);
         JumpComboIntervalSeconds = Clamp(JumpComboIntervalSeconds, .1f, 1.5f, .75f);
         AngryForceRadius = Clamp(AngryForceRadius, 1, 50, 10);
+        ForceBubbleLineLengthPercent = Clamp(ForceBubbleLineLengthPercent, 0, 100, 100);
         ForceCaptureLimit = Math.Clamp(ForceCaptureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
         ForceMaximumSpread = (float)ForceSpreadLimits.ValidateMaximum(ForceMaximumSpread);
         ClutterPickTolerance = Clamp(ClutterPickTolerance, 0, .5f, .2f);

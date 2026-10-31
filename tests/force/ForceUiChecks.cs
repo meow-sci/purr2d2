@@ -23,6 +23,7 @@ internal sealed partial class SaberRuntime
         internal float AngryForceRadius = 10, ClutterPickTolerance = .2f;
         internal float ForceBreakupGroanPixels = 6, ForceBreakupSplitPixels = 18, Volume = .55f;
         internal float ForceMaximumSpread = 20;
+        internal float ForceBubbleLineLengthPercent = 100;
         internal int ForceCaptureLimit = ForceCaptureLimits.Default;
         internal int ForceBreakupPieceLimit = ForceBreakupLimits.Default;
     }

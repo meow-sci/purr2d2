@@ -1036,7 +1036,7 @@ internal sealed partial class SaberRuntime
 
         var viewport = ImGui.GetMainViewport();
         ForceCaptureBubble.Draw(draw, camera, center, _forceCaptureRadius,
-            viewport.Pos, viewport.Size, SaberTypeFor(owner) == SaberType.Dark);
+            viewport.Pos, viewport.Size, SaberTypeFor(owner) == SaberType.Dark, _settings.ForceBubbleLineLengthPercent);
     }
 
     private void DrawForceHoverMarker(ImDrawListPtr draw, Camera camera, ForceHoverPresentation presentation)

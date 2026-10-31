@@ -264,8 +264,9 @@ internal sealed partial class SaberRuntime
 
     private void DrawForceSettings()
     {
-        if (!BeginSaberSettingsTable("##ForceSettings", "Furce breakup split (px)")) return;
+        if (!BeginSaberSettingsTable("##ForceSettings", "Radius bubble line length")) return;
         float tolerance = _settings.ClutterPickTolerance;
+        float bubbleLineLength = _settings.ForceBubbleLineLengthPercent;
         float maximumSpread = _settings.ForceMaximumSpread;
         float breakupGroan = _settings.ForceBreakupGroanPixels, breakupSplit = _settings.ForceBreakupSplitPixels;
         int captureLimit = _settings.ForceCaptureLimit, breakupPieceLimit = _settings.ForceBreakupPieceLimit;
@@ -275,6 +276,10 @@ internal sealed partial class SaberRuntime
             SaberSettingsRow("Furce capture limit");
             changed = ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
             ShowSaberControlTip($"Maximum vessels, debris, and ground objects per Angry Furce capture (default {ForceCaptureLimits.Default}); applies next capture.\n\nThe selected target is included first, then nearest objects fill remaining slots.");
+            SaberSettingsRow("Radius bubble line length");
+            changed |= ImGui.SliderFloat("##ForceBubbleLineLengthPercent", ref bubbleLineLength, 0, 100,
+                bubbleLineLength <= 0 ? "3 px" : bubbleLineLength >= 100 ? "Original" : "%.0f%%");
+            ShowSaberControlTip("Length of each Angry Furce radius bubble dash: 0% is 3 pixels, 100% is the original length (the maximum and default).\n\nShorter projected dashes keep their original length. Saves automatically and applies immediately.");
             SaberSettingsRow("Clutter aim tolerance");
             changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
             ShowSaberControlTip("After an exact miss, this radius catches nearby physical clutter.\n\nExact hits take priority; 0 allows exact hits only.");
@@ -296,6 +301,7 @@ internal sealed partial class SaberRuntime
         finally { ImGui.EndTable(); }
         if (!changed) return;
         _settings.ForceCaptureLimit = captureLimit;
+        _settings.ForceBubbleLineLengthPercent = bubbleLineLength;
         _settings.ClutterPickTolerance = tolerance;
         _settings.ForceMaximumSpread = maximumSpread;
         _settings.ForceBreakupGroanPixels = breakupGroan;

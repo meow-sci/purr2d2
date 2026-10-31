@@ -16,7 +16,7 @@ internal static class ForceCaptureBubble
     internal static int SegmentsPerCircle => CircleSegments;
 
     internal static void Draw(ImDrawListPtr draw, Camera camera, double3 centerEgo, double radius,
-        float2 viewportOrigin, float2 viewportSize, bool dark)
+        float2 viewportOrigin, float2 viewportSize, bool dark, float lineLengthPercent = 100)
     {
         if (camera == null || !ForceMathFinite(centerEgo) || !double.IsFinite(radius) || radius <= 0
             || !Finite(viewportOrigin) || !Finite(viewportSize) || viewportSize.X <= 0 || viewportSize.Y <= 0) return;
@@ -31,6 +31,7 @@ internal static class ForceCaptureBubble
         var color = dark ? new ImColor8(255, 72, 78, 230) : new ImColor8(110, 255, 174, 230);
         var clipMin = viewportOrigin;
         var clipMax = viewportOrigin + viewportSize;
+        double lineLengthFraction = float.IsFinite(lineLengthPercent) ? Math.Clamp(lineLengthPercent, 0, 100) / 100d : 1;
         foreach (var circle in Circles)
         {
             for (int segment = 0; segment < CircleSegments; segment += 2)
@@ -47,6 +48,18 @@ internal static class ForceCaptureBubble
                 var screenB = new double2(viewportOrigin.X + pixelB.X * viewportSize.X / framebuffer.X,
                     viewportOrigin.Y + pixelB.Y * viewportSize.Y / framebuffer.Y);
                 if (!ClipViewport(ref screenA, ref screenB, clipMin, clipMax)) continue;
+                if (lineLengthFraction < 1)
+                {
+                    // Shorten in UI pixels after clipping; never enlarge a short dash.
+                    var delta = screenB - screenA;
+                    double length = Math.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
+                    if (length > 3)
+                    {
+                        double inset = (1 - lineLengthFraction) * (length - 3) / (2 * length);
+                        screenA += delta * inset;
+                        screenB -= delta * inset;
+                    }
+                }
                 draw.AddLine(new((float)screenA.X, (float)screenA.Y), new((float)screenB.X, (float)screenB.Y), color, 2);
             }
         }
