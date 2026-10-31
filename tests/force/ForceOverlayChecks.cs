@@ -125,12 +125,11 @@ internal static class ForceOverlayChecks
                 "drawing and all five Force hit targets share exact circles with click-through corners");
             var angryOffset = force.AngryCenter - force.MoveCenter;
             float angryAngle = MathF.Atan2(angryOffset.Y, angryOffset.X) * 180 / MathF.PI;
-            Check(force.CaptureLimitCenter.X < force.AngryRadiusCenter.X
-                && force.AngryRadiusCenter.X < force.ForceCenter.X && force.ForceCenter.X < force.AngryCenter.X
-                && force.CaptureLimitCenter.Y > force.AngryRadiusCenter.Y
-                && force.AngryRadiusCenter.Y > force.ForceCenter.Y && force.ForceCenter.Y > force.AngryCenter.Y
+            Check(force.AngryRadiusCenter.X < force.CaptureLimitCenter.X
+                && force.CaptureLimitCenter.X < force.ForceCenter.X && force.ForceCenter.X < force.AngryCenter.X
+                && force.CaptureLimitCenter.Y > force.ForceCenter.Y && force.ForceCenter.Y > force.AngryCenter.Y
                 && force.AngryCenter.X > force.MoveCenter.X && angryOffset.Y > 0
-                && MathF.Abs(angryAngle - 5) < 1e-3f
+                && MathF.Abs(angryAngle - MathF.Atan2(110, 130) * 180 / MathF.PI) < 1e-3f
                 && (force.CaptureLimitCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
                 && (force.AngryRadiusCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
                 && (force.ForceCenter - force.MoveCenter).Length() > force.ButtonRadius + force.MoveRadius
@@ -145,8 +144,8 @@ internal static class ForceOverlayChecks
                 && force.SliderValueLabelMaxX <= force.ControlsMax.X
                 && force.StatusMax.Y < force.MoveCenter.Y - force.MoveRadius
                 && force.StatusMin.X >= origin.X && force.StatusMax.X <= origin.X + size.X,
-                "Count, Dist, Force and Angry follow a separated rising arc with the centered status above Move");
-            float expectedGap = saber.SwingSliceEdgeGap;
+                "Count sits next to Furce on a lower mirrored arc with the centered status above Move");
+            float expectedGap = saber.SwingSliceEdgeGap * force.Scale / saber.Scale;
             float captureGap = (force.CaptureLimitCenter - force.MoveCenter).Length()
                 - force.ButtonRadius - force.MoveRadius;
             float angryRadiusGap = (force.AngryRadiusCenter - force.MoveCenter).Length()
@@ -157,7 +156,7 @@ internal static class ForceOverlayChecks
                 - force.ButtonRadius - force.MoveRadius;
             float leftSpacing = (force.AngryRadiusCenter - force.CaptureLimitCenter).Length()
                 - force.ButtonRadius * 2;
-            float middleSpacing = (force.ForceCenter - force.AngryRadiusCenter).Length()
+            float middleSpacing = (force.ForceCenter - force.CaptureLimitCenter).Length()
                 - force.ButtonRadius * 2;
             float rightSpacing = (force.AngryCenter - force.ForceCenter).Length()
                 - force.ButtonRadius * 2;
@@ -170,6 +169,18 @@ internal static class ForceOverlayChecks
                 && MathF.Abs(rightSpacing - expectedGap) < 1e-3f
                 && force.ControlsMax.X >= force.SliderValueLabelMaxX,
                 "the four Force controls use the Swing/Slice edge gap around Move and between neighbors, with room reserved for slider values");
+            foreach (var (forceButton, saberButton) in new[]
+            {
+                (force.AngryCenter, saber.SliceCenter),
+                (force.ForceCenter, saber.IgniteCenter),
+                (force.CaptureLimitCenter, saber.AutoSwingCenter)
+            })
+            {
+                var left = (forceButton - force.MoveCenter) / force.Scale;
+                var right = (saberButton - saber.SwingCenter) / saber.Scale;
+                Check(MathF.Abs(left.X + right.X) < 1e-3f && MathF.Abs(left.Y - right.Y) < 1e-3f,
+                    "the three visible Furce buttons mirror the Swing arc at every supported viewport scale");
+            }
             Check(force.WithControlsOffset(origin, size, float2.Zero, 30) == force,
                 "zero Force offsets preserve the existing left-side anchors");
             foreach (var offset in new float2[] { new(-1, -1), new(1, 1), new(-1, 1), new(1, -1), new(100, -100) })

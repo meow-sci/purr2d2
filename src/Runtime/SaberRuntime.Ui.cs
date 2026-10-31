@@ -85,25 +85,14 @@ internal sealed partial class SaberRuntime
                 if (_renderer.LastError != null) ImGui.TextWrapped(_renderer.LastError);
                 if (_audio.LastError != null) ImGui.TextWrapped(_audio.LastError);
                 if (_preferencesSaveError != null) ImGui.TextWrapped(_preferencesSaveError);
-                if (ImGui.CollapsingHeader("Kitten save and restore"))
-                {
-                    ImGui.TextWrapped(SceneSaves.Status);
-                    if (SceneSaves.LastWarning is { } warning && warning != SceneSaves.Status) ImGui.TextWrapped("Last save/load warning: " + warning);
-                    ImGui.TextWrapped("Use KSA Save / Load to keep individual colors, Light/Dark choices, capes and saber equipment. Shared settings save automatically." );
-                    if (SceneSaves.Profiles.PreservedCount > 0)
-                    {
-                        ImGui.TextWrapped($"Preserved unavailable kitten records: {SceneSaves.Profiles.PreservedCount}");
-                        ImGui.TextWrapped("Discarding these records allows current choices to replace them in future saves. Existing save files change only when saved again.");
-                        if (ImGui.Button("Discard unavailable kitten records")) _discardUnavailableKittenRecords = true;
-                    }
-                }
-
-                if (ImGui.CollapsingHeader("Global BFL9K settings")) DrawSaberAppearanceSettings();
-                if (ImGui.CollapsingHeader("Cape settings")) DrawCapeSettings();
-                if (ImGui.CollapsingHeader("Furce settings")) DrawForceSettings();
-                if (ImGui.CollapsingHeader("Overlay UI Positions")) DrawControlPositionSettings();
-                if (ImGui.CollapsingHeader("Character & grip")) DrawSaberCharacterSettings();
-                if (ImGui.CollapsingHeader("Slice diagnostics"))
+                if (ImGui.CollapsingHeader("Global Big Fuckig Laser 9000 Settings")) DrawSaberAppearanceSettings();
+                if (ImGui.CollapsingHeader("The Furce Settings")) DrawForceSettings();
+                if (ImGui.CollapsingHeader("HUD Overlay Positions")) DrawControlPositionSettings();
+                if (ImGui.CollapsingHeader("Cape Settings")) DrawCapeSettings();
+                if (ImGui.CollapsingHeader("Character & Grip")) DrawSaberCharacterSettings();
+                if (ImGui.CollapsingHeader("Slicing Resources")) DrawSliceResourceSettings();
+                else _confirmSliceDebrisRemoval = false;
+                if (ImGui.CollapsingHeader("Slicing Diagnostics"))
                 {
                     string diagnostics = $"Purr2D2 {typeof(SaberRuntime).Assembly.GetName().Version}; KSA {typeof(Vehicle).Assembly.GetName().Version}\n"
                         + $"Equipped: {_blade.Equipped}; fresh pose: {_freshPoseThisTick}; pose age: {_pose.FreshnessFrames}\n"
@@ -114,10 +103,6 @@ internal sealed partial class SaberRuntime
                     ImGui.TextWrapped(diagnostics);
                     if (ImGui.Button("Copy slice diagnostics")) ImGui.SetClipboardText(diagnostics);
                 }
-                if (ImGui.CollapsingHeader("Slice resources")) DrawSliceResourceSettings();
-                else _confirmSliceDebrisRemoval = false;
-
-                ImGui.TextDisabled("Settings save automatically after a brief pause.");
                 ImGui.Separator();
                 if (ImGui.Button("Reset all settings")) ResetAllSettings();
                 ShowSaberControlTip("Restores all Purr2D2 settings to their defaults and deletes saved preferences.\n\nStartup graphics reservations update after restarting KSA.");

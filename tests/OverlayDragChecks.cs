@@ -300,16 +300,19 @@ internal static class OverlayDragChecks
                 && layout.IgniteRadius == layout.SliceRadius && layout.IgniteCenter.X < layout.SwingCenter.X
                 && layout.IgniteCenter.Y > layout.SwingCenter.Y
                 && layout.IgniteCenter.X > layout.SliceCenter.X && layout.IgniteCenter.Y > layout.SliceCenter.Y
-                && MathF.Abs((layout.IgniteCenter.X - layout.SwingCenter.X) / layout.Scale + 94) < 1e-3f
-                && MathF.Abs((layout.IgniteCenter.Y - layout.SwingCenter.Y) / layout.Scale
-                    - (132 + 27 + 12)) < 1e-3f
-                && MathF.Abs((layout.AutoSwingCenter.X - layout.IgniteCenter.X) / layout.Scale - (54 + 12)) < 1e-3f
-                && (layout.IgniteCenter - layout.SliceCenter).Length() > layout.IgniteRadius * 2
+                && MathF.Abs((layout.IgniteCenter - layout.SwingCenter).Length()
+                    - layout.SwingRadius - layout.IgniteRadius - layout.SwingSliceEdgeGap) < 1e-3f
+                && MathF.Abs((layout.AutoSwingCenter - layout.SwingCenter).Length()
+                    - layout.SwingRadius - layout.IgniteRadius - layout.SwingSliceEdgeGap) < 1e-3f
+                && MathF.Abs((layout.IgniteCenter - layout.SliceCenter).Length()
+                    - 2 * layout.SliceRadius - layout.SwingSliceEdgeGap) < 1e-3f
+                && MathF.Abs((layout.AutoSwingCenter - layout.IgniteCenter).Length()
+                    - 2 * layout.SliceRadius - layout.SwingSliceEdgeGap) < 1e-3f
                 && layout.AutoSwingPillMin.X >= origin.X - 1e-3f
                 && layout.AutoSwingPillMax.X <= origin.X + size.X + 1e-3f
                 && layout.AutoSwingPillMax.Y <= origin.Y + size.Y + 1e-3f
                 && layout.AutoSwingPillMax.Y > layout.AutoSwingPillMin.Y + 2 * layout.IgniteRadius,
-                "Ignite and Auto Swing sit in a separate row, and the duration capsule fits the viewport");
+                "Slice, Ignite and Auto Swing have equal radial and neighbor gaps, and the duration capsule fits the viewport");
             Check(layout.ForwardCenter.Y - layout.SomersaultRadius
                     >= layout.AutoSwingCenter.Y + layout.IgniteRadius + 12 * layout.Scale - 1e-3f,
                 "optional somersault buttons move below the Auto Swing row without overlapping idle hit targets");
@@ -361,8 +364,8 @@ internal static class OverlayDragChecks
                 && hidden.Hit(hidden.SwingCenter) == SaberOverlayHit.Swing && hidden.Hit(hidden.SliceCenter) == SaberOverlayHit.Slice
                 && hidden.Hit(hidden.IgniteCenter) == SaberOverlayHit.Ignite
                 && hidden.Hit(hidden.AutoSwingCenter) == SaberOverlayHit.AutoSwing
-                && circles.Skip(4).All(circle => hidden.Hit(circle.Item1) == SaberOverlayHit.None),
-                "airborne somersault circles become click-through while Auto Swing remains available");
+                && circles.Skip(4).All(circle => !IsSomersaultHit(hidden.Hit(circle.Item1))),
+                "airborne somersault hit targets disappear while Auto Swing remains available");
             var swatch = layout.ColorSwatchMin(0, 0);
             Check(swatch.X > layout.ListMin.X + layout.Padding + layout.ColorSwatchSize
                 && swatch.X + layout.ColorSwatchSize < layout.ListMax.X
@@ -525,6 +528,10 @@ internal static class OverlayDragChecks
             "nonfinite offsets reset per axis and unusable work areas leave no invisible action targets");
     }
 
+    private static bool IsSomersaultHit(SaberOverlayHit hit) => hit is
+        SaberOverlayHit.SomersaultForward or SaberOverlayHit.SomersaultBackward
+        or SaberOverlayHit.SomersaultLeft or SaberOverlayHit.SomersaultRight;
+
     private static void SomersaultPressOwnership()
     {
         var layout = SaberOverlayLayout.Create(new(120, 80), new(800, 600), 16, 2);
@@ -536,7 +543,7 @@ internal static class OverlayDragChecks
                 && capture.SuppressImGuiButton(0, true, 1)
                 && capture.Consume(0, true, true, false, 2, out bool duplicate) && !duplicate,
                 "a somersault click authorizes one action; held/duplicate presses stay consumed without repeating");
-            Check(hidden.Hit(center) == SaberOverlayHit.None
+            Check(!IsSomersaultHit(hidden.Hit(center))
                 && capture.Consume(0, false, false, false, 3, out bool release) && !release
                 && capture.SuppressImGuiButton(0, false, 3) && !capture.AnyHeld,
                 "launch may hide its circle before release without leaking the paired release to native UI/camera");

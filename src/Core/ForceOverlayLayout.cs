@@ -94,7 +94,6 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
             || !float.IsFinite(fontSize) || fontSize <= 0) return default;
         if (!float.IsFinite(throwLabelWidth) || throwLabelWidth < 0) throwLabelWidth = fontSize * 3.5f;
         float scale = saber.Scale;
-        float edgeGap = saber.SwingSliceEdgeGap;
         float availableRight = Math.Min(saber.SwingCenter.X - saber.SwingRadius,
             saber.SliceCenter.X - saber.SliceRadius) - origin.X;
         float interGroupGap = Math.Max(1, saber.Scale);
@@ -102,17 +101,13 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
             scale *= .98f;
         if (EstimateRightEdge(scale) + interGroupGap > availableRight) return default;
         float radius = 132 * scale, button = 27 * scale;
-        float centerDistance = radius + button + edgeGap;
-        float adjacentCenterDistance = button * 2 + edgeGap;
-        float angleStep = 2 * MathF.Asin(Math.Clamp(adjacentCenterDistance / (2 * centerDistance), -1, 1));
         // The wider centered info box needs 198 scaled pixels on each side of Move.
         var move = new float2(origin.X + 198 * scale, saber.SwingCenter.Y);
-        const float angryAngleDegrees = 5;
-        float angleStepDegrees = angleStep * 180 / MathF.PI;
-        var angry = AtAngle(angryAngleDegrees);
-        var force = AtAngle(angryAngleDegrees + angleStepDegrees);
-        var angryRadius = AtAngle(angryAngleDegrees + 2 * angleStepDegrees);
-        var captureLimit = AtAngle(angryAngleDegrees + 3 * angleStepDegrees);
+        var angry = move + SaberOverlayLayout.ActionButtonOffset(0, scale, mirrored: true);
+        var force = move + SaberOverlayLayout.ActionButtonOffset(1, scale, mirrored: true);
+        var captureLimit = move + SaberOverlayLayout.ActionButtonOffset(2, scale, mirrored: true);
+        // Retain the unused distance-control geometry for existing gesture helpers.
+        var angryRadius = move + SaberOverlayLayout.ActionButtonOffset(3, scale, mirrored: true);
         const float statusWidth = 396;
         const float statusHeight = 96;
         const float statusGap = 25;
@@ -122,23 +117,14 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
         return new(captureLimit, angryRadius, angry, force, button, move, radius,
             statusMin, statusMax, scale, fontSize, throwLabelWidth);
 
-        float2 AtAngle(float degrees)
-        {
-            float radians = degrees * MathF.PI / 180;
-            return move + new float2(MathF.Cos(radians), MathF.Sin(radians)) * centerDistance;
-        }
-
         float EstimateRightEdge(float candidateScale)
         {
             float candidateRadius = 132 * candidateScale, candidateButton = 27 * candidateScale;
-            float distance = candidateRadius + candidateButton + edgeGap;
-            float step = 2 * MathF.Asin(Math.Clamp((candidateButton * 2 + edgeGap) / (2 * distance), -1, 1));
-            float stepDegrees = step * 180 / MathF.PI;
             float moveX = 198 * candidateScale;
-            float angryX = moveX + distance * MathF.Cos(5 * MathF.PI / 180);
-            float forceX = moveX + distance * MathF.Cos((5 + stepDegrees) * MathF.PI / 180);
-            float distanceX = moveX + distance * MathF.Cos((5 + 2 * stepDegrees) * MathF.PI / 180);
-            float countX = moveX + distance * MathF.Cos((5 + 3 * stepDegrees) * MathF.PI / 180);
+            float angryX = moveX + SaberOverlayLayout.ActionButtonOffset(0, candidateScale, mirrored: true).X;
+            float forceX = moveX + SaberOverlayLayout.ActionButtonOffset(1, candidateScale, mirrored: true).X;
+            float countX = moveX + SaberOverlayLayout.ActionButtonOffset(2, candidateScale, mirrored: true).X;
+            float distanceX = moveX + SaberOverlayLayout.ActionButtonOffset(3, candidateScale, mirrored: true).X;
             float valueLabelWidth = Math.Max(64 * candidateScale, throwLabelWidth);
             float valueLabelMaxX = Math.Max(Math.Max(countX, distanceX), angryX) + candidateButton
                 + Math.Max(4, 6 * candidateScale) + valueLabelWidth;

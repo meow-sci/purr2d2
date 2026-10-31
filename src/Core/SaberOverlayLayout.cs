@@ -19,8 +19,20 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
     public float IgniteRadius => SliceRadius;
     public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
-    public float2 IgniteCenter => SwingCenter + new float2(-94 * Scale, SwingRadius + IgniteRadius + 12 * Scale);
-    public float2 AutoSwingCenter => IgniteCenter + new float2(2 * IgniteRadius + 12 * Scale, 0);
+    public float2 IgniteCenter => SwingCenter + ActionButtonOffset(1, Scale);
+    public float2 AutoSwingCenter => SwingCenter + ActionButtonOffset(2, Scale);
+
+    /// <summary>Equal radial and neighbor edge gaps, mirrored for the left-side Furce controls.</summary>
+    internal static float2 ActionButtonOffset(int index, float scale, bool mirrored = false)
+    {
+        // Keep Slice's familiar lower-left anchor and continue around the same circle.
+        float distance = MathF.Sqrt(130 * 130 + 110 * 110);
+        float gap = distance - 132 - 27;
+        float step = 2 * MathF.Asin((54 + gap) / (2 * distance));
+        float angle = MathF.Atan2(110, -130) - index * step;
+        var offset = new float2(MathF.Cos(angle), MathF.Sin(angle)) * (distance * scale);
+        return mirrored ? new(-offset.X, offset.Y) : offset;
+    }
     public float AutoSwingPillTravel => 120 * Scale;
     public float AutoSwingPillWidth => 2 * IgniteRadius;
     public float2 AutoSwingPillMin => AutoSwingCenter - new float2(IgniteRadius);
@@ -166,7 +178,7 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         if (minimumSwingY > maximumSwingY) return default;
         float swingY = Math.Clamp(origin.Y + size.Y * .5f, minimumSwingY, maximumSwingY);
         var swing = new float2(origin.X + size.X - 284 * scale, swingY);
-        var slice = swing + new float2(-130, 110) * scale;
+        var slice = swing + ActionButtonOffset(0, scale);
         var min = new float2(origin.X + size.X - margin - 296 * scale, listTop);
         float header = 38 * scale;
         float maximumHeight = Math.Min(size.Y * .34f, swing.Y - radius - min.Y - 16 * scale);
