@@ -7,6 +7,9 @@
     <Description>Kitten-held lightsabers, spatial audio and native vessel cutting for KSA.</Description>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- Generated host-check DLLs must not become candidate assembly references:
+         MSBuild searches default None items before explicit HintPath entries. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
     <GenerateDependencyFile>true</GenerateDependencyFile>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
