@@ -17,6 +17,8 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
     public bool HitRotation(float2 pointer, double rotation) => Valid && double.IsFinite(rotation)
         && SaberOverlayDrag.ContainsCircle(pointer, RotationHandleCenter(rotation), RotationHandleRadius);
     public float SliderTravel => 96 * Scale;
+    // Include both rounded ends so the whole throw pill is exactly 50% taller.
+    public float ThrowSliderTravel => (SliderTravel + 2 * ButtonRadius) * 1.5f - 2 * ButtonRadius;
     public float SliderValueLabelGap => Math.Max(4, 6 * Scale);
     // Values are regular ImGui text, unlike the scaled circles. ThrowLabelWidth
     // comes from the actual no-wrap font measurement when the runtime creates layout.
@@ -35,7 +37,7 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
             return new(Math.Min(StatusMin.X, Math.Min(MoveCenter.X - RotationTrackRadius - RotationHandleRadius, minimumButtonX)),
                 Math.Min(StatusMin.Y, Math.Min(MoveCenter.Y - RotationTrackRadius - RotationHandleRadius,
                     Math.Min(Math.Min(minimumSettingY - Math.Max(ButtonRadius, SliderValueLabelHalfHeight),
-                        AngryCenter.Y - SliderTravel - Math.Max(ButtonRadius, SliderValueLabelHalfHeight)), minimumButtonY))));
+                        AngryCenter.Y - ThrowSliderTravel - Math.Max(ButtonRadius, SliderValueLabelHalfHeight)), minimumButtonY))));
         }
     }
     public float2 ControlsMax
@@ -67,7 +69,7 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
         };
         if (!Valid || !float.IsFinite(center.X)) return default;
         if (hit == ForceOverlayHit.AngryForce)
-            return (center - new float2(ButtonRadius, SliderTravel + ButtonRadius), center + new float2(ButtonRadius));
+            return (center - new float2(ButtonRadius, ThrowSliderTravel + ButtonRadius), center + new float2(ButtonRadius));
         return (center - new float2(ButtonRadius),
             center + new float2(ButtonRadius, SliderTravel + ButtonRadius));
     }

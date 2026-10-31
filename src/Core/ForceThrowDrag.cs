@@ -88,8 +88,8 @@ public sealed class ForceThrowDrag
     public bool Matches(ForceOverlayLayout layout)
     {
         if (!Held || !layout.Valid || !Finite(layout.AngryCenter)
-            || !float.IsFinite(layout.ButtonRadius) || !float.IsFinite(layout.SliderTravel)) return false;
-        return Center == layout.AngryCenter && Radius == layout.ButtonRadius && Travel == layout.SliderTravel;
+            || !float.IsFinite(layout.ButtonRadius) || !float.IsFinite(layout.ThrowSliderTravel)) return false;
+        return Center == layout.AngryCenter && Radius == layout.ButtonRadius && Travel == layout.ThrowSliderTravel;
     }
 
     private void Reset()

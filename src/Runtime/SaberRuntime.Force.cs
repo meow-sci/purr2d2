@@ -804,7 +804,7 @@ internal sealed partial class SaberRuntime
         _forceDrag.Release();
         if (!ForceCanUse || !_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)
             || !_forceLayoutAvailable || !_forceThrowDrag.Begin(pointer, _forceLayout.AngryCenter,
-                _forceLayout.ButtonRadius, _forceLayout.SliderTravel)) return;
+                _forceLayout.ButtonRadius, _forceLayout.ThrowSliderTravel)) return;
         _forceThrowOwner = _owner;
     }
 

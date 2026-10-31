@@ -925,11 +925,11 @@ internal sealed partial class SaberRuntime
         Check(runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed
             && runtime._forceRequests.Count == 0 && runtime.ForceHolding,
             "holding Angry Force starts the separate minimum-speed pill without throwing or releasing ownership");
-        runtime.MoveForcePointer(angryCenter - new float2(0, runtime._forceLayout.SliderTravel));
+        runtime.MoveForcePointer(angryCenter - new float2(0, runtime._forceLayout.ThrowSliderTravel));
         Check(runtime._forceThrowDrag.Speed == ForceThrowDrag.MaximumSpeed
             && runtime._forceRequests.Count == 0,
             "dragging up selects the maximum throw speed without touching the settled queue");
-        Check(runtime.CompleteForceThrowSlider(angryCenter - new float2(0, runtime._forceLayout.SliderTravel))
+        Check(runtime.CompleteForceThrowSlider(angryCenter - new float2(0, runtime._forceLayout.ThrowSliderTravel))
             && runtime._forceRequests.TryPeek(out var thrown) && thrown.Action == ForceAction.Throw
             && thrown.ThrowSpeed == ForceThrowDrag.MaximumSpeed && !runtime._forceThrowDrag.Held
             && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed,
@@ -1339,10 +1339,10 @@ internal sealed partial class SaberRuntime
         runtime._forceLayoutAvailable = true;
         Program.Window.LeftShift = GlfwKeyAction.Press;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later capture can start a new throw drag");
-        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel * 4));
+        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel * 4));
         Check(runtime._forceThrowDrag.Speed == ForceThrowDrag.MaximumSpeed && runtime._forceRequests.Count == 0,
             "extreme upward pointer motion clamps to the maximum speed and never throws before release");
-        Check(runtime.CompleteForceThrowSlider(new(center.X, center.Y - runtime._forceLayout.SliderTravel * 4))
+        Check(runtime.CompleteForceThrowSlider(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel * 4))
             && runtime._forceRequests.TryPeek(out var maximumRequest) && maximumRequest.ThrowSpeed == ForceThrowDrag.MaximumSpeed
             && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed,
             "release preserves a maximum-speed request after the visible slider resets to its minimum");
@@ -1352,7 +1352,7 @@ internal sealed partial class SaberRuntime
 
         runtime._force.HasCapture = true; runtime._force.Owner = runtime._owner; runtime._forceLayoutAvailable = true;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a capture can begin a drag before cancellation");
-        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel));
+        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel));
         Program.Modal = true; runtime.UpdateForceVisibility(); Program.Modal = false;
         Check(!runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed
             && runtime._forceRequests.Count == 0 && runtime.ForceHolding,
@@ -1360,9 +1360,9 @@ internal sealed partial class SaberRuntime
 
         runtime._forceLayoutAvailable = true;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later throw drag starts after modal cancellation");
-        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel));
+        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel));
         ImGui.Io.AppFocusLost = true;
-        Check(runtime.CompleteForceThrowSlider(new(center.X, center.Y - runtime._forceLayout.SliderTravel))
+        Check(runtime.CompleteForceThrowSlider(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel))
             && !runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed
             && runtime._forceRequests.Count == 0,
             "a release delivered during application focus loss cancels instead of throwing");
@@ -1371,14 +1371,14 @@ internal sealed partial class SaberRuntime
         runtime._forceLayoutAvailable = true;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later throw drag starts after focus-loss cancellation");
         Program.HasMouseInputLatch = true;
-        Check(runtime.CompleteForceThrowSlider(new(center.X, center.Y - runtime._forceLayout.SliderTravel))
+        Check(runtime.CompleteForceThrowSlider(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel))
             && !runtime._forceThrowDrag.Held && runtime._forceRequests.Count == 0,
             "a release whose mouse ownership was lost cancels instead of throwing");
         Program.HasMouseInputLatch = false;
 
         runtime._forceLayoutAvailable = true;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later throw drag starts after input-latch cancellation");
-        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel));
+        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel));
         ImGui.Io.WantCaptureKeyboard = true;
         Check(runtime.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Press)
             && !runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed
@@ -1389,7 +1389,7 @@ internal sealed partial class SaberRuntime
 
         runtime._forceLayoutAvailable = true;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later throw drag starts after Escape cancellation");
-        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel));
+        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel));
         var replacement = new KittenEva();
         runtime._owner = replacement; Program.ControlledVehicle = replacement;
         runtime.UpdateForceVisibility();
@@ -1400,14 +1400,14 @@ internal sealed partial class SaberRuntime
 
         runtime._forceLayoutAvailable = true;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later throw drag starts after owner recovery");
-        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel));
+        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel));
         runtime.OverlayVisible = false; runtime.UpdateForceVisibility(); runtime.OverlayVisible = true;
         Check(!runtime._forceThrowDrag.Held && runtime._forceRequests.Count == 0,
             "hiding the HUD cancels the throw gesture without a throw");
 
         runtime._forceLayoutAvailable = true;
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, center), "a later throw drag starts after HUD cancellation");
-        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.SliderTravel));
+        runtime.MoveForcePointer(new(center.X, center.Y - runtime._forceLayout.ThrowSliderTravel));
         runtime._force.HasCapture = false;
         runtime.UpdateForceBeforePhysics(.016);
         Check(!runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Speed == ForceThrowDrag.MinimumSpeed
@@ -1450,7 +1450,7 @@ internal sealed partial class SaberRuntime
             && runtime._forceThrowDrag.Held && runtime._forceThrowDrag.Matches(runtime._forceLayout),
             "the throw pill can be drawn for an active gesture");
         runtime.MoveForcePointer(new(runtime._forceLayout.AngryCenter.X,
-            runtime._forceLayout.AngryCenter.Y - runtime._forceLayout.SliderTravel));
+            runtime._forceLayout.AngryCenter.Y - runtime._forceLayout.ThrowSliderTravel));
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
         runtime.DrawForceOverlayCore(default);
         var pill = ImDrawListPtr.Rects.Single(rect => rect.Filled);
@@ -1462,6 +1462,8 @@ internal sealed partial class SaberRuntime
         int labelDrawn = ImDrawListPtr.Events.FindLastIndex(e => e.Kind == "text" && e.Text == maximumSpeedLabel);
         int lastCircle = ImDrawListPtr.Events.FindLastIndex(e => e.Kind is "circle-filled" or "circle");
         Check(pill.Min == runtime._forceLayout.SliderEnvelope(ForceOverlayHit.AngryForce).Min
+            && Math.Abs(pill.Max.Y - pill.Min.Y
+                - (runtime._forceLayout.SliderTravel + 2 * runtime._forceLayout.ButtonRadius) * 1.5f) < 1e-3f
             && pill.Min.Y < runtime._forceLayout.AngryCenter.Y && pill.Max.Y > runtime._forceLayout.AngryCenter.Y
             && rim.Min == pill.Min && rim.Max == pill.Max && rim.Color == new ImColor8(255, 255, 255, 64).Value
             && Math.Abs(thumb.Radius * 2 - (pill.Max.X - pill.Min.X) * .8f) < 1e-3f
@@ -1482,9 +1484,9 @@ internal sealed partial class SaberRuntime
         Check(runtime.HandleForceOverlayPress(ForceOverlayHit.AngryForce, runtime._forceLayout.AngryCenter),
             "delayed owner verification starts from a clean default slider");
         runtime.MoveForcePointer(new(runtime._forceLayout.AngryCenter.X,
-            runtime._forceLayout.AngryCenter.Y - runtime._forceLayout.SliderTravel));
+            runtime._forceLayout.AngryCenter.Y - runtime._forceLayout.ThrowSliderTravel));
         Check(runtime.CompleteForceThrowSlider(new(runtime._forceLayout.AngryCenter.X,
-            runtime._forceLayout.AngryCenter.Y - runtime._forceLayout.SliderTravel))
+            runtime._forceLayout.AngryCenter.Y - runtime._forceLayout.ThrowSliderTravel))
             && runtime._forceRequests.TryPeek(out var delayed) && delayed.ThrowSpeed == ForceThrowDrag.MaximumSpeed,
             "a released speed is snapshotted before delayed owner verification");
         int throwsBeforeOwnerChange = runtime._force.Events.Count(value => value == "Throw");

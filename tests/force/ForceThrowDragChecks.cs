@@ -78,7 +78,7 @@ internal static class ForceThrowDragChecks
     {
         var layout = Layout();
         var drag = new ForceThrowDrag();
-        Check(drag.Begin(layout.AngryCenter, layout.AngryCenter, layout.ButtonRadius, layout.SliderTravel),
+        Check(drag.Begin(layout.AngryCenter, layout.AngryCenter, layout.ButtonRadius, layout.ThrowSliderTravel),
             "layout geometry starts a throw drag");
         Check(drag.Matches(layout), "the pressed layout matches its geometry");
         Check(!drag.Matches(layout with { AngryCenter = layout.AngryCenter + new float2(1, 0) }),
