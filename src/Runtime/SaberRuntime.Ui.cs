@@ -19,7 +19,7 @@ internal sealed partial class SaberRuntime
 
     internal void DrawMenu()
     {
-        if (_disposed || !ImGui.BeginMenu("Purr2D2")) return;
+        if (_disposed || !ImGui.BeginMenu("purr2d2")) return;
         try
         {
             ((IGameViewportLifecycle)Program.HoveredViewport).SetMenuBarInUse(true);
