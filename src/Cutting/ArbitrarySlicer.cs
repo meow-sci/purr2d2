@@ -29,7 +29,7 @@ internal sealed class ArbitrarySlicer : IDisposable
     internal bool Ready => _upload is { Done: true, Error: null } && SliceJitWarmup.Completed;
     internal string? Error { get; private set; }
     internal bool Busy => _retiredWork is { Finished: false } || _retiredUpload is { Done: false };
-    internal string Diagnostics => $"Background preparation: {_workerMs:F1} ms; largest preparation update: {_maxMainMs:F2} ms"
+    internal string Diagnostics => !DebugTimings.Enabled ? "Debug timing collection is off." : $"Background preparation: {_workerMs:F1} ms; largest preparation update: {_maxMainMs:F2} ms"
         + $"; slowest preparation unit: {_slowestStep} {_slowestStepMs:F2} ms; native commit: {_commitMs:F2} ms"
         + $"; earlier-frame isolation: {_isolationMs:F2} ms"
         + (_isolationPhases.Length == 0 ? "" : "; isolation pass [" + _isolationPhases + "]")
@@ -53,7 +53,7 @@ internal sealed class ArbitrarySlicer : IDisposable
         // Called once by the active assisted/manual coordinator at the joined physics hook.
         // Player/simulation time can stay unchanged on pause; use hook progress.
         _handoff++;
-        long started = Stopwatch.GetTimestamp();
+        long started = DebugTimings.Enabled ? Stopwatch.GetTimestamp() : 0;
         try
         {
             if (_capture == null || Error != null || Ready) return;
@@ -62,7 +62,7 @@ internal sealed class ArbitrarySlicer : IDisposable
             {
                 var input = _capture.Input!;
                 var context = RuntimeFragmentAssets.CaptureWorkerContext();
-                _workerStarted = Stopwatch.GetTimestamp();
+                _workerStarted = DebugTimings.Enabled ? Stopwatch.GetTimestamp() : 0;
                 _work = new((cancel, publish) => RuntimeFragmentAssets.LoadDetached(
                     SliceGeometryWork.Calculate(input, cancel, publish), context.Directory, context.Mod, cancel));
                 return;
@@ -70,24 +70,30 @@ internal sealed class ArbitrarySlicer : IDisposable
             if (_loaded == null)
             {
                 if (!_work.TryTake(out var result, out var error)) return;
-                _workerMs = Stopwatch.GetElapsedTime(_workerStarted).TotalMilliseconds;
+                if (_workerStarted != 0 && DebugTimings.Enabled)
+                    _workerMs = Stopwatch.GetElapsedTime(_workerStarted).TotalMilliseconds;
                 if (error != null) { Error = error; return; }
                 _loaded = result!; _upload = new(result!);
             }
             _upload!.Advance();
-            _slowestStep = _upload.SlowestStep; _slowestStepMs = _upload.SlowestStepMs;
+            if (DebugTimings.Enabled)
+            { _slowestStep = _upload.SlowestStep; _slowestStepMs = _upload.SlowestStepMs; }
             if (_upload.Error != null) Error = _upload.Error;
         }
         catch (Exception error) { Error = error.Message; }
-        finally { _maxMainMs = Math.Max(_maxMainMs, Stopwatch.GetElapsedTime(started).TotalMilliseconds); }
+        finally
+        {
+            if (started != 0 && DebugTimings.Enabled)
+                _maxMainMs = Math.Max(_maxMainMs, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        }
     }
     internal SliceAttempt Commit(Part part, double now)
     {
         if (!Ready || _loaded == null || _capture == null) return new(false, "Slice preparation is not ready.");
         SliceFrameDiagnostics.BeginOperation("swap", part.StructuralPart.Template.Id,
             part.Tree?.Count ?? 0, Isolation?.Parts.Length ?? -1, boundaryConnections: 0);
-        long started = Stopwatch.GetTimestamp();
-        var timings = new SliceCommitTimings();
+        long started = DebugTimings.Enabled ? Stopwatch.GetTimestamp() : 0;
+        var timings = SliceCommitTimings.Start();
         try
         {
             if (Isolation == null) return new(false, "The source must be isolated on an earlier frame.");
@@ -114,9 +120,13 @@ internal sealed class ArbitrarySlicer : IDisposable
         catch (Exception error) { return new(false, "Slice commit failed: " + error.Message); }
         finally
         {
-            _commitMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-            timings.Stop(); _commitPhases = timings.ToString();
-            Console.WriteLine("[purr2d2] " + Diagnostics);
+            timings.Stop();
+            if (started != 0 && DebugTimings.Enabled)
+            {
+                _commitMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                _commitPhases = timings.ToString();
+                Console.WriteLine("[purr2d2] " + Diagnostics);
+            }
         }
     }
     internal SliceAttempt Isolate(Part part)
@@ -124,8 +134,8 @@ internal sealed class ArbitrarySlicer : IDisposable
         if (!Ready || _loaded == null || _capture == null || Isolation != null)
             return new(false, "Slice preparation is not ready for native isolation.");
         SliceFrameDiagnostics.BeginOperation("isolation", part.StructuralPart.Template.Id, part.Tree?.Count ?? 0);
-        var timings = new SliceCommitTimings();
-        long started = Stopwatch.GetTimestamp();
+        var timings = SliceCommitTimings.Start();
+        long started = DebugTimings.Enabled ? Stopwatch.GetTimestamp() : 0;
         try
         {
             if (!_capture.IsCurrent(part)) return new(false, "The source geometry changed during preparation. Try again.");
@@ -139,8 +149,12 @@ internal sealed class ArbitrarySlicer : IDisposable
         catch (Exception error) { return new(false, "Slice isolation failed; any completed native separations remain: " + error.Message); }
         finally
         {
-            _isolationMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-            timings.Stop(); _isolationPhases = timings.ToString();
+            timings.Stop();
+            if (started != 0 && DebugTimings.Enabled)
+            {
+                _isolationMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                _isolationPhases = timings.ToString();
+            }
         }
     }
     internal void Cancel()

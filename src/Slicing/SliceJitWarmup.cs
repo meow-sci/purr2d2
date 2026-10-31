@@ -14,7 +14,7 @@ internal static class SliceJitWarmup
     internal const int MaximumDepth = 4, MaximumMethods = 1800, MaximumIlBytes = 768 * 1024;
     private static readonly TimeSpan MaximumTime = TimeSpan.FromSeconds(8);
     private static readonly BackgroundJitWarmup Attempt = new(Prepare,
-        summary => Console.WriteLine("[purr2d2] Slice JIT warmup: " + summary));
+        summary => { if (DebugTimings.Enabled) Console.WriteLine("[purr2d2] Slice JIT warmup: " + summary); });
     internal static bool Completed => Attempt.Completed;
     internal static void Start() => Attempt.Start();
     internal static void Cancel() => Attempt.Dispose();
@@ -26,12 +26,15 @@ internal static class SliceJitWarmup
         var elapsed = Stopwatch.StartNew();
         int prepared = 0;
         var resolution = new SliceJitCallGraph.Plan();
-        foreach (var initialize in new Action[] { SliceDiagnosticCounters.Warmup, SliceCommitTimings.Warmup,
-            SliceFrameDiagnostics.Warmup, SliceWorkerDiagnostics.Warmup })
+        if (DebugTimings.Enabled)
         {
-            cancel.ThrowIfCancellationRequested();
-            try { initialize(); }
-            catch (Exception error) { resolution.Failed(initialize.Method.DeclaringType!.Name, error); }
+            foreach (var initialize in new Action[] { SliceDiagnosticCounters.Warmup, SliceCommitTimings.Warmup,
+                SliceFrameDiagnostics.Warmup, SliceWorkerDiagnostics.Warmup })
+            {
+                cancel.ThrowIfCancellationRequested();
+                try { initialize(); }
+                catch (Exception error) { resolution.Failed(initialize.Method.DeclaringType!.Name, error); }
+            }
         }
         var plan = BuildPlan(cancel, resolution, MaximumTime - elapsed.Elapsed);
         foreach (var method in plan.Methods)

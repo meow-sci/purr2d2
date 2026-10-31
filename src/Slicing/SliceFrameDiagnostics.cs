@@ -1,4 +1,5 @@
 using System.Text;
+using Purr2D2.Core;
 
 namespace Purr2D2.Slicing;
 
@@ -174,11 +175,12 @@ internal static class SliceFrameDiagnostics
 {
     private static readonly SliceDiagnosticRing Ring = new();
     private static bool _armed;
-    internal static bool Sampling => _armed || Ring.HasActive;
+    internal static bool Sampling => DebugTimings.Enabled && (_armed || Ring.HasActive);
     internal static long CurrentOperation => Ring.CurrentOperation;
 
     internal static void Arm()
     {
+        if (!DebugTimings.Enabled) return;
         if (!_armed && !Ring.HasActive) Ring.ForgetFrame();
         _armed = true;
     }
@@ -187,11 +189,13 @@ internal static class SliceFrameDiagnostics
     internal static void BeginOperation(string kind, string sourceTemplateId, int ownerPartCount,
         int sourcePartCount = -1, int boundaryConnections = -1)
     {
+        if (!DebugTimings.Enabled) return;
         try { Ring.Begin(kind, sourceTemplateId, ownerPartCount, sourcePartCount, boundaryConnections, SliceCounterSnapshot.Capture()); }
         catch { Reset(); }
     }
     internal static void SetSourceDetails(int sourcePartCount, int boundaryConnections)
     {
+        if (!DebugTimings.Enabled) return;
         try { Ring.SetSourceDetails(sourcePartCount, boundaryConnections); }
         catch { Reset(); }
     }
@@ -209,7 +213,7 @@ internal static class SliceFrameDiagnostics
     }
     internal static void DispatchWorker()
     {
-        if (Ring.HasActive && SliceWorkerDiagnostics.Supported) SliceWorkerDiagnostics.Dispatch(Ring.CurrentFrame);
+        if (DebugTimings.Enabled && Ring.HasActive && SliceWorkerDiagnostics.Supported) SliceWorkerDiagnostics.Dispatch(Ring.CurrentFrame);
     }
     internal static void WorkerJoined(long waitStart, long waitEnd)
     {
@@ -218,25 +222,26 @@ internal static class SliceFrameDiagnostics
         try
         {
             var sample = SliceWorkerDiagnostics.Joined(waitStart, waitEnd);
-            if (sample != null) Ring.RecordWorker(sample);
+            if (DebugTimings.Enabled && sample != null) Ring.RecordWorker(sample);
         }
         catch { Reset(); }
     }
     internal static SliceCounterSnapshot StartSegment() => Sampling ? SliceCounterSnapshot.Capture() : default;
     internal static void EndSegment(SliceFrameSegment segment, in SliceCounterSnapshot start)
     {
-        if (start.Timestamp == 0) return;
+        if (!DebugTimings.Enabled || start.Timestamp == 0) return;
         try { Ring.RecordSegment(segment, SliceCounterDelta.Between(start, SliceCounterSnapshot.Capture())); }
         catch { Reset(); }
     }
     internal static void RecordPhase(long id, SliceCommitPhase phase, in SliceCounterDelta value)
     {
+        if (!DebugTimings.Enabled) return;
         try { Ring.RecordPhase(id, phase, value); }
         catch { Reset(); }
     }
     internal static void PumpSummaries()
     {
-        if (Ring.PendingCount == 0 || Ring.HasActive) return;
+        if (!DebugTimings.Enabled || Ring.PendingCount == 0 || Ring.HasActive) return;
         try { while (Ring.TakeCompleted() is { } summary) Console.WriteLine(summary); }
         catch { Reset(); }
     }

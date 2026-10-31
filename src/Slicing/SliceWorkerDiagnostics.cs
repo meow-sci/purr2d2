@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
 using System.Text;
+using Purr2D2.Core;
 
 namespace Purr2D2.Slicing;
 
@@ -20,6 +21,7 @@ internal readonly record struct SliceWorkerStamp(long Timestamp, long JitTicks, 
 {
     internal static SliceWorkerStamp Capture()
     {
+        if (!DebugTimings.Enabled) return default;
         long timestamp = Stopwatch.GetTimestamp();
         try
         {
@@ -139,7 +141,7 @@ internal static class SliceWorkerDiagnostics
 
     internal static void Dispatch(long frame)
     {
-        if (Volatile.Read(ref _pending) != null || Volatile.Read(ref _active) != null) return;
+        if (!DebugTimings.Enabled || Volatile.Read(ref _pending) != null || Volatile.Read(ref _active) != null) return;
         var sample = new SliceWorkerSample(Volatile.Read(ref _generation), frame, Stopwatch.GetTimestamp());
         if (Interlocked.CompareExchange(ref _pending, sample, null) != null) return;
         Volatile.Write(ref _queued, sample);
@@ -202,9 +204,12 @@ internal static class SliceWorkerDiagnostics
         if (sample == null) return;
         try
         {
-            var now = SliceWorkerStamp.Capture();
-            if (Valid(sample)) AddChild(sample, _childStage, _childStart, now, token.Inline);
-            _childStart = now;
+            if (Valid(sample))
+            {
+                var now = SliceWorkerStamp.Capture();
+                AddChild(sample, _childStage, _childStart, now, token.Inline);
+                _childStart = now;
+            }
         }
         finally
         {
@@ -234,7 +239,7 @@ internal static class SliceWorkerDiagnostics
         var active = Volatile.Read(ref _active); if (active != null) Volatile.Write(ref active.Cancelled, 1);
     }
     private static bool Valid(SliceWorkerSample sample) => Volatile.Read(ref sample.Cancelled) == 0
-        && sample.Generation == Volatile.Read(ref _generation);
+        && DebugTimings.Enabled && sample.Generation == Volatile.Read(ref _generation);
 
     internal static void Warmup()
     {

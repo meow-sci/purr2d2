@@ -1,10 +1,55 @@
 using System.Diagnostics;
+using Purr2D2.Core;
 using Purr2D2.Slicing;
 
 internal static class SliceDiagnosticsChecks
 {
     internal static void Run()
     {
+        Require(!DebugTimings.Enabled, "Debug timing collection must start disabled.");
+        Require(SliceCounterSnapshot.Capture() == default && SliceWorkerStamp.Capture() == default,
+            "Disabled diagnostics must not read wall, GC, allocation or JIT counters.");
+        SliceFrameDiagnostics.Reset();
+        SliceFrameDiagnostics.Arm();
+        SliceFrameDiagnostics.BeginOperation("disabled", "fixture", 1);
+        Require(!SliceFrameDiagnostics.Sampling && SliceFrameDiagnostics.CurrentOperation == 0
+            && SliceFrameDiagnostics.StartSegment() == default,
+            "Starting a real slice while disabled must not open a telemetry window.");
+        var disabled = SliceCommitTimings.Start();
+        disabled.Next(SliceCommitPhase.Isolation); disabled.Stop();
+        Require(ReferenceEquals(disabled, SliceCommitTimings.Start()) && disabled.ToString() == "",
+            "Disabled commits must reuse an inert collector without formatting phase summaries.");
+        long disabledAllocated = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++)
+        {
+            SliceFrameDiagnostics.Arm(); SliceFrameDiagnostics.BeginOperation("disabled", "fixture", 1);
+            SliceFrameDiagnostics.EnterFrame(); SliceFrameDiagnostics.HookReturned();
+            SliceFrameDiagnostics.DispatchWorker(); SliceFrameDiagnostics.PumpSummaries();
+            var timing = SliceCommitTimings.Start(); timing.Next(SliceCommitPhase.Registration); timing.Stop();
+            _ = SliceCounterSnapshot.Capture(); _ = SliceWorkerStamp.Capture();
+            SliceWorkerDiagnostics.Dispatch(i);
+        }
+        Require(GC.GetAllocatedBytesForCurrentThread() == disabledAllocated && !SliceWorkerDiagnostics.HasPending,
+            "Disabled slice and worker instrumentation must not allocate or queue samples.");
+        DebugTimings.Enabled = true;
+        SliceFrameDiagnostics.Arm(); SliceFrameDiagnostics.EnterFrame();
+        SliceFrameDiagnostics.BeginOperation("enabled", "fixture", 1);
+        Require(SliceFrameDiagnostics.Sampling && SliceFrameDiagnostics.CurrentOperation != 0
+            && SliceCounterSnapshot.Capture().Timestamp != 0 && SliceWorkerStamp.Capture().Timestamp != 0,
+            "Opting in must enable counters and frame windows.");
+        var enabled = SliceCommitTimings.Start(); enabled.Next(SliceCommitPhase.Isolation); enabled.Stop();
+        Require(enabled.ToString().Contains("Isolation"), "Opted-in commits must retain phase timing details.");
+        for (int i = 0; i < SliceDiagnosticRing.FramesPerOperation; i++) SliceFrameDiagnostics.EnterFrame();
+        Require(CaptureSummaries().Contains("Slice frame diagnostics: enabled"),
+            "Opting in must restore console timing summaries.");
+        SliceFrameDiagnostics.BeginOperation("queued-before-disable", "fixture", 1);
+        for (int i = 0; i < SliceDiagnosticRing.FramesPerOperation; i++) SliceFrameDiagnostics.EnterFrame();
+        DebugTimings.Enabled = false;
+        Require(CaptureSummaries() == "", "Disabling must suppress even a completed queued console summary.");
+        SliceFrameDiagnostics.Reset();
+        Require(!SliceFrameDiagnostics.Sampling && SliceFrameDiagnostics.CurrentOperation == 0
+            && enabled.ToString() == "", "Disabling must discard pending windows and suppress previous summaries.");
+
         var start = Snapshot(1);
         var end = Snapshot(3);
         var delta = SliceCounterDelta.Between(start, end);
@@ -81,5 +126,13 @@ internal static class SliceDiagnosticsChecks
 
     private static SliceCounterSnapshot Snapshot(int unit) => new(unit * Stopwatch.Frequency, unit * 10000L,
         unit * 2L, unit * 200L, unit * 1000L, unit * 2000L, unit * 3, unit * 2, unit, 1);
+    private static string CaptureSummaries()
+    {
+        var output = Console.Out;
+        using var captured = new StringWriter();
+        try { Console.SetOut(captured); SliceFrameDiagnostics.PumpSummaries(); }
+        finally { Console.SetOut(output); }
+        return captured.ToString();
+    }
     private static void Require(bool value, string message) { if (!value) throw new Exception(message); }
 }

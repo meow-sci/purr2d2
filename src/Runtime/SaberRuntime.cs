@@ -14,6 +14,7 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime : IDisposable
 {
+    private Harmony? _debugTimingHarmony;
     private enum Command { SelectSlice, CutPicked, CancelSlice }
     private readonly record struct Request(KittenEva Owner, Command Value, SliceTarget? PartTarget = null, Ray? PickRay = null);
     private readonly Queue<Request> _commands = new();
@@ -71,7 +72,18 @@ internal sealed partial class SaberRuntime : IDisposable
         RuntimeFragmentAssets.Install(harmony);
         QuietSliceQuiescence.Install(harmony);
         _audio.Initialize();
+        _debugTimingHarmony = harmony;
+        ApplyDebugTimingSettings();
         _ready = true;
+    }
+
+    private void ApplyDebugTimingSettings()
+    {
+        if (_debugTimingHarmony == null || DebugTimings.Enabled == _settings.DebugTimingsEnabled) return;
+        DebugTimings.Enabled = _settings.DebugTimingsEnabled;
+        SliceFrameDiagnostics.Reset();
+        if (DebugTimings.Enabled) SliceWorkerHooks.Install(_debugTimingHarmony);
+        else SliceWorkerHooks.Uninstall();
     }
 
     internal void BeforePhysics(double dtPlayer)
@@ -79,6 +91,8 @@ internal sealed partial class SaberRuntime : IDisposable
         if (!_ready || _disposed) return;
         try
         {
+            // Apply at the existing joined handoff, while no physics worker is running.
+            ApplyDebugTimingSettings();
             QuietSliceQuiescence.BeginSettledUpdate();
             QuietSliceContacts.Pump();
             SceneSaves.ObserveSystem(Universe.CurrentSystem);
@@ -239,6 +253,10 @@ internal sealed partial class SaberRuntime : IDisposable
     internal void Shutdown()
     {
         if (_disposed) return;
+        DebugTimings.Enabled = false;
+        SliceFrameDiagnostics.Reset();
+        SliceWorkerHooks.Uninstall();
+        _debugTimingHarmony = null;
         EnvironmentLightingPatch.Release();
         if (!_settingsAutosaver.Flush(_settings))
             Console.WriteLine("[purr2d2] " + _settingsAutosaver.LastError);

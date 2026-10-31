@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
+using Purr2D2.Core;
 
 namespace Purr2D2.Slicing;
 
@@ -10,6 +11,7 @@ internal readonly record struct SliceCounterSnapshot(long Timestamp, long JitTic
 {
     internal static SliceCounterSnapshot Capture()
     {
+        if (!DebugTimings.Enabled) return default;
         long timestamp = Stopwatch.GetTimestamp();
         try
         {

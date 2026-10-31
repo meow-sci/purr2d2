@@ -107,10 +107,13 @@ internal static partial class RuntimeFragmentAssets
                 if (_growthPending) { TryDrainForGrowth(); return; }
                 do
                 {
-                    long stepStarted = Stopwatch.GetTimestamp();
+                    long stepStarted = DebugTimings.Enabled ? Stopwatch.GetTimestamp() : 0;
                     bool more = _steps.MoveNext();
-                    double elapsed = Stopwatch.GetElapsedTime(stepStarted).TotalMilliseconds;
-                    if (elapsed > SlowestStepMs) { SlowestStepMs = elapsed; SlowestStep = _step; }
+                    if (stepStarted != 0 && DebugTimings.Enabled)
+                    {
+                        double elapsed = Stopwatch.GetElapsedTime(stepStarted).TotalMilliseconds;
+                        if (elapsed > SlowestStepMs) { SlowestStepMs = elapsed; SlowestStep = _step; }
+                    }
                     if (!more) { Done = true; _steps.Dispose(); break; }
                     // Submission or a zero-timeout fence poll consumes this frame's GPU work.
                     // A native unit is indivisible; never stack a second one in this frame.

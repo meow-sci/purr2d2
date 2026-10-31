@@ -8,7 +8,13 @@ internal static class ManualContactChecks
 {
     internal static void Run()
     {
-        Geometry(); Gestures(); Probe();
+        Geometry(); Gestures();
+        foreach (bool debug in new[] { false, true })
+        {
+            DebugTimings.Enabled = debug;
+            try { Probe(); }
+            finally { DebugTimings.Enabled = false; }
+        }
     }
     private static void Geometry()
     {
@@ -161,7 +167,8 @@ internal static class ManualContactChecks
             && probe.TestedTriangles == ManualContactProbe.TriangleBudget && Math.Abs(contact.PointLocal.X + .05) < 1e-8,
             "late first hit publishes while still current in the final age window");
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 2), out _); probe.Advance(scene.Owner, Pose(.1, 2.02, .1f), out _);
-        Check(!probe.Advance(scene.Owner, Pose(.5, 2.3, .3f), out _) && probe.ExpiredQueries > 0, "old frozen queries explicitly expire");
+        Check(!probe.Advance(scene.Owner, Pose(.5, 2.3, .3f), out _) && !probe.Pending
+            && (!DebugTimings.Enabled || probe.ExpiredQueries > 0), "old frozen queries explicitly expire with diagnostics on or off");
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 3), out _); probe.Advance(scene.Owner, Pose(.1, 3.02, .1f), out _);
         scene.Part.PositionParentAsmb = new(.2, 0, 0);
         Check(!probe.Advance(scene.Owner, Pose(.5, 3.04, .3f), out _), "source transform changes invalidate deferred queries");
@@ -213,6 +220,10 @@ internal static class ManualContactChecks
         Check(probe.DiscoveryUnits == ManualContactProbe.DiscoveryBudget && probe.FrameReads == 0 && probe.TestedTriangles == 0,
             "cold discovery respects its own bound without fleet snapshots or triangle work");
         probe.Reset(); Check(!probe.Pending, "cancellation clears frozen contact and candidate history");
+        if (!DebugTimings.Enabled)
+            Check(probe.LastUpdateMilliseconds == 0 && probe.MaximumUpdateMilliseconds == 0
+                && probe.ExpiredQueries == 0 && probe.Saturations == 0,
+                "disabled probing must skip optional timing and cumulative diagnostic stats");
     }
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); Console.WriteLine("PASS: " + message); }
 }

@@ -88,6 +88,7 @@ public sealed class SaberSettings
     public bool ForceUiEnabled { get; set; } = true;
     public bool BFL9KUiEnabled { get; set; } = true;
     public bool ExtendedEnvironmentLighting { get; set; } = false;
+    public bool DebugTimingsEnabled { get; set; } = false;
     public float SliceReachMultiplier { get; set; } = SaberLimits.DefaultSliceReachMultiplier;
     public float ColorR { get; set; } = .12f;
     public float ColorG { get; set; } = .75f;

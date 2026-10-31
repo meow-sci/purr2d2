@@ -154,6 +154,7 @@ internal static class CoreChecks
     private static void SettingsValidationAndPersistence()
     {
         var defaults = new SaberSettings();
+        Check(!defaults.DebugTimingsEnabled, "debug timing collection and console output are off by default");
         Check(defaults.BladeLength == 1.4f && defaults.GripX == -24.5f && defaults.GripY == -14.7f && defaults.GripZ == 16
             && defaults.AimX == .22f && defaults.AimY == .45f && defaults.AimZ == .6f && defaults.FingerCurl == .12f,
             "new preferences use the chosen blade reach and measured kitten grip");
@@ -297,6 +298,16 @@ internal static class CoreChecks
                     "saved UI visibility uses the BFL9K preference key");
             }
             File.Delete(path);
+            Check(!SaberSettings.Load(path).DebugTimingsEnabled,
+                "missing preferences must leave debug timing collection off");
+            foreach (bool debug in new[] { true, false })
+            {
+                var debugSettings = new SaberSettings { DebugTimingsEnabled = debug };
+                debugSettings.Save(path);
+                Check(SaberSettings.Load(path).DebugTimingsEnabled == debug,
+                    "debug timing preference must survive saving and loading in both states");
+            }
+            File.Delete(path);
             Check(!new SaberSettings().ExtendedEnvironmentLighting && !SaberSettings.Load(path).ExtendedEnvironmentLighting,
                 "extended environment lighting is off for new settings and missing preferences");
             Check(DefaultEffects(SaberSettings.Load(path).DarkEffects, SaberType.Dark),
@@ -307,6 +318,7 @@ internal static class CoreChecks
                 "legacy preferences acquire the default somersault combo interval");
             File.WriteAllText(path, "{\"BladeLength\":0.85,\"GripX\":-13,\"GripY\":-8,\"GripZ\":18,\"AimX\":0.05,\"AimY\":0.8,\"AimZ\":0.6,\"FingerCurl\":0.2}");
             var explicitPreferences = SaberSettings.Load(path);
+            Check(!explicitPreferences.DebugTimingsEnabled, "legacy preferences acquire disabled debug timings");
             Check(!explicitPreferences.ExtendedEnvironmentLighting,
                 "legacy preferences keep the stock environment-light budget");
             Check(explicitPreferences.BladeLength == .85f && explicitPreferences.GripX == -13 && explicitPreferences.GripY == -8

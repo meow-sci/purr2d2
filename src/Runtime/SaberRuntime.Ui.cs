@@ -94,12 +94,18 @@ internal sealed partial class SaberRuntime
                 else _confirmSliceDebrisRemoval = false;
                 if (ImGui.CollapsingHeader("Slicing Diagnostics"))
                 {
+                    bool debugTimings = _settings.DebugTimingsEnabled;
+                    if (ImGui.Checkbox("Debug timing stats and console logging", ref debugTimings))
+                        _settings.DebugTimingsEnabled = debugTimings;
+                    ShowSaberControlTip("Collects detailed slice, frame and physics-worker timings and prints them to the console. Off by default; enabling adds diagnostic overhead. Applies on the next simulation update and saves automatically.");
                     string diagnostics = $"Purr2D2 {typeof(SaberRuntime).Assembly.GetName().Version}; KSA {typeof(Vehicle).Assembly.GetName().Version}\n"
                         + $"Equipped: {_blade.Equipped}; fresh pose: {_freshPoseThisTick}; pose age: {_pose.FreshnessFrames}\n"
-                        + $"Slice active: {SliceWorkActive}; parts sliced: {_targeting.SlicedParts}\n{_sliceStatus}\n{_slicer.Diagnostics}\n"
+                        + $"Slice active: {SliceWorkActive}; parts sliced: {_targeting.SlicedParts}\n{_sliceStatus}\n";
+                    diagnostics += DebugTimings.Enabled ? _slicer.Diagnostics + "\n"
                         + $"Manual contact: {_manualProbe.LastUpdateMilliseconds:F3} ms last / {_manualProbe.MaximumUpdateMilliseconds:F3} ms maximum; "
                         + $"discovery {_manualProbe.DiscoveryUnits}, frames {_manualProbe.FrameReads}, primitives {_manualProbe.PrimitiveReads}, triangles {_manualProbe.TestedTriangles}; "
-                        + $"budget stops {_manualProbe.Saturations}, expired queries {_manualProbe.ExpiredQueries}";
+                        + $"budget stops {_manualProbe.Saturations}, expired queries {_manualProbe.ExpiredQueries}"
+                        : "Debug timing collection and console logging are off.";
                     ImGui.TextWrapped(diagnostics);
                     if (ImGui.Button("Copy slice diagnostics")) ImGui.SetClipboardText(diagnostics);
                 }

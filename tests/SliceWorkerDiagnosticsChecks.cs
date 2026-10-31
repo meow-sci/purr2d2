@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using Purr2D2.Core;
 using Purr2D2.Slicing;
 
 internal static class SliceWorkerDiagnosticsChecks
 {
     internal static void Run()
     {
+        DebugTimings.Enabled = true;
         var a = new SliceWorkerStamp(Stopwatch.Frequency, 100, 2, 3, 4, 7);
         var b = new SliceWorkerStamp(2 * Stopwatch.Frequency, 300, 5, 9, 15, 7);
         var delta = SliceWorkerDelta.Between(a, b);
@@ -108,6 +110,8 @@ internal static class SliceWorkerDiagnosticsChecks
             "Last dispatched worker must attach to the already closed interval before delayed formatting.");
         Require(sample.Stages.Length == (int)SliceWorkerStage.Count && sample.InlineChildren.Length == sample.Stages.Length
             && sample.HelperChildren.Length == sample.Stages.Length, "Each dispatch must retain only fixed-size metric arrays.");
+        DebugTimings.Enabled = false;
+        SliceWorkerDiagnostics.Reset();
         Console.WriteLine("PASS: worker current-thread metrics, bounded arrays, concurrent aggregation, nested scopes, idle allocations, reset/in-flight generations and final-frame joins");
     }
     private static void Require(bool value, string message) { if (!value) throw new Exception(message); }

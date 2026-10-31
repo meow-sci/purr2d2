@@ -876,6 +876,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
         program_path.write_text(program, encoding="utf-8")
         required = [*required, program_path]
     required = list(dict.fromkeys([*required, source / "src/Core/SaberLimits.cs",
+                                  source / "src/Core/DebugTimings.cs",
                                   source / "src/Core/ForceCaptureLimits.cs",
                                   source / "src/Core/ForceBreakupLimits.cs",
                                   source / "src/Core/ForceSpreadLimits.cs",

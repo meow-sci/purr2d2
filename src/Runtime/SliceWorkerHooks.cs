@@ -4,6 +4,7 @@ using Brutal.Concurrency.Jobs;
 using HarmonyLib;
 using KSA;
 using KSA.Concurrency;
+using Purr2D2.Core;
 using Purr2D2.Slicing;
 
 namespace Purr2D2.Runtime;
@@ -38,12 +39,12 @@ internal static class SliceWorkerHooks
                 harmony.Patch(method, prefix: new HarmonyMethod(typeof(SliceWorkerHooks), nameof(ChildPrefix)),
                     finalizer: new HarmonyMethod(typeof(SliceWorkerHooks), nameof(ChildFinalizer)));
             SliceWorkerDiagnostics.Supported = true;
-            Console.WriteLine("[purr2d2] Slice physics-worker diagnostics available (bounded dispatch windows; selected joined child scopes).");
+            if (DebugTimings.Enabled) Console.WriteLine("[purr2d2] Slice physics-worker diagnostics available (bounded dispatch windows; selected joined child scopes).");
         }
         catch (Exception error)
         {
             Uninstall();
-            Console.WriteLine("[purr2d2] Slice physics-worker diagnostics unavailable: " + error.GetBaseException().Message);
+            if (DebugTimings.Enabled) Console.WriteLine("[purr2d2] Slice physics-worker diagnostics unavailable: " + error.GetBaseException().Message);
         }
     }
 
@@ -56,7 +57,7 @@ internal static class SliceWorkerHooks
         {
             // Capture is already disabled and its epoch cancelled. Keep the owner for
             // a later cleanup retry; optional diagnostics must not prevent gameplay cleanup.
-            Console.WriteLine("[purr2d2] Slice physics-worker diagnostic cleanup failed: " + error.GetBaseException().Message);
+            if (DebugTimings.Enabled) Console.WriteLine("[purr2d2] Slice physics-worker diagnostic cleanup failed: " + error.GetBaseException().Message);
         }
         // Keep immutable metadata mappings for callbacks already inside a native method.
         // No engine instances are retained; later Install replaces them before publishing support.

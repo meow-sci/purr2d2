@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Cutting;
 
 namespace Purr2D2.Rendering;
@@ -75,6 +76,7 @@ internal sealed class ManualContactProbe
 
     internal bool Advance(KittenEva owner, Sample sample, out Contact contact)
     {
+        if (!DebugTimings.Enabled) return AdvanceCore(owner, sample, out contact);
         long started = Stopwatch.GetTimestamp();
         try { return AdvanceCore(owner, sample, out contact); }
         finally
@@ -115,7 +117,7 @@ internal sealed class ManualContactProbe
             _query.RefinementUpdates++;
             _query.LastCountedAdvance = _advanceSerial;
         }
-        if (_query != null && !Current(_query, owner, sample.Time)) { _query = null; ExpiredQueries++; }
+        if (_query != null && !Current(_query, owner, sample.Time)) { _query = null; if (DebugTimings.Enabled) ExpiredQueries++; }
         while (WithinBudget(started))
         {
             if (_query != null)
@@ -126,7 +128,7 @@ internal sealed class ManualContactProbe
                     if (query.Triangle == 0)
                     {
                         if (PrimitiveReads >= PrimitiveBudget)
-                        { Saturations++; return TryFallback(query, sample.Time, out contact); }
+                        { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
                         PrimitiveReads++;
                     }
                     var vertices = query.Primitives[query.Primitive];
@@ -134,11 +136,11 @@ internal sealed class ManualContactProbe
                     {
                         query.Primitive++; query.Triangle = 0;
                         if (!WithinBudget(started))
-                        { Saturations++; return TryFallback(query, sample.Time, out contact); }
+                        { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
                         continue;
                     }
                     if (TestedTriangles >= TriangleBudget)
-                    { Saturations++; return TryFallback(query, sample.Time, out contact); }
+                    { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
                     int index = query.Triangle; query.Triangle += 3; TestedTriangles++;
                     var triangle = new CutTriangle(Point(vertices[index]), Point(vertices[index + 1]), Point(vertices[index + 2]));
                     if (query.Sweep.TryHit(triangle, out var hit, out double along, out double time) && Better(query, hit, triangle.Normal, time, along))
@@ -156,7 +158,7 @@ internal sealed class ManualContactProbe
                     if (query.Triangle + 2 >= vertices.Length) { query.Primitive++; query.Triangle = 0; }
                     if (query.Primitive >= query.Primitives.Length) break;
                     if (!WithinBudget(started))
-                    { Saturations++; return TryFallback(query, sample.Time, out contact); }
+                    { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
                 }
                 if (query.HasBest)
                 {
@@ -194,8 +196,9 @@ internal sealed class ManualContactProbe
                 _query = new(entry, sweep, sample, length, sourceTransform, partTransform, primitives);
         }
         if (_query != null && TryFallback(_query, sample.Time, out contact))
-        { Saturations++; return true; }
-        if (!WithinBudget(started) || _query != null || DiscoveryUnits == DiscoveryBudget || FrameReads == FrameBudget) Saturations++;
+        { if (DebugTimings.Enabled) Saturations++; return true; }
+        if (DebugTimings.Enabled && (!WithinBudget(started) || _query != null
+            || DiscoveryUnits == DiscoveryBudget || FrameReads == FrameBudget)) Saturations++;
         return false;
     }
 
@@ -333,7 +336,7 @@ internal sealed class ManualContactProbe
             if (ReferenceEquals(candidate.Part, part) && ReferenceEquals(candidate.Mesh, mesh) && ReferenceEquals(candidate.Vehicle, vehicle)) return;
         var entry = new Candidate(part, vehicle, mesh);
         if (_candidates.Count < CandidateLimit) _candidates.Add(entry);
-        else { _candidates[_replace++ % CandidateLimit] = entry; Saturations++; }
+        else { _candidates[_replace++ % CandidateLimit] = entry; if (DebugTimings.Enabled) Saturations++; }
     }
     private static CutPoint Point(double3 value) => new(value.X, value.Y, value.Z);
     private static double3 Game(CutPoint value) => new(value.X, value.Y, value.Z);
