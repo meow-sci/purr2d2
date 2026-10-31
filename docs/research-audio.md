@@ -8,6 +8,7 @@ and static verification; native playback still needs an in-game acceptance pass.
 ## Assets and provenance
 
 The idle recording was supplied by the user in the feature directory.
+Original source filenames and external feature paths below retain their supplied names for reproducibility.
 Their original files are unmodified. This project does not claim authorship or establish
 redistribution rights for those supplied recordings. The contact sound is
 original procedural synthesis generated from this repository's Python code. The Light/Dark
@@ -15,7 +16,7 @@ ignition, static, saber close, clash, mouse swing, somersault swoosh and metal r
 
 | Runtime file | Source | Preparation |
 | --- | --- | --- |
-| `Assets/Audio/light_saber_on.ogg` | User-supplied `light_saber_on.ogg` | Unmodified mono Vorbis, 22,050 Hz, 2.143673 s; plays once when a Light saber ignites. |
+| `Assets/Audio/bfl9k_on.ogg` | User-supplied `light_saber_on.ogg` | Unmodified mono Vorbis, 22,050 Hz, 2.143673 s; plays once when a Light-type BFL9K ignites. |
 | `Assets/Audio/dark_saber_on.ogg` | User-supplied `dark_saber_on.ogg` | Unmodified mono Vorbis, 22,050 Hz, 2.143673 s; plays once when a Dark saber ignites. |
 | `Assets/Audio/saber-hum.wav` | `feature/purr2d2-light-sabers/sounds/lightsaber-idle.wav` | Stereo averaged to mono; 35 ms cosine overlap joins end to beginning. Original 95,091 frames becomes 93,547 frames at 44,100 Hz (2.12125 s). No resampling or normalization. |
 | `Assets/Audio/saber_close.ogg` | User-supplied `saber_close.ogg` | Unmodified mono Vorbis, 22,050 Hz, 1.187392 s; plays once on retraction. |

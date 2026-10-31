@@ -316,14 +316,14 @@ internal static class OverlayDragChecks
             foreach (bool listVisible in new[] { false, true })
             foreach (bool controlsVisible in new[] { false, true })
             {
-                var visible = layout with { ShowKittenList = listVisible, ShowLightsaberControls = controlsVisible };
+                var visible = layout with { ShowKittenList = listVisible, ShowBFL9KControls = controlsVisible };
                 Check(visible.Hit((layout.ListMin + layout.ListMax) * .5f)
                         == (listVisible ? SaberOverlayHit.Kittens : SaberOverlayHit.None)
                     && visible.Hit(layout.SwingCenter) == (controlsVisible ? SaberOverlayHit.Swing : SaberOverlayHit.None)
                     && visible.Hit(layout.SliceCenter) == (controlsVisible ? SaberOverlayHit.Slice : SaberOverlayHit.None)
                     && visible.Hit(layout.IgniteCenter) == (controlsVisible ? SaberOverlayHit.Ignite : SaberOverlayHit.None)
                     && visible.Hit(layout.AutoSwingCenter) == (controlsVisible ? SaberOverlayHit.AutoSwing : SaberOverlayHit.None),
-                    "list and lightsaber visibility independently remove hidden controls from pointer hit testing");
+                    "list and BFL9K visibility independently remove hidden controls from pointer hit testing");
             }
             foreach (var direction in new[] { new float2(1, 0), new float2(0, 1), new float2(-1, 0), new float2(0, -1),
                 SaberOverlayDrag.ClampDisk(new(1, 1)) })

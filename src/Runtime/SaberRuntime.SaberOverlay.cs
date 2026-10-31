@@ -49,7 +49,7 @@ internal sealed partial class SaberRuntime
     private bool OverlayVisible => _enabled && _showSaberOverlay && _ready && !_disposed && Program.DrawUI
         && !Program.EditorFlag && Universe.CurrentSystem != null && Program.MainViewport.Visible;
     private bool KittenListVisible => OverlayVisible && _settings.KittenListUiEnabled;
-    private bool LightsaberUiVisible => OverlayVisible && _settings.LightsaberUiEnabled;
+    private bool BFL9KUiVisible => OverlayVisible && _settings.BFL9KUiEnabled;
     private bool ForceUiVisible => OverlayVisible && _settings.ForceUiEnabled;
     private bool OverlayCanSwing => _fault == null && _owner is { IsDisposed: false }
         && ReferenceEquals(_owner, Program.ControlledVehicle) && _blade.Equipped && _pose.Eligible
@@ -79,10 +79,10 @@ internal sealed partial class SaberRuntime
         if (!visible) { CancelSaberDeploymentDrag(); DismissKittenColorPicker(); }
     }
 
-    private void SetLightsaberUiVisible(bool visible)
+    private void SetBFL9KUiVisible(bool visible)
     {
-        _settings.LightsaberUiEnabled = visible;
-        _overlayLayout = _overlayLayout with { ShowLightsaberControls = visible };
+        _settings.BFL9KUiEnabled = visible;
+        _overlayLayout = _overlayLayout with { ShowBFL9KControls = visible };
         if (!visible) { ResetOverlaySwing(); CancelSaberAutoSwingDrag(); }
     }
 
@@ -129,7 +129,7 @@ internal sealed partial class SaberRuntime
                 ShowSomersaultButtons && SomersaultOverlayControlsEnabled)) with
             {
                 ShowKittenList = KittenListVisible,
-                ShowLightsaberControls = LightsaberUiVisible,
+                ShowBFL9KControls = BFL9KUiVisible,
             };
             _overlayLayout = baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
                 new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset);
@@ -167,7 +167,7 @@ internal sealed partial class SaberRuntime
                     {
                         // List/swing/slice retain 50% alpha; blue action buttons use 25% below.
                         draw.AddRectFilled(layout.ListMin, layout.ListMax, new ImColor8(0, 0, 0, 128));
-                        draw.AddText(layout.ListMin + new float2(layout.Padding, layout.Padding), white, "EVA lightsabers");
+                        draw.AddText(layout.ListMin + new float2(layout.Padding, layout.Padding), white, "BFL9K");
                         if (kittens.Count == 0)
                             draw.AddText(new float2(layout.ListMin.X + layout.Padding, layout.ListBodyTop), muted, "No EVA kittens");
                         draw.PushClipRect(new(layout.ListMin.X, layout.ListBodyTop), new(layout.ListMax.X, layout.ListBodyTop + layout.ListBodyHeight), true);
@@ -227,7 +227,7 @@ internal sealed partial class SaberRuntime
                             draw.AddText(new(layout.ListMin.X + layout.Padding, layout.ListBodyTop + layout.ListBodyHeight), muted, "Scroll for more kittens");
                     }
 
-                    if (layout.ShowLightsaberControls)
+                    if (layout.ShowBFL9KControls)
                     {
                         draw.AddCircleFilled(layout.SwingCenter, layout.SwingRadius, new ImColor8(0, 0, 0, 128), 64);
                         draw.AddCircle(layout.SwingCenter, layout.SwingRadius, new ImColor8(255, 255, 255, 64), 64,
@@ -346,7 +346,7 @@ internal sealed partial class SaberRuntime
             ShowSomersaultButtons && SomersaultOverlayControlsEnabled)) with
         {
             ShowKittenList = KittenListVisible,
-            ShowLightsaberControls = LightsaberUiVisible,
+            ShowBFL9KControls = BFL9KUiVisible,
         };
         return baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
             new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset);
@@ -501,7 +501,7 @@ internal sealed partial class SaberRuntime
 
     private void BeginSaberAutoSwingDrag(KittenEva owner, float2 pointer, OverlayLayout layout)
     {
-        if (!LightsaberUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost
+        if (!BFL9KUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost
             || !ReferenceEquals(owner, _owner) || !ReferenceEquals(owner, Program.ControlledVehicle)
             || !_currentKittens.Contains(owner) || !_kittenSabers.TryGetValue(owner, out var saber)) return;
         if (!_autoSwingDrag.Begin(pointer, saber.AutoSwing.DurationSeconds, layout.AutoSwingCenter,
@@ -511,7 +511,7 @@ internal sealed partial class SaberRuntime
 
     private bool SaberAutoSwingDragLayoutStillValid(OverlayLayout layout)
     {
-        if (!_autoSwingDrag.Held || !LightsaberUiVisible || Program.IsModalOpen() || Program.HasMouseInputLatch
+        if (!_autoSwingDrag.Held || !BFL9KUiVisible || Program.IsModalOpen() || Program.HasMouseInputLatch
             || ImGui.GetIO().AppFocusLost
             || _fault != null || _autoSwingDragOwner is not { IsDisposed: false } owner
             || !ReferenceEquals(owner, _owner) || !ReferenceEquals(owner, Program.ControlledVehicle)

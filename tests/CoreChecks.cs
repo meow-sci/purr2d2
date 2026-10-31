@@ -283,6 +283,20 @@ internal static class CoreChecks
         try
         {
             Directory.CreateDirectory(directory);
+            Check(SaberSettings.Load(path).BFL9KUiEnabled, "BFL9K controls remain visible by default");
+            foreach (bool visible in new[] { false, true })
+            {
+                File.WriteAllText(path, "{\"BFL9KUiEnabled\":" + (visible ? "true" : "false") + "}");
+                var visibility = SaberSettings.Load(path);
+                Check(visibility.BFL9KUiEnabled == visible, "BFL9K UI visibility loads from preferences");
+                visibility.Save(path);
+                Check(SaberSettings.Load(path).BFL9KUiEnabled == visible,
+                    "BFL9K UI visibility survives saving and reloading");
+                using var savedVisibility = JsonDocument.Parse(File.ReadAllText(path));
+                Check(savedVisibility.RootElement.GetProperty("BFL9KUiEnabled").GetBoolean() == visible,
+                    "saved UI visibility uses the BFL9K preference key");
+            }
+            File.Delete(path);
             Check(!new SaberSettings().ExtendedEnvironmentLighting && !SaberSettings.Load(path).ExtendedEnvironmentLighting,
                 "extended environment lighting is off for new settings and missing preferences");
             Check(DefaultEffects(SaberSettings.Load(path).DarkEffects, SaberType.Dark),

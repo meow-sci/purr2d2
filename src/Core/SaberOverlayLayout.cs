@@ -12,7 +12,7 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     float2 StatusMin, float2 StatusMax, bool ShowSomersaultButtons)
 {
     public bool ShowKittenList { get; init; } = true;
-    public bool ShowLightsaberControls { get; init; } = true;
+    public bool ShowBFL9KControls { get; init; } = true;
     /// <summary>Regular-font dimensions for the no-wrap Auto Swing duration label.</summary>
     public float AutoSwingValueWidth { get; init; } = 48;
     public float AutoSwingValueHeight { get; init; } = 16;
@@ -110,7 +110,7 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public SaberOverlayHit Hit(float2 point)
     {
         if (!Valid) return SaberOverlayHit.None;
-        if (ShowLightsaberControls)
+        if (ShowBFL9KControls)
         {
             if (SaberOverlayDrag.ContainsCircle(point, SwingCenter, SwingRadius)) return SaberOverlayHit.Swing;
             if (SaberOverlayDrag.ContainsCircle(point, SliceCenter, SliceRadius)) return SaberOverlayHit.Slice;

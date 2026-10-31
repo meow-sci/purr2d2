@@ -24,12 +24,12 @@ internal sealed partial class SaberRuntime
         {
             ((IGameViewportLifecycle)Program.HoveredViewport).SetMenuBarInUse(true);
             if (ImGui.MenuItem("Enabled", default(ImString), _enabled, _ready)) SetEnabled(!_enabled);
-            if (ImGui.MenuItem("Kitten List UI", default(ImString), _settings.KittenListUiEnabled))
+            if (ImGui.MenuItem("Big Fucking Laser 9000 UI", default(ImString), _settings.KittenListUiEnabled))
                 SetKittenListUiVisible(!_settings.KittenListUiEnabled);
             if (ImGui.MenuItem("The Furce UI", default(ImString), _settings.ForceUiEnabled))
                 SetForceUiVisible(!_settings.ForceUiEnabled);
-            if (ImGui.MenuItem("Lightsaber UI", default(ImString), _settings.LightsaberUiEnabled))
-                SetLightsaberUiVisible(!_settings.LightsaberUiEnabled);
+            if (ImGui.MenuItem("BFL9K UI", default(ImString), _settings.BFL9KUiEnabled))
+                SetBFL9KUiVisible(!_settings.BFL9KUiEnabled);
             ImGui.Separator();
             if (ImGui.MenuItem("Settings", default(ImString), _windowVisible, _enabled)) ToggleSettingsWindow();
         }
@@ -98,7 +98,7 @@ internal sealed partial class SaberRuntime
                     }
                 }
 
-                if (ImGui.CollapsingHeader("Global lightsaber settings")) DrawSaberAppearanceSettings();
+                if (ImGui.CollapsingHeader("Global BFL9K settings")) DrawSaberAppearanceSettings();
                 if (ImGui.CollapsingHeader("Cape settings")) DrawCapeSettings();
                 if (ImGui.CollapsingHeader("Furce settings")) DrawForceSettings();
                 if (ImGui.CollapsingHeader("Overlay UI Positions")) DrawControlPositionSettings();
@@ -167,7 +167,7 @@ internal sealed partial class SaberRuntime
             ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(effectiveLength, sliceReach):F2} m fully extended.");
             SaberSettingsRow("Sound volume");
             changed |= ImGui.SliderFloat("##SoundVolume", ref volume, 0, 1, "%.2f");
-            ShowSaberControlTip("Overall volume for lightsaber sound effects and hum.");
+            ShowSaberControlTip("Overall volume for BFL9K sound effects and hum.");
             SaberSettingsRow("Extended environment lighting");
             ImGui.BeginDisabled(EnvironmentLightingPatch.UnavailableReason != null);
             try { changed |= ImGui.Checkbox("##ExtendedEnvironmentLighting", ref extendedLighting); }

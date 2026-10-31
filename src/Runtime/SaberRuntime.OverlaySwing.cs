@@ -23,7 +23,7 @@ internal sealed partial class SaberRuntime
     }
 
     private bool ManualSwingSwooshSamplingAllowed()
-        => _overlayDrag.Held && LightsaberUiVisible && OverlayCanSwing
+        => _overlayDrag.Held && BFL9KUiVisible && OverlayCanSwing
             && _owner is { IsDisposed: false } owner
             && ReferenceEquals(_overlayDragOwner, owner) && ReferenceEquals(_overlayDragPose, _pose)
             && ReferenceEquals(owner, Program.ControlledVehicle)
@@ -48,7 +48,7 @@ internal sealed partial class SaberRuntime
     private void ApplyOverlaySwing(double playerDt)
     {
         if (!_overlayDrag.Active) return;
-        if (!LightsaberUiVisible || !OverlayCanSwing || !ReferenceEquals(_overlayDragOwner, _owner)
+        if (!BFL9KUiVisible || !OverlayCanSwing || !ReferenceEquals(_overlayDragOwner, _owner)
             || !ReferenceEquals(_overlayDragPose, _pose))
         {
             ResetOverlaySwing();

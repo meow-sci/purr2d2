@@ -21,7 +21,7 @@ internal static class AudioChecks
         ChannelWrapper Latest(string suffix) => GameAudio.Channels.Last(c => c.Id == "Purr2D2Saber" + suffix);
 
         Tick();
-        Check(!Latest("LightIgnite").Stopped, "Light saber starts its own ignition recording");
+        Check(!Latest("LightIgnite").Stopped, "Light-type BFL9K starts its own ignition recording");
         var light = Latest("LightStatic");
         var hum = Latest("Hum");
         var contact = Latest("Contact");

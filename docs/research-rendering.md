@@ -1,4 +1,4 @@
-# Lightsaber rendering and art contract
+# BFL9K rendering and art contract
 
 Verified against the local `ksa-game-assemblies/current` snapshot, build 2026.10.19.5638. The coffer articles are useful starting points but target the older 5554 build; the implementation uses the current members below.
 

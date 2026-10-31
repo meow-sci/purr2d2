@@ -1,6 +1,6 @@
 # Purr2D2 implementation map
 
-The current gameplay is a held EVA lightsaber with cosmetic contact sparks, an intentional **SWING** contact cut, and assisted **Select part to slice**. A deliberate SWING press can accept one asynchronous quiet cut at a confirmed rendered surface; idle contact and recovery remain cosmetic. Exposure tracking, ring flight and autopilot remain retired. Current behavior and evidence are in [README](../README.md) and [acceptance](ACCEPTANCE.md).
+The current gameplay is a held EVA BFL9K with cosmetic contact sparks, an intentional **SWING** contact cut, and assisted **Select part to slice**. A deliberate SWING press can accept one asynchronous quiet cut at a confirmed rendered surface; idle contact and recovery remain cosmetic. Exposure tracking, ring flight and autopilot remain retired. Current behavior and evidence are in [README](../README.md) and [acceptance](ACCEPTANCE.md).
 
 ## Component ownership
 

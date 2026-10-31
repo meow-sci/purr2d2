@@ -3,7 +3,7 @@
 
 Default: synthesize the original optional contact sound only. Never overwrite
 the supplied hum unless --supplied-sounds-dir is explicitly provided. That option
-prepares the user's lightsaber-idle.wav as mono PCM,
+prepares the user's BFL9K idle recording (original filename: lightsaber-idle.wav) as mono PCM,
 retaining sample rate and applying a short overlap to make the idle loop continuous.
 Run from any directory; outputs are relative to this script's repository root.
 """
@@ -127,7 +127,7 @@ def check_manifest() -> None:
             loop = file.find("Loop")
             one_shots = {
                 "Purr2D2SaberRetract": "saber_close.ogg",
-                "Purr2D2SaberLightIgnite": "light_saber_on.ogg",
+                "Purr2D2SaberLightIgnite": "bfl9k_on.ogg",
                 "Purr2D2SaberDarkIgnite": "dark_saber_on.ogg",
                 "Purr2D2SomersaultSwoosh": "sommersault_swoosh.ogg",
                 "Purr2D2SaberSwing": "saber_swoosh.ogg",

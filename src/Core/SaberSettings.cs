@@ -86,7 +86,7 @@ public sealed class SaberSettings
     public float BladeLength { get; set; } = 1.4f;
     public bool KittenListUiEnabled { get; set; } = true;
     public bool ForceUiEnabled { get; set; } = true;
-    public bool LightsaberUiEnabled { get; set; } = true;
+    public bool BFL9KUiEnabled { get; set; } = true;
     public bool ExtendedEnvironmentLighting { get; set; } = false;
     public float SliceReachMultiplier { get; set; } = SaberLimits.DefaultSliceReachMultiplier;
     public float ColorR { get; set; } = .12f;

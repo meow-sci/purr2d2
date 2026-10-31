@@ -2,7 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "Content/Purr2D2/SaberVfxCommon.glsl"
 
-// Light sabers carry smooth, gently curving energy loops with no spatial noise knots.
+// Light-type BFL9K blades carry smooth, gently curving energy loops with no spatial noise knots.
 vec3 arcPoint(float u, float seed, float arc) {
     float time = pc.animation.x;
     vec2 extent = arcExtent(arc, seed);

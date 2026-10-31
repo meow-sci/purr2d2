@@ -105,7 +105,7 @@ internal sealed partial class SaberRuntime
         Check(runtime.SaberColorFor(first) == firstPalette && runtime.SaberColorFor(second) == secondPalette,
             "first and second EVA kittens receive exact normalized red and green palette entries");
         Check(runtime.SaberTypeFor(first) == SaberType.Light && runtime.SaberTypeFor(second) == SaberType.Light,
-            "every newly observed kitten starts with the Light saber style");
+            "every newly observed kitten starts with the Light-type BFL9K style");
         runtime.SetKittenSaberColor(first, new(1, 0, .2f));
         Check(runtime.SaberColorFor(first) == new float3(1, 0, .2f) && runtime.SaberColorFor(second) == secondPalette
             && !runtime.SaberEnabledFor(first) && runtime._kittenSaberRequests.Count == 0
@@ -332,7 +332,7 @@ internal sealed partial class SaberRuntime
         KittenEva afterReset = new("After reset");
         system.All.Items = [afterReset]; runtime.RefreshOverlayKittens();
         Check(runtime.SaberColorFor(afterReset) == firstPalette && runtime.SaberTypeFor(afterReset) == SaberType.Light,
-            "world reset starts a new Light saber session and restarts palette assignment at red");
+            "world reset starts a new Light-type BFL9K session and restarts palette assignment at red");
         runtime.ResetKittenSabers();
         CheckPerKittenLengthAndManualDeployment();
         CheckAutoSwingAndDeferredDeployment();
