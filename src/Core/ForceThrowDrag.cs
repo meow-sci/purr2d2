@@ -5,7 +5,7 @@ namespace Purr2D2.Core;
 /// <summary>A transient upward drag that chooses the speed for a Force throw.</summary>
 public sealed class ForceThrowDrag
 {
-    public const double MinimumSpeed = 10;
+    public const double MinimumSpeed = 1;
     public const double MaximumSpeed = 250;
 
     private float _pressY;

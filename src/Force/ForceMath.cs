@@ -13,7 +13,7 @@ internal static class ForceMath
     internal const double DefaultCaptureRadius = DefaultAngryRadius;
     internal const double MinimumAngryRadius = 1;
     internal const double MaximumAngryRadius = 50;
-    internal const double ThrowSpeed = 10;
+    internal const double ThrowSpeed = 1;
     internal const double MaximumThrowSpeed = 250;
     internal const double MaximumOffset = 25;
     internal const double DefaultGroupSpread = ForceSpreadLimits.DefaultGroupSpread;

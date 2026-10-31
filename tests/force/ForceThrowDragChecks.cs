@@ -31,7 +31,7 @@ internal static class ForceThrowDragChecks
     private static void MapsUpwardMovementAndClamps()
     {
         var drag = NewDrag();
-        Check(drag.Move(new float2(120, 215)) && drag.Speed == 70, "one quarter travel selects one quarter speed range");
+        Check(drag.Move(new float2(120, 215)) && drag.Speed == 63.25, "one quarter travel selects one quarter speed range");
         Check(drag.Thumb == new float2(120, 215), "thumb follows the selected speed");
         Check(drag.Move(new float2(-500, 140)) && drag.Speed == ForceThrowDrag.MaximumSpeed,
             "full upward travel selects maximum speed and ignores horizontal movement");

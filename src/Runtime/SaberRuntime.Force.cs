@@ -1241,14 +1241,14 @@ internal sealed partial class SaberRuntime
             DrawCenteredOverlayStatus(draw, _forceStatus, layout.StatusMin, layout.StatusMax,
                 font, layout.Scale, bottomAligned: true);
         var overlayPointer = ImGui.GetIO().MousePos;
-        if (!_forceSettingDrag.Held && !_forceThrowDrag.Held && !_forceCaptureRadiusDrag.Held
+        if (!_forceSettingDrag.Held && !_forceThrowDrag.Held && !_forceCaptureRadiusDrag.Held && !_forceRotationDrag.Held
             && !KittenColorPickerContainsPointer(overlayPointer) && !SettingsContainsPointer(overlayPointer))
         {
             var overlayHit = ForceOverlayHitAt(overlayPointer);
             if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
                 ShowSaberTooltip("Hold and drag up to choose a throw speed; release to throw.");
             else if (overlayHit == ForceOverlayHit.Rotate)
-                ShowSaberTooltip("Drag around the upper arc to rotate each held item: one full turn to either side.");
+                ShowSaberTooltip("rotate captured items");
             else if (overlayHit == ForceOverlayHit.CaptureLimit)
                 ShowSaberTooltip("max # objects Furce can capture");
         }

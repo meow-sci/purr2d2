@@ -524,7 +524,7 @@ internal static class ForceControllerChecks
             Check(controller.Capture(owner, Pick(target), false), "throw capture");
             var inherited = target.GetVelocityCci();
             controller.Release(true);
-            Equal(target.GetVelocityCci() - inherited, new(10, 0, 0), "throw adds the 10m/s default outward velocity once");
+            Equal(target.GetVelocityCci() - inherited, new(1, 0, 0), "throw adds the 1m/s default outward velocity once");
             var thrown = target.GetVelocityCci(); controller.Release(true);
             Equal(target.GetVelocityCci(), thrown, "second release never throws twice");
             Check(controller.Capture(owner, Pick(target), false), "recapture after throw");
