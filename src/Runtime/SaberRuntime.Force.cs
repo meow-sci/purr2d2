@@ -14,6 +14,13 @@ internal sealed partial class SaberRuntime
 {
     private readonly ForceController _force = new();
     private readonly ForceOverlayDrag _forceDrag = new();
+    private readonly ForceRotationDrag _forceRotationDrag = new();
+    private KittenEva? _forceRotationOwner;
+    private CelestialSystem? _forceRotationSystem;
+    private IParentBody? _forceRotationParent;
+    private long _forceRotationGeneration;
+    private double _forceRotationTarget;
+    private bool _forceRotationPending;
     private readonly ForceOffsetSmoother _forceOffsetSmoother = new();
     private readonly ForceSpreadSmoother _forceSpreadSmoother = new();
     private readonly ForceCaptureLift _forceCaptureLift = new();
@@ -140,6 +147,14 @@ internal sealed partial class SaberRuntime
                 AdvanceForceSpread(dtPlayer);
             }
 
+            // Pointer events publish intent only; rigid transforms are written here,
+            // in the same settled handoff as movement, before dispatching new workers.
+            if (_forceRotationPending)
+            {
+                if (ForceRotationGestureValid()) _force.SetRotation(_forceRotationTarget);
+                else CancelForceRotationDrag();
+                _forceRotationPending = false;
+            }
             bool wasHolding = _force.HasCapture;
             _force.Update(_owner);
             if (_forceThrowDrag.Held && (!ForceHolding || !ForceCanUse
@@ -575,6 +590,7 @@ internal sealed partial class SaberRuntime
             || (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner)))
             ResetForceGestures();
         if (_forceDrag.Held && !ReferenceEquals(_forceMoveOwner, _owner)) _forceDrag.Release();
+        if (_forceRotationDrag.Held && !ForceRotationGestureValid()) CancelForceRotationDrag();
         if (_forceSettingDrag.Held && !ReferenceEquals(_forceSettingOwner, _owner)) ReleaseForceSettingDrag();
         if (_forceThrowDrag.Held && (!ForceHolding || !ForceCanUse
             || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner)))
@@ -707,6 +723,20 @@ internal sealed partial class SaberRuntime
                 }
                 else BeginForceCaptureRadiusSelection(pointer);
                 break;
+            case ForceOverlayHit.Rotate:
+                double currentRotation = ForceRotationDisplay;
+                if (!ForceHolding || !ReferenceEquals(_force.Owner, _owner)
+                    || !_forceRotationDrag.Begin(pointer, _forceLayout, currentRotation)) break;
+                _forceDrag.Release();
+                ReleaseForceSettingDrag();
+                CancelForceThrowDrag();
+                _forceRotationOwner = _owner;
+                _forceRotationSystem = _owner!.System;
+                _forceRotationParent = _owner.Parent;
+                _forceRotationGeneration = _forceCaptureGeneration;
+                _forceRotationTarget = currentRotation;
+                _forceRotationPending = currentRotation != _force.ItemRotation;
+                break;
             case ForceOverlayHit.Move:
                 if (!_force.HasCapture || !ReferenceEquals(_force.Owner, _owner)) break;
                 var camera = Program.MainViewport.GetCamera();
@@ -732,6 +762,16 @@ internal sealed partial class SaberRuntime
 
     private void MoveForcePointer(float2 pointer)
     {
+        if (_forceRotationDrag.Held)
+        {
+            if (!ForceRotationGestureValid()) CancelForceRotationDrag();
+            else if (_forceRotationDrag.Move(pointer))
+            {
+                _forceRotationTarget = _forceRotationDrag.Rotation;
+                _forceRotationPending = true;
+            }
+            return;
+        }
         if (_forceCaptureRadiusDrag.Held)
         {
             if (_forceCaptureRadiusDrag.Move(pointer) && _forceCaptureRadiusDrag.Dragged)
@@ -797,8 +837,39 @@ internal sealed partial class SaberRuntime
     internal ForceOverlayHit ForceOverlayHitAt(float2 pointer)
     {
         if (!_forceLayoutAvailable) return ForceOverlayHit.None;
+        if (ForceCanUse && ForceHolding && ReferenceEquals(_force.Owner, _owner)
+            && _forceLayout.HitRotation(pointer, ForceRotationDisplay)) return ForceOverlayHit.Rotate;
         var hit = _forceLayout.Hit(pointer);
         return hit == ForceOverlayHit.AngryRadius ? ForceOverlayHit.None : hit;
+    }
+
+    private double ForceRotationDisplay => _forceRotationPending ? _forceRotationTarget : _force.ItemRotation;
+
+    private bool ForceRotationContextValid() => ForceCanUse && ForceHolding
+        && ReferenceEquals(_force.Owner, _owner) && ReferenceEquals(_forceRotationOwner, _owner)
+        && ReferenceEquals(_owner!.System, _forceRotationSystem)
+        && ReferenceEquals(_owner.Parent, _forceRotationParent)
+        && _forceRotationGeneration == _forceCaptureGeneration;
+
+    private bool ForceRotationGestureValid() => ForceRotationContextValid() && ForceUiVisible
+        && !Program.IsModalOpen() && !Program.HasMouseInputLatch && !ImGui.GetIO().AppFocusLost
+        && _forceLayoutAvailable && _forceRotationDrag.Matches(_forceLayout);
+
+    private void CompleteForceRotationDrag(float2 pointer)
+    {
+        if (!_forceRotationDrag.Held) return;
+        MoveForcePointer(pointer);
+        _forceRotationDrag.Release();
+    }
+
+    private void CancelForceRotationDrag()
+    {
+        _forceRotationDrag.Release();
+        _forceRotationPending = false;
+        _forceRotationTarget = _force.ItemRotation;
+        _forceRotationOwner = null;
+        _forceRotationSystem = null;
+        _forceRotationParent = null;
     }
 
     // Called only by the captured left-button release. Snapshot the radius or
@@ -915,6 +986,7 @@ internal sealed partial class SaberRuntime
         if (Program.IsModalOpen())
         {
             if (_forceThrowDrag.Held || _forceCaptureRadiusDrag.Held) CancelForceThrowDrag();
+            CancelForceRotationDrag();
             return false;
         }
         if (_forceEscapeHeld)
@@ -923,12 +995,13 @@ internal sealed partial class SaberRuntime
             return true;
         }
         var io = ImGui.GetIO();
-        bool throwSliderHeld = _forceThrowDrag.Held || _forceCaptureRadiusDrag.Held;
-        if (!throwSliderHeld && (!ForcePicking && !_forceSettingDrag.Held || KittenColorPickerContainsPointer(io.MousePos)
+        bool forceGestureHeld = _forceThrowDrag.Held || _forceCaptureRadiusDrag.Held || _forceRotationDrag.Held;
+        if (!forceGestureHeld && (!ForcePicking && !_forceSettingDrag.Held || KittenColorPickerContainsPointer(io.MousePos)
             || io.WantTextInput || io.WantCaptureKeyboard)) return false;
         if (action != GlfwKeyAction.Release)
         {
             _forceEscapeHeld = true;
+            CancelForceRotationDrag();
             CancelForcePicker();
             ReleaseForceSettingDrag();
             CancelForceThrowDrag();
@@ -944,7 +1017,7 @@ internal sealed partial class SaberRuntime
 
     private void ResetForceGestures()
     {
-        CancelForcePicker(); _forceDrag.Release(); ReleaseForceSettingDrag(); CancelForceThrowDrag(); _forceLayoutAvailable = false;
+        CancelForcePicker(); _forceDrag.Release(); CancelForceRotationDrag(); ReleaseForceSettingDrag(); CancelForceThrowDrag(); _forceLayoutAvailable = false;
         if (_forceBreakupSequence.TensionPixels > 0 || _forceBreakupSequence.StageOneActive
             || _force.BreakupActive || _forceBreakupScrollPixels.Count != 0)
             RequestForceBreakupCancel();
@@ -955,6 +1028,8 @@ internal sealed partial class SaberRuntime
         _forceCaptureLift.Reset();
         _forceCaptureLiftOwner = null;
         _forceDrag.Reset();
+        CancelForceRotationDrag();
+        _forceRotationDrag.Reset();
         _forceOffsetSmoother.Reset();
         ResetForceSpreadSmoother();
         _forceBreakupScrollPixels.Clear();
@@ -1091,6 +1166,7 @@ internal sealed partial class SaberRuntime
         if (_forceSettingDrag.Held && !_forceSettingDrag.Matches(layout)) ReleaseForceSettingDrag();
         if (_forceThrowDrag.Held && !_forceThrowDrag.Matches(layout)) CancelForceThrowDrag();
         if (_forceCaptureRadiusDrag.Held && !_forceCaptureRadiusDrag.Matches(layout)) CancelForceThrowDrag();
+        if (_forceRotationDrag.Held && !ForceRotationGestureValid()) CancelForceRotationDrag();
         Camera? frameCamera = Program.GetMainCamera();
         ForceHoverPresentation hoverPresentation = default;
         bool hasHoverPresentation = frameCamera is { } cameraForPreview
@@ -1143,6 +1219,23 @@ internal sealed partial class SaberRuntime
                 Math.Max(2, 5 * layout.Scale), white, 16, 1);
         DrawForceSettingControl(ForceOverlayHit.CaptureLimit, layout.CaptureLimitCenter,
             _settings.ForceCaptureLimit, "COUNT", value => $"{Math.Round(value, MidpointRounding.AwayFromZero):0}", "1", ForceCaptureLimits.Maximum.ToString());
+        if (ForceCanUse && ForceHolding && ReferenceEquals(_force.Owner, _owner))
+        {
+            if (_forceRotationDrag.Held)
+            {
+                // Reveal the constrained track while dragging; idle controls stay small.
+                var trackColor = new ImColor8(255, 255, 255, 32);
+                var previous = layout.RotationHandleCenter(-Math.PI * 2);
+                for (int i = 1; i <= 48; i++)
+                {
+                    var next = layout.RotationHandleCenter(-Math.PI * 2 + Math.PI * 4 * i / 48);
+                    draw.AddLine(previous, next, trackColor, Math.Max(.5f, layout.Scale));
+                    previous = next;
+                }
+            }
+            draw.AddCircleFilled(layout.RotationHandleCenter(ForceRotationDisplay),
+                layout.RotationHandleRadius, faintWhiteRim, 24);
+        }
         if (_forceStatusSeverity is ForceStatusSeverity.Warning or ForceStatusSeverity.Error
             && !string.IsNullOrWhiteSpace(_forceStatus))
             DrawCenteredOverlayStatus(draw, _forceStatus, layout.StatusMin, layout.StatusMax,
@@ -1154,6 +1247,8 @@ internal sealed partial class SaberRuntime
             var overlayHit = ForceOverlayHitAt(overlayPointer);
             if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
                 ShowSaberTooltip("Hold and drag up to choose a throw speed; release to throw.");
+            else if (overlayHit == ForceOverlayHit.Rotate)
+                ShowSaberTooltip("Drag around the upper arc to rotate each held item: one full turn to either side.");
             else if (overlayHit == ForceOverlayHit.CaptureLimit)
                 ShowSaberTooltip("max # objects Furce can capture");
         }

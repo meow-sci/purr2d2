@@ -740,6 +740,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     slice_overlay_sources = [source / "src/Core/OverlayStatusTextLayout.cs",
         source / "src/Core/SliceOverlayLayout.cs", source / "tests/SliceOverlayLayoutChecks.cs"]
     force_ui_sources = [source / "src/Core/ForceCaptureLift.cs",
+        source / "src/Core/ForceRotationDrag.cs", source / "tests/force/ForceRotationDragChecks.cs",
         source / "src/Core/ForceCaptureRadiusDrag.cs",
         source / "src/Pose/SaberPoseMath.cs", source / "src/Runtime/SaberRuntime.Force.cs", source / "src/Force/ForceMath.cs",
         source / "src/Rendering/ForceCaptureBubble.cs",

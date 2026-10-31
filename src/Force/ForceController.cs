@@ -12,7 +12,7 @@ internal sealed partial class ForceController : IDisposable
 {
     private readonly List<Held> _held = new(ForceCaptureLimits.Default);
     private Harmony? _harmony;
-    private bool _available, _disposed, _hasFrame, _offsetDirty, _spreadDirty;
+    private bool _available, _disposed, _hasFrame, _offsetDirty, _spreadDirty, _rotationDirty;
     private CelestialSystem? _system;
     private IParentBody? _parent;
     private double3 _anchorBody, _groupCenterBody, _primaryCenteredOffsetBody;
@@ -33,6 +33,10 @@ internal sealed partial class ForceController : IDisposable
     internal KittenEva? Owner { get; private set; }
     internal double3 GroupOffsetBody { get; private set; }
     internal double GroupSpread { get; private set; } = ForceMath.DefaultGroupSpread;
+    // KSA KittenEva uses body +X as its facing direction. Spin each rigid item
+    // about a parallel axis through its own origin; never orbit the group centroid.
+    internal double ItemRotation { get; private set; }
+    private doubleQuat _itemRotationBody = doubleQuat.Identity;
     internal string Status { get; private set; } = "";
     internal ForceStatusSeverity StatusSeverity { get; private set; }
 
@@ -206,11 +210,23 @@ internal sealed partial class ForceController : IDisposable
         _spreadDirty = true;
     }
 
+    internal void SetRotation(double radians)
+    {
+        if (!HasCapture || !double.IsFinite(radians)) return;
+        radians = Math.Clamp(radians, -Math.PI * 2, Math.PI * 2);
+        if (ItemRotation == radians) return;
+        ItemRotation = radians;
+        _itemRotationBody = doubleQuat.CreateFromAxisAngle(double3.UnitX, radians);
+        _rotationDirty = true;
+    }
+
     internal bool TryGetPoseTargetBody(KittenEva owner, out double3 targetBody)
     {
-        // Move the selected hit point with the primary object's center, preserving its
-        // unscaled local hit offset because spread changes positions, never object size.
-        targetBody = _anchorBody + _primaryCenteredOffsetBody * (GroupSpread - 1) + GroupOffsetBody;
+        // The selected surface point rotates with its item, without scaling its local
+        // offset when the group spreads or revolving it around the group centroid.
+        var primaryCenter = _groupCenterBody + _primaryCenteredOffsetBody;
+        targetBody = _groupCenterBody + _primaryCenteredOffsetBody * GroupSpread + GroupOffsetBody
+            + (_anchorBody - primaryCenter).Transform(_itemRotationBody);
         return HasCapture && ReferenceEquals(owner, Owner) && ForceMath.Finite(targetBody);
     }
 
@@ -270,9 +286,10 @@ internal sealed partial class ForceController : IDisposable
             try { held.ClutterHold?.Dispose(); }
             catch (Exception cleanup) { Console.WriteLine($"[purr2d2] Force clutter release cleanup failed: {cleanup}"); }
         _held.Clear(); Owner = null; _system = null; _parent = null;
-        GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
+        GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread; ItemRotation = 0;
+        _itemRotationBody = doubleQuat.Identity;
         _anchorBody = _groupCenterBody = _primaryCenteredOffsetBody = double3.Zero;
-        _hasFrame = false; _offsetDirty = _spreadDirty = false;
+        _hasFrame = false; _offsetDirty = _spreadDirty = _rotationDirty = false;
         _breakupEligible = false; _breakupRefused = false;
     }
 

@@ -32,7 +32,7 @@ internal sealed partial class ForceController
     {
         var owner = Owner!;
         if (!ForceMath.TryFollow(owner.GetPositionCci(), owner.GetVelocityCci(), owner.GetBody2Cci(), owner.BodyRates,
-            _groupCenterBody, held.PositionBody, held.SourceToOwner, GroupOffsetBody, GroupSpread, out var state))
+            _groupCenterBody, held.PositionBody, doubleQuat.Concatenate(held.SourceToOwner, _itemRotationBody), GroupOffsetBody, GroupSpread, out var state))
             throw new InvalidOperationException("A held rigid transform is invalid.");
         return state;
     }
@@ -42,7 +42,7 @@ internal sealed partial class ForceController
         var owner = Owner!;
         var position = owner.GetPositionCci(); var velocity = owner.GetVelocityCci();
         var rotation = owner.GetBody2Cci(); var rates = owner.BodyRates;
-        if (_hasFrame && time == _lastTime && !_offsetDirty && !_spreadDirty && position == _lastOwnerPosition
+        if (_hasFrame && time == _lastTime && !_offsetDirty && !_spreadDirty && !_rotationDirty && position == _lastOwnerPosition
             && velocity == _lastOwnerVelocity && rotation == _lastOwnerRotation && rates == _lastOwnerRates) return;
         JoinOrbitReaders();
         foreach (var held in _held)
@@ -53,7 +53,7 @@ internal sealed partial class ForceController
             else if (held.ClutterHold is { } hold) hold.Write(state);
             else throw new InvalidOperationException("A physical ground object could not be captured.");
         }
-        _hasFrame = true; _offsetDirty = _spreadDirty = false; _lastTime = time;
+        _hasFrame = true; _offsetDirty = _spreadDirty = _rotationDirty = false; _lastTime = time;
         _lastOwnerPosition = position; _lastOwnerVelocity = velocity; _lastOwnerRotation = rotation; _lastOwnerRates = rates;
     }
 

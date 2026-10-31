@@ -2,7 +2,7 @@ using Brutal.Numerics;
 
 namespace Purr2D2.Core;
 
-public enum ForceOverlayHit { None, CaptureLimit, AngryRadius, AngryForce, Force, Move }
+public enum ForceOverlayHit { None, CaptureLimit, AngryRadius, AngryForce, Force, Move, Rotate }
 
 /// <summary>Left-side Force controls, using the same scale as the right-side saber controls.</summary>
 public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, float2 AngryRadiusCenter,
@@ -10,6 +10,12 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
     float2 StatusMin, float2 StatusMax, float Scale, float FontSize = 16, float ThrowLabelWidth = 64)
 {
     public bool Valid => ButtonRadius > 0 && MoveRadius > 0;
+    public float RotationHandleRadius => ButtonRadius * .25f;
+    public float RotationTrackRadius => MoveRadius + RotationHandleRadius + 4 * Scale;
+    public float2 RotationHandleCenter(double rotation) => MoveCenter + new float2(
+        (float)Math.Sin(rotation / 4), -(float)Math.Cos(rotation / 4)) * RotationTrackRadius;
+    public bool HitRotation(float2 pointer, double rotation) => Valid && double.IsFinite(rotation)
+        && SaberOverlayDrag.ContainsCircle(pointer, RotationHandleCenter(rotation), RotationHandleRadius);
     public float SliderTravel => 96 * Scale;
     public float SliderValueLabelGap => Math.Max(4, 6 * Scale);
     // Values are regular ImGui text, unlike the scaled circles. ThrowLabelWidth
@@ -26,8 +32,8 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
             float minimumSettingY = Math.Min(CaptureLimitCenter.Y, AngryRadiusCenter.Y);
             float minimumButtonX = Math.Min(minimumSettingX, Math.Min(AngryCenter.X, ForceCenter.X)) - ButtonRadius;
             float minimumButtonY = Math.Min(minimumSettingY, Math.Min(AngryCenter.Y, ForceCenter.Y)) - ButtonRadius;
-            return new(Math.Min(StatusMin.X, Math.Min(MoveCenter.X - MoveRadius, minimumButtonX)),
-                Math.Min(StatusMin.Y, Math.Min(MoveCenter.Y - MoveRadius,
+            return new(Math.Min(StatusMin.X, Math.Min(MoveCenter.X - RotationTrackRadius - RotationHandleRadius, minimumButtonX)),
+                Math.Min(StatusMin.Y, Math.Min(MoveCenter.Y - RotationTrackRadius - RotationHandleRadius,
                     Math.Min(Math.Min(minimumSettingY - Math.Max(ButtonRadius, SliderValueLabelHalfHeight),
                         AngryCenter.Y - SliderTravel - Math.Max(ButtonRadius, SliderValueLabelHalfHeight)), minimumButtonY))));
         }
@@ -42,7 +48,7 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
             float maximumButtonY = Math.Max(Math.Max(ForceCenter.Y, AngryCenter.Y), maximumSettingY) + ButtonRadius;
             float maximumSliderY = maximumSettingY + SliderTravel + Math.Max(ButtonRadius, SliderValueLabelHalfHeight);
             float maximumThrowLabelY = AngryCenter.Y + Math.Max(ButtonRadius, SliderValueLabelHalfHeight);
-            return new(Math.Max(StatusMax.X, Math.Max(MoveCenter.X + MoveRadius,
+            return new(Math.Max(StatusMax.X, Math.Max(MoveCenter.X + RotationTrackRadius + RotationHandleRadius,
                     Math.Max(maximumButtonX, SliderValueLabelMaxX))),
                 Math.Max(StatusMax.Y, Math.Max(MoveCenter.Y + MoveRadius,
                     Math.Max(Math.Max(maximumButtonY, maximumSliderY), maximumThrowLabelY))));

@@ -15,6 +15,7 @@ internal static class ForceControllerChecks
         InvalidOwnerAndJoinFailure();
         MixedAngryEitherPrimary();
         GroupSpreadAroundCentroid();
+        IndependentItemRotation();
         BreakupKeepsMixedHold();
         BreakupPreflightAndPartialFailure();
         BreakupPieceBudgets();
@@ -60,7 +61,7 @@ internal static class ForceControllerChecks
             var clutter = new ClutterForceTarget(owner, "breakup-clutter", new(4, 0, 0), double3.Zero);
             ClutterForceTargets.Candidates = [clutter];
             Check(controller.Capture(owner, Pick(target), true, 10), "mixed breakup group captures");
-            controller.SetOffset(new(1, 2, 0)); controller.SetSpread(.5); controller.Update(owner);
+            controller.SetOffset(new(1, 2, 0)); controller.SetSpread(.5); controller.SetRotation(.7); controller.Update(owner);
             var originalCenter = target.GetPositionCci(); var neighborPosition = neighbor.GetPositionCci();
             var clutterPosition = clutter.State.Position;
             controller.TryGetPoseTargetBody(owner, out var aim);
@@ -87,12 +88,74 @@ internal static class ForceControllerChecks
             var before = pieces.Select(p => p.GetPositionCci()).ToArray();
             Check(!controller.BeginBreakup(owner) && controller.CapturedCount == 4 && target.BreakupCommits == 1,
                 "ordinary debris does not recursively break up");
+            Check(pieces.All(piece => Math.Abs(doubleQuat.Dot(piece.GetBody2Cci(),
+                doubleQuat.CreateFromAxisAngle(double3.UnitX, .7))) > 1 - 1e-12),
+                "new breakup pieces inherit the displayed item rotation without applying it twice");
+            controller.SetRotation(.9); controller.Update(owner);
+            Check(pieces.All(piece => Math.Abs(doubleQuat.Dot(piece.GetBody2Cci(),
+                doubleQuat.CreateFromAxisAngle(double3.UnitX, .9))) > 1 - 1e-12),
+                "subsequent handle changes rotate each replacement from its inherited baseline");
             controller.SetOffset(new(2, 2, 0)); controller.Update(owner);
             for (int i = 0; i < pieces.Length; i++) Equal(pieces[i].GetPositionCci(), before[i] + double3.UnitX,
                 "existing translation moves replacement debris normally");
             controller.Release(true);
             Check(!controller.HasCapture && !clutter.Captured && pieces.All(p => ForcePhysicsPatches.FilterCapturedWorker(p.TakeUpdateStateIfOrphaned()) != null),
                 "throw releases every replacement and the original mixed peers into ordinary physics");
+        }
+    }
+
+    private static void IndependentItemRotation()
+    {
+        var (controller, owner, target) = Setup("item-rotation");
+        using (controller)
+        {
+            owner.Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .7);
+            owner.BodyRates = double3.Zero;
+            target.Parts.Items.Add(new Part { Tree = target.Parts });
+            var parts = target.Parts.Items.ToArray();
+            var vessels = new List<Vehicle> { target };
+            for (int i = 1; i < 9; i++)
+                vessels.Add(new(owner.System, owner.Parent, "rotation-" + i, new(2 + i * .3, i * .1, -.2), double3.Zero)
+                { Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitY, i * .2) });
+            var clutter = new ClutterForceTarget(owner, "rotation-rock", new(3, 1, 0), double3.Zero);
+            ClutterForceTargets.Candidates = [clutter];
+            var positions = vessels.Select(v => v.GetPositionCci()).ToArray();
+            var rotations = vessels.Select(v => v.GetBody2Cci()).ToArray();
+            var rockPosition = clutter.State.Position;
+            var rockRotation = clutter.State.Body2Cci;
+            var pick = new ForcePick(target, target.Parts.Items[0], target.Parent, target.System, new(0, .5, 0));
+            Check(controller.Capture(owner, pick, true, 10) && controller.CapturedCount == 10,
+                "nine vessels including an intact multi-part vessel and a native rock capture as ten independent items");
+            var facing = double3.UnitX.Transform(owner.GetBody2Cci());
+            foreach (double angle in new[] { Math.PI / 2, -Math.PI / 3, Math.PI * 2, -Math.PI * 2, 0 })
+            {
+                controller.SetRotation(angle); controller.Update(owner); // same simulation time: dirty rotation must still follow
+                var worldSpin = doubleQuat.CreateFromAxisAngle(facing, angle);
+                for (int i = 0; i < vessels.Count; i++)
+                {
+                    Equal(vessels[i].GetPositionCci(), positions[i], "item rotation leaves each center fixed rather than orbiting the group");
+                    var expected = doubleQuat.Concatenate(rotations[i], worldSpin);
+                    Check(Math.Abs(doubleQuat.Dot(vessels[i].GetBody2Cci(), expected)) > 1 - 1e-12,
+                        "each differently oriented item rotates about the same kitten-facing axis in world space");
+                }
+                Equal(clutter.State.Position, rockPosition, "native clutter rotates in place too");
+                Check(Math.Abs(doubleQuat.Dot(clutter.State.Body2Cci, doubleQuat.Concatenate(rockRotation, worldSpin))) > 1 - 1e-12,
+                    "native clutter receives the same signed rotation about the kitten-facing axis");
+                Check(target.Parts.Items.SequenceEqual(parts) && parts.All(part => ReferenceEquals(part.Tree, target.Parts)),
+                    "a multi-part vessel remains one intact captured rigid item");
+                Check(controller.TryGetPoseTargetBody(owner, out var aim), "the selected surface stays available to the pose controller");
+                var expectedHit = target.GetPositionCci() + new double3(0, .5, 0).Transform(worldSpin);
+                Equal(aim.Transform(owner.GetBody2Cci()), expectedHit, "the pose target follows its rotating surface offset");
+            }
+            controller.SetRotation(double.NaN);
+            Check(controller.ItemRotation == 0, "nonfinite rotation cannot corrupt a capture");
+            controller.SetRotation(Math.PI / 4);
+            controller.Release(false); // final gesture may release before the next ordinary update
+            var finalRotation = doubleQuat.Concatenate(rotations[1], doubleQuat.CreateFromAxisAngle(facing, Math.PI / 4));
+            Check(Math.Abs(doubleQuat.Dot(vessels[1].GetBody2Cci(), finalRotation)) > 1 - 1e-12
+                && controller.ItemRotation == 0 && !controller.HasCapture,
+                "release commits the last item orientation and clears the angle for the next capture");
+            Equal(vessels[1].BodyRates, double3.Zero, "release does not introduce artificial residual spin");
         }
     }
 

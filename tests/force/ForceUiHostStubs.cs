@@ -297,6 +297,8 @@ namespace Purr2D2.Force
         internal bool CanBreakup, BreakupActive, BreakupPrepared = true, BreakupCompletesOnCommit = true;
         internal int CapturedLimit;
         internal double CapturedRadius;
+        internal double ItemRotation;
+        internal void SetRotation(double rotation) { Events.Add("Rotation"); ItemRotation = rotation; }
         internal double GroupSpread = ForceMath.DefaultGroupSpread;
         internal int SimulatedCapturedCount = 1;
         internal int CapturedCount => HasCapture ? SimulatedCapturedCount : 0;
@@ -316,7 +318,7 @@ namespace Purr2D2.Force
             CaptureCalls++; CapturedRadius = angryRadius; CapturedLimit = captureLimit; Events.Add("Capture");
             if (HasCapture) { Status = "Already holding"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
             if (!pick.Live) { Status = "Stale target"; StatusSeverity = ForceStatusSeverity.Warning; return false; }
-            HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
+            ItemRotation = 0; HasCapture = true; Owner = owner; GroupOffsetBody = double3.Zero; GroupSpread = ForceMath.DefaultGroupSpread;
             Status = "Holding"; StatusSeverity = ForceStatusSeverity.None; return true;
         }
         internal void Update(KSA.KittenEva? owner)
@@ -346,8 +348,8 @@ namespace Purr2D2.Force
         internal void CancelBreakup()
         { if (!BreakupActive) return; Events.Add("BreakupCancel"); BreakupCancels++; BreakupActive = false; }
         internal void Release(bool thrown, double throwSpeed = ForceMath.ThrowSpeed)
-        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
-        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
+        { Events.Add(thrown ? "Throw" : "Release"); ReleasedOffset = GroupOffsetBody; ReleasedSpread = GroupSpread; ReleasedThrowSpeed = throwSpeed; ItemRotation = 0; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = "Released"; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
+        internal void Reset() { if (Disposed) throw new InvalidOperationException("Reset after dispose"); ItemRotation = 0; HasCapture = false; Owner = null; GroupSpread = ForceMath.DefaultGroupSpread; Status = ""; StatusSeverity = ForceStatusSeverity.None; CanBreakup = false; BreakupActive = false; }
         public void Dispose() => Disposed = true;
     }
 }

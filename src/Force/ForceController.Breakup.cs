@@ -233,13 +233,16 @@ internal sealed partial class ForceController
             var centered = ((state.Position - ownerPosition).Transform(inverseOwner)
                 - _groupCenterBody - GroupOffsetBody) / GroupSpread;
             return new Held(new ForceTarget(piece), piece.Parent, piece.Parts, piece.Parts.Parts.ToArray(),
-                centered, doubleQuat.Concatenate(state.Body2Cci, inverseOwner), state);
+                centered, doubleQuat.Concatenate(doubleQuat.Concatenate(state.Body2Cci, inverseOwner),
+                    _itemRotationBody.Inverse()), state);
         }).ToArray();
 
         _held.RemoveAt(index);
         _held.InsertRange(index, replacements);
         _primaryCenteredOffsetBody = _held[0].PositionBody;
-        _anchorBody = previousAim - _primaryCenteredOffsetBody * (GroupSpread - 1) - GroupOffsetBody;
+        _anchorBody = _groupCenterBody + _primaryCenteredOffsetBody
+            + (previousAim - _groupCenterBody - _primaryCenteredOffsetBody * GroupSpread - GroupOffsetBody)
+                .Transform(_itemRotationBody.Inverse());
         ForcePhysicsPatches.Publish(_held.Where(item => item.Source != null).Select(item => item.Source!).ToArray());
         // Pieces inherit the just-followed source's displayed rigid pose. Let the next
         // ordinary handoff write the new group's FlightPlans instead of rebuilding all

@@ -380,6 +380,7 @@ internal sealed partial class SaberRuntime
                 CompleteSaberAutoSwingDrag(OverlayPointer(window));
                 CompleteSaberDeploymentDrag(OverlayPointer(window));
                 ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag();
+                CompleteForceRotationDrag(OverlayPointer(window));
                 CompleteForceThrowSlider(OverlayPointer(window));
             }
             return true;
@@ -689,6 +690,11 @@ internal sealed partial class SaberRuntime
     internal bool FilterOverlayCursor(GlfwWindow window)
     {
         if (FilterForceRadiusCursor(OverlayPointer(window))) return true;
+        if (_forceRotationDrag.Held)
+        {
+            MoveForcePointer(OverlayPointer(window));
+            return true;
+        }
         if (_igniteDrag.Held)
         {
             UpdateSaberIgniteDrag(OverlayPointer(window));
@@ -737,6 +743,7 @@ internal sealed partial class SaberRuntime
             CompleteSaberAutoSwingDrag(OverlayPointer(window));
             CompleteSaberDeploymentDrag(OverlayPointer(window));
             ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag();
+            CompleteForceRotationDrag(OverlayPointer(window));
             CompleteForceThrowSlider(OverlayPointer(window));
         }
         return true;

@@ -68,6 +68,8 @@ internal sealed partial class SaberRuntime
 
     public static void Main()
     {
+        ForceRotationDragChecks.Run();
+        ForceRotationHandle();
         ForceCaptureRadiusDragChecks.Run();
         ForceCaptureBubbleChecks.Run();
         ForceOverlayChecks.Run();
@@ -1671,6 +1673,91 @@ internal sealed partial class SaberRuntime
             && !runtime._forceSettingDrag.Held
             && runtime.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Release),
             "Escape cancels a settings drag and consumes its matching key release");
+    }
+
+    private static void ForceRotationHandle()
+    {
+        var runtime = new SaberRuntime
+        {
+            _forceLayout = ForceOverlayLayout.Create(
+                SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080)),
+            _forceLayoutAvailable = true
+        };
+        var layout = runtime._forceLayout;
+        var top = layout.RotationHandleCenter(0);
+        Check(runtime.ForceOverlayHitAt(top) == ForceOverlayHit.None,
+            "the rotation handle has no input target without captured items");
+        runtime._force.Capture(runtime._owner!, ForceTargeting.Next!, true);
+        Check(runtime.ForceOverlayHitAt(top) == ForceOverlayHit.Rotate,
+            "either capture mode exposes the top rotation handle");
+        ImDrawListPtr.Circles.Clear();
+        runtime.DrawForceOverlayCore(default);
+        Check(ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == top
+            && circle.Radius == layout.ButtonRadius * .25f
+            && circle.Color == new ImColor8(255, 255, 255, 64).Value),
+            "the idle handle is a solid quarter-size white circle at 25 percent opacity");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, top);
+        runtime.MoveForcePointer(layout.RotationHandleCenter(Math.PI));
+        Check(runtime._forceRotationDrag.Held && runtime._force.ItemRotation == 0
+            && Math.Abs(runtime._forceRotationTarget - Math.PI) < 1e-5,
+            "dragging publishes a half turn without mutating physics from a cursor event");
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        Check(Math.Abs(runtime._force.ItemRotation - Math.PI) < 1e-5,
+            "the settled handoff applies the rotation intent");
+        // No cursor move callback before release: sample the final pointer on release too.
+        runtime.CompleteForceRotationDrag(layout.RotationHandleCenter(Math.PI * 2));
+        Check(!runtime._forceRotationDrag.Held && runtime._forceRotationPending,
+            "button release retains its final rotation intent until the settled handoff");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, layout.RotationHandleCenter(Math.PI * 2));
+        Check(runtime._forceRotationDrag.Held && runtime._forceRotationPending,
+            "regrabbing before the next handoff starts at the displayed pending angle");
+        runtime.CompleteForceRotationDrag(layout.RotationHandleCenter(Math.PI * 2));
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        Check(Math.Abs(runtime._force.ItemRotation - Math.PI * 2) < 1e-5
+            && runtime.ForceOverlayHitAt(layout.RotationHandleCenter(Math.PI * 2)) == ForceOverlayHit.Rotate,
+            "release retains the endpoint and its input target");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, layout.RotationHandleCenter(runtime._force.ItemRotation));
+        runtime.MoveForcePointer(top);
+        runtime.OverlayVisible = false;
+        runtime.UpdateForceVisibility();
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        Check(!runtime._forceRotationDrag.Held && !runtime._forceRotationPending
+            && Math.Abs(runtime._force.ItemRotation - Math.PI * 2) < 1e-5,
+            "hiding the UI cancels unpublished rotation while retaining the displayed item pose");
+        runtime.OverlayVisible = true; runtime._forceLayoutAvailable = true;
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, layout.RotationHandleCenter(runtime._force.ItemRotation));
+        runtime.MoveForcePointer(top);
+        runtime.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Press);
+        Check(!runtime._forceRotationDrag.Held && !runtime._forceRotationPending,
+            "Escape cancels an active rotation gesture");
+        runtime.FilterForceKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Release);
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, layout.RotationHandleCenter(runtime._force.ItemRotation));
+        runtime.MoveForcePointer(top);
+        runtime._forceCaptureGeneration++;
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        Check(!runtime._forceRotationDrag.Held && Math.Abs(runtime._force.ItemRotation - Math.PI * 2) < 1e-5,
+            "a stale gesture cannot rotate a different capture generation");
+        runtime._force.Release(false);
+        runtime.ResetForceMovement();
+        runtime.ResetForceCaptureSession();
+        runtime._force.Capture(runtime._owner!, ForceTargeting.Next!, false);
+        Check(runtime._force.ItemRotation == 0 && runtime.ForceOverlayHitAt(top) == ForceOverlayHit.Rotate,
+            "a new regular capture starts with a neutral handle at the top");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, top);
+        runtime.MoveForcePointer(layout.RotationHandleCenter(-Math.PI));
+        runtime._forceLayout = layout with { MoveCenter = layout.MoveCenter + new float2(1, 0) };
+        runtime.MoveForcePointer(top);
+        Check(!runtime._forceRotationDrag.Held && !runtime._forceRotationPending,
+            "layout changes invalidate press-time geometry before another rotation is published");
+        runtime._forceLayout = layout;
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, top);
+        runtime.MoveForcePointer(layout.RotationHandleCenter(Math.PI));
+        ImGui.Io.AppFocusLost = true;
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        Check(!runtime._forceRotationDrag.Held && runtime._force.ItemRotation == 0,
+            "focus loss rejects pending input at the settled handoff even without another cursor event");
+        ImGui.Io.AppFocusLost = false;
+        runtime.ResetForce();
     }
 
     private static void ForceStatusBox()
