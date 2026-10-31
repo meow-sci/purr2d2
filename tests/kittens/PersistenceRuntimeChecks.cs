@@ -34,6 +34,8 @@ internal sealed partial class SaberRuntime
     private KittenEva? _kittenColorPickerOwner;
     private void DismissKittenColorPicker() => _kittenColorPickerOwner = null;
     private void CancelSaberDeploymentDrag() => _saberDeploymentDragOwner = null;
+    private KittenEva? _igniteDragOwner;
+    private void CancelSaberIgniteDrag() => _igniteDragOwner = null;
     private void CancelSaberAutoSwingDrag() => _autoSwingDragOwner = null;
     private void RemoveClashOwner(KittenEva owner)
     {

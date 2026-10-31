@@ -564,6 +564,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SaberSwing.cs",
         source / "src/Core/SaberAutoSwing.cs",
         source / "src/Core/SaberAutoSwingDrag.cs",
+        source / "src/Core/SaberIgniteDrag.cs",
         source / "src/Core/SaberOverlayDrag.cs",
         source / "src/Core/ManualSwingSwooshGate.cs",
         source / "src/Core/SaberDeploymentDrag.cs",

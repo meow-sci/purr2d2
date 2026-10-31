@@ -70,6 +70,7 @@ internal static class OverlayDragChecks
         Check(!drag.Active && !drag.Held && drag.Offset == float2.Zero,
             "world or ownership reset clears the temporary gesture");
         DeploymentDrag();
+        IgniteDrag();
         AutoSwingStateAndDrag();
         AutoSwingValueLayout();
         PointerOwnership();
@@ -108,6 +109,55 @@ internal static class OverlayDragChecks
         Check(drag.Begin(0, -float.MaxValue, float.MaxValue) && drag.Value == .5f
             && drag.Move(float.MaxValue) == 1,
             "finite extreme track coordinates use double precision and cannot overflow the deployment fraction");
+    }
+
+    private static void IgniteDrag()
+    {
+        var drag = new SaberIgniteDrag();
+        var center = new float2(200, 300);
+        const float radius = 27, travel = 120, threshold = 4;
+        float value = 0;
+        Check(!drag.Begin(center, float.NaN, false, center, radius, travel, threshold)
+            && !drag.Begin(center + new float2(radius + 1, 0), 0, false, center, radius, travel, threshold)
+            && !drag.Begin(center, 0, false, center, radius, 0, threshold),
+            "ignite rejects invalid fractions, outside presses and empty tracks");
+        Check(drag.Begin(center, 0, false, center, radius, travel, threshold)
+            && drag.Move(center + new float2(0, 3)) == 0 && !drag.Dragged
+            && drag.Release(center + new float2(0, 3), out value) && value == 1
+            && !drag.Release(center, out _),
+            "an ignite click tolerates slight jitter, selects full ignition and completes only once");
+        Check(drag.Begin(center, .4f, true, center, radius, travel, threshold)
+            && drag.Value == .4f && drag.Release(center, out value) && value == 0,
+            "pressing retract preserves the partial blade until a plain click retracts it");
+        var press = center + new float2(3, 7);
+        Check(drag.Begin(press, 0, false, center, radius, travel, threshold)
+            && drag.Move(press + new float2(0, 30)) == .25f
+            && drag.Release(press + new float2(0, 60), out value) && value == .5f && drag.Dragged,
+            "downward ignition drag sets a fraction relative to the press and commits the release coordinate");
+        var blade = new BladeState();
+        blade.Equip(true);
+        blade.SetManualDeploymentTarget(value);
+        for (int i = 0; i < 10; i++) blade.Advance(.1);
+        Check(blade.Deployment == .5f && blade.TargetOn && blade.ManualDeployment,
+            "a released partial ignition remains held and reports retract mode");
+        Check(drag.Begin(center, blade.ManualTargetDeployment, blade.TargetOn, center, radius, travel, threshold)
+            && MathF.Abs(drag.Move(center + new float2(0, 30)) - .75f) < 1e-6f
+            && MathF.Abs(drag.Move(center + new float2(0, -30)) - .25f) < 1e-6f,
+            "retract mode can extend or retract the current partial fraction in one gesture");
+        Check(drag.Move(center + new float2(0, 1000)) == 1
+            && drag.Move(center + new float2(0, -1000)) == 0
+            && drag.Move(new(float.NaN, 0)) == 0
+            && drag.MatchesLayout(center, radius, travel)
+            && !drag.MatchesLayout(center, radius, travel + 1),
+            "ignite motion clamps at both ends, ignores invalid pointers and detects layout changes");
+        drag.Reset();
+        Check(!drag.Held && !drag.Release(center, out _)
+            && drag.Begin(center, .5f, true, center, radius, travel, threshold)
+            && drag.Release(center + new float2(0, -60), out value) && value == 0 && drag.Dragged,
+            "cancel cannot toggle and a later upward release can drag all the way to zero");
+        Check(drag.Begin(center, 1, true, center, radius, travel, threshold)
+            && drag.Release(center + new float2(0, -30), out value) && value == .75f,
+            "a full blade in retract mode can also be shortened without toggling off");
     }
 
     private static void AutoSwingStateAndDrag()
@@ -251,6 +301,13 @@ internal static class OverlayDragChecks
         {
             var origin = new float2(120, 80); // A viewport need not start at desktop (0,0).
             var layout = SaberOverlayLayout.Create(origin, size, font, 100);
+            Check(layout.IgnitePillMin == layout.IgniteCenter - new float2(layout.IgniteRadius)
+                && layout.IgnitePillMax.Y > layout.IgniteCenter.Y + layout.IgniteRadius
+                && layout.ControlsMin.X <= layout.IgnitePillMin.X
+                && layout.ControlsMin.Y <= layout.IgnitePillMin.Y
+                && layout.ControlsMax.X >= layout.IgnitePillMax.X
+                && layout.ControlsMax.Y >= layout.IgnitePillMax.Y,
+                "the ignite capsule opens downward and its complete bounds are reserved");
             Check(layout.Valid && layout.ListMin.X >= origin.X && layout.ListMin.Y >= origin.Y
                 && layout.ListMax.X <= origin.X + size.X && layout.ListMax.Y < layout.SwingCenter.Y - layout.SwingRadius
                 && layout.SwingCenter.X - layout.SwingRadius >= origin.X

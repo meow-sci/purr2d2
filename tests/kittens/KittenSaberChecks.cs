@@ -37,6 +37,8 @@ internal sealed partial class SaberRuntime
     private KittenEva? _kittenColorPickerOwner;
     private void DismissKittenColorPicker() => _kittenColorPickerOwner = null;
     private void CancelSaberDeploymentDrag() => _saberDeploymentDragOwner = null;
+    private KittenEva? _igniteDragOwner;
+    private void CancelSaberIgniteDrag() => _igniteDragOwner = null;
     private void CancelSaberAutoSwingDrag() => _autoSwingDragOwner = null;
     private void RemoveClashOwner(KittenEva owner)
     {
@@ -223,12 +225,15 @@ internal sealed partial class SaberRuntime
             "changing a lit saber's style preserves its deployment, ignition, pose, color and other owners");
         runtime.SetKittenSaberType(first, SaberType.Dark);
         runtime._kittenColorPickerOwner = first;
-        runtime.SetControlledKitten(first); runtime.SetControlledKitten(second);
+        runtime.SetControlledKitten(first);
+        runtime._igniteDragOwner = first;
+        runtime.SetControlledKitten(second);
         Check(ReferenceEquals(runtime._blade, secondSaber.Blade) && ReferenceEquals(runtime._pose, secondSaber.Pose)
             && ReferenceEquals(runtime._audio, secondSaber.Audio) && ReferenceEquals(runtime._owner, second)
             && firstSaber.Blade.TargetOn && secondSaber.Blade.TargetOn
             && !runtime._freshPoseThisTick && !runtime._hasPreviousTip && runtime._swingSpeed == 0
             && runtime.Color == secondSaber.Color && runtime.Color != firstSaber.Color
+            && runtime._igniteDragOwner == null
             && runtime._kittenColorPickerOwner == null
             && HasSaberPosePair(first),
             "switching control changes active aliases and preserves both equipped sabers");
@@ -1053,9 +1058,10 @@ internal sealed partial class SaberRuntime
         // The host control can change after the last safe update. The circle must
         // target the currently controlled EVA, rather than the old runtime alias.
         Program.ControlledVehicle = first;
+        runtime._igniteDragOwner = first;
         runtime.QueueControlledSaberToggle();
         Check(runtime.SaberEnabledFor(first) && runtime.SaberEnabledFor(second) && !saber.Blade.Equipped
-            && runtime._kittenSaberRequests.Count == 1,
+            && runtime._kittenSaberRequests.Count == 1 && runtime._igniteDragOwner == null,
             "ignite button queues the current host kitten without changing the old controlled kitten or avatar");
         runtime.QueueControlledSaberToggle();
         Check(!runtime.SaberEnabledFor(first) && runtime._kittenSaberRequests.Count == 2,

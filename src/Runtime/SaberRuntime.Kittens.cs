@@ -169,6 +169,7 @@ internal sealed partial class SaberRuntime
         if (!_ready || _disposed || _fault != null || Program.EditorFlag || kitten.IsDisposed || !_currentKittens.Contains(kitten)) return;
         // A discrete equipment action supersedes any currently captured overlay
         // gesture for this same kitten, before a newer press can be started.
+        if (ReferenceEquals(kitten, _igniteDragOwner)) CancelSaberIgniteDrag();
         if (ReferenceEquals(kitten, _saberDeploymentDragOwner)) CancelSaberDeploymentDrag();
         if (ReferenceEquals(kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
         PublishKittenSaberRequest(new(kitten, enabled));
@@ -258,6 +259,7 @@ internal sealed partial class SaberRuntime
             // Boarding destroys/deregisters the EVA object. Release its processor,
             // MMU override and owned channels even if it was not being controlled.
             var saber = _kittenSabers[kitten];
+            if (ReferenceEquals(kitten, _igniteDragOwner)) CancelSaberIgniteDrag();
             if (ReferenceEquals(kitten, _saberDeploymentDragOwner)) CancelSaberDeploymentDrag();
             if (ReferenceEquals(kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
             RemoveClashOwner(kitten);
@@ -288,6 +290,7 @@ internal sealed partial class SaberRuntime
     private void SetControlledKitten(KittenEva? kitten)
     {
         CancelSaberDeploymentDrag();
+        CancelSaberIgniteDrag();
         CancelSaberAutoSwingDrag();
         DismissKittenColorPicker();
         CancelAssistedSlice(SliceWorkActive || _selectingSlice ? "Slice cancelled: controlled kitten changed." : "");
@@ -538,6 +541,7 @@ internal sealed partial class SaberRuntime
     private void ResetKittenSabers()
     {
         CancelSaberDeploymentDrag();
+        CancelSaberIgniteDrag();
         CancelSaberAutoSwingDrag();
         ReleaseProfileBindings();
         DismissKittenColorPicker();

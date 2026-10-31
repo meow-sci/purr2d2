@@ -34,6 +34,9 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         return mirrored ? new(-offset.X, offset.Y) : offset;
     }
     public float AutoSwingPillTravel => 120 * Scale;
+    public float IgnitePillTravel => AutoSwingPillTravel;
+    public float2 IgnitePillMin => IgniteCenter - new float2(IgniteRadius);
+    public float2 IgnitePillMax => IgniteCenter + new float2(IgniteRadius, IgniteRadius + IgnitePillTravel);
     public float AutoSwingPillWidth => 2 * IgniteRadius;
     public float2 AutoSwingPillMin => AutoSwingCenter - new float2(IgniteRadius);
     public float2 AutoSwingPillMax => AutoSwingCenter + new float2(IgniteRadius,
@@ -62,11 +65,11 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
             + (RowHeight - TopRowHeight - DeploymentBarHeight) * .5f);
     public float2 DeploymentBarMax(int row, float scroll) => new(ListMax.X - Padding,
         DeploymentBarMin(row, scroll).Y + DeploymentBarHeight);
-    public float2 ControlsMin => new(Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
-            SliceCenter.X - SliceRadius), Math.Min(StatusMin.X, AutoSwingValueEnvelopeMin.X)), AutoSwingPillMin.X),
-        Math.Min(Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y), AutoSwingValueEnvelopeMin.Y));
-    public float2 ControlsMax => new(Math.Max(Math.Max(StatusMax.X, AutoSwingPillMax.X), AutoSwingValueEnvelopeMax.X),
-        Math.Max(Math.Max(StatusMax.Y, AutoSwingPillMax.Y), AutoSwingValueEnvelopeMax.Y));
+    public float2 ControlsMin => new(Math.Min(IgnitePillMin.X, Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
+            SliceCenter.X - SliceRadius), Math.Min(StatusMin.X, AutoSwingValueEnvelopeMin.X)), AutoSwingPillMin.X)),
+        Math.Min(IgnitePillMin.Y, Math.Min(Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y), AutoSwingValueEnvelopeMin.Y)));
+    public float2 ControlsMax => new(Math.Max(IgnitePillMax.X, Math.Max(Math.Max(StatusMax.X, AutoSwingPillMax.X), AutoSwingValueEnvelopeMax.X)),
+        Math.Max(IgnitePillMax.Y, Math.Max(Math.Max(StatusMax.Y, AutoSwingPillMax.Y), AutoSwingValueEnvelopeMax.Y)));
 
     /// <summary>Moves the action controls and their status together; offsets are fractions of the viewport.</summary>
     public SaberOverlayLayout WithControlsOffset(float2 origin, float2 size, float2 normalizedOffset, float topInset = 0)
