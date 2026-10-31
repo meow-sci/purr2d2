@@ -24,11 +24,11 @@ internal sealed partial class SaberRuntime
         {
             ((IGameViewportLifecycle)Program.HoveredViewport).SetMenuBarInUse(true);
             if (ImGui.MenuItem("Enabled", default(ImString), _enabled, _ready)) SetEnabled(!_enabled);
-            if (ImGui.MenuItem("Big Fucking Laser 9000 UI", default(ImString), _settings.KittenListUiEnabled))
+            if (ImGui.MenuItem("Kitten List", default(ImString), _settings.KittenListUiEnabled))
                 SetKittenListUiVisible(!_settings.KittenListUiEnabled);
-            if (ImGui.MenuItem("The Furce UI", default(ImString), _settings.ForceUiEnabled))
+            if (ImGui.MenuItem("The Furce HUD", default(ImString), _settings.ForceUiEnabled))
                 SetForceUiVisible(!_settings.ForceUiEnabled);
-            if (ImGui.MenuItem("BFL9K UI", default(ImString), _settings.BFL9KUiEnabled))
+            if (ImGui.MenuItem("Big Fucking Laster 9000 HUD", default(ImString), _settings.BFL9KUiEnabled))
                 SetBFL9KUiVisible(!_settings.BFL9KUiEnabled);
             ImGui.Separator();
             if (ImGui.MenuItem("Settings", default(ImString), _windowVisible, _enabled)) ToggleSettingsWindow();
