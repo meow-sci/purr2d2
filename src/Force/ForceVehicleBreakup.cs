@@ -12,8 +12,9 @@ namespace Purr2D2.Force;
 /// construct its inert native replacements in bounded main-thread handoffs.</summary>
 internal sealed class ForceVehicleBreakup : IDisposable
 {
-    private enum PreparationState { Capture, Worker, Register, CreateRoots, CheckColliders, CreateTree, Ready, Failed, Disposed }
-    private sealed record PartSnapshot(Part Part, double4x4 AssemblyTransform, Part[] Children);
+    private enum PreparationState { Capture, Worker, Register, CreateRoots, CheckColliders, CreateTree, RestoreDents, Ready, Failed, Disposed }
+    private sealed record PartSnapshot(Part Part, double4x4 AssemblyTransform, Part[] Children,
+        AuthoredDebrisDeformation? Deformation);
     private readonly record struct CaptureCandidate(Part Part, int ParentIndex, int FullPartIndex, bool IsFullPart,
         int FirstLayerBranchIndex, Part StructuralAnchor, bool IsAttachedInternal);
     private sealed record BackgroundPreparation(ForceBreakupPlanner.PlannedPiece[] Pieces,
@@ -68,6 +69,7 @@ internal sealed class ForceVehicleBreakup : IDisposable
     private int _rootIndex;
     private ColliderModule[]? _currentColliders;
     private int _colliderIndex;
+    private int _dentIndex;
 
     internal int Count => _captureComplete ? _pieces.Count : 0;
     internal bool CaptureComplete => _captureComplete;
@@ -170,6 +172,9 @@ internal sealed class ForceVehicleBreakup : IDisposable
                     case PreparationState.CreateTree:
                         CreateOneTree();
                         break;
+                    case PreparationState.RestoreDents:
+                        RestoreOneDentField();
+                        break;
                     case PreparationState.Ready:
                     case PreparationState.Failed:
                     case PreparationState.Disposed:
@@ -209,7 +214,8 @@ internal sealed class ForceVehicleBreakup : IDisposable
         foreach (var snapshot in _topology)
         {
             if (!ReferenceEquals(snapshot.Part.Tree?.OwningVehicle, _source)
-                || !snapshot.Part.MatrixAsmb2VehicleAsmb.Equals(snapshot.AssemblyTransform)) return false;
+                || !snapshot.Part.MatrixAsmb2VehicleAsmb.Equals(snapshot.AssemblyTransform)
+                || !ForceDebrisDeformation.Matches(snapshot.Part, snapshot.Deformation)) return false;
             var children = snapshot.Part.SubParts;
             if (children.Length != snapshot.Children.Length) return false;
             for (int i = 0; i < children.Length; i++)
@@ -305,8 +311,9 @@ internal sealed class ForceVehicleBreakup : IDisposable
         {
             _currentSnapshotIndex = _topology.Count;
             var geometry = CaptureNode(current.Part, _currentMatrix, current.IsAttachedInternal);
-            _topology.Add(new(current.Part, _currentMatrix, _currentChildren));
-            _sourceNodes.Add(new(current.FullPartIndex, current.FirstLayerBranchIndex, current.IsFullPart, geometry));
+            var deformation = ForceDebrisDeformation.Capture(current.Part, _currentMatrix);
+            _topology.Add(new(current.Part, _currentMatrix, _currentChildren, deformation));
+            _sourceNodes.Add(new(current.FullPartIndex, current.FirstLayerBranchIndex, current.IsFullPart, geometry, deformation));
             _currentCaptured = true;
             if (_currentChildren.Length == 0)
             {
@@ -348,9 +355,6 @@ internal sealed class ForceVehicleBreakup : IDisposable
     {
         if (!ReferenceEquals(node.Tree?.OwningVehicle, _source)) throw new InvalidOperationException("A source part left its vehicle during breakup capture.");
 
-        foreach (var deformation in node.Modules.Get<FxDeformation>())
-            if (FxDeformation.TryGetFrom(_sourceTree!.States, out var states) && states.GetState(deformation).Count > 0)
-                throw new InvalidDataException("Dented geometry cannot be broken up until its deformed surface can be baked.");
         foreach (var chute in node.Modules.Get<Parachute>())
             if (chute.State is ChuteState.LineStretch or ChuteState.Reefed or ChuteState.Disreefing or ChuteState.Full)
                 throw new InvalidDataException("Retract or cut away deployed parachutes before breaking up their vehicle.");
@@ -541,6 +545,22 @@ internal sealed class ForceVehicleBreakup : IDisposable
     {
         var root = _roots[^1];
         root.Tree = PartTree.CreateFromNewPartTree(root);
+        _dentIndex = 0;
+        _state = PreparationState.RestoreDents;
+    }
+
+    private void RestoreOneDentField()
+    {
+        var fields = _pieces[_rootIndex].Shape.Deformations;
+        if (_dentIndex < fields.Length)
+        {
+            var root = _roots[^1];
+            // Carrier instances follow the visual instances in deterministic XML order.
+            int visualCount = _pieces[_rootIndex].Shape.Nodes?.Length ?? 1;
+            ForceDebrisDeformation.Restore(root.SubParts[visualCount + _dentIndex], fields[_dentIndex]);
+            _dentIndex++;
+            return;
+        }
         _rootIndex++;
         _currentColliders = null;
         _state = PreparationState.CreateRoots;

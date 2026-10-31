@@ -5,6 +5,7 @@ using System.Threading;
 using System.Xml.Linq;
 using Brutal.Numerics;
 using KSA;
+using KSA.Deformation;
 
 namespace Purr2D2.Rendering;
 
@@ -13,7 +14,11 @@ internal sealed record AuthoredDebrisShape(AuthoredDebrisSurface[] Surfaces, dou
     double Scale, float MassKg)
 {
     internal AuthoredDebrisNode[]? Nodes { get; init; }
+    internal AuthoredDebrisDeformation[] Deformations { get; init; } = [];
 }
+// Keep each source field intact: KSA computes its safety scale and dent limit per module.
+internal sealed record AuthoredDebrisDeformation(double3 Position, doubleQuat Rotation, double3 Scale,
+    Dent[] Dents, float EffectiveScale);
 internal sealed record AuthoredDebrisNode(int SourceIndex, AuthoredDebrisSurface[] Surfaces, double3 Position,
     doubleQuat Rotation, double3 Scale, double3 BoundsCenter, double3 BoundsExtents, double Volume,
     bool AttachedInternal = false);
@@ -134,6 +139,18 @@ internal static class AuthoredDebrisAssets
                 new XElement("CustomMass", new XElement("Mass", new XAttribute("Kg", F(shape.MassKg))),
                     new XElement("MassSpecificInertia", new XAttribute("Ixx", F(inertia.X)),
                         new XAttribute("Iyy", F(inertia.Y)), new XAttribute("Izz", F(inertia.Z)))));
+            for (int i = 0; i < shape.Deformations.Length; i++)
+            {
+                cancel.ThrowIfCancellationRequested();
+                var field = shape.Deformations[i];
+                string carrierId = name + "_dents" + i;
+                // Empty, massless subparts carry independent native deformation modules.
+                // Actual dents are instance state, written by KSA into the vessel save.
+                assets.Add(new XElement("SubPart", new XAttribute("Id", carrierId)));
+                root.Add(new XElement("SubPart", new XAttribute("InstanceOf", carrierId),
+                    new XElement("Transform", Vector("Position", field.Position - shape.Center),
+                        Vector("Rotation", field.Rotation.ToXyzRadians()), Vector("Scale", field.Scale))));
+            }
             assets.Add(root);
             return new XDocument(assets);
         }

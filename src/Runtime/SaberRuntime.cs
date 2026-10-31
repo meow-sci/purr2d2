@@ -64,6 +64,7 @@ internal sealed partial class SaberRuntime : IDisposable
         CapeController.Install(harmony);
         _somersaultMotion.Install(harmony);
         InitializeForce(harmony);
+        Force.ForceDebrisDeformation.Install(harmony);
         _renderer.Initialize(harmony);
         EnvironmentLightingPatch.Install(harmony,
             () => _enabled && _ready && !_disposed && _settings.ExtendedEnvironmentLighting);

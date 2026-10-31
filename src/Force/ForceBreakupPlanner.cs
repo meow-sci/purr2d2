@@ -11,7 +11,8 @@ internal sealed record ForceBreakupSourceNode(
     int FullPartIndex,
     int FirstLayerBranchIndex,
     bool IsFullPart,
-    AuthoredDebrisNode? Geometry);
+    AuthoredDebrisNode? Geometry,
+    AuthoredDebrisDeformation? Deformation = null);
 
 /// <summary>Pure grouping policy for detached source geometry. Full parts seed chunks first;
 /// optional refinement peels only direct subpart branches and keeps their descendants together.</summary>
@@ -153,11 +154,23 @@ internal static class ForceBreakupPlanner
             throw new InvalidDataException("The vehicle has fewer than two visible authored pieces.");
 
         var raw = new (AuthoredDebrisShape Shape, double Weight)[geometryGroups.Count];
+        var sourceFields = source.Where(item => item.Deformation != null).Select(item => item.Deformation!).ToArray();
         double totalWeight = 0;
         for (int i = 0; i < geometryGroups.Count; i++)
         {
             cancel.ThrowIfCancellationRequested();
             raw[i] = BuildShape(geometryGroups[i], cancel);
+            var shape = raw[i].Shape;
+            var fields = new List<AuthoredDebrisDeformation>();
+            // The native renderer applies vehicle-wide fields, including dents whose
+            // owner is in another chunk. Retain whole overlapping fields, never merge
+            // or trim their dents (which would change KSA's per-field safety scale).
+            foreach (var field in sourceFields)
+            {
+                cancel.ThrowIfCancellationRequested();
+                if (Affects(field, shape)) fields.Add(field);
+            }
+            raw[i] = (shape with { Deformations = fields.ToArray() }, raw[i].Weight);
             totalWeight += raw[i].Weight;
         }
         if (!double.IsFinite(totalWeight) || totalWeight <= 0
@@ -341,6 +354,22 @@ internal static class ForceBreakupPlanner
             || !Finite(node.BoundsCenter) || !Finite(node.BoundsExtents)
             || node.BoundsExtents.X <= 0 || node.BoundsExtents.Y <= 0 || node.BoundsExtents.Z <= 0)
             throw new InvalidDataException("Captured visual geometry has invalid bounds or transforms.");
+    }
+
+    private static bool Affects(AuthoredDebrisDeformation field, AuthoredDebrisShape shape)
+    {
+        double scale = Math.Max(field.Scale.X, Math.Max(field.Scale.Y, field.Scale.Z));
+        var min = shape.Center - shape.Extents * .5;
+        var max = shape.Center + shape.Extents * .5;
+        foreach (var dent in field.Dents)
+        {
+            var center = double3.Transform(double3.Unpack(dent.Center) * field.Scale, field.Rotation) + field.Position;
+            double radius = dent.Radius * scale;
+            var closest = double3.Max(min, double3.Min(max, center));
+            // Include a little slack for the native float deformation coordinate path.
+            if ((center - closest).LengthSquared() <= radius * radius * 1.00002) return true;
+        }
+        return false;
     }
 
     private static bool Finite(double3 value) =>

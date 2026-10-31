@@ -1,5 +1,13 @@
 # Acceptance record
 
+## Furce breakup preserves dents (2026-10-30)
+
+Furce breakup no longer rejects dented vessels. Capture retains each native dent field and its source assembly transform; planning copies whole overlapping fields to each output chunk, including peeled branches and fields owned by another part or an invisible container. Hidden, massless carrier subparts keep the fields separate, preserving KSA's per-module dent count and safety scale. Native `ApplySaveData` initializes their private lists and simulation/render state, and a construction hook recreates the modules before native subpart save data is restored. The original mesh references remain unchanged. Pending preparation is invalidated if source damage changes.
+
+The actual KSA host checks pass for compound chunks with eighteen dents across three fields, transformed/recentered assembly coordinates, native vessel-reference XML serialization and `PartTree.Deserialize`, raw fields and effective depths after reload, distant-field rejection, subpart refinement, changed-damage detection and balanced global dent counts after disposal. The managed save/reload fixtures remove only GPU/collider modules, preserving the generated templates, hierarchy, transforms and mass. Existing Furce host checks and fragment-template checks pass. The Release build has zero warnings/errors; source/stage validation and archive/checksum verification pass. Evidence: `artifacts/checks/force-dents-host.log`, `force-dents-fragments.log`, `force-dents-build.log`, and `force-dents-validation.log`.
+
+Native visual acceptance remains pending: dent several vessel parts, break the vessel up at low and high piece limits, inspect dents across chunk boundaries, release/throw, save, restart and reload. Confirm the dents remain and carriers stay hidden in both editor catalogs. Keep `Generated/Slices/` beside the save when updating the mod.
+
 ## Runtime networking acceptance
 
 - [ ] On Windows, launch with gatOS/unscience/purrTTY enabled: each entry reports runtime networking ready and only default networking assemblies.

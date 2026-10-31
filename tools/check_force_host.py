@@ -62,10 +62,11 @@ ET.SubElement(items, "PackageReference", Include="Samboy063.Tomlet", Version="6.
 ET.SubElement(items, "PackageReference", Include="Lib.Harmony", Version="2.4.2")
 # The reference snapshot omits the native EditorTag/KeyHash hashing dependency.
 ET.SubElement(items, "PackageReference", Include="System.IO.Hashing", Version="10.0.2")
+ET.SubElement(items, "PackageReference", Include="Microsoft.Extensions.Logging.Abstractions", Version="10.0.0")
 for source in ["src/Core/SaberLimits.cs", "src/Core/ForceCaptureLimits.cs", "src/Core/ForceBreakupLimits.cs", "src/Core/ForceSpreadLimits.cs", "src/Core/ForceBreakupSequence.cs", "src/Core/SomersaultMotion.cs", "src/Core/SomersaultSequence.cs",
                "src/Runtime/SomersaultMotionController.cs", "src/Cutting/CutGeometry.cs",
                "src/Rendering/AuthoredDebrisAssets.cs", "src/Rendering/FragmentTemplateLoader.cs",
-               "tests/ForceHostChecks.cs", "tests/ForceClutterBepuChecks.cs", "tests/ForceBreakupHostChecks.cs",
+               "tests/ForceHostChecks.cs", "tests/ForceClutterBepuChecks.cs", "tests/ForceBreakupHostChecks.cs", "tests/ForceDentHostChecks.cs",
                *(str(path.relative_to(root)) for path in sorted((root / "src/Force").glob("*.cs")))]:
     ET.SubElement(items, "Compile", Include=str(root / source))
 for dll in host.glob("*.dll"):
