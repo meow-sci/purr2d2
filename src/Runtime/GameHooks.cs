@@ -208,7 +208,8 @@ internal static class GameHooks
     private static bool OverlayCursor(GlfwWindow window) => !(Runtime?.FilterOverlayCursor(window) ?? false);
     private static bool OverlayScroll(GlfwWindow window, double2 offset) => !(Runtime?.FilterOverlayScroll(window, offset) ?? false);
     private static bool OverlayKey(GlfwWindow window, GlfwKey key, GlfwKeyAction action) =>
-        !(Runtime?.FilterForceKey(window, key, action) ?? false);
+        !((Runtime?.FilterSaberDropSpinKey(window, key, action) ?? false)
+            || (Runtime?.FilterForceKey(window, key, action) ?? false));
     internal static bool SpaceSomersaultKey(KittenEva __instance, GlfwKeyEvent keyEvent, ref bool __result)
     {
         var runtime = Runtime;

@@ -7,10 +7,16 @@ internal sealed class SaberDropSequence
     internal const double ReachDuration = .36, ReturnDuration = .45;
     internal Stage Phase { get; private set; }
     internal double Time { get; private set; }
+    internal float SpinMultiplier { get; private set; }
     internal bool Held => Phase == Stage.Held;
     internal bool Detached => Phase is Stage.Dropped or Stage.Returning;
     internal float ReturnBlend => EaseOut((float)(Time / ReturnDuration));
-    internal bool BeginDrop() { if (!Held) return false; Phase = Stage.Reaching; Time = 0; return true; }
+    internal bool BeginDrop(float spinMultiplier = 0)
+    {
+        if (!Held) return false;
+        SpinMultiplier = SaberDropMath.ValidateSpinMultiplier(spinMultiplier);
+        Phase = Stage.Reaching; Time = 0; return true;
+    }
     internal bool BeginReturn()
     {
         if (Phase != Stage.Dropped) return false;
@@ -24,7 +30,7 @@ internal sealed class SaberDropSequence
     internal bool ReadyToRelease => Phase == Stage.Reaching && Time >= ReachDuration;
     internal bool ReadyToAttach => Phase == Stage.Returning && Time >= ReturnDuration;
     internal void Released() { Phase = Stage.Dropped; Time = 0; }
-    internal void Reset() { Phase = Stage.Held; Time = 0; }
+    internal void Reset() { Phase = Stage.Held; Time = 0; SpinMultiplier = 0; }
     private static float EaseOut(float x)
     {
         x = Math.Clamp(x, 0, 1);

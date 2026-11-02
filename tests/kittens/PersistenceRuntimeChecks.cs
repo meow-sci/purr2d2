@@ -41,6 +41,8 @@ internal sealed partial class SaberRuntime
     private KittenEva? _igniteDragOwner;
     private void CancelSaberIgniteDrag() => _igniteDragOwner = null;
     private void CancelSaberAutoSwingDrag() => _autoSwingDragOwner = null;
+    private KittenEva? _dropSpinDragOwner;
+    private void CancelSaberDropSpinDrag() => _dropSpinDragOwner = null;
     private void RemoveClashOwner(KittenEva owner)
     {
         if (_kittenSabers.TryGetValue(owner, out var saber)) saber.Pose.ClearClash();

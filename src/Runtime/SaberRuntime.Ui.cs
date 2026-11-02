@@ -425,7 +425,7 @@ internal sealed partial class SaberRuntime
 
     private void ShowSaberControlTip(string text)
     {
-        if (!_autoSwingDrag.Held && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ShowSaberTooltip(text);
+        if (!_autoSwingDrag.Held && !_dropSpinDrag.Held && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ShowSaberTooltip(text);
     }
 
     private static void ShowSaberTooltip(string text)

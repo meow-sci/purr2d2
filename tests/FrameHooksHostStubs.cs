@@ -16,7 +16,12 @@ namespace Purr2D2.Runtime
         internal bool FilterOverlayMouseButton(GlfwWindow w, GlfwMouseButton b, GlfwButtonAction a) => false;
         internal bool FilterOverlayCursor(GlfwWindow w) => false;
         internal bool FilterOverlayScroll(GlfwWindow w, double2 o) => false;
-        internal bool FilterForceKey(GlfwWindow w, GlfwKey k, GlfwKeyAction a) => false;
+        internal bool DropSpinKeyResult = false;
+        internal int DropSpinKeyCalls, ForceKeyCalls;
+        internal bool FilterSaberDropSpinKey(GlfwWindow w, GlfwKey k, GlfwKeyAction a)
+        { DropSpinKeyCalls++; return DropSpinKeyResult; }
+        internal bool FilterForceKey(GlfwWindow w, GlfwKey k, GlfwKeyAction a)
+        { ForceKeyCalls++; return false; }
         internal int SpaceSomersaultFilterCalls;
         internal bool SpaceSomersaultFilterResult;
         internal bool SpaceSomersaultFilterThrows;

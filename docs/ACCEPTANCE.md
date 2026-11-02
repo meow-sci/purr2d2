@@ -1,5 +1,15 @@
 # Acceptance record
 
+## Drop spin pill
+
+Holding **DROP** opens a downward pill with a regular-font multiplier beside its thumb. Every press starts at **0×**; halfway selects the old **1×** initial release spin, and the bottom selects **2×**. Mouse release samples the final pointer position and queues one drop. A tap selects zero. The chosen multiplier belongs to that kitten's pending drop and survives the reach animation and pause. **UNDROP** and canceling an in-progress reach remain immediate press actions, retaining the eased recall.
+
+The multiplier scales the previous inherited native physics angular velocity. The native CCF/CCI conversion supplies matching inertial body rates, so zero spin on a planet does not remove the reference frame's planetary rotation. Linear motion, the palm-down reach pose and subsequent physical contact response keep their existing behavior. A stationary baseline remains zero at every multiplier. UI focus, window exit, Escape/right-click, modal input, hidden/unpublished/resized controls, owner changes and equipment changes cancel a pending gesture. The pill captures both wheel routes and its complete capsule/value bounds fit the viewport.
+
+Focused overlay/layout, gesture, drop lifecycle and persistence checks pass, along with final CoreChecks, SaberDropSpinRuntimeChecks, FurceScrollRoutingChecks and ForceUiChecks. Actual KSA host checks verify 0×/1×/2× angular conversions in surface and inertial frames, unchanged linear motion and native key-routing priority. The first core run rejected an invalid extreme-coordinate test fixture; the corrected representable fixture and full CoreChecks rerun pass. Release builds with zero warnings/errors, and source/stage/archive checks pass. Evidence: `artifacts/drop-spin-{managed,core-final,native-host,frame-host,build,package}.log` and `artifacts/checks/DropSpin{Overlay,Runtime}Focused.log`. The complete managed matrix was not rerun for this follow-up.
+
+Native visual acceptance remains pending: tap Drop, then compare midpoint and maximum spin while the kitten is rotating; inspect the zero-initial-spin release while stationary, ordinary ground impacts, the pill/value at compact viewport sizes, every cancel path, and Undrop's ease-out.
+
 ## Undrop arrival easing
 
 Undrop captures the dropped saber's current world frame and flies it toward the current hand pose using cubic ease-out, slowing to zero relative arrival speed over the existing 0.45 seconds. The return follows a moving hand, preserves orientation/scale interpolation and has no distance cutoff. This replaces the previous symmetric easing curve.

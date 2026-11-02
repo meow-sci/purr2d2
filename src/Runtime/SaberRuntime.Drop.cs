@@ -6,10 +6,11 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime
 {
-    private readonly Dictionary<KittenEva, bool> _dropRequests = new(ReferenceEqualityComparer.Instance);
+    private readonly record struct SaberDropRequest(bool Drop, float SpinMultiplier);
+    private readonly Dictionary<KittenEva, SaberDropRequest> _dropRequests = new(ReferenceEqualityComparer.Instance);
     private bool SaberHeldForActions => (_activeSaber ?? _idleSaber).Drop.Held;
 
-    private void QueueSaberDrop(KittenEva owner)
+    private void QueueSaberDrop(KittenEva owner, float spinMultiplier = 0)
     {
         if (!_enabled || !_ready || _disposed || _fault != null || !_currentKittens.Contains(owner)
             || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped
@@ -17,7 +18,8 @@ internal sealed partial class SaberRuntime
         if (saber.Drop.Phase == SaberDropSequence.Stage.Returning
             || saber.Drop.Held && (!saber.Pose.HasFreshBodyFrame || !owner.HasPhysicsBubble)) return;
         // A second click while reaching cancels the gesture; requests never mutate native state in UI.
-        _dropRequests[owner] = saber.Drop.Held;
+        _dropRequests[owner] = new(saber.Drop.Held,
+            saber.Drop.Held ? SaberDropMath.ValidateSpinMultiplier(spinMultiplier) : 0);
     }
 
     private void ApplySaberDropRequests()
@@ -27,8 +29,8 @@ internal sealed partial class SaberRuntime
             if (!_currentKittens.Contains(request.Key) || request.Key.IsDisposed
                 || !_kittenSabers.TryGetValue(request.Key, out var saber) || !saber.Blade.Equipped
                 || saber.TogglePhase is SaberTogglePhase.Retracting or SaberTogglePhase.Unequipping) continue;
-            if (request.Value && (!saber.Drop.Held || !saber.Pose.HasFreshBodyFrame || !request.Key.HasPhysicsBubble)
-                || !request.Value && saber.Drop.Phase is SaberDropSequence.Stage.Held or SaberDropSequence.Stage.Returning) continue;
+            if (request.Value.Drop && (!saber.Drop.Held || !saber.Pose.HasFreshBodyFrame || !request.Key.HasPhysicsBubble)
+                || !request.Value.Drop && saber.Drop.Phase is SaberDropSequence.Stage.Held or SaberDropSequence.Stage.Returning) continue;
             RemoveClashOwner(request.Key);
             DisableSaberAutoSwing(saber);
             if (ReferenceEquals(request.Key, _owner))
@@ -36,9 +38,9 @@ internal sealed partial class SaberRuntime
                 CancelAssistedSlice(""); ResetOverlaySwing();
                 _manualSwingSwoosh.Reset(); _contactProbe.Reset();
             }
-            if (request.Value)
+            if (request.Value.Drop)
             {
-                saber.Drop.BeginDrop();
+                saber.Drop.BeginDrop(request.Value.SpinMultiplier);
             }
             else if (saber.Drop.Phase == SaberDropSequence.Stage.Reaching) ResetSaberDrop(request.Key, saber);
             else if (saber.Drop.Phase == SaberDropSequence.Stage.Dropped)
@@ -65,7 +67,7 @@ internal sealed partial class SaberRuntime
         if (pose.Kitten is not { IsDisposed: false } owner) return;
         if (saber.Drop.ReadyToRelease && pose.PalmDownBlend >= .999f && pose.TryGetBodyFrame(out var emitter))
         {
-            if (DroppedSaberBody.TryCreate(owner, emitter, out var body, out var reason))
+            if (DroppedSaberBody.TryCreate(owner, emitter, saber.Drop.SpinMultiplier, out var body, out var reason))
             {
                 saber.DroppedBody = body;
                 saber.Drop.Released(); pose.PalmDown = false;

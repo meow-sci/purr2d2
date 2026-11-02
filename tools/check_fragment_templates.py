@@ -61,6 +61,7 @@ ET.SubElement(items, 'PackageReference', Include='Microsoft.Extensions.Logging.A
 # The reference snapshot omits the native EditorTag/KeyHash hashing dependency.
 ET.SubElement(items, 'PackageReference', Include='System.IO.Hashing', Version='10.0.2')
 for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
+               'src/Rendering/ClutterSurfaceTint.cs',
                'src/Rendering/EnvironmentLightingPatch.cs', 'tests/EnvironmentLightingChecks.cs',
                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentTopology.cs',
                'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/ClosedMeshPreparation.cs', 'src/Cutting/SliceShellBuilder.cs',

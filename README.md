@@ -5,9 +5,11 @@ A Kitten Spacy Agency mod to add:
 - BFL9K (Big Fucking Laser 9000)
 - The Furce
 
-BFL9K's **DROP** button reaches out with an open, palm-down paw and releases the
-hilt into native physics. A lit blade stays lit. **UNDROP** flies it back from its
-current position, easing to a stop in the paw. Saving, unequipping or disabling
+BFL9K's **DROP** button opens a downward spin pill while held. Each press starts
+at **0×** spin; halfway is the previous **1×** release rate and the bottom is **2×**.
+Release to reach out with an open, palm-down paw and drop the hilt into native
+physics. A tap drops with no initial spin. A lit blade stays lit. **UNDROP** flies
+it back from its current position, easing to a stop in the paw. Saving, unequipping or disabling
 the mod also returns transient dropped equipment to its owner. Blade length can
 be set up to **50 m** before character scaling.
 

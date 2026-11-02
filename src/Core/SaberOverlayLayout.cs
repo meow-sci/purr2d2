@@ -16,6 +16,8 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     /// <summary>Regular-font dimensions for the no-wrap Auto Swing duration label.</summary>
     public float AutoSwingValueWidth { get; init; } = 48;
     public float AutoSwingValueHeight { get; init; } = 16;
+    public float DropSpinValueWidth { get; init; } = 48;
+    public float DropSpinValueHeight { get; init; } = 16;
     public bool Valid => RowHeight > 0 && ListBodyHeight > 0;
     public float IgniteRadius => SliceRadius;
     public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
@@ -35,6 +37,14 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         return mirrored ? new(-offset.X, offset.Y) : offset;
     }
     public float AutoSwingPillTravel => 120 * Scale;
+    public float DropPillTravel => AutoSwingPillTravel;
+    public float2 DropPillMin => DropCenter - new float2(IgniteRadius);
+    public float2 DropPillMax => DropCenter + new float2(IgniteRadius, IgniteRadius + DropPillTravel);
+    public float2 DropSpinValueLabelPosition(float markerY) => new(
+        DropPillMax.X + AutoSwingValueLabelGap, markerY - DropSpinValueHeight * .5f);
+    public float2 DropSpinValueEnvelopeMin => DropSpinValueLabelPosition(DropCenter.Y);
+    public float2 DropSpinValueEnvelopeMax => DropSpinValueLabelPosition(DropCenter.Y + DropPillTravel)
+        + new float2(DropSpinValueWidth + AutoSwingValueShadowOffset, DropSpinValueHeight + AutoSwingValueShadowOffset);
     public float IgnitePillTravel => AutoSwingPillTravel;
     public float2 IgnitePillMin => IgniteCenter - new float2(IgniteRadius);
     public float2 IgnitePillMax => IgniteCenter + new float2(IgniteRadius, IgniteRadius + IgnitePillTravel);
@@ -66,11 +76,11 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
             + (RowHeight - TopRowHeight - DeploymentBarHeight) * .5f);
     public float2 DeploymentBarMax(int row, float scroll) => new(ListMax.X - Padding,
         DeploymentBarMin(row, scroll).Y + DeploymentBarHeight);
-    public float2 ControlsMin => new(Math.Min(DropCenter.X - IgniteRadius, Math.Min(IgnitePillMin.X, Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
+    public float2 ControlsMin => new(Math.Min(Math.Min(DropPillMin.X, DropSpinValueEnvelopeMin.X), Math.Min(IgnitePillMin.X, Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
             SliceCenter.X - SliceRadius), Math.Min(StatusMin.X, AutoSwingValueEnvelopeMin.X)), AutoSwingPillMin.X))),
-        Math.Min(DropCenter.Y - IgniteRadius, Math.Min(IgnitePillMin.Y, Math.Min(Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y), AutoSwingValueEnvelopeMin.Y))));
-    public float2 ControlsMax => new(Math.Max(DropCenter.X + IgniteRadius, Math.Max(IgnitePillMax.X, Math.Max(Math.Max(StatusMax.X, AutoSwingPillMax.X), AutoSwingValueEnvelopeMax.X))),
-        Math.Max(DropCenter.Y + IgniteRadius, Math.Max(IgnitePillMax.Y, Math.Max(Math.Max(StatusMax.Y, AutoSwingPillMax.Y), AutoSwingValueEnvelopeMax.Y))));
+        Math.Min(Math.Min(DropPillMin.Y, DropSpinValueEnvelopeMin.Y), Math.Min(IgnitePillMin.Y, Math.Min(Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y), AutoSwingValueEnvelopeMin.Y))));
+    public float2 ControlsMax => new(Math.Max(Math.Max(DropPillMax.X, DropSpinValueEnvelopeMax.X), Math.Max(IgnitePillMax.X, Math.Max(Math.Max(StatusMax.X, AutoSwingPillMax.X), AutoSwingValueEnvelopeMax.X))),
+        Math.Max(Math.Max(DropPillMax.Y, DropSpinValueEnvelopeMax.Y), Math.Max(IgnitePillMax.Y, Math.Max(Math.Max(StatusMax.Y, AutoSwingPillMax.Y), AutoSwingValueEnvelopeMax.Y))));
 
     /// <summary>Moves the action controls and their status together; offsets are fractions of the viewport.</summary>
     public SaberOverlayLayout WithControlsOffset(float2 origin, float2 size, float2 normalizedOffset, float topInset = 0)
@@ -197,9 +207,12 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
         var statusMin = new float2(swing.X - statusWidth * .5f,
             backward.Y + smallRadius + statusGap * scale);
         var statusMax = statusMin + new float2(statusWidth, statusHeight * scale);
-        return new(min, min + new float2(296 * scale, height), min.Y + header,
+        var layout = new SaberOverlayLayout(min, min + new float2(296 * scale, height), min.Y + header,
             height - header - footer, footer, row, pad, swing, radius, slice, smallRadius, scale,
             forward, backward, forward + new float2(-step, step), forward + new float2(step, step), statusMin, statusMax,
             showSomersaultButtons);
+        // The transient Drop capsule and full-font label also belong to the
+        // default bounds, including unusually short or narrow viewports.
+        return layout.WithControlsOffset(origin, size, float2.Zero, topInset);
     }
 }

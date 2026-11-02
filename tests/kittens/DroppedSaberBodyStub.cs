@@ -8,10 +8,12 @@ internal sealed class DroppedSaberBody : IDisposable
 {
     internal Vehicle Vehicle { get; } = new("Dropped native hilt");
     internal bool Disposed;
+    internal float SpinMultiplier;
     private double4x4 _frame;
-    internal static bool TryCreate(KittenEva owner, double4x4 frame, out DroppedSaberBody? result, out string reason)
+    internal static bool TryCreate(KittenEva owner, double4x4 frame, float spinMultiplier,
+        out DroppedSaberBody? result, out string reason)
     {
-        result = new() { _frame = frame * double4x4.CreateTranslation(owner.GetPositionEcl()) };
+        result = new() { _frame = frame * double4x4.CreateTranslation(owner.GetPositionEcl()), SpinMultiplier = spinMultiplier };
         reason = ""; return true;
     }
     internal bool TryFrame(out double4x4 frame) { frame = _frame; return !Disposed; }

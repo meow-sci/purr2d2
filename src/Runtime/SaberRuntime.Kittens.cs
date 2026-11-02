@@ -177,6 +177,7 @@ internal sealed partial class SaberRuntime
         if (ReferenceEquals(kitten, _igniteDragOwner)) CancelSaberIgniteDrag();
         if (ReferenceEquals(kitten, _saberDeploymentDragOwner)) CancelSaberDeploymentDrag();
         if (ReferenceEquals(kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
+        if (ReferenceEquals(kitten, _dropSpinDragOwner)) CancelSaberDropSpinDrag();
         PublishKittenSaberRequest(new(kitten, enabled));
     }
 
@@ -267,6 +268,7 @@ internal sealed partial class SaberRuntime
             if (ReferenceEquals(kitten, _igniteDragOwner)) CancelSaberIgniteDrag();
             if (ReferenceEquals(kitten, _saberDeploymentDragOwner)) CancelSaberDeploymentDrag();
             if (ReferenceEquals(kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
+            if (ReferenceEquals(kitten, _dropSpinDragOwner)) CancelSaberDropSpinDrag();
             RemoveClashOwner(kitten);
             ResetSaberDrop(kitten, saber);
             ForgetKittenBinding(kitten);
@@ -298,6 +300,7 @@ internal sealed partial class SaberRuntime
         CancelSaberDeploymentDrag();
         CancelSaberIgniteDrag();
         CancelSaberAutoSwingDrag();
+        CancelSaberDropSpinDrag();
         DismissKittenColorPicker();
         CancelAssistedSlice(SliceWorkActive || _selectingSlice ? "Slice cancelled: controlled kitten changed." : "");
         ResetOverlaySwing();
@@ -373,6 +376,7 @@ internal sealed partial class SaberRuntime
                 // Keep the hilt, pose and channels alive through retraction and
                 // arm lowering. A later enable reverses from the current pose/length.
                 if (ReferenceEquals(request.Kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
+                if (ReferenceEquals(request.Kitten, _dropSpinDragOwner)) CancelSaberDropSpinDrag();
                 saber.Pose.ClearClash();
                 DisableSaberAutoSwing(saber);
                 saber.Blade.SetIgnited(false);
@@ -555,6 +559,7 @@ internal sealed partial class SaberRuntime
         CancelSaberDeploymentDrag();
         CancelSaberIgniteDrag();
         CancelSaberAutoSwingDrag();
+        CancelSaberDropSpinDrag();
         ReleaseProfileBindings();
         DismissKittenColorPicker();
         _dropRequests.Clear();

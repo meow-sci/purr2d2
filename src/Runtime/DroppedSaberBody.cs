@@ -19,7 +19,8 @@ internal sealed class DroppedSaberBody : IDisposable
         Vehicle = vehicle;
         EmitterToBody = emitterToBody;
     }
-    internal static bool TryCreate(KittenEva owner, double4x4 emitter, out DroppedSaberBody? result, out string reason)
+    internal static bool TryCreate(KittenEva owner, double4x4 emitter, float spinMultiplier,
+        out DroppedSaberBody? result, out string reason)
     {
         result = null;
         reason = "The saber needs a fresh visible hand pose and native physics before it can be dropped.";
@@ -58,8 +59,16 @@ internal sealed class DroppedSaberBody : IDisposable
         var releasePosition = ownerState.Kinematic.PositionPhys + deltaPhys;
         var releaseVelocity = SaberDropMath.ReleaseVelocity(ownerState.Kinematic.VelocityPhys,
             owner.BodyRates, centerBody, ownerState.Kinematic.Body2Phys);
+        var releaseBody2Phys = doubleQuat.Concatenate(rotation, ownerState.Kinematic.Body2Phys);
+        var releaseAngularVelocity = SaberDropMath.ReleaseAngularVelocity(ownerState.Kinematic.AngularVelocityPhys, spinMultiplier);
+        // Native BodyRates is inertial even in a rotating surface bubble. Derive
+        // the constructor's cache from the chosen physics rate, including CCF's
+        // planetary offset, instead of scaling that offset or mutating the owner.
+        var releaseBodyRates = PhysicsStates.GetBodyRates(ownerState.Origin.BubFrame,
+            releaseAngularVelocity, releaseBody2Phys, owner.Parent);
         if (!NativeVector(releasePosition) || !NativeVector(releaseVelocity)
             || !NativeVector(ownerState.Kinematic.AngularVelocityPhys) || !NativeVector(owner.BodyRates)
+            || !NativeVector(releaseAngularVelocity) || !NativeVector(releaseBodyRates)
             || !UnitRotation(owner.Body2Cce) || !UnitRotation(ownerState.Kinematic.Body2Phys)) return false;
         string id = "Purr2D2_DroppedHilt_" + Guid.NewGuid().ToString("N");
         Vehicle? created = null;
@@ -70,13 +79,13 @@ internal sealed class DroppedSaberBody : IDisposable
             root.RefreshScale();
             root.Tree = PartTree.CreateFromNewPartTree(root);
             created = Vehicle.CreateVehicle(owner.System, doubleQuat.Concatenate(rotation, owner.Body2Cce),
-                owner.BodyRates.Transform(doubleQuat.Inverse(rotation)), owner.Parent, id, root, owner.Orbit);
+                releaseBodyRates, owner.Parent, id, root, owner.Orbit);
             Adopt(owner, created, bubble, deltaPhys.NormalizeOrZero());
             var state = created.GetPhysicsStatesMutable();
             state.Kinematic.PositionPhys = releasePosition;
-            state.Kinematic.Body2Phys = doubleQuat.Concatenate(rotation, ownerState.Kinematic.Body2Phys);
+            state.Kinematic.Body2Phys = releaseBody2Phys;
             state.Kinematic.VelocityPhys = releaseVelocity;
-            state.Kinematic.AngularVelocityPhys = ownerState.Kinematic.AngularVelocityPhys;
+            state.Kinematic.AngularVelocityPhys = releaseAngularVelocity;
             state.Props.SetOnRails(false);
             // Keep this equipment out of the native debris eviction policy; ownership is explicit.
             created.SetFlightPlan(new FlightPlan(state.ComputeOrbit(created.OrbitColor), created.Hash));

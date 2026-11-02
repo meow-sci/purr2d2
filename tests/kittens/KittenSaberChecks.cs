@@ -44,6 +44,8 @@ internal sealed partial class SaberRuntime
     private KittenEva? _igniteDragOwner;
     private void CancelSaberIgniteDrag() => _igniteDragOwner = null;
     private void CancelSaberAutoSwingDrag() => _autoSwingDragOwner = null;
+    private KittenEva? _dropSpinDragOwner;
+    private void CancelSaberDropSpinDrag() => _dropSpinDragOwner = null;
     private void RemoveClashOwner(KittenEva owner)
     {
         if (_kittenSabers.TryGetValue(owner, out var saber)) saber.Pose.ClearClash();
@@ -87,6 +89,7 @@ internal sealed partial class SaberRuntime
     {
         CheckLocomotionTransitions();
         CheckDropLifecycle();
+        CheckDropSpinSelection();
         var runtime = new SaberRuntime();
         KittenEva first = new("First"), second = new("Second");
         second.Renderable.Avatar.Attachments.Mmu.Enabled = false;
@@ -1182,6 +1185,63 @@ internal sealed partial class SaberRuntime
         runtime.ResetKittenSabers();
         Check(runtime._renderer.Detached.Count == 0 && runtime._kittenSabers.Count == 0,
             "world reset clears detached rendering and all per-kitten drop records");
+    }
+
+    private static void CheckDropSpinSelection()
+    {
+        var runtime = new SaberRuntime();
+        KittenEva[] owners = [new("Spin zero"),new("Spin one"),new("Spin two"),new("Spin invalid")];
+        var system = new CelestialSystem(); system.All.Items = owners; Universe.CurrentSystem = system;
+        Program.ControlledVehicle = owners[0]; Program.RenderedViewport = Program.MainViewport;
+        runtime.RefreshOverlayKittens(); runtime.SetControlledKitten(owners[0]);
+        foreach (var owner in owners) runtime.QueueKittenSaber(owner,true);
+        runtime.ApplyKittenSaberRequests();
+        void PoseAll()
+        {
+            Program.FrameNumber++;
+            foreach (var owner in owners)
+            {
+                var model = owner.Renderable.Avatar.Core.CharacterModel;
+                foreach (var processor in model.AnimProcessors)
+                    processor.UpdateSkeleton(StockModelTransform(owner),model.Skeleton,0);
+            }
+        }
+        for (int i=0;i<6;i++)
+        {
+            foreach (var owner in owners) runtime.AdvanceKittenSaber(runtime._kittenSabers[owner],.1);
+            PoseAll();
+        }
+        float selectedSpin = 1;
+        runtime.QueueSaberDrop(owners[0]); runtime.QueueSaberDrop(owners[1],selectedSpin);
+        runtime.QueueSaberDrop(owners[2],5); runtime.QueueSaberDrop(owners[3],float.NaN);
+        selectedSpin = 0;
+        Check(runtime._kittenSabers[owners[1]].Drop.Held && runtime._kittenSabers[owners[1]].DroppedBody is null,
+            "choosing drop spin only queues the native action during UI input");
+        Program.ControlledVehicle = owners[2]; runtime.SetControlledKitten(owners[2]);
+        runtime.ApplySaberDropRequests();
+        float[] expectedSpin = [0,1,2,0];
+        Check(owners.Select((owner,index) => runtime._kittenSabers[owner].Drop.SpinMultiplier == expectedSpin[index]).All(value => value),
+            "per-kitten queued drop spin is clamped and survives selection changes before the settled handoff");
+        foreach (var owner in owners) runtime.AdvanceKittenSaber(runtime._kittenSabers[owner],0);
+        Check(runtime._kittenSabers[owners[1]].Drop.SpinMultiplier == 1 && selectedSpin == 0,
+            "paused reaching retains its captured spin independently of later UI selection");
+        for (int i=0;i<5;i++)
+        {
+            foreach (var owner in owners) runtime.AdvanceKittenSaber(runtime._kittenSabers[owner],.1);
+            PoseAll();
+        }
+        Check(owners.Select((owner,index) => runtime._kittenSabers[owner].DroppedBody is { } body
+                && body.SpinMultiplier == expectedSpin[index]).All(value => value),
+            "delayed native release receives each kitten's original zero, one, two or recovered spin setting");
+        var recalled = runtime._kittenSabers[owners[1]];
+        runtime.QueueSaberDrop(owners[1],float.PositiveInfinity); runtime.ApplySaberDropRequests();
+        Check(recalled.Drop.Phase == SaberDropSequence.Stage.Returning && recalled.Drop.SpinMultiplier == 1
+            && recalled.DroppedBody is null,
+            "Undrop ignores spin input and recalls the existing saber without changing its captured release setting");
+        runtime.ResetAllDroppedSabers();
+        Check(owners.All(owner => runtime._kittenSabers[owner].Drop.SpinMultiplier == 0),
+            "world and save cleanup clear every kitten's transient spin selection");
+        runtime.ResetKittenSabers();
     }
 
     private static void CheckLocomotionTransitions()

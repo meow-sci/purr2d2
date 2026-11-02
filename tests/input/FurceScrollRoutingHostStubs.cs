@@ -82,7 +82,7 @@ namespace Purr2D2.Runtime
     internal sealed partial class SaberRuntime
     {
         internal readonly SaberOverlayPointerCapture _overlayPointerCapture = new();
-        internal readonly TestScrollDrag _autoSwingDrag = new(), _saberDeploymentDrag = new(),
+        internal readonly TestScrollDrag _autoSwingDrag = new(), _dropSpinDrag = new(), _saberDeploymentDrag = new(),
             _forceCaptureRadiusDrag = new(), _forceThrowDrag = new(), _forceSettingDrag = new(),
             _forceDrag = new(), _overlayDrag = new();
         internal readonly TestForceCapture _force = new();

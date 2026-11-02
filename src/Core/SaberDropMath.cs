@@ -4,6 +4,14 @@ namespace Purr2D2.Core;
 
 internal static class SaberDropMath
 {
+    internal static float ValidateSpinMultiplier(float multiplier) => float.IsFinite(multiplier)
+        ? Math.Clamp(multiplier, 0, 2) : 0;
+
+    // The baseline is the owner's native physics-frame angular velocity, not an
+    // invented throw rate or the inertial body-rate cache (which includes planet spin).
+    internal static double3 ReleaseAngularVelocity(double3 ownerAngularVelocityPhys, float multiplier) =>
+        ownerAngularVelocityPhys * ValidateSpinMultiplier(multiplier);
+
     internal static double3 ReleaseVelocity(double3 ownerVelocityPhys, double3 ownerRatesBody,
         double3 releaseOffsetBody, doubleQuat bodyToPhys) => ownerVelocityPhys
         + double3.Transform(double3.Cross(ownerRatesBody, releaseOffsetBody), bodyToPhys);

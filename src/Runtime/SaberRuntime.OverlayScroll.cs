@@ -15,7 +15,7 @@ internal sealed partial class SaberRuntime
         // The GLFW key state is authoritative at callback time; pass one snapshot
         // through the complete game-side routing decision.
         bool shift = window == Program.GetWindow() && ForceShiftHeld(window);
-        if (_autoSwingDrag.Held) return true;
+        if (_autoSwingDrag.Held || _dropSpinDrag.Held) return true;
         if (_saberDeploymentDrag.Held) return true;
         if (_forceCaptureRadiusDrag.Held) return true;
         if (window == Program.GetWindow() && _forceThrowDrag.Held)
@@ -57,7 +57,7 @@ internal sealed partial class SaberRuntime
     private bool OverlayOwnsScroll(GlfwWindow window, bool shift, out OverlayHit hit)
     {
         hit = OverlayHit.None;
-        if (_autoSwingDrag.Held || _saberDeploymentDrag.Held || _forceCaptureRadiusDrag.Held) return true;
+        if (_autoSwingDrag.Held || _dropSpinDrag.Held || _saberDeploymentDrag.Held || _forceCaptureRadiusDrag.Held) return true;
         if (window == Program.GetWindow() && _forceThrowDrag.Held) return true;
         if (Program.HasMouseInputLatch) return false;
         var pointer = OverlayPointer(window);
@@ -85,7 +85,7 @@ internal sealed partial class SaberRuntime
             || !CursorTarget.IsHitTestViewport(Program.MainViewport)
             || KittenColorPickerContainsPointer(pointer) || SettingsContainsPointer(pointer) || _overlayUiButtons != 0
             || _overlayLayout.Hit(pointer) != OverlayHit.None
-            || _autoSwingDrag.Held || _saberDeploymentDrag.Held || _forceCaptureRadiusDrag.Held
+            || _autoSwingDrag.Held || _dropSpinDrag.Held || _saberDeploymentDrag.Held || _forceCaptureRadiusDrag.Held
             || _forceThrowDrag.Held || _forceSettingDrag.Held || _overlayDrag.Held)
             return false;
 

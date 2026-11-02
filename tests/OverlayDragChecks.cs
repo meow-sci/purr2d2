@@ -73,6 +73,7 @@ internal static class OverlayDragChecks
         IgniteDrag();
         AutoSwingStateAndDrag();
         AutoSwingValueLayout();
+        DropSpinValueLayout();
         PointerOwnership();
         PairedConsumerOwnership();
         LayoutBounds();
@@ -531,6 +532,42 @@ internal static class OverlayDragChecks
                     Check(labelMin.X >= min.X - 1e-3f && labelMin.Y >= min.Y - 1e-3f
                         && labelMax.X <= max.X + 1e-3f && labelMax.Y <= max.Y + 1e-3f,
                         $"Auto Swing endpoint value remains visible at {duration:0.00}s");
+                }
+            }
+        }
+    }
+
+    private static void DropSpinValueLayout()
+    {
+        foreach (var (size, font) in new[] {
+            (new float2(1920, 1080), 16f), (new float2(800, 600), 16f),
+            (new float2(420, 820), 24f), (new float2(240, 220), 32f), (new float2(1920, 220), 32f) })
+        {
+            float2 origin = new(-120, 80);
+            const float inset = 24;
+            var layout = SaberOverlayLayout.Create(origin, size, font, 20, inset) with
+                { DropSpinValueWidth = font * 2.8f, DropSpinValueHeight = font };
+            Check(layout.DropPillMin == layout.DropCenter - new float2(layout.IgniteRadius)
+                && layout.DropPillMax == layout.DropCenter + new float2(layout.IgniteRadius,
+                    layout.IgniteRadius + layout.DropPillTravel), "Drop capsule extends down from its button at every viewport scale");
+            foreach (var offset in new[] { float2.Zero, new float2(-1, -1), new float2(1, 1), new float2(1, -1) })
+            {
+                var moved = layout.WithControlsOffset(origin, size, offset, inset);
+                float2 min = origin + new float2(0, inset), max = origin + size;
+                Check(moved.Valid && moved.ControlsMin.X >= min.X - 1e-3f && moved.ControlsMin.Y >= min.Y - 1e-3f
+                    && moved.ControlsMax.X <= max.X + 1e-3f && moved.ControlsMax.Y <= max.Y + 1e-3f,
+                    "Drop capsule and full-size spin value fit inside compact, scaled and moved control bounds");
+                foreach (float spin in new[] { 0f, 1f, 2f })
+                {
+                    float marker = moved.DropCenter.Y + moved.DropPillTravel * spin / 2;
+                    float2 label = moved.DropSpinValueLabelPosition(marker);
+                    float2 labelMax = label + new float2(moved.DropSpinValueWidth + moved.AutoSwingValueShadowOffset,
+                        moved.DropSpinValueHeight + moved.AutoSwingValueShadowOffset);
+                    Check(MathF.Abs(label.X - moved.DropPillMax.X - moved.AutoSwingValueLabelGap) < 1e-4f
+                        && MathF.Abs(label.Y + moved.DropSpinValueHeight * .5f - marker) < 1e-4f
+                        && label.X >= min.X - 1e-3f && label.Y >= min.Y - 1e-3f
+                        && labelMax.X <= max.X + 1e-3f && labelMax.Y <= max.Y + 1e-3f,
+                        "Drop spin value uses regular text to the pill's right, centered on the thumb with its shadow visible");
                 }
             }
         }

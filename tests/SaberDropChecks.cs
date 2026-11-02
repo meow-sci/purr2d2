@@ -24,6 +24,7 @@ internal static class SaberDropChecks
         drop.Reset();
         Check(drop.Held && !drop.Detached && drop.Time == 0, "cleanup clears all transient sequence state");
         ReturnEaseOut();
+        ReleaseSpin();
         var drift = new double3(1000,-500,20);
         Check(SaberDropMath.ReleaseVelocity(drift,double3.Zero,new(2,0,0),doubleQuat.Identity) == drift,
             "a space release inherits the full owner drift without an artificial throw");
@@ -56,6 +57,29 @@ internal static class SaberDropChecks
             "rotation plus interpolated triangular shear stays nonsingular through recall");
         Check(SaberLimits.MaximumBladeLength == 50
             && SaberLimits.SliceSelectionReach(50, 4) == 200, "50-metre blade and assisted-reach bounds share the canonical limit");
+    }
+    private static void ReleaseSpin()
+    {
+        var oldRate = new double3(1.25,-2.5,.625);
+        Check(SaberDropMath.ReleaseAngularVelocity(oldRate,0) == double3.Zero,
+            "zero spin releases with no angular velocity in the native physics frame");
+        Check(SaberDropMath.ReleaseAngularVelocity(oldRate,1) == oldRate
+            && SaberDropMath.ReleaseAngularVelocity(oldRate,2) == oldRate * 2,
+            "one and two times spin preserve or double the exact existing release angular vector");
+        foreach (float invalid in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity, -5f })
+            Check(SaberDropMath.ReleaseAngularVelocity(oldRate,invalid) == double3.Zero,
+                "invalid and negative drop spin recover the zero-spin default");
+        Check(SaberDropMath.ValidateSpinMultiplier(3) == 2 && SaberDropMath.ValidateSpinMultiplier(.75f) == .75f,
+            "finite drop spin clamps at two while retaining fractional selections");
+        Check(SaberDropMath.ReleaseAngularVelocity(double3.Zero,2) == double3.Zero,
+            "a stationary native release never gains an invented angular rate");
+        var drop = new SaberDropSequence();
+        Check(drop.SpinMultiplier == 0 && drop.BeginDrop(1.5f) && !drop.BeginDrop(0) && drop.SpinMultiplier == 1.5f,
+            "each drop snapshots spin once before the reaching animation");
+        drop.Advance(.1); drop.Released(); drop.BeginReturn();
+        Check(drop.SpinMultiplier == 1.5f, "release and Undrop preserve the captured drop setting");
+        drop.Reset(); drop.BeginDrop(float.NaN);
+        Check(drop.SpinMultiplier == 0, "reset and an invalid next drop restore zero spin");
     }
     private static void ReturnEaseOut()
     {

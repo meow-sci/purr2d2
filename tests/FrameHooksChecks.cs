@@ -14,6 +14,7 @@ internal static class FrameHooksChecks
 {
     internal static void Run()
     {
+        CheckDropSpinKeyRouting();
         GameHooks.Runtime = null;
         var method = AccessTools.Method(typeof(KSA.Program), "PrepareFrame", [typeof(double), typeof(double)])!;
         var original = PatchProcessor.GetOriginalInstructions(method);
@@ -188,6 +189,24 @@ internal static class FrameHooksChecks
         GameHooks.Runtime = null;
 
         Console.WriteLine("PASS: actual KSA keyboard guard/controller ordering and KittenEva.OnKey signature verified; accepted, declined, absent and failing runtime paths preserve native input contract; main-window focus loss cancels pending keyboard intent");
+    }
+
+    private static void CheckDropSpinKeyRouting()
+    {
+        var hook = AccessTools.Method(typeof(GameHooks), "OverlayKey")!;
+        var runtime = new SaberRuntime { DropSpinKeyResult = true };
+        GameHooks.Runtime = runtime;
+        Require(!(bool)hook.Invoke(null, [null, GlfwKey.Escape, GlfwKeyAction.Press])!
+            && runtime.DropSpinKeyCalls == 1 && runtime.ForceKeyCalls == 0,
+            "A drop-pill Escape must be consumed before Furce or native key handling.");
+        runtime.DropSpinKeyResult = false;
+        Require((bool)hook.Invoke(null, [null, GlfwKey.Escape, GlfwKeyAction.Release])!
+            && runtime.DropSpinKeyCalls == 2 && runtime.ForceKeyCalls == 1,
+            "Unhandled drop-pill keys must retain the existing Furce and native input route.");
+        GameHooks.Runtime = null;
+        Require((bool)hook.Invoke(null, [null, GlfwKey.Escape, GlfwKeyAction.Press])!,
+            "Missing runtime must leave native key handling available.");
+        Console.WriteLine("PASS: drop spin key routing consumes owned cancellation before Furce/native input and preserves unhandled keys");
     }
 
     // Legacy fragment picking is repaired in a constructor postfix. Follow each public

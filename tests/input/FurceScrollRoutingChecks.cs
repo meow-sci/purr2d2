@@ -82,6 +82,13 @@ internal static class FurceScrollRoutingChecks
 
         runtime = Active(out window);
         SetPointer(runtime, window, World);
+        runtime._dropSpinDrag.Held = true;
+        window.LeftShift = GlfwKeyAction.Press;
+        CheckRoute(runtime, window, new(0, .5), native: true, backend: true, ticks: null, shift: true,
+            "the drop spin pill owns both wheel routes without changing Furce spread");
+
+        runtime = Active(out window);
+        SetPointer(runtime, window, World);
         var unrelatedWindow = new GlfwWindow
         { CursorPos = new(World.X, World.Y), LeftShift = GlfwKeyAction.Press };
         CheckRoute(runtime, unrelatedWindow, new(0, 1), native: false, backend: false, ticks: null, shift: false,
