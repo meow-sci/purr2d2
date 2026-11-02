@@ -26,6 +26,10 @@ internal sealed partial class SaberRuntime
     private readonly SaberOverlayDrag _overlayDrag = new();
     private bool _ready = true, _enabled = true, _disposed, _selectingSlice, _freshPoseThisTick, _hasPreviousTip;
     private string? _fault;
+    private readonly ManualSwingSwooshGate _manualSwingSwoosh = new();
+    private string _sliceStatus = "";
+    private double _sliceMessageUntil;
+    private double _playerTime = 0;
     private float _swingSpeed;
     private ulong _consumedPoseGeneration;
     private KittenEva? _resetGestureOwner;
@@ -49,7 +53,7 @@ internal sealed partial class SaberRuntime
     private SaberRuntime()
     {
         _blade = _idleSaber.Blade; _pose = _idleSaber.Pose; _audio = _idleSaber.Audio;
-        _disposed = false; _fault = null; _selectingSlice = false;
+        _disposed = false; _fault = null; _selectingSlice = false; DebugTimings.Enabled = false;
     }
     private void CancelAssistedSlice(string reason) { _sliceSequence.Cancel(); _selectingSlice = false; _pose.ClearSliceSwing(); }
     private void ResetSomersault() { }
@@ -61,12 +65,16 @@ internal sealed partial class SaberRuntime
         saber.PreviousTipTime = Program.FrameNumber;
         saber.PreviousTipBody = double3.Unpack(emitter.Translation);
     }
+    private static bool Finite(double3 p) => double.IsFinite(p.X) && double.IsFinite(p.Y) && double.IsFinite(p.Z);
     private static void Cleanup(Action action, string component) => action();
     private sealed class Resettable { internal void Reset() { } }
     private sealed class FakeRenderer
     {
         internal readonly HashSet<KittenEva> Emitters = [];
         internal readonly Dictionary<KittenEva, float3> Colors = [];
+        internal readonly Dictionary<KittenEva, double4x4> Detached = [];
+        internal void SetDetachedSaber(KittenEva owner, double4x4 frame, float length, float3 color, SaberType type) => Detached[owner] = frame;
+        internal void RemoveDetachedSaber(KittenEva owner) => Detached.Remove(owner);
         internal void RemoveEmitter(KittenEva owner) => Emitters.Remove(owner);
         internal void SetEmitter(KittenEva owner, double4x4 frame, float length, float3 color)
         {
@@ -78,6 +86,7 @@ internal sealed partial class SaberRuntime
     public static void Main()
     {
         CheckLocomotionTransitions();
+        CheckDropLifecycle();
         var runtime = new SaberRuntime();
         KittenEva first = new("First"), second = new("Second");
         second.Renderable.Avatar.Attachments.Mmu.Enabled = false;
@@ -244,7 +253,7 @@ internal sealed partial class SaberRuntime
         Program.FrameNumber = 7; Program.RenderedViewport = Program.MainViewport;
         firstSaber.Pose.Update(.1, true);
         var firstModel = first.Renderable.Avatar.Core.CharacterModel;
-        firstModel.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, firstModel.Skeleton, 0);
+        firstModel.AnimProcessors[0].UpdateSkeleton(StockModelTransform(first), firstModel.Skeleton, 0);
         Check(firstSaber.Pose.HasFreshBodyFrame && firstSaber.Pose.MainPoseGeneration == 1,
             "actual pose publication accepts a visible EVA kitten that is not controlled");
         runtime.UpdateOtherSabers(0);
@@ -252,7 +261,7 @@ internal sealed partial class SaberRuntime
             && renderedColor != secondSaber.Color, "an uncontrolled kitten's point light receives its own color");
         Program.RenderedViewport = new Viewport(ViewportType.Secondary);
         Program.FrameNumber = 8;
-        firstModel.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, firstModel.Skeleton, 0);
+        firstModel.AnimProcessors[0].UpdateSkeleton(StockModelTransform(first), firstModel.Skeleton, 0);
         Check(firstSaber.Pose.MainPoseGeneration == 1, "secondary view cannot refresh destructive-contact pose generation");
         Program.FrameNumber = 10;
         Check(!firstSaber.Pose.HasFreshBodyFrame, "noncontrolled poses retain the same stale-frame rejection");
@@ -271,7 +280,7 @@ internal sealed partial class SaberRuntime
         Check(firstSaber.Blade.Deployment == 1 && firstSaber.Pose.Blend == 1,
             "disabling while paused preserves the visible blade and arm until time resumes");
         Program.RenderedViewport = Program.MainViewport; Program.FrameNumber = 11;
-        firstModel.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, firstModel.Skeleton, 0);
+        firstModel.AnimProcessors[0].UpdateSkeleton(StockModelTransform(first), firstModel.Skeleton, 0);
         runtime.UpdateOtherSabers(.05); runtime.UpdateOtherSaberAudio();
         Check(firstSaber.Blade.Deployment > 0 && firstSaber.Blade.Deployment < 1 && firstSaber.Pose.Blend == 1
             && firstSaber.Audio.Updates > 0 && !firstSaber.Audio.LastTargetOn
@@ -292,7 +301,7 @@ internal sealed partial class SaberRuntime
         Check(firstSaber.Pose.Blend == loweringBlend && firstSaber.Blade.Equipped,
             "pausing during unequip freezes the lowering pose without hiding the hilt");
         Program.FrameNumber = 12;
-        firstModel.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, firstModel.Skeleton, 0);
+        firstModel.AnimProcessors[0].UpdateSkeleton(StockModelTransform(first), firstModel.Skeleton, 0);
         Check(firstSaber.Pose.HasFreshBodyFrame, "the lowering hilt still publishes a fresh hand transform");
         runtime.UpdateOtherSabers(.1); runtime.UpdateOtherSabers(.05);
         Check(!firstSaber.Blade.Equipped && firstModel.AnimProcessors.Count == 0
@@ -529,7 +538,7 @@ internal sealed partial class SaberRuntime
         foreach (var processor in model.AnimProcessors)
             processor.UpdateLocalPose(float4x4.Identity, model.Skeleton, localPose, 0);
         foreach (var processor in model.AnimProcessors)
-            processor.UpdateSkeleton(float4x4.Identity, model.Skeleton, 0);
+            processor.UpdateSkeleton(StockModelTransform(kitten), model.Skeleton, 0);
     }
 
     private static bool HasSaberPosePair(KittenEva kitten)
@@ -1077,6 +1086,74 @@ internal sealed partial class SaberRuntime
         Program.ControlledVehicle = second;
     }
 
+    private static float4x4 StockModelTransform(KittenEva kitten) => float4x4.CreateScale(kitten.Renderable.Avatar.Core.Scale)
+        * float4x4.CreateRotationX(-MathF.PI / 2) * float4x4.CreateRotationZ(-MathF.PI / 2)
+        * float4x4.CreateTranslation(float3.Pack(kitten.GetPositionEcl() - Program.RenderedViewport.GetCamera().PositionEcl));
+
+    private static void CheckDropLifecycle()
+    {
+        var runtime = new SaberRuntime();
+        var first = new KittenEva("Drop first"); var second = new KittenEva("Drop second");
+        var system = new CelestialSystem(); system.All.Items = [first, second]; Universe.CurrentSystem = system;
+        Program.ControlledVehicle = first; Program.RenderedViewport = Program.MainViewport;
+        runtime.RefreshOverlayKittens(); runtime.SetControlledKitten(first);
+        runtime.QueueKittenSaber(first, true); runtime.QueueKittenSaber(second, true); runtime.ApplyKittenSaberRequests();
+        var a = runtime._kittenSabers[first]; var b = runtime._kittenSabers[second];
+        void Pose(KittenEva owner, KittenSaber saber)
+        {
+            Program.FrameNumber++;
+            var model = owner.Renderable.Avatar.Core.CharacterModel;
+            foreach (var processor in model.AnimProcessors) processor.UpdateSkeleton(StockModelTransform(owner), model.Skeleton, 0);
+        }
+        for (int i = 0; i < 6; i++) { runtime.AdvanceKittenSaber(a,.1); runtime.AdvanceKittenSaber(b,.1); Pose(first,a); Pose(second,b); }
+        runtime.QueueSaberDrop(first);
+        Check(a.Drop.Held && a.DroppedBody is null, "Drop UI enqueues without creating native bodies while workers run");
+        runtime.ApplySaberDropRequests();
+        Check(!runtime.SaberHeldForActions && a.Drop.Phase == SaberDropSequence.Stage.Reaching && a.Blade.TargetOn,
+            "drop disables hand attacks immediately while retaining ignition");
+        for (int i = 0; i < 5; i++) { runtime.AdvanceKittenSaber(a,.1); Pose(first,a); }
+        Check(a.Drop.Phase == SaberDropSequence.Stage.Dropped && a.DroppedBody is not null && a.Blade.Deployment == 1
+            && b.Drop.Held && b.DroppedBody is null, "release creates one native owner for the requested kitten and preserves the lit blade");
+        runtime.PublishDetachedSaber(first,a);
+        var releasedFrame = runtime._renderer.Detached[first];
+        int audioBefore = a.Audio.Updates;
+        Check(runtime.UpdateDetachedSaberAudio(first,a) && a.Audio.Updates == audioBefore + 1,
+            "a dropped saber keeps its own spatial audio channel alive");
+        first.PositionEcl += new double3(20, 30, 40);
+        runtime.SetControlledKitten(second); runtime.UpdateOtherSabers(.1);
+        Check(runtime._renderer.Detached[first].Translation == releasedFrame.Translation && a.Drop.Detached,
+            "switching kittens and moving the original owner cannot drag the dropped hilt");
+        runtime.QueueSaberDrop(first); runtime.ApplySaberDropRequests();
+        Check(a.Drop.Phase == SaberDropSequence.Stage.Returning && a.DroppedBody is null,
+            "Undrop retires the collider at the settled boundary before animated return");
+        Program.FrameNumber += 3;
+        for (int i=0;i<8;i++) runtime.AdvanceKittenSaber(a,.1);
+        Check(a.Drop.Time == 0 && a.Drop.Phase == SaberDropSequence.Stage.Returning,
+            "recall waits for an offscreen hand instead of skipping its return animation");
+        for (int i = 0; i < 7; i++) { runtime.AdvanceKittenSaber(a,.1); Pose(first,a); }
+        Check(a.Drop.Held && a.Blade.TargetOn && !runtime._renderer.Detached.ContainsKey(first),
+            "animated return finishes on a fresh hand attachment without re-igniting");
+        runtime.QueueSaberDrop(first); runtime.ApplySaberDropRequests();
+        runtime.ResetAllDroppedSabers();
+        Check(a.Drop.Held && a.DroppedBody is null && runtime._dropRequests.Count == 0,
+            "save capture cancels a pending drop and releases transient ownership");
+        runtime.QueueSaberDrop(first); runtime.ApplySaberDropRequests();
+        for (int i = 0; i < 5; i++) { runtime.AdvanceKittenSaber(a,.1); Pose(first,a); }
+        var ownedBody = a.DroppedBody;
+        runtime.QueueKittenSaber(first,false); runtime.ApplyKittenSaberRequests();
+        Check(a.Drop.Held && a.DroppedBody is null && ownedBody?.Disposed == true,
+            "unequip destroys only that kitten's dropped native body");
+        runtime.QueueKittenSaber(first,true); runtime.ApplyKittenSaberRequests();
+        for (int i=0;i<6;i++) { runtime.AdvanceKittenSaber(a,.1); Pose(first,a); }
+        runtime.QueueSaberDrop(first); runtime.QueueKittenSaber(first,false);
+        runtime.ApplyKittenSaberRequests(); runtime.ApplySaberDropRequests();
+        Check(a.Drop.Held && a.DroppedBody is null && !a.Blade.TargetOn && runtime._dropRequests.Count == 0,
+            "a same-frame explicit stow cancels a pending drop before any collider can be released");
+        runtime.ResetKittenSabers();
+        Check(runtime._renderer.Detached.Count == 0 && runtime._kittenSabers.Count == 0,
+            "world reset clears detached rendering and all per-kitten drop records");
+    }
+
     private static void CheckLocomotionTransitions()
     {
         var runtime = new SaberRuntime();
@@ -1097,7 +1174,7 @@ internal sealed partial class SaberRuntime
             kitten.LocomotionState.Mode = mode;
             runtime.AdvanceKittenSaber(saber, .1);
             Program.FrameNumber++;
-            model.AnimProcessors[0].UpdateSkeleton(float4x4.Identity, model.Skeleton, 0);
+            model.AnimProcessors[0].UpdateSkeleton(StockModelTransform(kitten), model.Skeleton, 0);
             Check(saber.Blade.Equipped && saber.Blade.TargetOn && saber.Blade.Deployment == 1
                 && saber.Pose.Blend == 1 && saber.Pose.HasFreshBodyFrame && runtime.SaberEnabledFor(kitten),
                 "running, hopping, stumbling and rightening retain a lit saber and fresh hand pose");
@@ -1106,9 +1183,9 @@ internal sealed partial class SaberRuntime
         {
             kitten.LocomotionState.Mode = mode;
             runtime.AdvanceKittenSaber(saber, .1); runtime.AdvanceKittenSaber(saber, .1);
-            Check(!saber.Pose.Eligible && !saber.Pose.HasFreshBodyFrame && saber.Blade.TargetOn
+            Check(saber.Pose.Eligible && saber.Pose.Blend == 1 && saber.Blade.TargetOn
                 && saber.Blade.Deployment == 1 && runtime.SaberEnabledFor(kitten),
-                "unsupported hand poses suspend presentation without clearing ignition intent");
+                "ladder and swimming keep the same resolved hand pose and ignition intent");
             kitten.LocomotionState.Mode = LocomotionMode.Grounded;
             runtime.AdvanceKittenSaber(saber, .1); runtime.AdvanceKittenSaber(saber, .1);
             Check(saber.Pose.Blend == 1 && saber.Blade.TargetOn && saber.Blade.Deployment == 1,
@@ -1125,12 +1202,12 @@ internal sealed partial class SaberRuntime
         runtime.AdvanceKittenSaber(saber, .05);
         kitten.LocomotionState.Mode = LocomotionMode.Ladder;
         for (int i = 0; i < 4; i++) runtime.AdvanceKittenSaber(saber, .1);
-        Check(runtime.SaberEnabledFor(kitten) && saber.TogglePhase == SaberTogglePhase.Equipping && !saber.Blade.TargetOn,
-            "a temporary pose loss during equip retains the queued ignition");
+        Check(runtime.SaberEnabledFor(kitten) && saber.TogglePhase == SaberTogglePhase.None && saber.Blade.TargetOn,
+            "equipping on a ladder completes with the same live hand solve");
         kitten.LocomotionState.Mode = LocomotionMode.Airborne;
         for (int i = 0; i < 6; i++) runtime.AdvanceKittenSaber(saber, .1);
         Check(saber.Blade.TargetOn && saber.Blade.Deployment == 1,
-            "interrupted equip completes automatically once a supported pose returns");
+            "airborne movement keeps the completed equip and ignition");
         runtime.ResetKittenSabers();
         Program.FrameNumber = 0;
     }

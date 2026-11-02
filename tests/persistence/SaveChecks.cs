@@ -201,7 +201,7 @@ internal static class SaveChecks
             "version-one profiles without the optional override remain valid and inherit the global default");
 
         var invalid = Document("invalid-length");
-        using (var state = JsonDocument.Parse("{\"Red\":0.25,\"Green\":0.5,\"Blue\":0.75,\"Type\":\"Dark\",\"CapeEnabled\":true,\"SaberEnabled\":true,\"BladeLengthOverride\":12.01}"))
+        using (var state = JsonDocument.Parse("{\"Red\":0.25,\"Green\":0.5,\"Blue\":0.75,\"Type\":\"Dark\",\"CapeEnabled\":true,\"SaberEnabled\":true,\"BladeLengthOverride\":50.01}"))
             invalid.Kittens[0].State = state.RootElement.Clone();
         string original = invalid.Kittens[0].State.GetRawText();
         Session.Profiles.Import(invalid, Session.Warn);

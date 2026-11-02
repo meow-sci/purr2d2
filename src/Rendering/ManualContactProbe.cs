@@ -14,7 +14,14 @@ internal sealed class ManualContactProbe
     internal const double UpdateMilliseconds = .5, MaximumAge = .15, MaximumEndpointTravel = 1;
     internal const int RefinementUpdates = 2;
     internal const double RefinementSeconds = .05;
-    internal readonly record struct Sample(ulong Gesture, double Time, double3 BaseBody, double3 TipBody, float2 Drag);
+    internal readonly record struct Sample(ulong Gesture, double Time, double3 BaseBody, double3 TipBody, float2 Drag)
+    {
+        internal double VisualScale { get; init; } = 1d;
+        internal float3 VisualAxes { get; init; } = float3.One;
+        // The deployed setting before visual scaling. A nonuniform transform can
+        // change physical blade length during a swing without deploying the blade.
+        internal double NominalLength { get; init; }
+    }
     internal readonly record struct Contact(Part Part, double3 PointLocal, double3 NormalLocal,
         double DistanceMeters, double BladeLength, double4x4 SourceTransform, double4x4 PartTransform)
     {
@@ -90,6 +97,9 @@ internal sealed class ManualContactProbe
         _advanceSerial++;
         contact = default; TestedTriangles = DiscoveryUnits = FrameReads = PrimitiveReads = 0;
         if (sample.Gesture == 0 || !double.IsFinite(sample.Time) || !Point(sample.BaseBody).Finite || !Point(sample.TipBody).Finite
+            || !double.IsFinite(sample.VisualScale) || sample.VisualScale <= 0
+            || !double.IsFinite(sample.NominalLength) || sample.NominalLength < 0
+            || !PositiveAxes(sample.VisualAxes)
             || owner.IsDisposed || Program.EditorFlag || Program.GetMainCamera() == null || Universe.CurrentSystem == null)
         { Reset(); return false; }
         if (!ReferenceEquals(_owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem) || _gesture != sample.Gesture)
@@ -184,12 +194,18 @@ internal sealed class ManualContactProbe
             double travel = Math.Max(baseTravel, WorldDistanceSquared(b - entry.Tip, partTransform));
             double length = (sample.TipBody - sample.BaseBody).Length();
             double endpointLimit = Math.Max(MaximumEndpointTravel, length * 1.5);
+            double hiltLimit = MaximumEndpointTravel * Math.Max(1d, sample.VisualScale);
+            double currentLength = sample.NominalLength > 0 ? sample.NominalLength : length;
+            double previousLength = previous.NominalLength > 0 ? previous.NominalLength
+                : (previous.TipBody - previous.BaseBody).Length();
             bool motion = entry.HasPrevious && previous.Gesture == sample.Gesture
                 && sample.Time > previous.Time && sample.Time - previous.Time <= MaximumAge
                 && (sample.Drag - previous.Drag).LengthSquared() >= .000001f
                 && travel >= .000004
-                && baseTravel <= MaximumEndpointTravel * MaximumEndpointTravel && travel <= endpointLimit * endpointLimit
-                && Math.Abs(length - (previous.TipBody - previous.BaseBody).Length()) <= .001
+                && baseTravel <= hiltLimit * hiltLimit && travel <= Math.Max(endpointLimit, hiltLimit) * Math.Max(endpointLimit, hiltLimit)
+                && Math.Abs(sample.VisualScale - previous.VisualScale) <= Math.Max(sample.VisualScale, previous.VisualScale) * .0002
+                && StableAxes(sample.VisualAxes, previous.VisualAxes)
+                && Math.Abs(currentLength - previousLength) <= .001
                 && entry.SourceTransform.Equals(sourceTransform) && sweep.Subdivisions <= BladeSweep.MaximumSubdivisions;
             entry.Base = a; entry.Tip = b; entry.Previous = sample; entry.HasPrevious = true; entry.SourceTransform = sourceTransform;
             if (motion && BoundsCouldHit(sweep, entry.Mesh.BoundingSphereRadius) && entry.Mesh.PositionsCompare is { } primitives)
@@ -300,7 +316,8 @@ internal sealed class ManualContactProbe
                 || !ReferenceEquals(vehicle.Parent, owner.Parent) || Program.GetMainCamera() is not { } camera) continue;
             double reach = (_sample.TipBody - _sample.BaseBody).Length();
             var baseEgo = _sample.BaseBody.Transform(owner.Body2Ego) + camera.GetPositionEgo(owner);
-            if ((camera.GetPositionEgo(vehicle) - baseEgo).Length() > vehicle.BoundingSphereRadiusBody + reach + MaximumEndpointTravel) continue;
+            if ((camera.GetPositionEgo(vehicle) - baseEgo).Length() > vehicle.BoundingSphereRadiusBody + reach
+                + MaximumEndpointTravel * Math.Max(1d, _sample.VisualScale)) continue;
             for (int p = 0; !vehicle.IsDisposed && p < vehicle.Parts.Parts.Length; p++)
             {
                 var full = vehicle.Parts.Parts[p]; yield return 0;
@@ -340,4 +357,8 @@ internal sealed class ManualContactProbe
     }
     private static CutPoint Point(double3 value) => new(value.X, value.Y, value.Z);
     private static double3 Game(CutPoint value) => new(value.X, value.Y, value.Z);
+    private static bool PositiveAxes(float3 value) => float.IsFinite(value.X) && value.X > 0
+        && float.IsFinite(value.Y) && value.Y > 0 && float.IsFinite(value.Z) && value.Z > 0;
+    private static bool StableAxes(float3 a, float3 b) => Stable(a.X, b.X) && Stable(a.Y, b.Y) && Stable(a.Z, b.Z);
+    private static bool Stable(float a, float b) => MathF.Abs(a - b) <= MathF.Max(a, b) * .0002f;
 }

@@ -94,12 +94,13 @@ namespace KSA
     public sealed class CharacterModel
     {
         public Skeleton Skeleton = Skeleton.KnownRig();
+        public float4x4 Transform = float4x4.Pack(Purr2D2.Pose.SaberPoseMath.ModelToBody(.01f, new(0, 0, -.35f)));
         public readonly List<IAnimProcessor> AnimProcessors = [];
         public TransformTRS[] Sample()
         {
             TransformTRS[] local = Skeleton.DefaultLocalPose!.AsSpan().ToArray().Select(TransformTRS.FromMatrix).ToArray();
             foreach (IAnimProcessor processor in AnimProcessors)
-                if (processor.ShouldUpdate) processor.UpdateLocalPose(float4x4.Identity, Skeleton, local, .016f);
+                if (processor.ShouldUpdate) processor.UpdateLocalPose(Transform, Skeleton, local, .016f);
             Rebuild(local);
             return local;
         }
@@ -113,7 +114,7 @@ namespace KSA
         public void Publish()
         {
             foreach (IAnimProcessor processor in AnimProcessors)
-                if (processor.ShouldUpdate) processor.UpdateSkeleton(float4x4.Identity, Skeleton, .016f);
+                if (processor.ShouldUpdate) processor.UpdateSkeleton(Transform, Skeleton, .016f);
         }
     }
     public interface IAnimProcessor
@@ -131,7 +132,11 @@ namespace KSA
         public ViewportType Type => type;
         public Camera GetCamera() => new();
     }
-    public sealed class Camera { public double3 PositionEcl => double3.Zero; }
+    public sealed class Camera
+    {
+        public double3 PositionEcl => double3.Zero;
+        public double3 GetPositionEgo(KittenEva kitten) => kitten.GetPositionEcl() - PositionEcl;
+    }
 }
 
 namespace RenderCore

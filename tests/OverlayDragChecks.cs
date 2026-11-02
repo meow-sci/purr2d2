@@ -324,13 +324,15 @@ internal static class OverlayDragChecks
             Check(layout.Hit(layout.SwingCenter) == SaberOverlayHit.Swing
                 && layout.Hit(layout.SwingCenter + new float2(layout.SwingRadius * .9f)) == SaberOverlayHit.None
                 && layout.Hit(layout.SliceCenter) == SaberOverlayHit.Slice
-                && layout.Hit(layout.AutoSwingCenter) == SaberOverlayHit.AutoSwing,
+                && layout.Hit(layout.AutoSwingCenter) == SaberOverlayHit.AutoSwing
+                && layout.Hit(layout.DropCenter) == SaberOverlayHit.Drop,
                 "drawing geometry and pointer geometry agree without square corner capture");
             var circles = new[] {
                 (layout.SwingCenter, layout.SwingRadius, SaberOverlayHit.Swing),
                 (layout.SliceCenter, layout.SliceRadius, SaberOverlayHit.Slice),
                 (layout.IgniteCenter, layout.IgniteRadius, SaberOverlayHit.Ignite),
                 (layout.AutoSwingCenter, layout.IgniteRadius, SaberOverlayHit.AutoSwing),
+                (layout.DropCenter, layout.IgniteRadius, SaberOverlayHit.Drop),
                 (layout.ForwardCenter, layout.SomersaultRadius, SaberOverlayHit.SomersaultForward),
                 (layout.BackwardCenter, layout.SomersaultRadius, SaberOverlayHit.SomersaultBackward),
                 (layout.LeftCenter, layout.SomersaultRadius, SaberOverlayHit.SomersaultLeft),
@@ -382,7 +384,8 @@ internal static class OverlayDragChecks
                     && visible.Hit(layout.SwingCenter) == (controlsVisible ? SaberOverlayHit.Swing : SaberOverlayHit.None)
                     && visible.Hit(layout.SliceCenter) == (controlsVisible ? SaberOverlayHit.Slice : SaberOverlayHit.None)
                     && visible.Hit(layout.IgniteCenter) == (controlsVisible ? SaberOverlayHit.Ignite : SaberOverlayHit.None)
-                    && visible.Hit(layout.AutoSwingCenter) == (controlsVisible ? SaberOverlayHit.AutoSwing : SaberOverlayHit.None),
+                    && visible.Hit(layout.AutoSwingCenter) == (controlsVisible ? SaberOverlayHit.AutoSwing : SaberOverlayHit.None)
+                    && visible.Hit(layout.DropCenter) == (controlsVisible ? SaberOverlayHit.Drop : SaberOverlayHit.None),
                     "list and BFL9K visibility independently remove hidden controls from pointer hit testing");
             }
             foreach (var direction in new[] { new float2(1, 0), new float2(0, 1), new float2(-1, 0), new float2(0, -1),

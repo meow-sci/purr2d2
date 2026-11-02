@@ -12,7 +12,7 @@ internal sealed partial class SaberRuntime
     private readonly ManualContactProbe _manualProbe = new();
     private ManualContactProbe.Sample _manualPose;
     private bool _manualPoseAvailable, _manualResetPending, _manualCancelPending, _manualSliceActive, _manualIsolated;
-    private bool SliceWorkActive => _sliceSequence.Active || _manualSliceActive;
+    private bool SliceWorkActive => _sliceSequence.Active || _manualSliceActive || ClutterSliceWorkActive;
 
     private void BeginManualSwing(float2 pointer = default, float swooshThresholdPixels = 4)
     {
@@ -45,11 +45,14 @@ internal sealed partial class SaberRuntime
 
     // Render only publishes the pose and gesture identity. All discovery, reads of
     // target transforms, capture and native mutation occur in BeforePhysics.
-    private void PublishManualPose(double3 emitter, double3 tip)
+    private void PublishManualPose(double3 emitter, double3 tip, float visualScale = 1f, double nominalLength = 0d,
+        float3 visualAxes = default)
     {
         _manualPoseAvailable = _overlayDrag.Held && _manualGesture.CanDetectAt(_playerTime);
         if (_manualPoseAvailable)
-            _manualPose = new(_manualGesture.Id, _playerTime, emitter, tip, _overlayDrag.Offset);
+            _manualPose = new(_manualGesture.Id, _playerTime, emitter, tip, _overlayDrag.Offset)
+                { VisualScale = visualScale, NominalLength = nominalLength,
+                    VisualAxes = visualAxes == default ? float3.One : visualAxes };
         else ClearManualPose();
     }
 
@@ -71,10 +74,10 @@ internal sealed partial class SaberRuntime
 
     private void UpdateManualContact(bool simulationAdvancing)
     {
-        bool eligible = _fault == null && _owner is { IsDisposed: false } && BFL9KUiVisible
+        bool eligible = _fault == null && _owner is { IsDisposed: false } && BFL9KUiVisible && SaberHeldForActions
             && _blade.Equipped && _blade.TargetOn
             && (_blade.Deployment >= .99f || _blade.ManualDeployment && _blade.Deployment > .001f) && _pose.Eligible
-            && !SomersaultActive && !ForceHolding && !ForcePicking;
+            && !ForceHolding && !ForcePicking;
         if (_manualSliceActive)
         {
             if (!eligible)
@@ -90,7 +93,7 @@ internal sealed partial class SaberRuntime
         }
         // A clash blocks new contact gestures, but accepted native slice work above keeps pumping.
         if (_pose.ClashHeld) { _manualProbe.Reset(); return; }
-        if (!eligible || !_manualGesture.CanDetectAt(_playerTime) || !_overlayDrag.Held || !_manualPoseAvailable
+        if (!eligible || ClutterSliceWorkActive || !_manualGesture.CanDetectAt(_playerTime) || !_overlayDrag.Held || !_manualPoseAvailable
             || _manualPose.Gesture != _manualGesture.Id || _playerTime < _manualPose.Time
             || _manualPose.Time < _manualGesture.CooldownUntil
             || _playerTime - _manualPose.Time > ManualContactProbe.MaximumAge

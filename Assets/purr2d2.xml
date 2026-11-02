@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Assets>
+  <!-- Transient physics owner only. The saber renderer supplies the visible hilt/blade. -->
+  <Part Id="Purr2D2_DroppedHilt" DisplayName="BFL9K hilt">
+    <EditorTag Value="Hidden" />
+    <SolidCuboidMass><Mass Kg="0.8" /><LengthX M="0.06" /><LengthY M="0.06" /><LengthZ M="0.30" /></SolidCuboidMass>
+    <Collider Id="Purr2D2_DroppedHilt_Collider"><Box Id="Purr2D2_DroppedHilt_Box"><LengthX M="0.06" /><LengthY M="0.06" /><LengthZ M="0.30" /></Box></Collider>
+  </Part>
   <GltfFile Id="Purr2D2_Hilt_Glb">
     <Source Path="Assets/Models/Purr2D2_Hilt.glb" />
   </GltfFile>

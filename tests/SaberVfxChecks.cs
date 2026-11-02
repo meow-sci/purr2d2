@@ -51,7 +51,7 @@ internal static class SaberVfxChecks
         foreach (float pixels in new[] { 0, 8, 24, 36, 80, 180, 2000, float.MaxValue })
         foreach (float radius in new[] { 0, .4f, 1, 1.8f, 2, 3.5f, 6, 500, float.MaxValue })
         foreach (double distance in new[] { 0, 8, 10, 18, 32, 40, 64, double.MaxValue })
-        foreach (float length in new[] { .001f, .12f, .18f, .24f, 1.4f, 12f })
+        foreach (float length in new[] { .001f, .12f, .18f, .24f, 1.4f, 12f, SaberLimits.MaximumBladeLength })
         {
             SaberVfxDetail detail = SaberVfx.Detail(pixels, radius, distance, length);
             Check(detail.ArcCount is >= 0 and <= 3 && detail.ArcVisibility is >= 0 and <= 1
@@ -107,7 +107,7 @@ internal static class SaberVfxChecks
         foreach (float pixels in new[] { 0, 24, 80, 180, float.MaxValue })
         foreach (float radius in new[] { 0, 1, 2, 6, float.MaxValue })
         foreach (double distance in new[] { 0, 10, 40, double.MaxValue })
-        foreach (float length in new[] { .001f, .12f, .18f, 1.4f, 12f })
+        foreach (float length in new[] { .001f, .12f, .18f, 1.4f, 12f, SaberLimits.MaximumBladeLength })
         {
             var tuning = new SaberVfxTuning(4, 4, count, 10, 3, 6, 4);
             var detail = SaberVfx.Detail(pixels, radius, distance, length, tuning);

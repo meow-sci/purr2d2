@@ -29,8 +29,8 @@ internal static class SaberPoseMath
         if (!double.IsFinite(lengthMeters) || lengthMeters < 0 || !double.IsFinite(axisSquared)
             || axisSquared < 1e-12 || !double.IsFinite(origin.X) || !double.IsFinite(origin.Y) || !double.IsFinite(origin.Z)) return false;
         baseBody = origin;
-        // Blade length is a physical metre setting, independent of avatar/hilt scale.
-        tipBody = origin + axis * (lengthMeters / Math.Sqrt(axisSquared));
+        // Settings use stock-kitten metres; the observed model frame carries all visual scale.
+        tipBody = origin + axis * lengthMeters;
         return double.IsFinite(tipBody.X) && double.IsFinite(tipBody.Y) && double.IsFinite(tipBody.Z);
     }
 

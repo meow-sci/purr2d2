@@ -24,12 +24,13 @@ public sealed partial class SaberPoseController
 
     internal void ClearClash() => _clashTail?.ClearClash();
 
-    private bool TryGetHeldEmitterToModel(out float4x4 metresToModel)
+    private bool TryGetHeldEmitterToModel(float4x4 observedModelToEgo, out float4x4 metresToModel)
     {
         metresToModel = float4x4.Identity;
         if (_clashTail?.IsHolding != true || _avatar is null || Kitten is not { } kitten) return false;
-        double4x4 modelToBody = SaberPoseMath.ModelToBody(_avatar.Core.Scale, kitten.CenterOfMassAsmbF);
-        if (!double4x4.Invert(modelToBody, out var bodyToModel)) return false;
+        if (!KittenVisualScale.TryModelToBody(observedModelToEgo, kitten.Body2Cce,
+            Program.RenderedViewport.GetCamera().GetPositionEgo(kitten), out var modelToBody)
+            || !double4x4.Invert(modelToBody, out var bodyToModel)) return false;
         double4x4 held = _clashTail.HeldEmitterToBody * bodyToModel;
         if (!Finite(held.Translation) || !Finite(held.Z.XYZ)) return false;
         metresToModel = float4x4.Pack(held);

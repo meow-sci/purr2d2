@@ -20,6 +20,7 @@ internal static class ForceHostChecks
         ForceClutterBepuChecks.Run();
         ForceBreakupHostChecks.Run();
         ForceDentHostChecks.Run();
+        SaberDropHostChecks.Run();
         Console.WriteLine("Force host checks passed (actual KSA handoff/patch composition and native clutter promotion, identity, frames and contact contracts).");
     }
 
@@ -97,6 +98,7 @@ internal static class ForceHostChecks
 
     private static void NativeBridgeDelegates()
     {
+        ClutterForceNative.ValidateSliceLayout();
         var native = new BubbleClutterStatics();
         Check(ClutterForceNative.Generation(native) == 0,
             "production native bridge initializes its checked private fields and emitted delegates against actual KSA");

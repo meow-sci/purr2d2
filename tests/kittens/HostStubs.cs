@@ -84,6 +84,7 @@ namespace KSA
         public readonly KittenRenderable Renderable = new();
         public readonly LocomotionState LocomotionState = new();
         public readonly ParentBody Parent = new();
+        public bool HasPhysicsBubble = true;
         public double3 PositionEcl;
         public double3 SurfaceVelocityCci;
         public int PositionReads, VelocityReads;
@@ -193,7 +194,9 @@ namespace KSA
             return Camera;
         }
     }
-    public sealed class Camera { public double3 PositionEcl { get; set; } }
+    public sealed class Camera { public double3 PositionEcl { get; set; }
+        public double3 GetPositionEgo(KittenEva kitten) => kitten.GetPositionEcl() - PositionEcl;
+    }
     public static class Double3Ex
     {
         public static double3 Transform(this double3 value, double4x4 matrix) => double3.Transform(value, matrix);
@@ -341,7 +344,7 @@ namespace Purr2D2.Audio
         public void Suspend() => Suspends++;
         public void Update(KSA.KittenEva owner, double3 position, float deployment, bool targetOn,
             bool paused, float volume, float swingSpeed = 0, float contact = 0,
-            Purr2D2.Core.SaberType type = Purr2D2.Core.SaberType.Light)
+            Purr2D2.Core.SaberType type = Purr2D2.Core.SaberType.Light, KSA.Vehicle? spatialOwner = null)
         {
             Updates++; LastTargetOn = targetOn; LastDeployment = deployment; LastType = type;
         }

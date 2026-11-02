@@ -35,11 +35,16 @@ namespace Purr2D2.Runtime
         private sealed class KittenSaber(float bladeLength, bool equipped, float deployment,
             TestPose pose, TestAudio audio)
         {
+            internal readonly TestDrop Drop = new();
             internal readonly TestBlade Blade = new(equipped, deployment);
             internal readonly float BladeLength = bladeLength;
             internal readonly TestPose Pose = pose;
             internal readonly TestAudio Audio = audio;
         }
+
+        private sealed class TestDrop { internal bool Held = true; }
+
+        internal void SetDroppedForTest(KSA.KittenEva owner, bool dropped) => _kittenSabers[owner].Drop.Held = !dropped;
 
         private sealed class TestBlade(bool equipped, float deployment)
         {

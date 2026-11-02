@@ -13,6 +13,7 @@ internal static class AudioChecks
 
     static void Main()
     {
+        DebugTimings.Enabled = false;
         using var audio = new SaberAudio();
         var owner = new KittenEva();
         void Tick(SaberType type = SaberType.Light, bool paused = false, float deployment = 1,
@@ -85,7 +86,27 @@ internal static class AudioChecks
         SaberActionOneShots();
         ManualSwingOneShot();
         SaberSwooshAssetSelectionAndMissingCue();
+        DetachedSaberSpatialVelocity();
         Console.WriteLine("PASS: audio layering, saber action one-shots, type switching, pause, mute and cleanup");
+    }
+
+    private static void DetachedSaberSpatialVelocity()
+    {
+        using var audio = new SaberAudio();
+        var owner = new KittenEva();
+        var dropped = new Vehicle { AudioVelocity = new double3(-5,2,1) };
+        GameAudio.CameraPosition = double3.Zero; GameAudio.CameraVelocity = new double3(100,200,300);
+        audio.Update(owner,new double3(22,33,44),1,true,false,.8f,spatialOwner:dropped);
+        var hum = GameAudio.Channels.Last(c => c.Id == "Purr2D2SaberHum");
+        Check(hum.Spatial.Position == new double3(22,33,44) && hum.Spatial.Velocity == dropped.AudioVelocity,
+            "dropped hum uses detached hilt position and velocity while retaining kitten channel ownership");
+        int channels = GameAudio.Channels.Count;
+        dropped.AudioVelocity = new double3(-1,0,2);
+        audio.Update(owner,new double3(24,35,46),1,true,false,.8f,spatialOwner:dropped);
+        Check(GameAudio.Channels.Count == channels && hum.Spatial.Position == new double3(24,35,46)
+            && hum.Spatial.Velocity == dropped.AudioVelocity,
+            "a moving dropped hilt updates existing channels without replaying ignition");
+        GameAudio.CameraPosition = GameAudio.CameraVelocity = double3.Zero;
     }
 
     private static void SaberActionOneShots()
@@ -474,15 +495,19 @@ namespace KSA
     {
         public static double3 Transform(this double3 value, doubleQuat rotation) => double3.Transform(value, rotation);
     }
-    public sealed class KittenEva
+    public class Vehicle
     {
         public bool IsDisposed { get; set; }
+        public double3? AudioVelocity;
+    }
+    public sealed class KittenEva : Vehicle
+    {
         public doubleQuat Body2Cce => doubleQuat.Identity;
     }
     public sealed class Camera
     {
         public double3 GetPositionEgo(KittenEva owner) => GameAudio.CameraPosition;
-        public double3 GetVelocityEgo(KittenEva owner) => GameAudio.CameraVelocity;
+        public double3 GetVelocityEgo(Vehicle owner) => owner.AudioVelocity ?? GameAudio.CameraVelocity;
     }
     public readonly record struct SpatialAudio(double3 Position, double3 Velocity, double Density);
     public sealed record SoundBehavior(string Id);

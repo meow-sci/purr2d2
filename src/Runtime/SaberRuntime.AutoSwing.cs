@@ -9,7 +9,7 @@ internal sealed partial class SaberRuntime
     private void AdvanceSaberAutoSwing(KittenSaber saber, double playerDt)
     {
         var swing = saber.AutoSwing;
-        if (!swing.Enabled) return;
+        if (!swing.Enabled || !saber.Drop.Held) return;
         double dt = double.IsFinite(playerDt) && playerDt > 0
             && saber.Blade.Equipped && VisibleBladeLength(saber) > .001f
             && saber.Pose.Eligible && saber.Pose.HasFreshBodyFrame && !saber.Pose.ClashHeld
@@ -38,6 +38,7 @@ internal sealed partial class SaberRuntime
             DisableSaberAutoSwing(saber);
             return true;
         }
+        if (!saber.Drop.Held) return false;
         if (saber.AutoSwing.Enabled) return true;
 
         // Retire manual/assisted input through its existing safe request path before

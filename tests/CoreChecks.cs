@@ -238,7 +238,7 @@ internal static class CoreChecks
             SaberControlsOffsetY = float.PositiveInfinity,
         };
         settings.Validate();
-        Check(settings.BladeLength == 12f && settings.ColorR == 0 && settings.ColorG == .75f && settings.ColorB == 1 && settings.Volume == 0,
+        Check(settings.BladeLength == SaberLimits.MaximumBladeLength && settings.ColorR == 0 && settings.ColorG == .75f && settings.ColorB == 1 && settings.Volume == 0,
             "settings clamp high, low, and nonfinite values to supported boundaries");
         Check(settings.AngryForceRadius == 50 && settings.ForceControlsOffsetX == -1 && settings.ForceControlsOffsetY == 1
             && settings.SaberControlsOffsetX == 0 && settings.SaberControlsOffsetY == 0,
@@ -381,7 +381,7 @@ internal static class CoreChecks
             settings.SaberControlsOffsetX = .5f; settings.SaberControlsOffsetY = -.75f;
             settings.Save(path);
             loaded = SaberSettings.Load(path);
-            Check(loaded.BladeLength == 12f && loaded.ColorR == 0 && loaded.ColorG == .75f && loaded.ColorB == 1 && loaded.Volume == 0,
+            Check(loaded.BladeLength == SaberLimits.MaximumBladeLength && loaded.ColorR == 0 && loaded.ColorG == .75f && loaded.ColorB == 1 && loaded.Volume == 0,
                 "settings save and load preserves validated preferences");
             Check(loaded.LightEffects.ShimmerAmount == 2.5f && loaded.LightEffects.ShimmerSpeed == .75f
                 && loaded.LightEffects.ArcCount == 7 && loaded.LightEffects.ArcFrequency == 1.75f

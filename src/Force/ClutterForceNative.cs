@@ -12,7 +12,7 @@ using KSA;
 namespace Purr2D2.Force;
 
 /// <summary>Checked access to native clutter ownership. No replacement shapes, placement system or simulation.</summary>
-internal static class ClutterForceNative
+internal static partial class ClutterForceNative
 {
     internal delegate bool DisplaceDelegate(BubbleClutterStatics native, ConstraintSim sim,
         in BubbleClutterStatics.ClutterInstanceKey key, float mass, out GroundClutterPlacementData.DisplacedObject displaced);

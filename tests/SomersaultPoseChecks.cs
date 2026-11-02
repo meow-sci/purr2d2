@@ -122,13 +122,14 @@ internal static class SomersaultPoseChecks
         motion.SetMotion(SomersaultDirection.Forward, MathF.PI / 2, 1, true);
         model.Sample(); model.Publish();
         Check(SomersaultPoseMath.TryPivot(.01f, kitten.CenterOfMassAsmbF, out float3 pivot), "fixture COM pivot resolves");
-        float4x4 expected = tuckEmitter * SomersaultPoseMath.Rotation(SomersaultDirection.Forward, MathF.PI / 2, pivot);
+        Check(float4x4.Invert(model.Transform, out var egoToModel), "observed stock render frame inverts");
+        float4x4 expected = tuckEmitter * egoToModel
+            * SomersaultPoseMath.Rotation(SomersaultDirection.Forward, MathF.PI / 2, pivot) * model.Transform;
         Near(drawn.Translation, expected.Translation, "hilt publishes the final flipped grip position");
         Near(drawn.Z.XYZ, expected.Z.XYZ, "fallback hand rig publishes the flipped blade direction");
         Near(drawn.X.XYZ, expected.X.XYZ, "hilt roll follows the same full-body rotation");
         Check(saber.TryGetBodyFrame(out double4x4 body), "main-view emitter publishes a fresh body frame");
-        Near(float3.Pack(body.Translation), float3.Pack((double4x4.Unpack(expected)
-            * SaberPoseMath.ModelToBody(.01f, kitten.CenterOfMassAsmbF)).Translation),
+        Near(float3.Pack(body.Translation), expected.Translation,
             "audio/contact body snapshot shares the rendered flipped emitter");
 
         ulong generation = saber.MainPoseGeneration;

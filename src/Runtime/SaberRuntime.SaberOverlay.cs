@@ -53,7 +53,7 @@ internal sealed partial class SaberRuntime
     private bool ForceUiVisible => OverlayVisible && _settings.ForceUiEnabled;
     private bool OverlayCanSwing => _fault == null && _owner is { IsDisposed: false }
         && ReferenceEquals(_owner, Program.ControlledVehicle) && _blade.Equipped && _pose.Eligible
-        && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
+        && SaberHeldForActions && !_selectingSlice && (!_sliceSequence.Active || _sliceSequence.EndPresented);
     private bool OverlayCanStartSwing => OverlayCanSwing && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed());
 
     // The picker runs after this overlay; retain consumption for quick press/release pairs too.
@@ -250,6 +250,15 @@ internal sealed partial class SaberRuntime
                         CenterOverlayText(draw, layout.IgniteCenter, toggleText,
                             toggleKitten != null && SaberEnabledFor(toggleKitten) ? "RETRACT" : "IGNITE", layout.IgniteRadius * 1.6f);
                         if (_igniteDrag.Held) DrawSaberIgnitePill(draw, layout);
+                        bool dropped = toggleKitten != null && _kittenSabers.TryGetValue(toggleKitten, out var dropSaber) && !dropSaber.Drop.Held;
+                        bool canDrop = toggleKitten != null && _kittenSabers.TryGetValue(toggleKitten, out var dropEquipment)
+                            && dropEquipment.Blade.Equipped && _fault == null
+                            && dropEquipment.TogglePhase is not (SaberTogglePhase.Retracting or SaberTogglePhase.Unequipping)
+                            && (!dropEquipment.Drop.Held || dropEquipment.Pose.HasFreshBodyFrame && toggleKitten.HasPhysicsBubble);
+                        draw.AddCircleFilled(layout.DropCenter, layout.IgniteRadius, MovementButtonFill, 48);
+                        draw.AddCircle(layout.DropCenter, layout.IgniteRadius, new ImColor8(255, 255, 255, 64), 48, Math.Max(.5f, layout.Scale));
+                        CenterOverlayText(draw, layout.DropCenter, canDrop ? MovementButtonText : MovementButtonDisabledText,
+                            dropped ? "UNDROP" : "DROP", layout.IgniteRadius * 1.6f);
                         bool autoEnabled = toggleKitten != null && _kittenSabers.TryGetValue(toggleKitten, out var autoSaber)
                             && autoSaber.AutoSwing.Enabled;
                         draw.AddCircleFilled(layout.AutoSwingCenter,
@@ -270,7 +279,7 @@ internal sealed partial class SaberRuntime
                         var swingText = OverlayCanStartSwing ? dragCircleWhite : dragCircleMuted;
                         CenterOverlayText(draw, layout.SwingCenter - new float2(0, fontSize * .55f), swingText, "SWING", layout.SwingRadius * 1.6f, fontSize);
                         CenterOverlayText(draw, layout.SwingCenter + new float2(0, fontSize * .65f), swingText, "hold + drag", layout.SwingRadius * 1.6f, fontSize);
-                        CenterOverlayText(draw, layout.SliceCenter, SomersaultActive && !_selectingSlice ? muted : white,
+                        CenterOverlayText(draw, layout.SliceCenter, SaberHeldForActions ? white : muted,
                             _selectingSlice ? "CANCEL" : "SLICE", layout.SliceRadius * 1.6f);
                         // Temporarily hidden while somersaults use Space + arrow keys.
                         // Set SomersaultOverlayControlsEnabled to true and uncomment to restore.
@@ -487,9 +496,12 @@ internal sealed partial class SaberRuntime
             case OverlayHit.Slice:
                 DisableSaberAutoSwing(_activeSaber);
                 ResetOverlaySwing();
-                if ((!SomersaultActive || _selectingSlice) && _fault == null && _owner is { IsDisposed: false }
+                if (SaberHeldForActions && _fault == null && _owner is { IsDisposed: false }
                     && ReferenceEquals(_owner, Program.ControlledVehicle))
                     Queue(Command.SelectSlice);
+                break;
+            case OverlayHit.Drop:
+                if (AppearanceKitten is { } dropOwner) QueueSaberDrop(dropOwner);
                 break;
             case OverlayHit.Ignite:
                 if (AppearanceKitten is { } igniteOwner)

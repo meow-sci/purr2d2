@@ -85,7 +85,7 @@ public sealed class SaberAudio : IDisposable
     /// <param name="contact">Contact intensity from 0 to 1; zero stops the optional sizzle loop.</param>
     /// <param name="type">Selects ignition and the additional ambient loop independently of blade color.</param>
     public void Update(KittenEva owner, double3 emitterBody, float deployment, bool targetOn,
-        bool paused, float volume, float swingSpeed = 0, float contact = 0, SaberType type = SaberType.Light)
+        bool paused, float volume, float swingSpeed = 0, float contact = 0, SaberType type = SaberType.Light, Vehicle? spatialOwner = null)
     {
         if (_shutdown || _disposed) return;
         if (owner.IsDisposed || !Finite(emitterBody)) { Stop(); return; }
@@ -123,7 +123,7 @@ public sealed class SaberAudio : IDisposable
             FollowOneShot(ref _slice, owner, camera, volume * SliceGain, paused);
             if (!Ready) return;
             double3 position = camera.GetPositionEgo(owner) + emitterBody.Transform(owner.Body2Cce);
-            double3 velocity = camera.GetVelocityEgo(owner);
+            double3 velocity = camera.GetVelocityEgo(spatialOwner ?? owner);
             // Fictional suit/saber audio remains audible in vacuum. Coordinates still spatialize normally.
             var spatial = new SpatialAudio(position, velocity, 1.0);
 

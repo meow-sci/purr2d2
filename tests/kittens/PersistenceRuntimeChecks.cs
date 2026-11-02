@@ -26,6 +26,10 @@ internal sealed partial class SaberRuntime
     private readonly SaberOverlayDrag _overlayDrag = new();
     private bool _ready = true, _enabled = true, _disposed, _selectingSlice, _freshPoseThisTick, _hasPreviousTip;
     private string? _fault;
+    private readonly ManualSwingSwooshGate _manualSwingSwoosh = new();
+    private string _sliceStatus = "";
+    private double _sliceMessageUntil;
+    private double _playerTime = 0;
     private float _swingSpeed;
     private ulong _consumedPoseGeneration;
     private KittenEva? _resetGestureOwner;
@@ -58,12 +62,16 @@ internal sealed partial class SaberRuntime
         saber.PreviousTipTime = Program.FrameNumber;
         saber.PreviousTipBody = double3.Unpack(emitter.Translation);
     }
+    private static bool Finite(double3 p) => double.IsFinite(p.X) && double.IsFinite(p.Y) && double.IsFinite(p.Z);
     private static void Cleanup(Action action, string component) => action();
     private sealed class Resettable { internal void Reset() { } }
     private sealed class FakeRenderer
     {
         internal readonly HashSet<KittenEva> Emitters = [];
         internal readonly Dictionary<KittenEva, float3> Colors = [];
+        internal readonly Dictionary<KittenEva, double4x4> Detached = [];
+        internal void SetDetachedSaber(KittenEva owner, double4x4 frame, float length, float3 color, SaberType type) => Detached[owner] = frame;
+        internal void RemoveDetachedSaber(KittenEva owner) => Detached.Remove(owner);
         internal void RemoveEmitter(KittenEva owner) => Emitters.Remove(owner);
         internal void SetEmitter(KittenEva owner, double4x4 frame, float length, float3 color)
         {

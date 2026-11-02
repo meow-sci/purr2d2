@@ -90,6 +90,7 @@ internal sealed partial class SaberRuntime
                 if (ImGui.CollapsingHeader("HUD Overlay Positions")) DrawControlPositionSettings();
                 if (ImGui.CollapsingHeader("Cape Settings")) DrawCapeSettings();
                 if (ImGui.CollapsingHeader("Character & Grip")) DrawSaberCharacterSettings();
+                if (ImGui.CollapsingHeader("Clutter Slicing")) DrawClutterSliceSettings();
                 if (ImGui.CollapsingHeader("Slicing Resources")) DrawSliceResourceSettings();
                 else _confirmSliceDebrisRemoval = false;
                 if (ImGui.CollapsingHeader("Slicing Diagnostics"))
@@ -155,7 +156,9 @@ internal sealed partial class SaberRuntime
             ShowSaberControlTip("The blade length multiplier fudge factor for how far away a part slice is detected");
             float effectiveLength = _activeSaber?.BladeLengthOverride ?? length;
             double visibleLength = _pose.ClashHeld ? _pose.ClashHeldBladeLength : _blade.Deployment * effectiveLength;
-            ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(effectiveLength, sliceReach):F2} m fully extended.");
+            double bladeScale = _pose.TryGetBodyFrame(out var frame) ? frame.Z.XYZ.Length() : 1;
+            if (!double.IsFinite(bladeScale) || bladeScale <= 0) bladeScale = 1;
+            ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength * bladeScale, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(effectiveLength * bladeScale, sliceReach):F2} m fully extended.");
             SaberSettingsRow("Sound volume");
             changed |= ImGui.SliderFloat("##SoundVolume", ref volume, 0, 1, "%.2f");
             ShowSaberControlTip("Overall volume for BFL9K sound effects and hum.");
@@ -172,6 +175,23 @@ internal sealed partial class SaberRuntime
         _settings.SliceReachMultiplier = sliceReach;
         _settings.Volume = volume;
         _settings.ExtendedEnvironmentLighting = extendedLighting;
+        _settings.Validate();
+    }
+
+    private void DrawClutterSliceSettings()
+    {
+        if (!BeginSaberSettingsTable("##ClutterSlicing", "Tree cut fire duration")) return;
+        float fireSeconds = _settings.TreeCutFireSeconds;
+        bool changed = false;
+        try
+        {
+            SaberSettingsRow("Tree cut fire duration");
+            changed = ImGui.SliderFloat("##TreeCutFireSeconds", ref fireSeconds, 0, 60, "%.1f s");
+            ShowSaberControlTip("How long flames linger on freshly cut tree ends. Set to 0 to disable cut fire. Default: 10 seconds.");
+        }
+        finally { ImGui.EndTable(); }
+        if (!changed) return;
+        _settings.TreeCutFireSeconds = fireSeconds;
         _settings.Validate();
     }
 

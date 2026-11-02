@@ -29,6 +29,8 @@ internal static partial class RuntimeFragmentAssets
     private static double _now;
     private static readonly Dictionary<string, double> HotCaps = new(StringComparer.Ordinal);
     private static readonly Dictionary<PartModel, string> CapFragments = new(ReferenceEqualityComparer.Instance);
+    private sealed record ClutterTintValue(uint Color, uint Luminosity);
+    private static readonly ConditionalWeakTable<PartModel, ClutterTintValue> ClutterTints = new();
     private static readonly Dictionary<string, PreparedFragment> Prepared = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> FailedPreparations = new(StringComparer.Ordinal);
 
@@ -122,6 +124,7 @@ internal static partial class RuntimeFragmentAssets
     // Raytraced IVA submissions leave through this overload without entering InstanceList.
     private static void BeforePartInstance(PartModel __instance, ref PartModel.PerInstanceData instanceData)
     {
+        ApplyClutterTint(__instance, new Span<PartModel.PerInstanceData>(ref instanceData));
         if (TryGetCapFragment(__instance, out string fragmentId))
             ApplyCapEmission(fragmentId, new Span<PartModel.PerInstanceData>(ref instanceData));
     }
@@ -130,9 +133,27 @@ internal static partial class RuntimeFragmentAssets
     // bypassing AddInstance. Rewrite generated cap entries immediately before their upload.
     private static void BeforePartInstanceUpload(PartModel __instance, IViewport viewport)
     {
+        var tintInstances = PartModel.ViewportData.Get(__instance, viewport).InstanceList;
+        if (tintInstances.Count != 0) ApplyClutterTint(__instance, CollectionsMarshal.AsSpan(tintInstances));
         if (!TryGetCapFragment(__instance, out string fragmentId)) return;
         var instances = PartModel.ViewportData.Get(__instance, viewport).InstanceList;
         if (instances.Count != 0) ApplyCapEmission(fragmentId, CollectionsMarshal.AsSpan(instances));
+    }
+
+    private static void ApplyClutterTint(PartModel model, Span<PartModel.PerInstanceData> instances)
+    {
+        if (!ClutterTints.TryGetValue(model, out var tint))
+        {
+            if (!ClutterSurfaceTint.TryRead(model.Template.Mesh?.Id, out uint color, out uint luminosity)) return;
+            tint = new(color, luminosity); ClutterTints.Add(model, tint);
+        }
+        foreach (ref var instance in instances)
+        {
+            instance.StateBitFlag = ClutterSurfaceTint.Flags(instance.StateBitFlag, tint.Luminosity);
+            // Native RGB10 data rides the existing emission varying, but the
+            // native add-emissive flag is not set. Caps have separate mesh IDs.
+            instance.EmissiveColor = tint.Color;
+        }
     }
 
     // Main render thread only. The upload prefix runs for every model in every view each

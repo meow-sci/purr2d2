@@ -6,7 +6,7 @@ using Purr2D2.Rendering;
 namespace Purr2D2.Slicing;
 
 // Worker inputs contain copied values only: never Part, Vehicle, MeshReference or a native material.
-internal sealed record SliceMaterialData(string Id, bool Glass);
+internal sealed record SliceMaterialData(string Id, bool Glass, uint ClutterColor = 0, uint ClutterLuminosity = 0);
 internal sealed record SliceInput(SliceFace[][] Groups, CutPoint[] Axes,
     IReadOnlyDictionary<int, SliceMaterialData> Materials, float MassKg, uint Seed = 0)
 {

@@ -45,7 +45,8 @@ namespace KSA
     {
         internal static bool DrawUI = false, EditorFlag = false;
         internal static Viewport MainViewport = new();
-        internal static Camera? GetMainCamera() => null;
+        internal static Camera? ActiveCamera;
+        internal static Camera? GetMainCamera() => ActiveCamera;
     }
     internal static class Universe { internal static double GetSimulationSpeed() => 1; }
 }
@@ -64,13 +65,17 @@ namespace Purr2D2.Cutting
             internal SliceTarget? Target;
             internal string Reason = "No target.";
             internal bool Done;
+            internal bool NoSurface;
+            internal bool SearchComplete;
+            internal double SurfaceDistance = double.PositiveInfinity;
             internal int AdvanceCount;
             internal void Advance() => AdvanceCount++;
             public void Dispose() { }
         }
         internal Selection? BeginSelection(KittenEva owner, double3 origin, double3 direction, double3 baseBody, double reach) => new();
+        internal bool RejectPart;
         internal bool CheckSliceTarget(KittenEva owner, SliceTarget target, double3 baseBody, double reach, out string reason)
-        { reason = ""; return true; }
+        { reason = RejectPart ? "Part refused." : ""; return !RejectPart; }
         internal bool CheckPendingSliceTarget(KittenEva owner, SliceTarget target, out string reason)
         { reason = ""; return true; }
         internal SliceTarget? PreviewPointTarget(KittenEva owner, Part part, double3 hit, double3 baseBody, double reach,
@@ -111,12 +116,27 @@ namespace Purr2D2.Runtime
         private readonly TestRenderer _renderer = new();
         private readonly TestSettings _settings = new();
         private readonly Queue<Request> _commands = new();
-        private bool SomersaultActive, _manualSliceActive, _manualIsolated, _freshPoseThisTick = true;
+        private bool _manualSliceActive, _manualIsolated, _freshPoseThisTick = true;
         private bool OverlayCapturesPointer;
         private string? _fault;
         private double _playerTime;
         private float Length => 1;
         private bool SliceWorkActive => _sliceSequence.Active || _manualSliceActive;
+        private bool SaberHeldForActions => true;
+        private bool _testSnapshotUnavailable;
+        private Ray? SnapshotClutterSliceRay(Ray ray) => _testSnapshotUnavailable ? null : ray;
+        private double _testClutterDistance = double.PositiveInfinity;
+        private string? _testClutterBlock;
+        private int _testClutterStarts, _testClutterAttempts;
+        private AssistedClutterResult TryBeginAssistedClutterSlice(Ray ray,
+            double maximumRayDistance = double.PositiveInfinity, Part? selectedPart = null)
+        {
+            _testClutterAttempts++;
+            if (_testClutterBlock != null) return BlockAssistedClutter(_testClutterBlock);
+            if (_testClutterDistance >= maximumRayDistance) return AssistedClutterResult.Absent;
+            _testClutterStarts++; return AssistedClutterResult.Started;
+        }
+        private void CancelClutterSlice() { }
         private readonly TestManualGesture _manualGesture = new();
 
         private enum Command { CancelSlice, CutPicked }
@@ -151,6 +171,29 @@ namespace Purr2D2.Runtime
 
         internal void BeginSelectionForTest() => SelectPartToSlice();
         internal void BeginSliceForTest(SliceTarget target) => BeginAssistedSlice(target, null);
+        internal void BeginPointerSliceForTest(SliceTarget target, double clutterDistance, bool rejectPart = false,
+            string? blocker = null, bool snapshotUnavailable = false)
+        {
+            _testClutterDistance = clutterDistance; _targeting.RejectPart = rejectPart;
+            _testClutterBlock = blocker; _testSnapshotUnavailable = snapshotUnavailable;
+            BeginAssistedSlice(target, new Ray(double3.Zero, double3.UnitY));
+        }
+        internal void BeginDeferredPointerSliceForTest(SliceTarget? target, double clutterDistance,
+            string? blocker = null, bool searchComplete = true, bool snapshotUnavailable = false)
+        {
+            _testClutterDistance = clutterDistance; _testClutterBlock = blocker;
+            _testSnapshotUnavailable = snapshotUnavailable;
+            BeginAssistedSlice(null, new Ray(double3.Zero, double3.UnitY));
+            if (_sliceSelection == null) return;
+            _sliceSelection.Target = searchComplete ? target : null;
+            _sliceSelection.Done = true; _sliceSelection.SearchComplete = searchComplete;
+            _sliceSelection.SurfaceDistance = target == null ? double.PositiveInfinity : 10;
+            _sliceSelection.Reason = searchComplete ? "No sliceable part." : "Selection budget exhausted.";
+            UpdateAssistedSlice(.016);
+        }
+        internal int ClutterStartsForTest => _testClutterStarts;
+        internal int ClutterAttemptsForTest => _testClutterAttempts;
+        internal string SliceStatusForTest => _sliceStatus;
         internal void PumpSliceForTest(double dt) => UpdateAssistedSlice(dt);
         internal bool SelectingForTest => _selectingSlice;
         internal int QueuedCommandsForTest => _commands.Count;

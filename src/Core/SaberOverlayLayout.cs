@@ -2,7 +2,7 @@ using Brutal.Numerics;
 
 namespace Purr2D2.Core;
 
-public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite, AutoSwing }
+public enum SaberOverlayHit { None, Kittens, Swing, Slice, SomersaultForward, SomersaultBackward, SomersaultLeft, SomersaultRight, Ignite, AutoSwing, Drop }
 
 /// <summary>Viewport-relative geometry shared by drawing and exact pointer hit testing.</summary>
 public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax, float ListBodyTop,
@@ -20,6 +20,7 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public float IgniteRadius => SliceRadius;
     public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
     public float2 IgniteCenter => SwingCenter + ActionButtonOffset(1, Scale);
+    public float2 DropCenter => SwingCenter + ActionButtonOffset(3, Scale);
     public float2 AutoSwingCenter => SwingCenter + ActionButtonOffset(2, Scale);
 
     /// <summary>Equal radial and neighbor edge gaps, mirrored for the left-side Furce controls.</summary>
@@ -65,11 +66,11 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
             + (RowHeight - TopRowHeight - DeploymentBarHeight) * .5f);
     public float2 DeploymentBarMax(int row, float scroll) => new(ListMax.X - Padding,
         DeploymentBarMin(row, scroll).Y + DeploymentBarHeight);
-    public float2 ControlsMin => new(Math.Min(IgnitePillMin.X, Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
-            SliceCenter.X - SliceRadius), Math.Min(StatusMin.X, AutoSwingValueEnvelopeMin.X)), AutoSwingPillMin.X)),
-        Math.Min(IgnitePillMin.Y, Math.Min(Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y), AutoSwingValueEnvelopeMin.Y)));
-    public float2 ControlsMax => new(Math.Max(IgnitePillMax.X, Math.Max(Math.Max(StatusMax.X, AutoSwingPillMax.X), AutoSwingValueEnvelopeMax.X)),
-        Math.Max(IgnitePillMax.Y, Math.Max(Math.Max(StatusMax.Y, AutoSwingPillMax.Y), AutoSwingValueEnvelopeMax.Y)));
+    public float2 ControlsMin => new(Math.Min(DropCenter.X - IgniteRadius, Math.Min(IgnitePillMin.X, Math.Min(Math.Min(Math.Min(SwingCenter.X - SwingRadius,
+            SliceCenter.X - SliceRadius), Math.Min(StatusMin.X, AutoSwingValueEnvelopeMin.X)), AutoSwingPillMin.X))),
+        Math.Min(DropCenter.Y - IgniteRadius, Math.Min(IgnitePillMin.Y, Math.Min(Math.Min(Math.Min(SwingCenter.Y - SwingRadius, StatusMin.Y), AutoSwingPillMin.Y), AutoSwingValueEnvelopeMin.Y))));
+    public float2 ControlsMax => new(Math.Max(DropCenter.X + IgniteRadius, Math.Max(IgnitePillMax.X, Math.Max(Math.Max(StatusMax.X, AutoSwingPillMax.X), AutoSwingValueEnvelopeMax.X))),
+        Math.Max(DropCenter.Y + IgniteRadius, Math.Max(IgnitePillMax.Y, Math.Max(Math.Max(StatusMax.Y, AutoSwingPillMax.Y), AutoSwingValueEnvelopeMax.Y))));
 
     /// <summary>Moves the action controls and their status together; offsets are fractions of the viewport.</summary>
     public SaberOverlayLayout WithControlsOffset(float2 origin, float2 size, float2 normalizedOffset, float topInset = 0)
@@ -131,6 +132,7 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
             if (SaberOverlayDrag.ContainsCircle(point, SliceCenter, SliceRadius)) return SaberOverlayHit.Slice;
             if (SaberOverlayDrag.ContainsCircle(point, IgniteCenter, IgniteRadius)) return SaberOverlayHit.Ignite;
             if (SaberOverlayDrag.ContainsCircle(point, AutoSwingCenter, IgniteRadius)) return SaberOverlayHit.AutoSwing;
+            if (SaberOverlayDrag.ContainsCircle(point, DropCenter, IgniteRadius)) return SaberOverlayHit.Drop;
             if (ShowSomersaultButtons)
             {
                 if (SaberOverlayDrag.ContainsCircle(point, ForwardCenter, SomersaultRadius)) return SaberOverlayHit.SomersaultForward;

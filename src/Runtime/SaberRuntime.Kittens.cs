@@ -42,6 +42,9 @@ internal sealed partial class SaberRuntime
     private sealed class KittenSaber
     {
         internal readonly BladeState Blade = new();
+        internal readonly SaberDropSequence Drop = new();
+        internal DroppedSaberBody? DroppedBody;
+        internal double4x4 ReturnStart;
         internal readonly SaberAutoSwing AutoSwing = new();
         internal readonly SaberPoseController Pose;
         internal readonly SaberAudio Audio = new();
@@ -70,6 +73,8 @@ internal sealed partial class SaberRuntime
 
         internal void Dispose()
         {
+            if (DroppedBody is { } dropped) Cleanup(dropped.Dispose, "Dropped kitten hilt");
+            DroppedBody = null; Drop.Reset();
             Cleanup(Audio.Shutdown, "Kitten audio");
             Cleanup(Audio.Dispose, "Kitten audio");
             Cleanup(Pose.Dispose, "Kitten pose");
@@ -263,6 +268,7 @@ internal sealed partial class SaberRuntime
             if (ReferenceEquals(kitten, _saberDeploymentDragOwner)) CancelSaberDeploymentDrag();
             if (ReferenceEquals(kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
             RemoveClashOwner(kitten);
+            ResetSaberDrop(kitten, saber);
             ForgetKittenBinding(kitten);
             RemoveCapeOwner(kitten);
             if (ReferenceEquals(kitten, _kittenColorPickerOwner)) DismissKittenColorPicker();
@@ -362,6 +368,8 @@ internal sealed partial class SaberRuntime
             }
             else
             {
+                _dropRequests.Remove(request.Kitten);
+                ResetSaberDrop(request.Kitten, saber);
                 // Keep the hilt, pose and channels alive through retraction and
                 // arm lowering. A later enable reverses from the current pose/length.
                 if (ReferenceEquals(request.Kitten, _autoSwingDragOwner)) CancelSaberAutoSwingDrag();
@@ -487,11 +495,13 @@ internal sealed partial class SaberRuntime
             else if (saber.TogglePhase == SaberTogglePhase.Retracting && saber.Blade.Deployment == 0)
                 saber.TogglePhase = SaberTogglePhase.Unequipping;
         }
-        pose.Update(visualDt, saber.Blade.Equipped && saber.TogglePhase != SaberTogglePhase.Unequipping);
+        AdvanceSaberDrop(saber, visualDt);
+        pose.Update(visualDt, saber.Blade.Equipped && saber.TogglePhase != SaberTogglePhase.Unequipping
+            && saber.Drop.Phase != SaberDropSequence.Stage.Dropped);
         saber.FreshPoseThisTick = pose.MainPoseGeneration != saber.ConsumedPoseGeneration && pose.HasFreshBodyFrame;
         saber.ConsumedPoseGeneration = pose.MainPoseGeneration;
-        // Pose availability can change while moving or grabbing a ladder. It
-        // suspends presentation, never the player's ignition/equipment intent.
+        // A missing avatar or offscreen pose suspends held presentation, never
+        // the player's ignition/equipment intent. Locomotion mode does not gate it.
         // Pending equip resumes when the hand pose is available again.
         saber.Blade.Advance(visualDt);
         if (advancing && saber.TogglePhase == SaberTogglePhase.Unequipping && pose.Blend == 0)
@@ -514,6 +524,7 @@ internal sealed partial class SaberRuntime
             AdvanceSaberAutoSwing(saber, playerDt);
             AdvanceKittenSaber(saber, playerDt);
             var pose = saber.Pose;
+            if (saber.Drop.Detached) { PublishDetachedSaber(pair.Key, saber); continue; }
             if (saber.Blade.Equipped && saber.FreshPoseThisTick && pose.TryGetBodyFrame(out var emitter))
                 _renderer.SetEmitter(pair.Key, emitter, VisibleBladeLength(saber), saber.Color);
             else if (saber.Blade.Equipped) saber.Audio.Suspend();
@@ -529,6 +540,7 @@ internal sealed partial class SaberRuntime
             var saber = pair.Value;
             if (ReferenceEquals(saber, _activeSaber)) continue;
             float length = VisibleBladeLength(saber);
+            if (UpdateDetachedSaberAudio(pair.Key, saber)) continue;
             if (saber.Blade.Equipped && saber.FreshPoseThisTick && saber.Pose.TryGetBladeSegment(length, out var emitter, out _))
                 saber.Audio.Update(pair.Key, emitter, saber.Blade.Deployment, saber.Blade.TargetOn,
                     unsupportedSpeed || !saber.Pose.HasFreshBodyFrame, _settings.Volume, saber.SwingSpeed,
@@ -545,8 +557,10 @@ internal sealed partial class SaberRuntime
         CancelSaberAutoSwingDrag();
         ReleaseProfileBindings();
         DismissKittenColorPicker();
+        _dropRequests.Clear();
         foreach (var pair in _kittenSabers)
         {
+            ResetSaberDrop(pair.Key, pair.Value);
             DisposeKittenCape(pair.Key, pair.Value, clearFailure: true);
             pair.Value.AutoSwing.Reset();
             pair.Value.Dispose();

@@ -90,6 +90,7 @@ public sealed class SaberSettings
     public bool ExtendedEnvironmentLighting { get; set; } = false;
     public bool DebugTimingsEnabled { get; set; } = false;
     public float SliceReachMultiplier { get; set; } = SaberLimits.DefaultSliceReachMultiplier;
+    public float TreeCutFireSeconds { get; set; } = 10;
     public float ColorR { get; set; } = .12f;
     public float ColorG { get; set; } = .75f;
     public float ColorB { get; set; } = 1f;
@@ -145,6 +146,7 @@ public sealed class SaberSettings
     {
         BladeLength = Clamp(BladeLength, .25f, SaberLimits.MaximumBladeLength, 1.4f);
         SliceReachMultiplier = SaberLimits.ValidateSliceReachMultiplier(SliceReachMultiplier);
+        TreeCutFireSeconds = Clamp(TreeCutFireSeconds, 0, 60, 10);
         ColorR = Clamp(ColorR, 0, 1, .12f);
         ColorG = Clamp(ColorG, 0, 1, .75f);
         ColorB = Clamp(ColorB, 0, 1, 1);

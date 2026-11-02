@@ -89,12 +89,13 @@ internal sealed class SliceSourceCapture : IDisposable
                 if (mesh?.HostPrimitives == null || material == null || !material.IsReferenceable || string.IsNullOrEmpty(material.Id))
                     throw new InvalidDataException("Part has no accessible native mesh or durable material reference.");
                 topology?.BeginSurface(mesh.Id);
-                string key = material.Id + ":glass=" + model.Glass;
+                ClutterSurfaceTint.TryRead(mesh.Id, out uint clutterColor, out uint clutterLuminosity);
+                string key = material.Id + ":glass=" + model.Glass + ":clutter=" + clutterColor + ":lum=" + clutterLuminosity;
                 if (!indices.TryGetValue(key, out int materialId))
                 {
                     materialId = indices.Count;
                     if (materialId >= 48) throw new InvalidDataException("Part exceeds the 48-material slicing budget.");
-                    indices.Add(key, materialId); materials.Add(materialId, new(material.Id, model.Glass));
+                    indices.Add(key, materialId); materials.Add(materialId, new(material.Id, model.Glass, clutterColor, clutterLuminosity));
                 }
                 foreach (var primitive in mesh.HostPrimitives)
                 {

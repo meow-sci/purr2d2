@@ -19,6 +19,7 @@ public sealed class Mod
     public void ImmediateLoad(KSA.Mod mod)
     {
         _directory = mod.DirectoryPath;
+        ClutterTintShader.Install();
         // Reserve native mesh space and register persisted slice templates before game saves load.
         SaberSettings settings;
         try { settings = SaberSettings.Load(Path.Combine(_directory, "settings.json")); }
@@ -64,6 +65,7 @@ public sealed class Mod
         catch (Exception ex) { SaberRuntime.Report("Unload cleanup failed", ex); }
         finally
         {
+            ClutterTintShader.Remove();
             GameHooks.Runtime = null;
             SliceWorkerHooks.Uninstall();
             _harmony?.UnpatchAll(_harmony.Id);

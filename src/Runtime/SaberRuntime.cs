@@ -62,6 +62,7 @@ internal sealed partial class SaberRuntime : IDisposable
         GameHooks.Runtime = this;
         GameHooks.Install(harmony);
         KittenSaveHooks.Install(harmony);
+        SaberDropHooks.Install(harmony);
         CapeController.Install(harmony);
         _somersaultMotion.Install(harmony);
         InitializeForce(harmony);
@@ -97,7 +98,8 @@ internal sealed partial class SaberRuntime : IDisposable
             QuietSliceContacts.Pump();
             SceneSaves.ObserveSystem(Universe.CurrentSystem);
             ApplyKittenProfileRecovery();
-            if (!ApplyActivation() || SceneSaves.Suspended || _fault is not null) { _slicer.PumpRetired(); return; }
+            if (!ApplyActivation() || SceneSaves.Suspended || _fault is not null)
+            { _slicer.PumpRetired(); _clutterSlicer.PumpRetired(); return; }
             double playerDt = double.IsFinite(dtPlayer) ? Math.Clamp(dtPlayer, 0, .1) : 0;
             _playerTime += playerDt;
             var selected = !Program.EditorFlag ? Program.ControlledVehicle as KittenEva : null;
@@ -111,6 +113,7 @@ internal sealed partial class SaberRuntime : IDisposable
             if (!ReferenceEquals(_owner, selected)) SetControlledKitten(selected);
             ApplyManualContactReset();
             ApplyKittenSaberRequests();
+            ApplySaberDropRequests();
             UpdateSomersault();
             UpdateForceBeforePhysics(playerDt);
             UpdateForcePose(playerDt);
@@ -144,19 +147,22 @@ internal sealed partial class SaberRuntime : IDisposable
             AdvanceKittenSaber(activeSaber, supportedSpeed ? playerDt : 0);
             _freshPoseThisTick = activeSaber.FreshPoseThisTick;
             _consumedPoseGeneration = activeSaber.ConsumedPoseGeneration;
-            UpdateManualSwingSwoosh(Environment.TickCount64);
+            if (SaberHeldForActions) UpdateManualSwingSwoosh(Environment.TickCount64);
             // Assisted and intentional manual contact share the settled slice worker.
             if (_sliceSequence.Active) UpdateAssistedSlice(_pose.ClashHeld ? 0 : playerDt);
-            UpdateManualContact(simulationDt > 0);
+            UpdateManualContact(SaberHeldForActions && simulationDt > 0);
+            UpdateClutterSlicing(simulationDt > 0);
             if (!_overlayDrag.Held && !_manualSliceActive && (!_sliceSequence.Active || _sliceSequence.EndPresented)
-                && _owner != null && _blade.Equipped && !_pose.ClashHeld && simulationDt > 0 && _freshPoseThisTick
+                && SaberHeldForActions && _owner != null && _blade.Equipped && !_pose.ClashHeld && simulationDt > 0 && _freshPoseThisTick
                 && _pose.TryGetBladeSegment(Length, out var contactBase, out var contactTip)
                 && _contactProbe.TrySample(_owner, contactBase, contactTip, _playerTime, out var contact))
                 _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
             _renderer.Update(_playerTime);
             RuntimeFragmentAssets.Update(_playerTime);
             _renderer.ClearEmitters();
-            if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBodyFrame(out var emitter))
+            _renderer.ClearDetachedSabers();
+            if (_owner != null && _activeSaber is { Drop.Detached: true } detached) PublishDetachedSaber(_owner, detached);
+            else if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBodyFrame(out var emitter))
                 _renderer.SetEmitter(_owner, emitter, Length, Color);
             else
             {
@@ -186,7 +192,8 @@ internal sealed partial class SaberRuntime : IDisposable
             _renderer.Prepare();
             var io = ImGui.GetIO();
             if ((SliceWorkActive || _selectingSlice) && !io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Escape, false)) Queue(Command.CancelSlice);
-            if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
+            if (_owner != null && _activeSaber is { } detached && UpdateDetachedSaberAudio(_owner, detached)) { }
+            else if (_owner != null && _blade.Equipped && _freshPoseThisTick && _pose.TryGetBladeSegment(Length, out var emitter, out _))
                 _audio.Update(_owner, emitter, _blade.Deployment, _blade.TargetOn,
                     !SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) || !_pose.HasFreshBodyFrame,
                     _settings.Volume, swingSpeed: _swingSpeed, contact: _sliceSequence.Swinging ? 1 : 0,
@@ -199,7 +206,7 @@ internal sealed partial class SaberRuntime : IDisposable
 
     private void DrawSaber(KittenEva owner, IViewport viewport, float4x4 emitterToEgo)
     {
-        if (!_enabled || _disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped) return;
+        if (!_enabled || _disposed || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped || saber.Drop.Detached) return;
         float length = VisibleBladeLength(saber);
         _renderer.DrawSaber(owner, viewport, emitterToEgo, length, saber.Color, saber.Type);
         if (ReferenceEquals(viewport, Program.MainViewport) && saber.Pose.TryGetBladeSegment(length, out var emitter, out var tip))
@@ -213,7 +220,7 @@ internal sealed partial class SaberRuntime : IDisposable
             {
                 _swingSpeed = saber.SwingSpeed;
                 _sliceSequence.NotifyRendered();
-                PublishManualPose(emitter, tip);
+                if (SaberHeldForActions) PublishManualPose(emitter, tip, _pose.VisualScale, Length, _pose.VisualScaleAxes);
                 _previousTipBody = tip; _previousTipTime = _playerTime; _hasPreviousTip = true;
             }
             saber.Audio.Update(owner, emitter, saber.Blade.Deployment, saber.Blade.TargetOn,
@@ -241,12 +248,13 @@ internal sealed partial class SaberRuntime : IDisposable
     {
         ResetSliceResourceRequests();
         ResetForce();
+        ResetClutterSlicing();
         _forcePose.Unbind();
         ResetSomersault();
         ClearSaberClashes();
         CancelAssistedSlice(""); ResetOverlaySwing(); _manualSwingSwoosh.Reset(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
         _renderer.ClearEffects(); _contactProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
-        _renderer.ClearEmitters();
+        _renderer.ClearEmitters(); _renderer.ClearDetachedSabers();
         _owner = null; _system = null; _hasConsumedTime = _hasPreviousTip = _freshPoseThisTick = false;
         _swingSpeed = 0; _consumedPoseGeneration = _pose.MainPoseGeneration;
     }
@@ -261,9 +269,10 @@ internal sealed partial class SaberRuntime : IDisposable
         if (!_settingsAutosaver.Flush(_settings))
             Console.WriteLine("[purr2d2] " + _settingsAutosaver.LastError);
         _disposed = true; _ready = false;
+        JobSystems.WaitAll();
         Cleanup(DisposeForce, "Force capture"); Cleanup(_forcePose.Dispose, "Force pose");
         Cleanup(_somersaultMotion.Dispose, "Somersault motion"); Cleanup(_somersaultPose.Dispose, "Somersault pose");
-        Cleanup(ResetWorld, "World"); Cleanup(QuietSliceContacts.RetireToNative, "Quiet slice contacts"); Cleanup(QuietSliceQuiescence.Clear, "Quiet slice modules"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
+        Cleanup(ResetWorld, "World"); Cleanup(QuietSliceContacts.RetireToNative, "Quiet slice contacts"); Cleanup(QuietSliceQuiescence.Clear, "Quiet slice modules"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(DisposeClutterSlicing, "Clutter slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");
         SceneSaves.Clear();
     }
     private static void Cleanup(Action action, string component)

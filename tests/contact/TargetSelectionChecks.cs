@@ -5,7 +5,7 @@ using Purr2D2.Cutting;
 
 internal static class TargetSelectionChecks
 {
-    private static void Main() { AssistedSliceSelection(); BladeReach(); ConfigurableReach(); HoverPreview(); PointerOcclusion(); IncrementalSelection(); LegacyFragmentPicking(); ContactEffectsChecks.Run(); ManualContactChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
+    private static void Main() { AssistedSliceSelection(); BladeReach(); ConfigurableReach(); HoverPreview(); PointerOcclusion(); IncrementalSelection(); ClutterFallbackEligibility(); LegacyFragmentPicking(); ContactEffectsChecks.Run(); ManualContactChecks.Run(); Console.WriteLine("PASS: explicit part selection and commit guards"); }
     private static double Reach(double visibleLength, float multiplier = SaberLimits.DefaultSliceReachMultiplier) =>
         SaberLimits.SliceSelectionReach(visibleLength, multiplier);
     private static MeshReference NewMesh() => new() { PositionsCompare = [[new(-1, 0, -1), new(1, 0, -1), new(0, 0, 1)]] };
@@ -184,6 +184,23 @@ internal static class TargetSelectionChecks
         Check(!fixture.Cutter.CheckSliceTarget(fixture.Wielder, selection.Target!, new(0, -1, 0), 3, out _),
             "disposing a target invalidates the prepared selection");
     }
+    private static void ClutterFallbackEligibility()
+    {
+        var f = new Fixture();
+        using var empty = f.Cutter.BeginSelection(f.Wielder, new(8, -1, 0), double3.UnitY, default, 3);
+        while (!empty.Done) empty.Advance();
+        Check(empty.NoSurface && empty.Target == null,
+            "a completed query with no vessel surface can authorize ground-clutter fallback");
+        using var invalid = f.Cutter.BeginSelection(f.Wielder, new(8, -1, 0), double3.UnitY, default, double.NaN);
+        while (!invalid.Done) invalid.Advance();
+        Check(!invalid.NoSurface, "an invalid vessel query cannot authorize ground-clutter fallback");
+        f.Target.HasPhysicsBubble = false;
+        using var refused = f.Cutter.BeginSelection(f.Wielder, new(0, -1, 0), double3.UnitY, default, 3);
+        while (!refused.Done) refused.Advance();
+        Check(!refused.NoSurface && refused.Target == null,
+            "a refused foreground vessel remains an occluder for ground-clutter fallback");
+    }
+
     private static void AssistedSliceSelection()
     {
         var f = new Fixture();

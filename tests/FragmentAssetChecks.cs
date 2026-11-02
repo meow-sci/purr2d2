@@ -152,8 +152,9 @@ internal static class FragmentAssetChecks
     private static void CheckIdentity(CpuFragment fragment, Dictionary<int, SliceMaterialData> materials, CpuFragmentAsset asset)
     {
         // Frozen independently from this implementation using the documented
-        // length-delimited little-endian stream and the authored box fixture.
-        Check(asset.Id == "Purr2D2_Fragment_eb3e728ef997baa87d095444fc5f5437006c5733167633aefd65dbb9fd96cc66", "canonical identity has stable versioned little-endian field encoding");
+        // length-delimited little-endian v5 stream (including tint fields) and
+        // the authored box fixture; the frozen v3 collider fixes native hull order.
+        Check(asset.Id == "Purr2D2_Fragment_47a9cf635a2d29699c17d5cde7a4777578598fcc6790d1982e0f58369d163225", "canonical identity has stable versioned little-endian field encoding");
         var reordered = materials.Reverse().ToDictionary(m => m.Key, m => m.Value);
         Check(Export(fragment, reordered).Id == asset.Id, "material dictionary iteration order cannot affect identity");
         var aliases = fragment with { Solids = fragment.Solids.Select(s => s.Select(f => f.Material == 0 ? f with { Material = 1 } : f).ToArray()).ToArray() };
@@ -182,6 +183,13 @@ internal static class FragmentAssetChecks
         Check(Export(fragment, changedMaterials).Id != asset.Id, "durable material IDs affect immutable identity");
         changedMaterials[3] = materials[3] with { Glass = true };
         Check(Export(fragment, changedMaterials).Id != asset.Id, "the glass render pass affects immutable identity");
+        changedMaterials[3] = materials[3] with { ClutterColor = 0x80a0c003u, ClutterLuminosity = ClutterSurfaceTint.Luminosity(.75f) };
+        var tinted = Export(fragment, changedMaterials);
+        Check(tinted.Id != asset.Id, "native clutter tint and luminosity cannot alias an ordinary saved surface");
+        changedMaterials[3] = changedMaterials[3] with { ClutterColor = 0x80a0c007u };
+        Check(Export(fragment, changedMaterials).Id != tinted.Id, "every packed RGB10 color bit affects immutable identity");
+        changedMaterials[3] = changedMaterials[3] with { ClutterColor = 0x80a0c003u, ClutterLuminosity = ClutterSurfaceTint.Luminosity(.5f) };
+        Check(Export(fragment, changedMaterials).Id != tinted.Id, "native clutter luminosity affects immutable identity");
         Check(Export(fragment with { MassKg = fragment.MassKg + 1 }).Id != asset.Id, "native mass affects immutable identity");
         for (int axis = 0; axis < 3; axis++)
         {
@@ -200,7 +208,7 @@ internal static class FragmentAssetChecks
         Check(Export(twoMaterials, left).Id != Export(twoMaterials, right).Id,
             "length-prefixed material identity cannot alias strings containing field delimiters");
         var unicode = new Dictionary<int, SliceMaterialData>(materials) { [3] = new("δοκιμή|:glass=False🚀", false) };
-        Check(Export(fragment, unicode).Id == "Purr2D2_Fragment_8531a227ea61b38c2f59dc98e0b1154931379590860bc3452b56d1fead24dc18", "material lengths use UTF-8 bytes rather than character counts");
+        Check(Export(fragment, unicode).Id == "Purr2D2_Fragment_096569ba6d234f2faea91075570009e50c0bad4c9cb75ff520175fe50102e120", "material lengths use UTF-8 bytes rather than character counts");
         var longMaterial = new Dictionary<int, SliceMaterialData>(materials) { [3] = new(new string('x', 16_315) + "🚀tail", false) };
         var longAsset = Export(fragment, longMaterial);
         Check(longAsset.Id == Export(fragment, longMaterial).Id && longAsset.Id != asset.Id,

@@ -45,6 +45,15 @@ internal static class SaberClashRuntimeChecks
             "unequipped sabers are excluded before pair testing");
 
         runtime = new SaberRuntime();
+        a = new KittenEva("dropped") { Parent = parent };
+        b = new KittenEva("held") { Parent = parent };
+        runtime.AddTestSaber(a); runtime.AddTestSaber(b);
+        runtime.SetDroppedForTest(a, true);
+        runtime.TickClashesForTest(.016,4);
+        Check(runtime.CandidateCountForTest == 1 && runtime.PairCountForTest == 0 && runtime.SparkCountForTest == 0,
+            "a dropped saber cannot clash using its owner's stale hand segment");
+
+        runtime = new SaberRuntime();
         var overflowOwners = new KittenEva[130];
         for (int i = 0; i < overflowOwners.Length; i++)
         {

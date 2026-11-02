@@ -38,10 +38,10 @@ internal sealed partial class SaberRuntime
                 continue;
             }
             saber.Pose.UpdateClash(_clashTime);
-            if (!saber.Blade.Equipped || saber.Blade.Deployment <= .001f
+            if (!saber.Drop.Held || !saber.Blade.Equipped || saber.Blade.Deployment <= .001f
                 || !saber.Pose.Eligible)
                 saber.Pose.ClearClash();
-            if (!saber.Blade.Equipped || saber.Blade.Deployment <= .001f)
+            if (!saber.Drop.Held || !saber.Blade.Equipped || saber.Blade.Deployment <= .001f)
                 _clashPairs.Remove(owner);
         }
 
@@ -63,7 +63,7 @@ internal sealed partial class SaberRuntime
         {
             KittenEva owner = pair.Key;
             KittenSaber saber = pair.Value;
-            if (owner.IsDisposed || !saber.Blade.Equipped || !saber.Pose.Eligible
+            if (!saber.Drop.Held || owner.IsDisposed || !saber.Blade.Equipped || !saber.Pose.Eligible
                 || !saber.Pose.HasFreshClashSnapshot) continue;
             float length = VisibleBladeLength(saber);
             if (!float.IsFinite(length) || length <= .001f

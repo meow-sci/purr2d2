@@ -65,6 +65,8 @@ internal static class FragmentAssetWriter
             {
                 hash.Text(surface.Material.Id);
                 hash.Int32(surface.Material.Glass ? 1 : 0);
+                hash.Int32(unchecked((int)surface.Material.ClutterColor));
+                hash.Int32(unchecked((int)surface.Material.ClutterLuminosity));
                 hash.Geometry(surface.Faces);
                 // Batched triangles can represent independent touching solids or
                 // one shell. Persisted recutting provenance is part of identity.
@@ -79,7 +81,8 @@ internal static class FragmentAssetWriter
         }
         // _s now indexes render surfaces. Retain this marker and _cap suffix so old
         // saved fragments and every cap group share the existing heat-owner lookup.
-        var groups = surfaces.Select((s, i) => new FragmentGlbWriter.Group($"{id}_s{i}" + (s.Cap ? "_cap" : "_m" + i), s.Cap ? -1 : i, s.Faces)).ToList();
+        var groups = surfaces.Select((s, i) => new FragmentGlbWriter.Group($"{id}_s{i}"
+            + (s.Cap ? "_cap" : ClutterSurfaceTint.MeshSuffix(s.Material.ClutterColor, s.Material.ClutterLuminosity) + "_m" + i), s.Cap ? -1 : i, s.Faces)).ToList();
         // Full visual picking mesh, plus a compact collider with exactly the same enclosing hull.
         groups.Add(new(id + "_hull", int.MinValue, transformed));
         groups.Add(new(id + "_collision", int.MinValue, collider));
@@ -123,7 +126,7 @@ internal static class FragmentAssetWriter
     private static XDocument AssetXml(string id, string glbPath, IReadOnlyList<FragmentGlbWriter.Group> groups,
         IReadOnlyList<SurfaceGroup> surfaces, float mass, double3 inertia)
     {
-        var part = new XElement("Part", new XAttribute("Id", id), new XAttribute("DisplayName", "Sliced metal fragment"));
+        var part = new XElement("Part", new XAttribute("Id", id), new XAttribute("DisplayName", "Sliced fragment"));
         string subpartId = id + "_visual";
         var subpart = new XElement("SubPart", new XAttribute("Id", subpartId),
             // Native part raycasts visit visual subparts. The single identity child
@@ -171,7 +174,7 @@ internal static class FragmentAssetWriter
     {
         // A new identity never overwrites a v3 saved asset; startup still reads its
         // original XML/GLB and names. Bump this when durable export semantics change.
-        private const string Version = "Purr2D2|merged-surfaces-pick-v4|canonical-le";
+        private const string Version = "Purr2D2|merged-surfaces-pick-v5|durable-clutter-tint|canonical-le";
         private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
         private readonly IncrementalHash _hash;
         private readonly byte[] _buffer = new byte[16 * 1024];

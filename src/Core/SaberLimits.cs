@@ -3,7 +3,7 @@ namespace Purr2D2.Core;
 /// <summary>Shared limits for the visible blade, assisted selection and simulation timing.</summary>
 internal static class SaberLimits
 {
-    internal const float MaximumBladeLength = 12;
+    internal const float MaximumBladeLength = 50;
     internal const float MinimumSliceReachMultiplier = 1;
     internal const float MaximumSliceReachMultiplier = 4;
     internal const float DefaultSliceReachMultiplier = 2;

@@ -560,6 +560,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     source = source.resolve()
     core_sources = [
         source / "src/Core/BladeState.cs",
+        source / "src/Core/SaberDropSequence.cs",
+        source / "src/Core/SaberDropMath.cs",
+        source / "tests/SaberDropChecks.cs",
         source / "src/Core/AssistedSliceSequence.cs",
         source / "src/Core/SaberSwing.cs",
         source / "src/Core/SaberAutoSwing.cs",
@@ -606,6 +609,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/PlaneSliceChecks.cs",
         source / "tests/ShellSliceChecks.cs",
         source / "tests/CoreChecks.cs",
+        source / "tests/TreeCutFireSettingsChecks.cs",
         source / "tests/PoseChecks.cs",
         source / "tests/SlicingPhysicsChecks.cs",
         source / "src/Core/SomersaultMotion.cs",
@@ -640,10 +644,16 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/contact/ManualRuntimeChecks.cs", source / "tests/contact/ManualRuntimeHostStubs.cs"]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); SliceCapEmissionChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); TreeCutFireSettingsChecks.Run(); SaberDropChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); SliceCapEmissionChecks.Run(); } }\n"
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",
+        source / "src/Runtime/SaberRuntime.Drop.cs",
+        source / "src/Core/SaberDropSequence.cs",
+        source / "src/Core/SaberDropMath.cs",
+        source / "src/Core/ManualSwingSwooshGate.cs",
+        source / "src/Pose/KittenVisualScale.cs",
+        source / "tests/kittens/DroppedSaberBodyStub.cs",
         source / "src/Runtime/SaberRuntime.Capes.cs",
         source / "src/Capes/CapeUpdatePolicy.cs",
         source / "src/Pose/SaberPoseController.cs",
@@ -715,6 +725,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/motion/SomersaultInputChecks.cs",
     ]
     somersault_pose_sources = [
+        source / "src/Pose/KittenVisualScale.cs",
         source / "src/Core/SomersaultMotion.cs",
         source / "src/Core/SaberSwing.cs",
         source / "src/Pose/SaberPoseController.cs",
@@ -839,6 +850,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
             source / "tests/SliceMeshGrowthChecks.cs"], None),
         ("SaberVfxChecks", vfx_sources, None),
         ("SaberBlendChecks", [source / "src/Rendering/SaberBlendState.cs", source / "tests/SaberBlendChecks.cs"], None),
+        ("KittenVisualScaleChecks", [source / "src/Pose/KittenVisualScale.cs", source / "src/Capes/CapeScaleState.cs",
+            source / "tests/KittenVisualScaleChecks.cs"],
+            "internal static class Program { static void Main() { KittenVisualScaleChecks.Run(); } }"),
         ("ClashCoreChecks", [source / "src/Core/SaberClashMath.cs", source / "src/Core/SaberClashLatchTable.cs",
             source / "tests/clash/ClashCoreChecks.cs"],
             "internal static class Program { static void Main() { ClashCoreChecks.Run(); } }"),
@@ -849,7 +863,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("AssistedSliceClashChecks", [source / "src/Core/AssistedSliceSequence.cs", source / "src/Core/SaberSwing.cs",
             source / "src/Runtime/SaberRuntime.AssistedSlice.cs", source / "tests/clash/AssistedSliceHostStubs.cs",
             source / "tests/clash/AssistedSliceClashChecks.cs"],
-            "namespace Purr2D2.Checks { internal static class Program { static void Main() { AssistedSliceClashChecks.Run(); } } }"),
+            "namespace Purr2D2.Checks { internal static class Program { static void Main() { Purr2D2.Core.DebugTimings.Enabled = false; AssistedSliceClashChecks.Run(); } } }"),
     ):
         code, output = _run_managed_project(source, name, required, program,
                                            harmony=name in ("SomersaultWorkerChecks", "ForceControllerChecks", "QuietQuiescenceChecks", "KittenSaveChecks"),
@@ -876,6 +890,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
         program_path.write_text(program, encoding="utf-8")
         required = [*required, program_path]
     required = list(dict.fromkeys([*required, source / "src/Core/SaberLimits.cs",
+                                  source / "src/Rendering/ClutterSurfaceTint.cs",
                                   source / "src/Core/DebugTimings.cs",
                                   source / "src/Core/ForceCaptureLimits.cs",
                                   source / "src/Core/ForceBreakupLimits.cs",

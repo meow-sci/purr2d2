@@ -43,8 +43,8 @@ internal static class PoseChecks
             * double4x4.CreateTranslation(5, 40, 20)
             * SaberPoseMath.ModelToBody(.02f, new float3(.1f, .2f, .3f));
         Check(SaberPoseMath.TryBladeSegment(largeKitten, .85, out var largeBase, out var largeTip)
-            && Math.Abs((largeTip - largeBase).Length() - .85) < 1e-12,
-            "nondefault kitten scale cannot change physical blade/contact length");
+            && Math.Abs((largeTip - largeBase).Length() - 1.7) < 2e-7,
+            "nondefault kitten scale changes physical blade/contact length with the visible model");
         Check(!SaberPoseMath.TryBladeSegment(default, .85, out _, out _),
             "degenerate emitter direction cannot create a contact segment");
 

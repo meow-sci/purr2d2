@@ -147,7 +147,8 @@ internal static class ForcePoseChecks
             float4x4 rotation = SomersaultPoseMath.Rotation(SomersaultDirection.Forward, .7f, pivot);
             for (int i = 0; i < upright.Length; i++) Near(model.Skeleton.WorldTransforms[i].Translation,
                 (upright[i] * rotation).Translation, "both hand poses receive the final somersault root rotation exactly once");
-            Near(emitter.Translation, (uprightEmitter * rotation).Translation,
+            Check(float4x4.Invert(model.Transform, out var egoToModel), "observed stock composition frame inverts");
+            Near(emitter.Translation, (uprightEmitter * egoToModel * rotation * model.Transform).Translation,
                 "the saber publishes its final transformed grip while Force remains active");
             motion.SetMotion(SomersaultDirection.Forward, .7f, 1, true);
             model.Sample();

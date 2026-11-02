@@ -125,6 +125,29 @@ internal static class ManualContactChecks
         probe.Reset(); probe.Advance(scene.Owner, new(1, .8, default, new(-3, 11, 0), default), out _);
         Check(probe.Advance(scene.Owner, new(1, .82, default, new(3, 11, 0), new(.1f, 0)), out _),
             "long-blade angular motion is not mistaken for a hilt teleport");
+        scene = Scene(); scene.Mesh.PositionsCompare = [[new(0, 48, -.2), new(0, 50, -.2), new(0, 49, .2)]];
+        scene.Mesh.BoundingSphereRadius = 60;
+        probe.Reset(); probe.Advance(scene.Owner, new(1, .84, default, new(-10, 49, 0), default), out _);
+        Check(probe.Advance(scene.Owner, new(1, .86, default, new(10, 49, 0), new(.1f, 0)), out _),
+            "a 50-metre blade confirms fast angular contact near its actual tip");
+        scene = Scene(); probe.Reset();
+        probe.Advance(scene.Owner, new(1, .88, new(-2, -10, 0), new(-2, 10, 0), default)
+            { VisualScale = 10, VisualAxes = new(10), NominalLength = 2 }, out _);
+        Check(probe.Advance(scene.Owner, new(1, .9, new(2, -10, 0), new(2, 10, 0), new(.1f, 0))
+            { VisualScale = 10, VisualAxes = new(10), NominalLength = 2 }, out _),
+            "a giant kitten's ordinary scaled hilt sweep is not mistaken for a stock-size teleport");
+        scene = Scene(); probe.Reset();
+        probe.Advance(scene.Owner, new(1, .92, new(-.1, -1, 0), new(-.1, 1, 0), default)
+            { VisualScale = 4, VisualAxes = new(4, 2, 3), NominalLength = 2 }, out _);
+        Check(probe.Advance(scene.Owner, new(1, .94, new(.1, -2, 0), new(.1, 2, 0), new(.1f, 0))
+            { VisualScale = 4, VisualAxes = new(4, 2, 3), NominalLength = 2 }, out _),
+            "nonuniform visual scale may change physical blade length during a stable nominal-length swing");
+        scene = Scene(); probe.Reset();
+        probe.Advance(scene.Owner, new(1, .96, new(-.1, -1, 0), new(-.1, 1, 0), default)
+            { VisualScale = 4, VisualAxes = new(4, 2, 3), NominalLength = 2 }, out _);
+        Check(!probe.Advance(scene.Owner, new(1, .98, new(.1, -2, 0), new(.1, 2, 0), new(.1f, 0))
+            { VisualScale = 4, VisualAxes = new(4, 3, 3), NominalLength = 2 }, out _),
+            "resizing one avatar axis discards sweep history even when the maximum scale is unchanged");
         // A frozen sweep survives a new, already-moved-away pose while its cursor resumes.
         scene = Scene(ManualContactProbe.TriangleBudget + 7); probe.Reset();
         probe.Advance(scene.Owner, Pose(-.1, 1), out _);

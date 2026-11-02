@@ -59,6 +59,8 @@ public sealed partial class SaberPoseController : IDisposable
     private float _sliceAngle;
     private float4x4 _visualRootTransform = float4x4.Identity;
     private double _swingTime = SaberSwing.Duration;
+    internal bool PalmDown { get; set; }
+    internal float PalmDownBlend { get; private set; }
     internal bool Swinging => _swingTime < SaberSwing.Duration;
     private float SwingAngle => _sliceDirection.HasValue ? _sliceAngle : SaberSwing.Angle(_swingTime / SaberSwing.Duration);
 
@@ -72,9 +74,11 @@ public sealed partial class SaberPoseController : IDisposable
 
     public KittenEva? Kitten { get; private set; }
     public float Blend { get; private set; }
+    internal float VisualScale { get; private set; } = 1f;
+    internal float3 VisualScaleAxes { get; private set; } = float3.One;
     public bool Active => Eligible && Blend > 0.001f;
     public bool Eligible => Kitten is { IsDisposed: false } kitten && _processor is { Resolved: true }
-        && Supported(kitten.LocomotionState.Mode) && _failure is null;
+        && _failure is null;
     /// <summary>
     /// Advances only after a valid gameplay-main-view pose is published. Unlike
     /// Program.FrameNumber it distinguishes successful poses across skipped renders.
@@ -85,7 +89,6 @@ public sealed partial class SaberPoseController : IDisposable
     public ulong FreshnessFrames => SaberPoseMath.AgeFrames(_hasBodyFrame, FrameNumber, Program.FrameNumber);
     public bool HasFreshBodyFrame => Active && !Program.EditorFlag && FreshnessFrames <= 1;
     public string Status => _failure ?? (Kitten is null ? "Control an EVA kitten to equip the saber."
-        : !Supported(Kitten.LocomotionState.Mode) ? $"Saber stowed while {Kitten.LocomotionState.Mode.ToString().ToLowerInvariant()}."
         : Active ? "Saber held in the right paw." : "Saber stowed.");
 
     /// <summary>Stock MMU hand controllers cover the paw. Restore their previous state on release.</summary>
@@ -141,6 +144,7 @@ public sealed partial class SaberPoseController : IDisposable
         float dt = double.IsFinite(dtPlayer) ? (float)Math.Clamp(dtPlayer, 0.0, 0.1) : 0f;
         float target = equipped && Eligible ? 1f : 0f;
         Blend = MoveTowards(Blend, target, dt / 0.18f);
+        PalmDownBlend = MoveTowards(PalmDownBlend, PalmDown ? 1 : 0, dt / .28f);
         _swingTime = Math.Min(SaberSwing.Duration, _swingTime + dt);
         if ((!equipped && Blend == 0) || !Eligible) _hasBodyFrame = false;
         if (_avatar is not null)
@@ -215,7 +219,8 @@ public sealed partial class SaberPoseController : IDisposable
         _processor = null;
         _clashTail = null;
         _equipped = false;
-        Blend = 0f;
+        Blend = 0f; VisualScale = 1f; VisualScaleAxes = float3.One;
+        PalmDown = false; PalmDownBlend = 0;
         _swingTime = SaberSwing.Duration;
         ClearSliceSwing();
         _visualRootTransform = float4x4.Identity;
@@ -247,9 +252,6 @@ public sealed partial class SaberPoseController : IDisposable
         _changedMmu = false;
     }
 
-    private static bool Supported(LocomotionMode mode) => mode is LocomotionMode.Grounded
-        or LocomotionMode.Airborne or LocomotionMode.Mmu or LocomotionMode.Tumbling or LocomotionMode.Rightening;
-
     private float3 Direction => _sliceDirection ?? Unit(float3.Transform(BladeDirectionModel,
         floatQuat.CreateFromAxisAngle(float3.UnitY, SwingAngle)), float3.UnitY);
     private float3 PublishedDirection => Unit(float3.TransformNormal(Direction, _visualRootTransform), Direction);
@@ -271,8 +273,13 @@ public sealed partial class SaberPoseController : IDisposable
         // may refresh the pose used for audio and destructive contact.
         if (ReferenceEquals(viewport, Program.MainViewport) && viewport.Type == ViewportType.Main)
         {
-            _emitterToBody = double4x4.Unpack(metresToModel)
-                * SaberPoseMath.ModelToBody(_avatar.Core.Scale, kitten.CenterOfMassAsmbF);
+            if (!KittenVisualScale.TryModelToBody(modelToEgo, kitten.Body2Cce,
+                viewport.GetCamera().GetPositionEgo(kitten), out var modelToBody)
+                || !KittenVisualScale.TryRelativeScale(modelToBody, out var visualAxes))
+            { _hasBodyFrame = false; return; }
+            VisualScaleAxes = visualAxes;
+            VisualScale = Math.Max(visualAxes.X, Math.Max(visualAxes.Y, visualAxes.Z));
+            _emitterToBody = double4x4.Unpack(metresToModel) * modelToBody;
             FrameNumber = Program.FrameNumber;
             _hasBodyFrame = Finite(_emitterToBody.Translation) && Finite(_emitterToBody.Z.XYZ);
             if (_hasBodyFrame) MainPoseGeneration++;
@@ -339,6 +346,9 @@ public sealed partial class SaberPoseController : IDisposable
                 float3 chest = _chest >= 0 ? _world[_chest].Translation : shoulder + new float3(12, -3, 0);
                 float3 target = chest + _owner.GripOffsetFromChestCm;
                 target.X += MathF.Sin(_owner.SwingAngle) * 7f;
+                float release = _owner.PalmDownBlend;
+                // Extend the right arm and turn the knuckle axis across the body: palm faces down.
+                target = float3.Lerp(target, chest + new float3(-30, -3, 23), release);
                 // A discovered knuckle centroid gives the actual paw centre rather than the wrist joint.
                 target -= Grip(_world) - wrist;
                 TransformTRS shoulderBefore = localPose[_shoulder];
@@ -350,12 +360,27 @@ public sealed partial class SaberPoseController : IDisposable
                 {
                     float3 fistAxis = _world[_index].Translation - _world[_pinky].Translation;
                     Turn(skeleton, localPose, _wrist, SaberPoseMath.RotationFromTo(fistAxis, _owner.Direction));
+                    if (release > 0)
+                    {
+                        // One axis alone leaves wrist roll unspecified. Use the knuckle
+                        // centroid as a second axis, then point the palm normal down.
+                        var heldWrist = localPose[_wrist];
+                        var acrossPaw = _world[_index].Translation - _world[_pinky].Translation;
+                        var alongPaw = Grip(_world) - _world[_wrist].Translation;
+                        var palmNormal = Unit(float3.Cross(acrossPaw, alongPaw), -float3.UnitY);
+                        Turn(skeleton, localPose, _wrist, SaberPoseMath.RotationFromTo(palmNormal, -float3.UnitY));
+                        acrossPaw = _world[_index].Translation - _world[_pinky].Translation;
+                        acrossPaw.Y = 0;
+                        Turn(skeleton, localPose, _wrist, SaberPoseMath.RotationFromTo(acrossPaw, float3.UnitX));
+                        localPose[_wrist] = TransformTRS.Lerp(heldWrist, localPose[_wrist], release);
+                        World(skeleton, localPose);
+                    }
                 }
                 float blend = _owner.Blend;
                 localPose[_shoulder] = TransformTRS.Lerp(shoulderBefore, localPose[_shoulder], blend);
                 localPose[_elbow] = TransformTRS.Lerp(elbowBefore, localPose[_elbow], blend);
                 localPose[_wrist] = TransformTRS.Lerp(wristBefore, localPose[_wrist], blend);
-                float curl = Math.Clamp(_owner.FingerCurlRadians, 0f, 0.5f) * blend;
+                float curl = (Math.Clamp(_owner.FingerCurlRadians, 0f, 0.5f) * (1 - release) - .28f * release) * blend;
                 foreach (int finger in _fingerRoots)
                     localPose[finger].Rotation = floatQuat.Concatenate(
                         floatQuat.CreateFromAxisAngle(float3.UnitY, curl), localPose[finger].Rotation);
@@ -371,7 +396,7 @@ public sealed partial class SaberPoseController : IDisposable
             if (!_owner.Active || skeleton.BoneCount != _world.Length) return;
             try
             {
-                if (_owner.TryGetHeldEmitterToModel(out var heldEmitterToModel))
+                if (_owner.TryGetHeldEmitterToModel(transform, out var heldEmitterToModel))
                 {
                     _owner.PublishMetresToModel(heldEmitterToModel, transform);
                     return;

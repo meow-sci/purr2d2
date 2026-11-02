@@ -12,6 +12,11 @@ internal sealed partial class PartSliceTargeting
         internal SliceTarget? Target;
         internal string Reason = "No part under the pointer. Click a visible vessel part.";
         internal bool Done;
+        // Only a complete, valid query with no surface may fall back to clutter.
+        // Refused foreground parts and exhausted budgets must remain occluders.
+        internal bool NoSurface;
+        internal bool SearchComplete;
+        internal double SurfaceDistance = double.PositiveInfinity;
         internal IEnumerator<int>? Steps;
         internal void Advance()
         {
@@ -101,6 +106,9 @@ internal sealed partial class PartSliceTargeting
                 }
             }
         }
+        request.NoSurface = request.Target == null;
+        request.SearchComplete = true;
+        request.SurfaceDistance = best;
         if (request.Target is { } target && !CheckSliceTarget(wielder, target, baseBody, reach, out var refusal))
         { request.Target = null; request.Reason = refusal; }
     }

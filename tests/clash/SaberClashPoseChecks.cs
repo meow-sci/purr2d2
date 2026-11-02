@@ -11,8 +11,14 @@ internal static class SaberClashPoseChecks
 {
     internal static void Run()
     {
+        PalmDownGesture();
         var kitten = new KittenEva();
         CharacterModel model = kitten.Renderable.Avatar.Core.CharacterModel;
+        // Include visual-only scale that is absent from Core.Scale, plus a rotated
+        // nonuniform component as supplied by the final native draw callback.
+        model.Transform = float4x4.CreateScale(.02f, .035f, .05f)
+            * float4x4.CreateRotationX(-MathF.PI / 2) * float4x4.CreateRotationZ(-MathF.PI / 2)
+            * float4x4.CreateRotationY(.37f);
         kitten.Renderable.Avatar.Expressions.ExpressionRootIndex = 16;
         kitten.Renderable.Avatar.Expressions.Angry = [new AnimationAssetRef()];
         float4x4 drawn = default;
@@ -50,6 +56,8 @@ internal static class SaberClashPoseChecks
             "the saber emitter stays at the captured body-local pose while the body and somersault continue");
         Near(drawn.Z.XYZ, emitterBefore.Z.XYZ,
             "the held emitter direction remains captured through a changing somersault pose");
+        Near(drawn.X.XYZ, emitterBefore.X.XYZ,
+            "clash hold does not apply observed nonuniform or draw-only scale twice");
         Check(held[17].Translation == new float3(9, 8, 7),
             "the angry expression overlays the frozen pose during the hold");
 
@@ -82,6 +90,34 @@ internal static class SaberClashPoseChecks
             "unbinding removes the hand and clash tail and clears the held pose");
 
         Console.WriteLine("PASS: pose clash snapshot, whole-pose hold, emitter hold, angry timer and cleanup");
+    }
+
+    private static void PalmDownGesture()
+    {
+        var kitten = new KittenEva();
+        var model = kitten.Renderable.Avatar.Core.CharacterModel;
+        model.Skeleton = new(
+            ["Root", "Chest_M", "Shoulder_R", "Elbow_R", "Wrist_R", "Index_R", "Middle_R", "Ring_R", "Pinky_R"],
+            [-1, 0, 1, 2, 3, 4, 4, 4, 4],
+            [new(0,0,0), new(0,50,0), new(-8,0,0), new(-5,-12,0), new(0,-10,0),
+                new(-2,0,4), new(-.6f,0,4), new(.6f,0,4), new(2,0,4)]);
+        using var saber = new SaberPoseController();
+        Check(saber.Bind(kitten), "drop gesture resolves the hand and all four finger roots");
+        saber.Update(.1,true); saber.Update(.1,true);
+        var holding = model.Sample();
+        saber.PalmDown = true;
+        saber.Update(.1,true);
+        Check(saber.PalmDownBlend > 0 && saber.PalmDownBlend < 1, "drop arm and paw animate through an intermediate pose");
+        saber.Update(.1,true); saber.Update(.1,true);
+        var released = model.Sample();
+        var world = model.Skeleton.WorldTransforms;
+        var across = world[5].Translation - world[8].Translation;
+        var along = (world[5].Translation + world[6].Translation + world[7].Translation + world[8].Translation) / 4 - world[4].Translation;
+        var normal = float3.Normalize(float3.Cross(across,along));
+        Check(float3.Dot(normal,-float3.UnitY) > .999f,
+            "the full release pose points the palm down using both knuckle and wrist axes");
+        Check(released[5].Rotation != holding[5].Rotation && released[8].Rotation != holding[8].Rotation,
+            "release visibly opens the index and pinky instead of retaining the held curl");
     }
 
     private static void Near(float3 actual, float3 expected, string message) => Check((actual - expected).Length() < .003f, message);

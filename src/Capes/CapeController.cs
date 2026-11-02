@@ -6,6 +6,7 @@ using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
 using Purr2D2.Core;
+using Purr2D2.Pose;
 using Purr2D2.Runtime;
 using RenderCore;
 using RenderCore.Animation;
@@ -35,7 +36,9 @@ internal sealed class CapeController : IDisposable
     private bool _idleReleased;
     private bool _simulationSuspended;
     private bool _disposed;
-    private floatQuat _bodyToCape = floatQuat.Identity;
+    private float4x4 _bodyToCape = float4x4.Identity;
+    private readonly CapeScaleState _scaleState = new();
+    private bool _hasBodyToCape;
 
     internal static string? HookFailure { get; private set; }
     internal KittenEva Owner { get; }
@@ -163,10 +166,28 @@ internal sealed class CapeController : IDisposable
         Skeleton skeleton = character.Skeleton;
         if (_chestBone >= skeleton.BoneCount) return false;
 
-        float4x4 modelToBody = ModelToBody();
-        float4x4 capeFrame = SocketFrame(character, skeleton, _chestBone, modelToBody, out var bodyToCape);
         bool mainView = ReferenceEquals(viewport, Program.MainViewport);
-        if (mainView) _bodyToCape = bodyToCape;
+        // This final game-owned matrix includes scalar, axis and draw-only size
+        // changes, even when the cape is enabled after a kitten was already resized.
+        if (!KittenVisualScale.TryModelToBody(character.Transform, Owner.Body2Cce,
+                viewport.GetCamera().GetPositionEgo(Owner), out var modelToBody)
+            || !KittenVisualScale.TryRelativeScale(modelToBody, out var visualScale)
+            || !TrySocketFrame(character, skeleton, _chestBone, modelToBody,
+                out var capeFrame, out var bodyToCape))
+        {
+            if (mainView) _hasBodyToCape = false;
+            return false;
+        }
+        if (mainView)
+        {
+            _bodyToCape = bodyToCape;
+            _hasBodyToCape = true;
+            if (_scaleState.Observe(visualScale))
+            {
+                // Native cloth ownership remains on the settled manager path.
+                _stepAccumulator = 0f;
+            }
+        }
         _cape.Transform = capeFrame;
         ViewHandle view = Program.Instance.SuperMeshRenderSystem.ViewForViewport(viewport);
         _cape.UpdateAnimation(0d);
@@ -176,35 +197,45 @@ internal sealed class CapeController : IDisposable
         return true;
     }
 
-    private float4x4 ModelToBody() =>
-        float4x4.CreateScale(_avatar.Core.Scale)
-        * float4x4.CreateRotationX(-(float)Math.PI / 2f)
-        * float4x4.CreateRotationZ(-(float)Math.PI / 2f);
-
-    private static float4x4 SocketFrame(AnimatedRenderable character, Skeleton skeleton, int bone,
-        float4x4 modelToBody, out floatQuat bodyToSocket)
+    private static bool TrySocketFrame(AnimatedRenderable character, Skeleton skeleton, int bone,
+        double4x4 modelToBody, out float4x4 socketToCamera, out float4x4 bodyToSocket)
     {
+        socketToCamera = bodyToSocket = float4x4.Identity;
         if (skeleton.InverseBindPose is not { } inverseBind || inverseBind.Count <= bone)
             throw new InvalidOperationException("The kitten skeleton has no inverse bind pose for the cape socket.");
 
         float4x4 boneWorld = skeleton.WorldTransforms[bone];
-        float4x4 inverseBindRotation = RotationOnly(inverseBind[bone]);
+        float4x4 inverseBindRotation = KittenVisualScale.RotationOnly(inverseBind[bone]);
         float4x4 correctedBone = inverseBindRotation * boneWorld;
-        float4x4 socketToBody = RotationOnly(correctedBone * modelToBody);
-        bodyToSocket = floatQuat.Inverse(floatQuat.CreateFromRotationMatrix(socketToBody));
-
-        float4x4 socketToCamera = RotationOnly(correctedBone * character.Transform);
-        socketToCamera.Translation = float3.Transform(boneWorld.Translation, character.Transform);
-        return socketToCamera;
+        if (!KittenVisualScale.TrySocketFrame(correctedBone, character.Transform,
+            float3.Transform(boneWorld.Translation, character.Transform), out socketToCamera)) return false;
+        double4x4 socketToBody = double4x4.CreateScale(KittenVisualScale.ModelUnitsPerMetre)
+            * double4x4.Unpack(KittenVisualScale.RotationOnly(correctedBone)) * modelToBody;
+        socketToBody.Translation = double3.Zero;
+        if (!double4x4.Invert(socketToBody, out var inverse)) return false;
+        bodyToSocket = float4x4.Pack(inverse);
+        return KittenVisualScale.TryRelativeScale(double4x4.Unpack(bodyToSocket), out _);
     }
 
     internal void Step(float dt, float3 bodyVelocity)
     {
-        if (_disposed || _cloth.Failure is not null) return;
-        _cloth.Step(dt, float3.Transform(bodyVelocity, _bodyToCape));
+        if (_disposed || _cloth.Failure is not null || !_hasBodyToCape) return;
+        ApplyScaleReset();
+        _cloth.Step(dt, float3.TransformNormal(bodyVelocity, _bodyToCape));
     }
 
-    internal void Accumulate(double playerDt) => CapeUpdatePolicy.Accumulate(ref _stepAccumulator, playerDt, advancing: true);
+    internal void Accumulate(double playerDt)
+    {
+        ApplyScaleReset();
+        CapeUpdatePolicy.Accumulate(ref _stepAccumulator, playerDt, advancing: true);
+    }
+
+    private void ApplyScaleReset()
+    {
+        if (_disposed || !_scaleState.ConsumeReset()) return;
+        _stepAccumulator = 0f;
+        if (_cloth.Failure is null) _cloth.Reset();
+    }
     internal float ConsumeStepTime() => CapeUpdatePolicy.Consume(ref _stepAccumulator);
     internal void ClearAccumulatedTime() => _stepAccumulator = 0f;
 
@@ -271,28 +302,6 @@ internal sealed class CapeController : IDisposable
         for (int i = 0; i < names.Count; i++)
             if (string.Equals(names[i], name, StringComparison.OrdinalIgnoreCase)) return i;
         return -1;
-    }
-
-    private static float4x4 RotationOnly(float4x4 matrix)
-    {
-        float3 x = Normalize(matrix.X.XYZ, float3.UnitX);
-        float3 y = matrix.Y.XYZ - x * float3.Dot(matrix.Y.XYZ, x);
-        y = Normalize(y, float3.UnitY);
-        float3 z = Normalize(float3.Cross(x, y), float3.UnitZ);
-        y = Normalize(float3.Cross(z, x), y);
-        return new float4x4(
-            x.X, x.Y, x.Z, 0f,
-            y.X, y.Y, y.Z, 0f,
-            z.X, z.Y, z.Z, 0f,
-            0f, 0f, 0f, 1f);
-    }
-
-    private static float3 Normalize(float3 value, float3 fallback)
-    {
-        float lengthSquared = value.LengthSquared();
-        return float.IsFinite(lengthSquared) && lengthSquared > 1e-10f
-            ? value / MathF.Sqrt(lengthSquared)
-            : fallback;
     }
 
     private sealed class CapePoseProcessor : IAnimProcessor

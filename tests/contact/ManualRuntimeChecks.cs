@@ -15,6 +15,8 @@ internal sealed partial class SaberRuntime
     private bool OverlayVisible = true, SomersaultActive, ForceHolding, ForcePicking, _freshPoseThisTick = true, _selectingSlice;
     private bool _bfl9kUiEnabled = true;
     private bool BFL9KUiVisible => OverlayVisible && _bfl9kUiEnabled;
+    private bool ClutterSliceWorkActive => false;
+    private bool SaberHeldForActions => true;
     private readonly FakeBlade _blade = new();
     private readonly FakePose _pose = new();
     private readonly FakeRenderer _renderer = new();
@@ -134,6 +136,7 @@ internal sealed partial class SaberRuntime
     }
     internal static void Run()
     {
+        DebugTimings.Enabled = false;
         var r = Scene(); r.Tick(-.1, 0); r.Tick(.1, .02);
         Check(r._slicer.Begins == 0, "runtime idle poses cannot query or cut");
         r.Begin(); r.Tick(-.1, .1, move: false); r.Tick(.1, .12, move: false);
@@ -261,8 +264,18 @@ internal sealed partial class SaberRuntime
             && r._sliceMessageUntil > 9.02 && !r._manualProbe.Pending && !r._manualPoseAvailable,
             "refused physical contact stays cosmetic, clears its sweep, and throttles retry for exactly 250 ms");
         Check(r._audio.Slices == 0, "a cosmetic or refused contact plays no slice cue");
+        r = Scene(); r.SomersaultActive = true; r.Begin(); r.Tick(-.1, 9.5); r.Tick(.1, 9.52);
+        Check(r.SomersaultActive && r._manualSliceActive && r._slicer.Begins == 1,
+            "somersault motion permits a live fresh manual blade contact");
+        int advancesDuringJump = r._slicer.Advances;
+        r.Tick(.1, 9.54, fresh: false);
+        Check(r._manualSliceActive && r._slicer.Advances > advancesDuringJump && r._slicer.Isolations == 0,
+            "accepted contact keeps preparing during somersault while stale poses still cannot mutate native geometry");
+        r = Scene(); r.SomersaultActive = true; r.Begin(); r.Tick(-.1, 9.7); r.Tick(.1, 9.9, fresh: false);
+        Check(r._slicer.Begins == 0 && !r._manualProbe.Pending,
+            "somersault cannot bypass the maximum age of a rendered blade sample");
         foreach (var gate in new (string Name, Action<SaberRuntime> Apply)[] {
-            ("fault", x => x._fault = "test"), ("somersault", x => x.SomersaultActive = true),
+            ("fault", x => x._fault = "test"),
             ("Force picker", x => x.ForcePicking = true), ("slice picker", x => x._selectingSlice = true),
             ("ineligible pose", x => x._pose.Eligible = false) })
         {
