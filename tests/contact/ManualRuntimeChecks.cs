@@ -274,6 +274,24 @@ internal sealed partial class SaberRuntime
         r = Scene(); r.SomersaultActive = true; r.Begin(); r.Tick(-.1, 9.7); r.Tick(.1, 9.9, fresh: false);
         Check(r._slicer.Begins == 0 && !r._manualProbe.Pending,
             "somersault cannot bypass the maximum age of a rendered blade sample");
+        foreach (bool moving in new[] { false, true })
+        {
+            r = Scene(); r._owner!.LocomotionState.Mode = LocomotionMode.Swimming;
+            r._owner.LocomotionState.GroundSpeed = moving ? 4 : 0;
+            r._owner.LocomotionState.SwimParked = !moving;
+            r._owner.PositionEgo = new(0, 0, -20);
+            r._owner.HasPhysicsBubble = moving;
+            var submergedTarget = (Vehicle)Universe.CurrentSystem!.All.Items[1];
+            submergedTarget.PositionEgo = r._owner.PositionEgo;
+            r.Begin(); r.Tick(-.1, 9.91); r.Tick(.1, 9.93);
+            Check(r._manualSliceActive && r._slicer.Begins == 1 && r._blade.TargetOn,
+                moving ? "a moving submerged swimmer can swing a live blade through an underwater target"
+                    : "a parked swimmer keeps valid rendered manual contacts without requiring its own physics bubble");
+        }
+        r = Scene(); r._owner!.LocomotionState.Mode = LocomotionMode.Swimming; r.Begin();
+        r.Tick(-.1, 9.94); r.Tick(.1, 10.2, fresh: false);
+        Check(r._slicer.Begins == 0 && !r._manualProbe.Pending,
+            "swimming cannot bypass stale rendered-frame contact refusal");
         foreach (var gate in new (string Name, Action<SaberRuntime> Apply)[] {
             ("fault", x => x._fault = "test"),
             ("Force picker", x => x.ForcePicking = true), ("slice picker", x => x._selectingSlice = true),

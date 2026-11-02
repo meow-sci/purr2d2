@@ -76,7 +76,9 @@ namespace KSA
         public void MarkAsDebris() { MarkAsDebrisCalls++; IsDebris = true; }
     }
 
-    public sealed class KittenEva : Vehicle { }
+    public enum LocomotionMode { Mmu, Grounded, Airborne, Tumbling, Rightening, Ladder, Swimming }
+    public sealed class LocomotionState { public LocomotionMode Mode = LocomotionMode.Grounded; public float GroundSpeed; public bool SwimParked; }
+    public sealed class KittenEva : Vehicle { public readonly LocomotionState LocomotionState = new(); }
 
     public sealed class HostList<T> : List<T> { public int Length => Count; }
 

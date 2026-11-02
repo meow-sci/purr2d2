@@ -79,6 +79,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
         // StarMapUnload occurs after the Vulkan device has gone away. Free before KSA tears it down.
         harmony.Patch(AccessTools.DeclaredMethod(typeof(Program), nameof(Program.Dispose)),
             prefix: new HarmonyMethod(typeof(SaberRenderer), nameof(BeforeProgramDispose)));
+        InstallWater(harmony);
         _installed = true;
     }
 
@@ -138,6 +139,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
             }
         }
         catch (Exception ex) { _gpuFailed = true; Report("glow initialization", ex); }
+        PrepareWater();
     }
 
     /// <summary>Publish the last posed emitter in the kitten's COM/body frame for next-frame light submission.</summary>
@@ -258,13 +260,14 @@ public sealed unsafe partial class SaberRenderer : IDisposable
         if (_sparks.Count == 0 && _slagCount == 0 && _treeFire.Count == 0
             && (!_blades.TryGetValue(viewport.ShaderSlot, out var blades) || blades.Count == 0)) return;
 
+        bool deferBlades = TryDeferWaterBlades(viewport,commands);
         // The blade has no depth writes. Drawing before atmosphere/cloud composition makes
         // those passes attenuate its light using the distant planet's depth instead of the blade's.
         // KSA normally closes its custom translucency scope before this postfix runs; callers
         // with useCustomRenderPass=false still own an open scope, which we must not nest or end.
         if (!useCustomRenderPass)
         {
-            DrawEffects(viewport, commands, pair);
+            DrawEffects(viewport, commands, pair, !deferBlades);
             return;
         }
 
@@ -304,21 +307,19 @@ public sealed unsafe partial class SaberRenderer : IDisposable
             StencilAttachment = depth.HasStencil ? &depthAttachment : null,
         };
         commands.BeginRendering(in rendering);
-        try { DrawEffects(viewport, commands, pair); }
+        try { DrawEffects(viewport, commands, pair, !deferBlades); }
         finally { commands.EndRendering(); }
     }
 
-    private void DrawEffects(IViewport viewport, CommandBuffer commands, PipelinePair pair)
+    private void DrawEffects(IViewport viewport, CommandBuffer commands, PipelinePair pair, bool includeBlades = true)
     {
         var camera = viewport.GetCamera();
         var projection = camera.MVP.viewProjection;
-        float time = SaberVfx.Clock(_now);
         Program.SetViewport(commands);
 
         // Sparks deliberately retain the original hot branch, without either style's shimmer.
         commands.BindPipeline(VkPipelineBindPoint.Graphics, pair.Dark);
         DrawSlag(camera, commands, projection);
-        bool lightBound = false;
         foreach (var spark in _sparks)
         {
             double age = Math.Max(0, _now - spark.Born);
@@ -336,7 +337,17 @@ public sealed unsafe partial class SaberRenderer : IDisposable
             }
         }
         DrawTreeFire(commands, projection, camera);
-        if (!_blades.TryGetValue(viewport.ShaderSlot, out var blades)) return;
+        if (includeBlades) DrawBlades(viewport,commands,pair);
+    }
+
+    private void DrawBlades(IViewport viewport, CommandBuffer commands, PipelinePair pair)
+    {
+        if (!_blades.TryGetValue(viewport.ShaderSlot,out var blades) || blades.Count == 0) return;
+        var camera=viewport.GetCamera();
+        var projection=camera.MVP.viewProjection;
+        float time=SaberVfx.Clock(_now);
+        bool lightBound=false;
+        commands.BindPipeline(VkPipelineBindPoint.Graphics,pair.Dark);
         foreach (var blade in blades)
         {
             bool light = blade.Type == SaberType.Light;
@@ -423,7 +434,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
             Animation = new float4(time, blade.Seed, detail.Segments, detail.ArcLevel),
             Camera = new float4(cameraLocal, detail.ArcVisibility * 2.5f * tuning.ArcBrightness),
         };
-        commands.PushConstants(_layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
+        commands.PushConstants(_drawingWater ? _waterLayout : _layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
             ByteSize.Zero, push);
         // Each instance is one contiguous strip: 8 arcs x 10 segments is the hard maximum.
         commands.Draw(2 * (detail.Segments + 1), detail.ArcCount, 0, 0);
@@ -474,7 +485,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
             Shape = new float4((float)half, radius, core, isChar ? 1 : 0),
             Animation = animation,
         };
-        commands.PushConstants(_layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
+        commands.PushConstants(_drawingWater ? _waterLayout : _layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
             ByteSize.Zero, push);
         commands.Draw(4, 1, 0, 0);
     }
@@ -500,7 +511,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
             Shape = new float4(0, radius, 0.009f * radiusScale, 0),
             Animation = animation,
         };
-        commands.PushConstants(_layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
+        commands.PushConstants(_drawingWater ? _waterLayout : _layout, VkShaderStageFlags.VertexBit | VkShaderStageFlags.FragmentBit,
             ByteSize.Zero, push);
         commands.Draw(4, 1, 0, 0);
     }
@@ -550,6 +561,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
     {
         if (_instance is not { } self) return;
         if (self._blades.TryGetValue(viewport.ShaderSlot, out var list)) list.Clear();
+        if (ReferenceEquals(viewport,Program.MainViewport)) self.ResetWaterFrame();
         if (!viewport.Visible || Program.EditorFlag || viewport.Type is not (ViewportType.Main or ViewportType.Secondary)) return;
         foreach (var pair in self._detachedSabers)
         {
@@ -592,6 +604,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
         // Called outside recording, or before Program.Dispose destroys SuperMesh/the device.
         var device = Program.GetRenderer().Device;
         device.WaitIdle();
+        ReleaseWaterResources(device);
         _hilt?.Dispose();
         _hilt = null;
         foreach (var pair in _pipelines.Values)

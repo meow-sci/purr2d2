@@ -21,8 +21,9 @@ namespace KSA
         public readonly KittenRenderable Renderable = new();
         public readonly LocomotionState LocomotionState = new();
         public float3 CenterOfMassAsmbF = new(0, 0, -.35f);
-        public doubleQuat Body2Cce => doubleQuat.Identity;
-        public double3 GetPositionEcl() => double3.Zero;
+        public doubleQuat Body2Cce { get; set; } = doubleQuat.Identity;
+        public double3 PositionEcl { get; set; }
+        public double3 GetPositionEcl() => PositionEcl;
     }
     public sealed class KittenRenderable
     {
@@ -96,9 +97,10 @@ namespace KSA
         public Skeleton Skeleton = Skeleton.KnownRig();
         public float4x4 Transform = float4x4.Pack(Purr2D2.Pose.SaberPoseMath.ModelToBody(.01f, new(0, 0, -.35f)));
         public readonly List<IAnimProcessor> AnimProcessors = [];
-        public TransformTRS[] Sample()
+        public TransformTRS[] Sample(TransformTRS[]? nativePose = null)
         {
-            TransformTRS[] local = Skeleton.DefaultLocalPose!.AsSpan().ToArray().Select(TransformTRS.FromMatrix).ToArray();
+            TransformTRS[] local = nativePose?.ToArray()
+                ?? Skeleton.DefaultLocalPose!.AsSpan().ToArray().Select(TransformTRS.FromMatrix).ToArray();
             foreach (IAnimProcessor processor in AnimProcessors)
                 if (processor.ShouldUpdate) processor.UpdateLocalPose(Transform, Skeleton, local, .016f);
             Rebuild(local);

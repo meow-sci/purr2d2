@@ -3,13 +3,12 @@ layout(location=0) in vec2 positionOnRibbon;
 layout(location=1) in float effectBrightness;
 layout(location=0) out vec4 outColor;
 
-void main() {
+vec4 saberEmission() {
     if (pc.shape.w < -0.5) {
         // Tiny untextured colored streak; no white core, noise, lighting, or halo samples.
         float edge = max(1.0 - abs(positionOnRibbon.x), 0.0)
             * max(1.0 - abs(positionOnRibbon.y), 0.0);
-        outColor = vec4(pc.color.rgb * (pc.color.a * effectBrightness * edge), 1.0);
-        return;
+        return vec4(pc.color.rgb * (pc.color.a * effectBrightness * edge), 1.0);
     }
     if (pc.shape.w > 1.5) {
         float distanceToArc = abs(positionOnRibbon.x);
@@ -20,16 +19,15 @@ void main() {
         float ends = smoothstep(0.0, 0.12, positionOnRibbon.y)
             * (1.0 - smoothstep(0.88, 1.0, positionOnRibbon.y));
         // The saber adds RGB and preserves attachment alpha. Fade the emitted RGB.
-        outColor = vec4((pc.color.rgb * halo + vec3(core * 0.85))
+        return vec4((pc.color.rgb * halo + vec3(core * 0.85))
             * effectBrightness * ends, 1.0);
-        return;
     }
     vec2 radial = vec2(positionOnRibbon.x, max(abs(positionOnRibbon.y) - pc.shape.x, 0.0));
     float distanceToSegment = length(radial);
     if (distanceToSegment >= pc.shape.y) discard;
     if (pc.shape.w > 0.5) {
         float feather = 1.0 - smoothstep(pc.shape.y * 0.55, pc.shape.y, distanceToSegment);
-        outColor = vec4(pc.color.rgb, pc.color.a * feather);
+        return vec4(pc.color.rgb, pc.color.a * feather);
     } else {
         float radius = max(pc.shape.z, 0.0001);
         // The white core stays steady. Animation=0 preserves the original cut-spark path.
@@ -42,6 +40,14 @@ void main() {
         halo *= 1.0 - smoothstep(pc.shape.y * 0.75, pc.shape.y, distanceToSegment);
         halo *= 1.0 + shimmer * 0.6;
         float core = 1.0 - smoothstep(radius * 0.3, radius, distanceToSegment);
-        outColor = vec4((pc.color.rgb * halo + vec3(core * 1.5)) * pc.color.a, 1.0);
+        return vec4((pc.color.rgb * halo + vec3(core * 1.5)) * pc.color.a, 1.0);
     }
+}
+
+void main() {
+    vec4 emission = saberEmission();
+#ifdef SABER_WATER_PASS
+    emission.rgb *= saberWaterTransmission();
+#endif
+    outColor = emission;
 }

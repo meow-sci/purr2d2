@@ -77,7 +77,12 @@ namespace KSA
     public sealed class IVASeat { public KeyHash AssignedKittenHash; }
     public sealed class CharacterReference(string id) { public string Id = id; }
     public enum LocomotionMode { Grounded, Airborne, Mmu, Ladder, Tumbling, Rightening, Swimming }
-    public sealed class LocomotionState { public LocomotionMode Mode = LocomotionMode.Grounded; }
+    public sealed class LocomotionState
+    {
+        public LocomotionMode Mode = LocomotionMode.Grounded;
+        public float GroundSpeed, SupportRatio;
+        public bool SwimParked;
+    }
     public sealed class KittenEva(string id) : Vehicle(id)
     {
         public CharacterReference Character = new("Stock");
@@ -89,7 +94,7 @@ namespace KSA
         public double3 SurfaceVelocityCci;
         public int PositionReads, VelocityReads;
         public float3 CenterOfMassAsmbF => float3.Zero;
-        public doubleQuat Body2Cce => doubleQuat.Identity;
+        public doubleQuat Body2Cce { get; set; } = doubleQuat.Identity;
         public double3 GetPositionEcl() { PositionReads++; return PositionEcl; }
         public double3 GetSurfaceVelocityCci() { VelocityReads++; return SurfaceVelocityCci; }
     }

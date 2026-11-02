@@ -15,6 +15,8 @@ internal static class FragmentTemplateChecks
         SliceWorkerHooksChecks.Run();
         QuietSliceHooksChecks.Run();
         EnvironmentLightingChecks.Run();
+        SwimmingAnimationHostChecks.Run();
+        SaberWaterHostChecks.Run();
         CapEmissionHostChecks.Run();
         var xml = Encoding.UTF8.GetBytes("""
             <Assets>

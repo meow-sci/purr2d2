@@ -1,5 +1,23 @@
 # Acceptance record
 
+## Swimming and underwater BFL9Ks
+
+The saber pose, ignition and slicing paths already accept swimming and submerged movement. The water-specific failure was in rendering: the ocean surface wrote depth before the late blade pass, and underwater fog used distant scene depth for the blade's light.
+
+The main ocean view now draws blade ribbons, tips and arcs after native underwater composition and before bloom. The pass tests the native pre-ocean opaque depth, preserving solid-object occlusion, then attenuates the blade's emission using its own distance through water. It reuses the installed game's FFT/Gerstner wave functions and waterline probe, retaining native above-water linear absorption and underwater Beer–Lambert extinction. It adds only RGB, preserving scene depth and ocean alpha. Hilts retain native opaque rendering. The emissive blade remains straight in projection rather than reproducing the ocean's screen-space refraction; grazing paths use the first visible water surface.
+
+Water rendering requires a matching main-view ocean copy and prepared resources for the current frame. Other views and unavailable water contexts retain the existing pass. Frame/view/command/image ownership and a one-shot fallback guard deferred submissions. The resolved single-sample output feeds native bloom and subsequent MSAA reload.
+
+Focused managed checks pass for animated swimming poses, ignition/equipment transitions, parked swimmers, submerged manual contacts, persistence, shared pose layers, water-frame ownership, shader expansion, VFX and blending. The actual KSA 2026.10.25.5707 host checks also pass, including native swimming animation routing and 30 water render-order, descriptor, uniform-layout, depth-resolve and resource-rebuild checks. Both saber styles compile and link with the installed native water includes; the 128-byte push constants, 16-byte water uniform and descriptor bindings are checked. These checks do not execute GPU commands or a live game scene. Evidence: `artifacts/swimming-managed.log`, `artifacts/swimming-water-checks.log` and `artifacts/checks/water-native-host.log`.
+
+The final Release build passes with zero warnings/errors. Source/stage shader compilation, source/stage metadata, archive byte equality/checksum and staged DLL equality pass. The final water suite passes 24 assertions, including Windows shader line endings. Validation recognizes only the three installed-native includes in the two exact water shader entrypoints; missing owned includes, misspelled native includes and lookalike entrypoint paths remain errors. Evidence: `artifacts/swimming-release.log`, `artifacts/swimming-shaders-final.log`, `artifacts/swimming-package.log` and `artifacts/swimming-water-final-focused.log`. Ten relevant managed suites were run for this follow-up; the full managed matrix was not rerun. GPT-6.1 Sol / xhigh handled implementation and native tests, with independent GPT-6 Astra / xhigh rendering review.
+
+Native visual acceptance remains pending:
+
+- [ ] Equip, ignite, aim, swing and slice while treading, swimming horizontally and fully submerged; enter and leave the water with a blade already lit. Include manual and automatic swings, stationary swimmers and submerged MMU movement.
+- [ ] View blades from above and below moving waves, including a blade crossing the surface and a nearby blade with distant seabed behind it. Verify that vessels, rocks, kittens and the hilt still occlude the glow.
+- [ ] Repeat with both saber styles, MSAA off/on, resized windows, ocean display toggled, secondary views, a 50 m blade, scaled kittens and a dropped/recalled saber.
+
 ## Drop spin pill
 
 Holding **DROP** opens a downward pill with a regular-font multiplier beside its thumb. Every press starts at **0×**; halfway selects the old **1×** initial release spin, and the bottom selects **2×**. Mouse release samples the final pointer position and queues one drop. A tap selects zero. The chosen multiplier belongs to that kitten's pending drop and survives the reach animation and pause. **UNDROP** and canceling an in-progress reach remain immediate press actions, retaining the eased recall.

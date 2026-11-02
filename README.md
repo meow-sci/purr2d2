@@ -15,7 +15,10 @@ be set up to **50 m** before character scaling.
 
 Sabers and capes follow the kitten's observed visual scale, including per-axis
 scaling, without an unscience dependency. Manual blade contact remains active
-while jumping or somersaulting.
+while jumping, somersaulting, swimming or underwater. Water does not extinguish
+the blade. Ocean views apply water attenuation at the blade's own distance while
+solid objects still block it; the glowing blade does not reproduce water's
+refraction distortion.
 
 Moving blades and assisted selection can cut ground rocks and compatible tree
 meshes into physical fragments. Unsupported foliage retains its native appearance

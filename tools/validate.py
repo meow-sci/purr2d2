@@ -17,7 +17,7 @@ import wave
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from check_saber_shaders import check_shader_includes, run_shader_checks
+from check_saber_shaders import NATIVE_WATER_INCLUDES, check_shader_includes, run_shader_checks
 import check_cape_assets
 
 
@@ -490,6 +490,10 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
             # Production entrypoints may live in shared GLSL includes. Compile/link
             # checks establish entrypoint validity; validate packaged dependencies here.
             for include in re.findall(r'^\s*#\s*include\s*[<"]([^>"\r\n]+)[>"]', contents, re.MULTILINE):
+                if path.relative_to(root).as_posix() in {"Assets/Shaders/SaberWaterGlow.frag", "Assets/Shaders/SaberWaterLight.frag"} and include in NATIVE_WATER_INCLUDES:
+                    # These exact templates compile beside the installed native water
+                    # shader; every other include remains a packaged dependency.
+                    continue
                 try:
                     target = _relative_asset_path(root, include, context, path.parent)
                     if not target.is_file():
@@ -827,6 +831,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         ("SomersaultRuntimeChecks", somersault_runtime_sources, None),
         ("SomersaultWorkerChecks", somersault_worker_sources, None),
         ("SomersaultPoseChecks", somersault_pose_sources, None),
+        ("SwimmingPoseChecks", [*somersault_pose_sources[:-1], source / "tests/SwimmingPoseChecks.cs"],
+            "namespace Purr2D2.Checks { internal static class Program { static void Main() { global::SwimmingPoseChecks.Run(); } } }"),
         ("SaberClashPoseChecks", [*somersault_pose_sources[:-1], source / "tests/clash/SaberClashPoseChecks.cs"],
             "namespace Purr2D2.Checks { internal static class Program { static void Main() { global::SaberClashPoseChecks.Run(); } } }"),
         ("ForcePoseChecks", force_pose_sources, None),
@@ -858,6 +864,9 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
             source / "tests/SliceMeshGrowthChecks.cs"], None),
         ("SaberVfxChecks", vfx_sources, None),
         ("SaberBlendChecks", [source / "src/Rendering/SaberBlendState.cs", source / "tests/SaberBlendChecks.cs"], None),
+        ("SaberWaterChecks", [source / "src/Rendering/SaberWaterFrameGate.cs",
+            source / "src/Rendering/SaberWaterShaderSource.cs", source / "tests/SaberWaterChecks.cs"],
+            "internal static class SaberWaterEntry { static void Main() { SaberWaterChecks.Run(); } }"),
         ("KittenVisualScaleChecks", [source / "src/Pose/KittenVisualScale.cs", source / "src/Capes/CapeScaleState.cs",
             source / "tests/KittenVisualScaleChecks.cs"],
             "internal static class Program { static void Main() { KittenVisualScaleChecks.Run(); } }"),

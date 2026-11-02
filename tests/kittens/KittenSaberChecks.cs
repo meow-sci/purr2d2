@@ -88,6 +88,7 @@ internal sealed partial class SaberRuntime
     public static void Main()
     {
         CheckLocomotionTransitions();
+        CheckSwimmingLifecycle();
         CheckDropLifecycle();
         CheckDropSpinSelection();
         var runtime = new SaberRuntime();
@@ -1091,6 +1092,7 @@ internal sealed partial class SaberRuntime
 
     private static float4x4 StockModelTransform(KittenEva kitten) => float4x4.CreateScale(kitten.Renderable.Avatar.Core.Scale)
         * float4x4.CreateRotationX(-MathF.PI / 2) * float4x4.CreateRotationZ(-MathF.PI / 2)
+        * float4x4.CreateFromQuaternion(floatQuat.Pack(kitten.Body2Cce))
         * float4x4.CreateTranslation(float3.Pack(kitten.GetPositionEcl() - Program.RenderedViewport.GetCamera().PositionEcl));
 
     private static void CheckDropLifecycle()
@@ -1300,6 +1302,66 @@ internal sealed partial class SaberRuntime
             "airborne movement keeps the completed equip and ignition");
         runtime.ResetKittenSabers();
         Program.FrameNumber = 0;
+    }
+
+    private static void CheckSwimmingLifecycle()
+    {
+        var runtime = new SaberRuntime();
+        var kitten = new KittenEva("Swimmer"); var background = new KittenEva("Other swimmer");
+        var system = new CelestialSystem(); system.All.Items = [kitten, background]; Universe.CurrentSystem = system;
+        Program.ControlledVehicle = kitten;
+        runtime.RefreshOverlayKittens(); runtime.SetControlledKitten(kitten);
+        foreach (var owner in new[] { kitten, background }) runtime.QueueKittenSaber(owner, true);
+        runtime.ApplyKittenSaberRequests();
+        var saber = runtime._kittenSabers[kitten]; var other = runtime._kittenSabers[background];
+        for (int i = 0; i < 6; i++) { runtime.AdvanceKittenSaber(saber, .1); runtime.AdvanceKittenSaber(other, .1); }
+        Program.RenderedViewport = Program.MainViewport;
+        foreach (var state in new[] {
+            (LocomotionMode.Grounded, 0f, 0f, false, 0d, "entering the water"),
+            (LocomotionMode.Swimming, 0f, 0f, false, -.2d, "stationary surface swimming"),
+            (LocomotionMode.Swimming, 0f, 0f, true, -.2d, "parked analytic swimming"),
+            (LocomotionMode.Swimming, 4f, MathF.PI / 2, false, -20d, "moving fully underwater"),
+            (LocomotionMode.Mmu, 1f, .4f, false, -20d, "underwater MMU movement"),
+            (LocomotionMode.Swimming, 0f, 0f, true, -.2d, "resurfacing"),
+            (LocomotionMode.Grounded, 0f, 0f, false, 0d, "leaving the water") })
+        {
+            foreach (var owner in new[] { kitten, background })
+            {
+                owner.LocomotionState.Mode = state.Item1; owner.LocomotionState.GroundSpeed = state.Item2;
+                owner.LocomotionState.SupportRatio = state.Item1 == LocomotionMode.Swimming ? 1 : 0;
+                owner.LocomotionState.SwimParked = state.Item4;
+                owner.HasPhysicsBubble = !state.Item4;
+                owner.Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitY, state.Item3);
+                owner.PositionEcl = new(0, 0, state.Item5);
+            }
+            Program.FrameNumber++;
+            foreach (var owner in new[] { kitten, background })
+            {
+                var record = runtime._kittenSabers[owner]; var model = owner.Renderable.Avatar.Core.CharacterModel;
+                model.AnimProcessors[0].UpdateSkeleton(StockModelTransform(owner), model.Skeleton, 0);
+                runtime.AdvanceKittenSaber(record, .1);
+                runtime.SetSaberAutoSwing(owner, true);
+                double phase = record.AutoSwing.Phase;
+                runtime.AdvanceSaberAutoSwing(record, .1);
+                Check(record.Blade.Equipped && record.Blade.TargetOn && record.Blade.Deployment == 1
+                    && record.Pose.HasFreshBodyFrame && record.AutoSwing.Phase > phase,
+                    state.Item6 + " keeps controlled and background BFL9Ks lit, fresh and automatically swinging");
+            }
+        }
+        kitten.LocomotionState.Mode = LocomotionMode.Swimming;
+        Program.FrameNumber += 2;
+        double frozen = saber.AutoSwing.Phase;
+        runtime.AdvanceSaberAutoSwing(saber, .1); runtime.AdvanceKittenSaber(saber, .1);
+        Check(!saber.Pose.HasFreshBodyFrame && saber.AutoSwing.Phase == frozen
+            && saber.Blade.Equipped && saber.Blade.TargetOn && saber.Blade.Deployment == 1,
+            "a culled swimmer suspends stale automatic motion while preserving equipment and ignition intent");
+        Program.FrameNumber++;
+        var currentModel = kitten.Renderable.Avatar.Core.CharacterModel;
+        currentModel.AnimProcessors[0].UpdateSkeleton(StockModelTransform(kitten), currentModel.Skeleton, 0);
+        runtime.AdvanceSaberAutoSwing(saber, .1);
+        Check(saber.Pose.HasFreshBodyFrame && saber.AutoSwing.Phase > frozen,
+            "a new visible swimming pose resumes automatic motion without a new ignition");
+        runtime.ResetKittenSabers(); Program.FrameNumber = 0;
     }
 
     private static void Check(bool condition, string message)

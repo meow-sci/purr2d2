@@ -63,6 +63,8 @@ ET.SubElement(items, 'PackageReference', Include='System.IO.Hashing', Version='1
 for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
                'src/Rendering/ClutterSurfaceTint.cs',
                'src/Rendering/EnvironmentLightingPatch.cs', 'tests/EnvironmentLightingChecks.cs',
+               'tests/SwimmingAnimationHostChecks.cs',
+               'tests/SaberWaterHostChecks.cs',
                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentTopology.cs',
                'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/ClosedMeshPreparation.cs', 'src/Cutting/SliceShellBuilder.cs',
                'src/Cutting/ContactSliceGeometry.cs',
