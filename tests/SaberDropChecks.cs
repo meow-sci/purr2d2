@@ -23,6 +23,7 @@ internal static class SaberDropChecks
         Check(drop.ReadyToAttach && !drop.Held, "recall waits for host hand-frame validation before attachment");
         drop.Reset();
         Check(drop.Held && !drop.Detached && drop.Time == 0, "cleanup clears all transient sequence state");
+        ReturnEaseOut();
         var drift = new double3(1000,-500,20);
         Check(SaberDropMath.ReleaseVelocity(drift,double3.Zero,new(2,0,0),doubleQuat.Identity) == drift,
             "a space release inherits the full owner drift without an artificial throw");
@@ -55,6 +56,41 @@ internal static class SaberDropChecks
             "rotation plus interpolated triangular shear stays nonsingular through recall");
         Check(SaberLimits.MaximumBladeLength == 50
             && SaberLimits.SliceSelectionReach(50, 4) == 200, "50-metre blade and assisted-reach bounds share the canonical limit");
+    }
+    private static void ReturnEaseOut()
+    {
+        var recall = new SaberDropSequence();
+        recall.Released(); recall.BeginReturn();
+        recall.Advance(-1); recall.Advance(double.NaN); recall.Advance(double.NegativeInfinity);
+        Check(recall.ReturnBlend == 0 && recall.Time == 0, "recall easing preserves its exact start and ignores invalid time");
+        float previousBlend = 0, previousTravel = float.PositiveInfinity;
+        for (int interval = 1; interval <= 8; interval++)
+        {
+            recall.Advance(SaberDropSequence.ReturnDuration / 8);
+            float blend = recall.ReturnBlend;
+            float travel = blend - previousBlend;
+            Check(travel > 0 && travel < previousTravel,
+                "each equal recall interval travels less distance as the saber eases toward the hand");
+            if (interval == 4)
+                Check(Math.Abs(blend - .875f) < 1e-6f,
+                    "half the return duration covers seven eighths of the path with cubic ease-out");
+            previousBlend = blend; previousTravel = travel;
+        }
+        Check(recall.ReturnBlend == 1 && recall.ReadyToAttach,
+            "ease-out reaches the exact hand endpoint at the existing return duration");
+        for (int i = 0; i < 20; i++) recall.Advance(.1);
+        Check(recall.ReturnBlend == 1, "return progress clamps at the hand without overshoot after completion");
+
+        recall.Released(); recall.BeginReturn();
+        for (int i = 0; i < 4; i++) recall.Advance(.1);
+        recall.Advance(SaberDropSequence.ReturnDuration * .99 - recall.Time);
+        float nearEnd = recall.ReturnBlend;
+        double finalInterval = SaberDropSequence.ReturnDuration - recall.Time;
+        recall.Advance(finalInterval);
+        Check(recall.ReturnBlend == 1 && (1 - nearEnd) / finalInterval < .001,
+            "the final one percent of recall time approaches zero arrival speed");
+        recall.Reset();
+        Check(recall.ReturnBlend == 0, "reset restores the exact zero return endpoint");
     }
     private static bool NearFrame(double4x4 a, double4x4 b, double tolerance)
     {

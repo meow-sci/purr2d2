@@ -1123,13 +1123,43 @@ internal sealed partial class SaberRuntime
         runtime.SetControlledKitten(second); runtime.UpdateOtherSabers(.1);
         Check(runtime._renderer.Detached[first].Translation == releasedFrame.Translation && a.Drop.Detached,
             "switching kittens and moving the original owner cannot drag the dropped hilt");
+        // Model a later native physics update, far beyond the original release location.
+        var driftedFrame = releasedFrame;
+        driftedFrame.Translation += new double3(1_000_000, -2_000_000, 3_000_000);
+        a.DroppedBody!.MoveTo(driftedFrame);
         runtime.QueueSaberDrop(first); runtime.ApplySaberDropRequests();
         Check(a.Drop.Phase == SaberDropSequence.Stage.Returning && a.DroppedBody is null,
             "Undrop retires the collider at the settled boundary before animated return");
+        Check(a.ReturnStart.Equals(driftedFrame) && (a.ReturnStart.Translation - first.PositionEcl).Length() > 1_000_000
+            && runtime.TryDetachedSaberFrame(first,a,out var returnStart) && returnStart.Equals(driftedFrame),
+            "Undrop begins at the dropped body's current distant world frame without a radius limit or initial snap");
         Program.FrameNumber += 3;
         for (int i=0;i<8;i++) runtime.AdvanceKittenSaber(a,.1);
         Check(a.Drop.Time == 0 && a.Drop.Phase == SaberDropSequence.Stage.Returning,
             "recall waits for an offscreen hand instead of skipping its return animation");
+        Pose(first,a); runtime.AdvanceKittenSaber(a,.1);
+        bool hasCurrentHand = a.Pose.TryGetBodyFrame(out var currentHand);
+        bool hasApproachingFrame = runtime.TryDetachedSaberFrame(first,a,out var approaching);
+        Check(hasCurrentHand && hasApproachingFrame,
+            "a fresh hand starts the distant return animation");
+        var handWorld = currentHand.Translation + first.GetPositionEcl();
+        var expected = driftedFrame.Translation + (handWorld - driftedFrame.Translation) * a.Drop.ReturnBlend;
+        Check((approaching.Translation - expected).Length() < 1e-7
+            && (approaching.Translation - handWorld).Length() > 1000 && !a.Drop.Held,
+            "a distant saber travels from its current position with the eased blend instead of snapping to the hand");
+        first.PositionEcl += new double3(140,-20,80);
+        var handModel = first.Renderable.Avatar.Core.CharacterModel;
+        handModel.Skeleton.WorldTransforms[3].Translation += new float3(4,-2,7);
+        Pose(first,a);
+        hasCurrentHand = a.Pose.TryGetBodyFrame(out currentHand);
+        bool hasFollowingFrame = runtime.TryDetachedSaberFrame(first,a,out var followingHand);
+        Check(hasCurrentHand && hasFollowingFrame,
+            "recall resamples the moving body's current hand pose");
+        handWorld = currentHand.Translation + first.GetPositionEcl();
+        expected = driftedFrame.Translation + (handWorld - driftedFrame.Translation) * a.Drop.ReturnBlend;
+        Check((followingHand.Translation - expected).Length() < 1e-7
+            && (followingHand.Translation - approaching.Translation).Length() > 1 && a.ReturnStart.Equals(driftedFrame),
+            "the return follows the current hand while retaining its captured distant starting frame");
         for (int i = 0; i < 7; i++) { runtime.AdvanceKittenSaber(a,.1); Pose(first,a); }
         Check(a.Drop.Held && a.Blade.TargetOn && !runtime._renderer.Detached.ContainsKey(first),
             "animated return finishes on a fresh hand attachment without re-igniting");

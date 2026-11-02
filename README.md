@@ -6,10 +6,10 @@ A Kitten Spacy Agency mod to add:
 - The Furce
 
 BFL9K's **DROP** button reaches out with an open, palm-down paw and releases the
-hilt into native physics. A lit blade stays lit. **UNDROP** brings it back into the
-paw; saving, unequipping or disabling the mod also returns transient dropped
-equipment to its owner. Blade length can be set up to **50 m** before character
-scaling.
+hilt into native physics. A lit blade stays lit. **UNDROP** flies it back from its
+current position, easing to a stop in the paw. Saving, unequipping or disabling
+the mod also returns transient dropped equipment to its owner. Blade length can
+be set up to **50 m** before character scaling.
 
 Sabers and capes follow the kitten's observed visual scale, including per-axis
 scaling, without an unscience dependency. Manual blade contact remains active

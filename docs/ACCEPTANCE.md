@@ -1,5 +1,11 @@
 # Acceptance record
 
+## Undrop arrival easing
+
+Undrop captures the dropped saber's current world frame and flies it toward the current hand pose using cubic ease-out, slowing to zero relative arrival speed over the existing 0.45 seconds. The return follows a moving hand, preserves orientation/scale interpolation and has no distance cutoff. This replaces the previous symmetric easing curve.
+
+Focused drop checks pass (31 assertions), as do kitten lifecycle checks (202 assertions), including decreasing travel over equal time intervals, exact endpoints, no overshoot, negligible terminal speed, recall after a million-metre drift, and following a moving hand without changing the captured starting frame. The Release build has zero warnings/errors; source/stage validation, ZIP byte equality, checksum and staged DLL equality pass. Evidence: `artifacts/undrop-easeout-{core,kittens,build,package}.log`. The full managed matrix was not rerun for this easing-only follow-up. Live visual acceptance remains pending: recall nearby and distant sabers while standing and moving, and inspect the deceleration into the paw.
+
 ## Saber drop, visual scaling and ground-object cuts (2026-11-01)
 
 The BFL9K controls now expose **Drop / Undrop**. Drop extends the arm, turns the open paw downward and releases a hidden native vehicle carrying the hilt's collider and mass. The visible hilt, blade, lighting and spatial audio follow that vehicle, preserving ignition and inherited motion. Native physics supplies gravity, collision and free drift. Undrop removes the physical proxy and animates the saber back to a fresh hand pose; an offscreen hand waits for a pose before completing recall. Detached sabers cannot perform held attacks or clashes. Unequip, owner loss, reset and unload clean up the proxy. Saving recalls transient dropped equipment before native save capture, retaining the per-kitten equipment and ignition choices. The collision shape covers the hilt, not the blade.

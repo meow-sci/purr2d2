@@ -9,7 +9,7 @@ internal sealed class SaberDropSequence
     internal double Time { get; private set; }
     internal bool Held => Phase == Stage.Held;
     internal bool Detached => Phase is Stage.Dropped or Stage.Returning;
-    internal float ReturnBlend => Smooth((float)(Time / ReturnDuration));
+    internal float ReturnBlend => EaseOut((float)(Time / ReturnDuration));
     internal bool BeginDrop() { if (!Held) return false; Phase = Stage.Reaching; Time = 0; return true; }
     internal bool BeginReturn()
     {
@@ -25,5 +25,10 @@ internal sealed class SaberDropSequence
     internal bool ReadyToAttach => Phase == Stage.Returning && Time >= ReturnDuration;
     internal void Released() { Phase = Stage.Dropped; Time = 0; }
     internal void Reset() { Phase = Stage.Held; Time = 0; }
-    private static float Smooth(float x) { x = Math.Clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+    private static float EaseOut(float x)
+    {
+        x = Math.Clamp(x, 0, 1);
+        float remaining = 1 - x;
+        return 1 - remaining * remaining * remaining;
+    }
 }

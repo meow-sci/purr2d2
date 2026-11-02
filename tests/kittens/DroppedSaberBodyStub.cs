@@ -15,5 +15,6 @@ internal sealed class DroppedSaberBody : IDisposable
         reason = ""; return true;
     }
     internal bool TryFrame(out double4x4 frame) { frame = _frame; return !Disposed; }
+    internal void MoveTo(double4x4 frame) => _frame = frame;
     public void Dispose() { Disposed = true; Vehicle.IsDisposed = true; }
 }
