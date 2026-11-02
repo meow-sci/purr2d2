@@ -43,6 +43,7 @@ internal sealed class ClutterSlicer : IDisposable
         if (_source == null) return;
         if (!ReferenceEquals(owner, _owner) || owner == null || !_source.Target.IsLocalTo(owner) || !_source.Target.IsValid)
         { Status = "Ground-object cut cancelled: its owner or scene changed."; Cancel(); return; }
+        bool committed = false;
         try
         {
             if (_failure != null) { Fallback(_failure, permitCommit); return; }
@@ -71,40 +72,49 @@ internal sealed class ClutterSlicer : IDisposable
             if (!_upload.Done || !permitCommit) return;
             if (!NativeSlicePhysics.TryReplaceClutter(owner, _source, _upload.Fragments, _loaded.Data.Plane,
                 out var created, out var reason)) { Fallback(reason, permitCommit); return; }
+            committed = true;
+            Status = (_source.Tree ? "Tree" : "Rock") + " cut into " + created.Count + " separating fragments. " + reason;
             for (int i = 0; i < created.Count; i++)
             {
-                RuntimeFragmentAssets.MarkHot(_upload.Fragments[i].Asset, now);
+                // The original is gone and the replacement vehicles own these
+                // fragments. Optional bookkeeping/effects cannot undo that cut
+                // or send the removed original through whole-object fallback.
+                try { RuntimeFragmentAssets.MarkHot(_upload.Fragments[i].Asset, now); }
+                catch (Exception effect) { Console.WriteLine("[purr2d2] Ground cut resource refresh: " + effect.Message); }
                 // Both ends are attached to their own moving fragments. Bound each
                 // fragment to four fire anchors even on dense cap triangulations.
                 var sparks = _loaded.Fragments[i].Data.Sparks;
-                for (int s = 0; s < sparks.Length; s++)
+                for (int s = 0; s < Math.Min(4, sparks.Length); s++)
                 {
-                    try
-                    {
-                        if (s < 4) CutSparks?.Invoke(created[i].Parts.Root, sparks[s].Point, sparks[s].Normal, now);
-                        if (_source.Tree && s < 4 && fireSeconds > 0)
-                            TreeFire?.Invoke(created[i].Parts.Root, sparks[s].Point, sparks[s].Normal, now, fireSeconds);
-                    }
+                    try { CutSparks?.Invoke(created[i].Parts.Root, sparks[s].Point, sparks[s].Normal, now); }
                     catch (Exception effect) { Console.WriteLine("[purr2d2] Ground cut effect: " + effect.Message); }
+                    try
+                    { if (_source.Tree && fireSeconds > 0) TreeFire?.Invoke(created[i].Parts.Root, sparks[s].Point, sparks[s].Normal, now, fireSeconds); }
+                    catch (Exception effect) { Console.WriteLine("[purr2d2] Ground cut fire: " + effect.Message); }
                 }
             }
-            Status = (_source.Tree ? "Tree" : "Rock") + " cut into " + created.Count + " separating fragments. " + reason;
             Cancel();
         }
-        catch (Exception error) { Fallback(error.Message, permitCommit); }
+        catch (Exception error)
+        {
+            if (!committed) { Fallback(error.Message, permitCommit); return; }
+            Console.WriteLine("[purr2d2] Ground cut completed; finalization reported: " + error.Message);
+            Cancel();
+        }
     }
 
     private void Fallback(string reason, bool permitCommit)
     {
         // Pause can still drain CPU/GPU preparation, but cannot wake/change native bodies.
-        if (!permitCommit) { Status = reason; _failure = reason; return; }
+        if (!permitCommit) { Status = "Waiting to finish the ground-object interaction..."; _failure = reason; return; }
+        Console.WriteLine("[purr2d2] Ground mesh cut unavailable; trying native displacement: " + reason);
         try
         {
-            if (_source != null && ClutterForceNative.ToppleClutter(_source, _motion, out var fallback))
-                Status = fallback + " Native appearance retained; mesh cut unavailable: " + reason;
-            else Status = "Ground cut refused; original retained: " + reason;
+            if (_source == null) return;
+            bool displaced = ClutterForceNative.ToppleClutter(_source, _motion, out var fallback);
+            Status = displaced ? fallback : "Ground-object displacement failed: " + fallback;
         }
-        catch (Exception error) { Status = "Ground cut refused; native object retained: " + error.Message; }
+        catch (Exception error) { Status = "Ground-object displacement failed: " + error.Message; }
         Cancel();
     }
 

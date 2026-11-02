@@ -62,6 +62,7 @@ ET.SubElement(items, 'PackageReference', Include='Microsoft.Extensions.Logging.A
 ET.SubElement(items, 'PackageReference', Include='System.IO.Hashing', Version='10.0.2')
 for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
                'src/Rendering/ClutterSurfaceTint.cs',
+               'src/Rendering/ClutterFoliageSurface.cs', 'src/Rendering/ClutterFoliageMaterial.cs', 'tests/ClutterFoliageHostChecks.cs',
                'src/Rendering/EnvironmentLightingPatch.cs', 'tests/EnvironmentLightingChecks.cs',
                'tests/SwimmingAnimationHostChecks.cs',
                'tests/SaberWaterHostChecks.cs',

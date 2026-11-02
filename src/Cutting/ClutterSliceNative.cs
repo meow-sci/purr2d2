@@ -146,8 +146,11 @@ internal static partial class ClutterForceNative
     internal static bool ToppleClutter(ClutterSliceDescription source, double3 motionCci, out string reason)
     {
         reason = "The ground object could not enter native physics.";
-        if (!TrySliceFrame(source, out var frame) || !Promote(source.Target, out _, out reason)
-            || !source.Target.TryResolveBody(out var body)) return false;
+        if (!TrySliceFrame(source, out var frame) || !Promote(source.Target, out _, out reason)) return false;
+        if (!source.Target.TryResolveBody(out var body))
+        { reason = "The ground object lost its native body before toppling."; return false; }
+        if (body.Kinematic || !float.IsFinite(body.LocalInertia.InverseMass) || body.LocalInertia.InverseMass <= 0)
+        { reason = "The ground object has no movable native body."; return false; }
         var cci2Ccf = source.Target.Parent.GetCci2Ccf(source.Target.Bubble.Origin.Time);
         var up = frame.PositionCci.NormalizeOrZero().Transform(cci2Ccf);
         var direction = motionCci.Transform(cci2Ccf);

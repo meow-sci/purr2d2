@@ -40,7 +40,7 @@ internal sealed class ClutterSliceSourceCapture : IDisposable
         var geometry = SliceGeometryBudget.Current;
         var materials = new Dictionary<int, SliceMaterialData>();
         var ids = new Dictionary<string, int>(StringComparer.Ordinal);
-        var groups = new List<SliceFace[]>(); int total = 0;
+        var groups = new List<SliceFace[]>(); var foliage = new List<SliceFace>(); int total = 0;
         foreach (var mesh in lod.Meshes)
         {
             if (!_source.Target.IsValid) throw new InvalidDataException("The ground object left native physics during capture.");
@@ -50,36 +50,37 @@ internal sealed class ClutterSliceSourceCapture : IDisposable
             for (int p = 0; p < mesh.HostPrimitives.Length; p++)
             {
                 var material = lod.ResolveMaterial(mesh.PrimitiveMaterialIds[p]).Get();
-                // Leaf cards require the ground-clutter shader. Refuse an opaque
-                // PBR imitation and let native whole-tree displacement preserve it.
-                if (ClutterSliceGeometry.RequiresNativeFoliage(material.OpacityMap != null, material.ThicknessMap != null, material.DoubleSided.Value))
-                    throw new InvalidDataException("This foliage needs its native opacity/transmission shader; preserving the whole tree.");
+                bool leaf = ClutterSliceGeometry.IsFoliage(material.OpacityMap != null, material.ThicknessMap != null, material.DoubleSided.Value);
+                if (leaf && !ClutterTintShader.FoliageReady)
+                    throw new InvalidDataException("The native foliage renderer is unavailable; preserving the ground object's appearance.");
                 if (!material.IsReferenceable || string.IsNullOrEmpty(material.Id))
                     throw new InvalidDataException("The ground object has no durable surface material.");
-                if (!ids.TryGetValue(material.Id, out int id))
+                string key = material.Id + ":foliage=" + leaf + ":double=" + material.DoubleSided.Value + ":backface=" + material.KeepBackfaceNormals.Value;
+                if (!ids.TryGetValue(key, out int id))
                 {
                     id = ids.Count;
                     if (id >= 48) throw new InvalidDataException("The ground object exceeds the surface budget.");
-                    ids.Add(material.Id, id); materials.Add(id, new(material.Id, false, _source.PackedColor, luminosityBits));
+                    ids.Add(key, id); materials.Add(id, new(material.Id, false, _source.PackedColor, luminosityBits,
+                        leaf, leaf && material.DoubleSided.Value, leaf && material.KeepBackfaceNormals.Value));
                 }
                 var primitive = mesh.HostPrimitives[p];
                 if (primitive.IndexBuffer == null || primitive.IndexBuffer.Stride != 4 || primitive.IndexBuffer.Count % 3 != 0)
                     throw new InvalidDataException("The ground object does not expose indexed triangles.");
-                long triangles = (long)total + faces.Count + primitive.IndexBuffer.Count / 3;
+                long triangles = (long)total + faces.Count + foliage.Count + primitive.IndexBuffer.Count / 3;
                 if (triangles > geometry.SourceTriangles) throw new InvalidDataException("The ground object exceeds the configured source triangle budget.");
                 for (int start = 0; start < primitive.IndexBuffer.Count; start += 768)
                 {
-                    CopyChunk(primitive, start, faces, _source.Scale, id);
+                    CopyChunk(primitive, start, leaf ? foliage : faces, _source.Scale, id);
                     yield return 0;
                 }
             }
             if (faces.Count != 0) { total += faces.Count; groups.Add(faces.ToArray()); }
             yield return 0;
         }
-        if (groups.Count == 0 || !geometry.AllowsSource(groups.Count, total))
+        if (groups.Count == 0 || !geometry.AllowsSource(groups.Count, (long)total + foliage.Count))
             throw new InvalidDataException("The ground object exceeds the configured closed-geometry budget.");
         Input = new(groups.ToArray(), [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, _source.MassKg)
-        { Geometry = geometry, Contact = _contact };
+        { Geometry = geometry, Contact = _contact, Foliage = foliage.ToArray() };
     }
 
     private static void CopyChunk(MeshAsset primitive, int start, List<SliceFace> faces, double scale, int material)

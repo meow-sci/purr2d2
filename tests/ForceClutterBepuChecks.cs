@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using BepuPhysics;
 using BepuPhysics.Collidables;
 using BepuPhysics.CollisionDetection;
@@ -7,6 +9,8 @@ using BepuUtilities;
 using BepuUtilities.Memory;
 using Purr2D2.Force;
 using Brutal.Numerics;
+using HarmonyLib;
+using KSA;
 
 /// <summary>Exercise the actual host Bepu query/mobility algorithms without starting KSA or its workers.</summary>
 internal static class ForceClutterBepuChecks
@@ -57,6 +61,7 @@ internal static class ForceClutterBepuChecks
             ForgivingSurfacePicking(sim, pool, sphere, box, convex, capsule);
             DistantCameraPicking(sim, pool, sphere);
             NearestOverlapOverflow(sim, pool, sphere);
+            TreeToppleGuard(sim, box);
 
             var inertia = new Box(2, 3, 4).ComputeInertia(7);
             var bodyHandle = sim.Bodies.Add(BodyDescription.CreateDynamic(new RigidPose(new(1, 2, 3)),
@@ -73,6 +78,84 @@ internal static class ForceClutterBepuChecks
                 "release restores the complete native inertia tensor, shape, linear velocity and angular velocity");
         }
         pool.Clear();
+    }
+
+    private static BodyReference _toppleBody;
+
+    private static void TreeToppleGuard(Simulation sim, TypedIndex shape)
+    {
+        // The fixture substitutes only scene residency/frame lookup. The real
+        // production fallback reads a real Bepu body's mobility/inertia and
+        // applies its actual impulse. Native identity/promotion are checked by
+        // ForceHostChecks against the real game separately.
+        var harmony = new Harmony("purr2d2.tree-topple.host-check");
+        var frame = AccessTools.Method(typeof(ClutterForceNative), nameof(ClutterForceNative.TrySliceFrame));
+        var promote = AccessTools.Method(typeof(ClutterForceNative), nameof(ClutterForceNative.Promote));
+        var resolve = AccessTools.Method(typeof(ClutterForceTarget), nameof(ClutterForceTarget.TryResolveBody));
+        var inertia = new Box(2, 3, 4).ComputeInertia(7);
+        var handle = sim.Bodies.Add(BodyDescription.CreateDynamic(new RigidPose(Vector3.Zero), inertia,
+            new CollidableDescription(shape), new BodyActivityDescription(.005f)));
+        _toppleBody = sim.Bodies[handle];
+        try
+        {
+            harmony.Patch(frame, prefix: new HarmonyMethod(typeof(ForceClutterBepuChecks), nameof(ToppleFrame)));
+            harmony.Patch(promote, prefix: new HarmonyMethod(typeof(ForceClutterBepuChecks), nameof(TopplePromote)));
+            harmony.Patch(resolve, prefix: new HarmonyMethod(typeof(ForceClutterBepuChecks), nameof(ToppleResolve)));
+            var parent = DispatchProxy.Create<IParentBody, ToppleParent>();
+            var bubble = (PhysicsBubble)RuntimeHelpers.GetUninitializedObject(typeof(PhysicsBubble));
+            bubble.Origin = BubbleOrigin.CreateZero(parent, default);
+            var target = (ClutterForceTarget)RuntimeHelpers.GetUninitializedObject(typeof(ClutterForceTarget));
+            AccessTools.Field(typeof(ClutterForceTarget), nameof(ClutterForceTarget.Bubble)).SetValue(target, bubble);
+            AccessTools.Field(typeof(ClutterForceTarget), "<Parent>k__BackingField").SetValue(target, parent);
+            var source = new ClutterSliceDescription(target, null!, null!, 0, 0, 0, 1, 7, true);
+
+            _toppleBody.BecomeKinematic();
+            Refuse("kinematic native tree");
+            _toppleBody.SetLocalInertia(in inertia);
+            foreach (float inverseMass in new[] { 0f, -1f, float.NaN, float.PositiveInfinity })
+            {
+                _toppleBody.LocalInertia.InverseMass = inverseMass;
+                Refuse("unusable inverse mass " + inverseMass);
+            }
+            _toppleBody.LocalInertia = inertia;
+            _toppleBody.Velocity = default;
+            Check(ClutterForceNative.ToppleClutter(source, double3.UnitX, out var success)
+                && success.Contains("toppling") && _toppleBody.Awake
+                && Math.Abs(_toppleBody.Velocity.Linear.X - .18f) < 1e-6f
+                && _toppleBody.Velocity.Angular.LengthSquared() > 0,
+                "production tree fallback reports success only after applying real native linear and angular motion");
+
+            void Refuse(string name)
+            {
+                var before = _toppleBody.Velocity;
+                Check(!ClutterForceNative.ToppleClutter(source, double3.UnitX, out var reason)
+                    && reason.Contains("no movable native body")
+                    && _toppleBody.Velocity.Linear == before.Linear && _toppleBody.Velocity.Angular == before.Angular,
+                    "production tree fallback rejects " + name + " without claiming motion or changing velocity");
+            }
+        }
+        finally
+        {
+            harmony.UnpatchAll(harmony.Id);
+            _toppleBody.LocalInertia = inertia;
+            sim.Bodies.Remove(handle); _toppleBody = default;
+        }
+    }
+
+    private static bool ToppleFrame(out ClutterSliceFrame frame, ref bool __result)
+    { frame = new(double3.UnitZ * 100, doubleQuat.Identity, default, default); __result = true; return false; }
+    private static bool TopplePromote(out BodyHandle handle, out string reason, ref bool __result)
+    { handle = _toppleBody.Handle; reason = ""; __result = true; return false; }
+    private static bool ToppleResolve(out BodyReference body, ref bool __result)
+    { body = _toppleBody; __result = true; return false; }
+    private class ToppleParent : DispatchProxy
+    {
+        public ToppleParent() { }
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) => targetMethod?.Name switch
+        {
+            nameof(IParentBody.GetCci2Ccf) => doubleQuat.Identity,
+            _ => throw new InvalidOperationException("Unexpected tree parent query: " + targetMethod?.Name)
+        };
     }
 
     private static void TreeCapsulePicking(Simulation sim, BufferPool pool)

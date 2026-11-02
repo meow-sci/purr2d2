@@ -23,10 +23,17 @@ internal static class FragmentAssetWriter
     private readonly record struct SurfaceGroup(SliceMaterialData Material, SliceFace[] Faces, FragmentSolidRun[] SolidRuns)
     {
         internal bool Cap => Material.Id == CapMaterial;
+        internal bool Foliage => Material.Foliage;
+        internal SliceFace[] RenderFaces => !Foliage || !Material.DoubleSided ? Faces
+            : Faces.Concat(Faces.Select(Backface)).ToArray();
+        private SliceFace Backface(SliceFace face) => new(Back(face.A), Back(face.C), Back(face.B), face.Material);
+        private SliceVertex Back(SliceVertex vertex) => Material.KeepBackfaceNormals ? vertex
+            : vertex with { Normal = vertex.Normal * -1 };
     }
 
-    internal static int CountRenderSurfaces(IEnumerable<SliceFace[]> solids, IReadOnlyDictionary<int, SliceMaterialData> materials)
-        => solids.SelectMany(s => s).Select(f => ResolveMaterial(f.Material, materials)).Distinct().Count();
+    internal static int CountRenderSurfaces(IEnumerable<SliceFace[]> solids, IReadOnlyDictionary<int, SliceMaterialData> materials,
+        IEnumerable<SliceFace>? foliage = null)
+        => solids.SelectMany(s => s).Concat(foliage ?? []).Select(f => ResolveMaterial(f.Material, materials)).Distinct().Count();
 
     private static SliceMaterialData ResolveMaterial(int index, IReadOnlyDictionary<int, SliceMaterialData> materials)
     {
@@ -40,7 +47,7 @@ internal static class FragmentAssetWriter
         SliceGeometryBudget? geometry = null)
     {
         geometry ??= SliceGeometryBudget.Current;
-        long triangles = fragment.Solids.Sum(s => (long)s.Length);
+        long triangles = fragment.Solids.Sum(s => (long)s.Length) + fragment.Foliage.Length;
         if (!geometry.AllowsFragment(fragment.Solids.Length, triangles))
             throw new InvalidDataException($"Fragment exceeds the export geometry budget ({geometry.FragmentUsage(fragment.Solids.Length, triangles)}). {SliceGeometryBudget.SettingsHint}");
         // Closed-solid boundaries belong to the geometry/recutting pipeline, not the
@@ -48,17 +55,26 @@ internal static class FragmentAssetWriter
         // Durable identity merges aliases while keeping opaque and glass passes apart.
         var transformed = fragment.Solids.SelectMany(s => s).ToArray();
         var surfaces = fragment.Solids.SelectMany((solid, i) => solid.Select(face => (Solid: i, Face: face)))
+            .Concat(fragment.Foliage.Select(face => (Solid: -1, Face: face)))
             .GroupBy(f => ResolveMaterial(f.Face.Material, materials))
             .OrderBy(g => g.Key.Id, StringComparer.Ordinal).ThenBy(g => g.Key.Glass)
             .Select(g => new SurfaceGroup(g.Key, g.Select(f => f.Face).ToArray(),
-                CountSolidRuns(g.Select(f => f.Solid)))).ToArray();
+                g.Key.Foliage ? [] : CountSolidRuns(g.Select(f => f.Solid)))).ToArray();
+        if (surfaces.Any(s => s.Foliage && (s.Cap || s.Material.Glass))
+            || fragment.Foliage.Any(f => !ResolveMaterial(f.Material, materials).Foliage)
+            || fragment.Solids.SelectMany(s => s).Any(f => ResolveMaterial(f.Material, materials).Foliage))
+            throw new InvalidDataException("Fragment closed solids and visual foliage have mixed surface provenance.");
         if (surfaces.Length > SliceResourceLimits.MaximumRenderSurfaces)
             throw new InvalidDataException($"Fragment surface count exceeds the export budget ({surfaces.Length:N0} / {SliceResourceLimits.MaximumRenderSurfaces:N0}).");
+        long renderedTriangles = surfaces.Sum(s => (long)s.Faces.Length * (s.Foliage && s.Material.DoubleSided ? 2 : 1));
+        if (!geometry.AllowsFragment(fragment.Solids.Length, renderedTriangles))
+            throw new InvalidDataException($"Fragment render geometry exceeds the export budget ({geometry.FragmentUsage(fragment.Solids.Length, renderedTriangles)}). {SliceGeometryBudget.SettingsHint}");
         cancel.ThrowIfCancellationRequested();
         var collider = SliceColliderGeometry.Build(transformed, cancel);
+        var picker = fragment.Foliage.Length == 0 ? transformed : transformed.Concat(fragment.Foliage).ToArray();
         var inertia = fragment.Frame.PrincipalSpecificInertia;
         string id;
-        using (var hash = new IdentityHash(cancel))
+        using (var hash = new IdentityHash(cancel, fragment.Foliage.Length != 0))
         {
             hash.Int32(surfaces.Length);
             foreach (var surface in surfaces)
@@ -67,6 +83,12 @@ internal static class FragmentAssetWriter
                 hash.Int32(surface.Material.Glass ? 1 : 0);
                 hash.Int32(unchecked((int)surface.Material.ClutterColor));
                 hash.Int32(unchecked((int)surface.Material.ClutterLuminosity));
+                if (fragment.Foliage.Length != 0)
+                {
+                    hash.Int32(surface.Foliage ? 1 : 0);
+                    hash.Int32(surface.Material.DoubleSided ? 1 : 0);
+                    hash.Int32(surface.Material.KeepBackfaceNormals ? 1 : 0);
+                }
                 hash.Geometry(surface.Faces);
                 // Batched triangles can represent independent touching solids or
                 // one shell. Persisted recutting provenance is part of identity.
@@ -75,16 +97,18 @@ internal static class FragmentAssetWriter
             }
             // Picker order also determines its compact indices and first attributes
             // at shared positions. Include both exported non-render meshes.
-            hash.Geometry(transformed);
+            hash.Geometry(picker);
             hash.Geometry(collider);
             id = Prefix + hash.Complete(fragment.MassKg, inertia);
         }
         // _s now indexes render surfaces. Retain this marker and _cap suffix so old
         // saved fragments and every cap group share the existing heat-owner lookup.
         var groups = surfaces.Select((s, i) => new FragmentGlbWriter.Group($"{id}_s{i}"
-            + (s.Cap ? "_cap" : ClutterSurfaceTint.MeshSuffix(s.Material.ClutterColor, s.Material.ClutterLuminosity) + "_m" + i), s.Cap ? -1 : i, s.Faces)).ToList();
+            + (s.Cap ? "_cap" : (s.Foliage ? "_fol" : "")
+                + ClutterSurfaceTint.MeshSuffix(s.Material.ClutterColor, s.Material.ClutterLuminosity) + "_m" + i),
+                s.Cap ? -1 : i, s.RenderFaces)).ToList();
         // Full visual picking mesh, plus a compact collider with exactly the same enclosing hull.
-        groups.Add(new(id + "_hull", int.MinValue, transformed));
+        groups.Add(new(id + "_hull", int.MinValue, picker));
         groups.Add(new(id + "_collision", int.MinValue, collider));
         var uploads = new CpuMeshUpload[surfaces.Length];
         for (int i = 0; i < uploads.Length; i++)
@@ -137,10 +161,16 @@ internal static class FragmentAssetWriter
         {
             var group = groups[i];
             var material = surfaces[i].Material;
-            subpart.Add(new XElement(material.Glass ? "PartModelGlass" : "PartModel", new XAttribute("Id", group.Name + "_model"),
+            var model = new XElement(material.Glass ? "PartModelGlass" : "PartModel", new XAttribute("Id", group.Name + "_model"),
                 new XElement("Mesh", new XAttribute("Id", group.Name)),
                 new XElement("Material", new XAttribute("Id", material.Id)),
-                new XElement("ShadowCaster", true)));
+                // Native part shadows are vertex-only and cannot alpha-test leaf
+                // cards. Keep wood/cap shadows without casting opaque rectangles.
+                new XElement("ShadowCaster", !surfaces[i].Foliage));
+            // Native RT part geometry is ForceOpaque and ignores ShadowCaster.
+            // Cards stay in the ordinary alpha-tested raster path in RT views too.
+            if (surfaces[i].Foliage) model.Add(new XElement("RayTracing", "Disabled"));
+            subpart.Add(model);
         }
         part.Add(new XElement("SubPart", new XAttribute("InstanceOf", subpartId)));
         part.Add(new XElement("Collider", new XAttribute("Id", id + "_collider"),
@@ -150,7 +180,11 @@ internal static class FragmentAssetWriter
             new XElement("MassSpecificInertia", new XAttribute("Ixx", F(inertia.X)),
                 new XAttribute("Iyy", F(inertia.Y)), new XAttribute("Izz", F(inertia.Z)))));
         var topology = new FragmentTopology(surfaces.SelectMany(s => s.SolidRuns).Max(r => r.Solid) + 1,
-            surfaces.Select((s, i) => (Name: groups[i].Name, s.SolidRuns)).ToDictionary(s => s.Name, s => s.SolidRuns, StringComparer.Ordinal));
+            surfaces.Select((s, i) => (Name: groups[i].Name, s.SolidRuns, s.Foliage)).Where(s => !s.Foliage)
+                .ToDictionary(s => s.Name, s => s.SolidRuns, StringComparer.Ordinal),
+            surfaces.Select((s, i) => (Name: groups[i].Name, Surface: s)).Where(s => s.Surface.Foliage)
+                .ToDictionary(s => s.Name, s => new FragmentFoliageRun(s.Surface.Faces.Length,
+                    s.Surface.Material.DoubleSided, s.Surface.Material.KeepBackfaceNormals), StringComparer.Ordinal));
         return new XDocument(new XElement("Assets", new XElement("MeshAtlas", new XAttribute("Id", id + "_atlas"),
             new XAttribute("Path", glbPath)), subpart, part, topology.ToXml()));
     }
@@ -181,12 +215,12 @@ internal static class FragmentAssetWriter
         private readonly CancellationToken _cancel;
         private int _used;
 
-        internal IdentityHash(CancellationToken cancel)
+        internal IdentityHash(CancellationToken cancel, bool foliage = false)
         {
             _cancel = cancel;
             cancel.ThrowIfCancellationRequested();
             _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            Text(Version);
+            Text(foliage ? "Purr2D2|wood-solids-foliage-v6|durable-clutter-tint|canonical-le" : Version);
         }
 
         internal void Int32(int value)

@@ -15,6 +15,7 @@ internal static class FragmentTemplateChecks
         SliceWorkerHooksChecks.Run();
         QuietSliceHooksChecks.Run();
         EnvironmentLightingChecks.Run();
+        ClutterFoliageHostChecks.Run();
         SwimmingAnimationHostChecks.Run();
         SaberWaterHostChecks.Run();
         CapEmissionHostChecks.Run();

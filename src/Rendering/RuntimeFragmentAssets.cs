@@ -150,6 +150,7 @@ internal static partial class RuntimeFragmentAssets
         foreach (ref var instance in instances)
         {
             instance.StateBitFlag = ClutterSurfaceTint.Flags(instance.StateBitFlag, tint.Luminosity);
+            if (ClutterFoliageSurface.IsMesh(model.Template.Mesh?.Id)) ClutterFoliageMaterial.MarkShadow(ref instance);
             // Native RGB10 data rides the existing emission varying, but the
             // native add-emissive flag is not set. Caps have separate mesh IDs.
             instance.EmissiveColor = tint.Color;

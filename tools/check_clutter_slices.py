@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check actual stock rock and tree-trunk GLBs through the production clutter worker.
+"""Check actual stock rocks and full trees through the production clutter worker.
 
 Game geometry is read locally into ignored artifacts/checks; it is never committed.
 Usage: python3 tools/check_clutter_slices.py ../ksa-game-assemblies/current/Content/Core
@@ -48,33 +48,36 @@ def fixtures(content):
         atlas = root.find('MeshAtlas')
         meshes = load_meshes(content / atlas.get('Path'))
         materials = {m.get('Id'): m for m in root.findall('GroundClutterMaterial')}
-        for obj in root.findall('ClutterObject')[:3 if not tree else 1]:
+        active_trees = {f'TreeType{i}' for i in (1, 2, 3, 4, 5, 6, 10, 11, 12)}
+        objects = root.findall('ClutterObject')
+        for obj in (objects[:3] if not tree else [o for o in objects if o.get('Id') in active_trees]):
             lod = obj.find('LODs/LOD')
             mesh_ids = [m.get('Id') for m in lod.findall('Mesh')]
             material_names = [m.get('Id') for m in lod.findall('Material')]
             atlas_ids = sorted({material for name in mesh_ids for material, _ in meshes[name]})
             indirection = dict(zip(atlas_ids, material_names))
-            groups, trunk = [], []
-            native_foliage = False
+            groups, foliage = [], []
+            surfaces = {}
             for name in mesh_ids:
-                faces, trunk_faces = [], []
+                faces = []
                 for material, triangles in meshes[name]:
                     material_name = indirection[material]
                     definition = materials[material_name]
                     native = definition.find('Opacity') is not None or definition.find('Thickness') is not None or definition.find('DoubleSided') is not None
-                    native_foliage |= native
+                    surfaces[material] = {
+                        'Index': material, 'Id': material_name, 'Foliage': native,
+                        'DoubleSided': definition.find('DoubleSided') is not None
+                            and definition.find('DoubleSided').get('Value', 'false').lower() == 'true',
+                        'KeepBackfaceNormals': definition.find('KeepBackfaceNormals') is not None
+                            and definition.find('KeepBackfaceNormals').get('Value', 'false').lower() == 'true',
+                    }
                     for triangle in triangles:
                         face = [vertex + [material] for vertex in triangle]
-                        faces.append(face)
-                        if not native:
-                            trunk_faces.append(face)
+                        (foliage if native else faces).append(face)
                 if faces:
                     groups.append(faces)
-                if trunk_faces:
-                    trunk.append(trunk_faces)
-            yield {'Name': obj.get('Id'), 'Tree': tree, 'NativeFoliage': native_foliage, 'Groups': groups}
-            if tree:
-                yield {'Name': obj.get('Id') + '_TrunkOnly', 'Tree': True, 'NativeFoliage': False, 'Groups': trunk}
+            yield {'Name': obj.get('Id'), 'Tree': tree, 'Groups': groups, 'Foliage': foliage,
+                   'Materials': sorted(surfaces.values(), key=lambda surface: surface['Index'])}
 
 
 if __name__ == '__main__':
@@ -89,6 +92,7 @@ if __name__ == '__main__':
         'src/Cutting/ContactSliceGeometry.cs', 'src/Cutting/ClutterSliceGeometry.cs',
         'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentAssetWriter.cs', 'src/Rendering/FragmentTopology.cs',
         'src/Rendering/ClutterSurfaceTint.cs',
+        'src/Rendering/ClutterFoliageSurface.cs',
         'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs', 'src/Slicing/SliceColliderGeometry.cs',
         'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',
         'src/Slicing/SliceMeshPrecision.cs', 'tests/ClutterStockSliceChecks.cs')]

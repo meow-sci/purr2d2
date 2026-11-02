@@ -68,8 +68,9 @@ internal sealed class SliceSourceCapture : IDisposable
         var materials = new Dictionary<int, SliceMaterialData>();
         var indices = new Dictionary<string, int>(StringComparer.Ordinal);
         var parts = new[] { _full }.Concat(_full.SubParts.ToArray()).ToArray();
-        var topology = FragmentTopology.Find(_full.Template.Id,
-            required: parts.Any(p => p.Template.Id == _full.Template.Id + "_visual"))?.BeginCapture();
+        var provenance = FragmentTopology.Find(_full.Template.Id,
+            required: parts.Any(p => p.Template.Id == _full.Template.Id + "_visual"));
+        var topology = provenance?.BeginCapture();
         int total = 0;
         foreach (var part in parts)
         {
@@ -89,13 +90,19 @@ internal sealed class SliceSourceCapture : IDisposable
                 if (mesh?.HostPrimitives == null || material == null || !material.IsReferenceable || string.IsNullOrEmpty(material.Id))
                     throw new InvalidDataException("Part has no accessible native mesh or durable material reference.");
                 topology?.BeginSurface(mesh.Id);
+                FragmentFoliageRun visual = default;
+                bool leaf = provenance?.TryFoliage(mesh.Id, out visual) == true;
+                if (leaf && !ClutterTintShader.FoliageReady)
+                    throw new InvalidDataException("The native foliage renderer is unavailable; preserving this fragment's appearance.");
                 ClutterSurfaceTint.TryRead(mesh.Id, out uint clutterColor, out uint clutterLuminosity);
-                string key = material.Id + ":glass=" + model.Glass + ":clutter=" + clutterColor + ":lum=" + clutterLuminosity;
+                string key = material.Id + ":glass=" + model.Glass + ":clutter=" + clutterColor + ":lum=" + clutterLuminosity
+                    + ":foliage=" + leaf + ":double=" + visual.DoubleSided + ":backface=" + visual.KeepBackfaceNormals;
                 if (!indices.TryGetValue(key, out int materialId))
                 {
                     materialId = indices.Count;
                     if (materialId >= 48) throw new InvalidDataException("Part exceeds the 48-material slicing budget.");
-                    indices.Add(key, materialId); materials.Add(materialId, new(material.Id, model.Glass, clutterColor, clutterLuminosity));
+                    indices.Add(key, materialId); materials.Add(materialId, new(material.Id, model.Glass, clutterColor, clutterLuminosity,
+                        leaf, visual.DoubleSided, visual.KeepBackfaceNormals));
                 }
                 foreach (var primitive in mesh.HostPrimitives)
                 {
@@ -132,7 +139,8 @@ internal sealed class SliceSourceCapture : IDisposable
         {
             GeneratedClosedGeometry = RuntimeFragmentAssets.IsGeneratedTemplate(_full.Template.Id),
             Geometry = _geometry,
-            Contact = contact
+            Contact = contact,
+            Foliage = topology?.CompleteFoliage() ?? []
         };
         if (!IsCurrent(_full)) throw new InvalidOperationException("Source changed during capture; try again.");
     }
