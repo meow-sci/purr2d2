@@ -1,5 +1,11 @@
 # Acceptance record
 
+## Larger, more intense tree fire
+
+Tree cut-end flames now use 3× spatial scale and 3× HDR brightness. Rise, lateral spread, ribbon length, width and core all scale together; the frustum bound expands to cover the larger effect. The existing lifetime setting, animation speed and bounded ribbon/source counts are preserved.
+
+The Release build passes with zero warnings/errors, along with source/stage validation, ZIP equality/checksum and staged DLL equality. Evidence: `artifacts/tree-fire-boost-{release,package}.log`. This visual tuning received focused source review without new implementation-mirroring unit tests or a full managed rerun. Live appearance remains to be checked in game.
+
 ## Solid tree ends and growth rings
 
 Stock trunk artwork contains open tubes. The generic thin-sheet repair gave that artwork a 4 mm backing, so the mathematically closed cut surface was an annulus rather than solid wood. Tree-only source preparation now seals verified manifold tube components at their authored end loops, retaining original bark positions and materials. Each component is handled separately and must pass the existing oriented closed-volume audit; unrelated open detail retains sheet backing. The general slicer's hole-preserving rule remains intact for vessels and other hollow geometry. Source closures are not tagged as fresh cut faces or fire anchors.

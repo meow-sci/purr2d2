@@ -8,6 +8,7 @@ namespace Purr2D2.Rendering;
 public sealed unsafe partial class SaberRenderer
 {
     private const int MaximumTreeFireSources = 32;
+    private const float TreeFireSizeMultiplier = 3f, TreeFireIntensityMultiplier = 3f;
     private readonly List<TreeFireSource> _treeFire = new(MaximumTreeFireSources);
     private readonly record struct TreeFireSource(Part Part, double3 Point, double3 Normal, double Born, double Duration);
 
@@ -37,7 +38,7 @@ public sealed unsafe partial class SaberRenderer
             var vehicleMatrix = vehicle.GetMatrixAsmb2Ego(camera);
             var matrix = source.Part.MatrixAsmb2Ego(in vehicleMatrix);
             var origin = source.Point.Transform(matrix);
-            if (!Finite(origin) || origin.LengthSquared() > 300 * 300 || camera.IsSphereOutsideFrustum(origin, 1.5)) continue;
+            if (!Finite(origin) || origin.LengthSquared() > 300 * 300 || camera.IsSphereOutsideFrustum(origin, 1.5 * TreeFireSizeMultiplier)) continue;
             var up = camera.GetPositionEgo(vehicle).NormalizeOrZero();
             // Camera coordinates are relative; radial up comes from the body's
             // actual inertial radial direction transformed through its ego frame.
@@ -52,10 +53,10 @@ public sealed unsafe partial class SaberRenderer
                 double phase = cycle - Math.Floor(cycle);
                 double angle = i * 2.399963 + Math.Floor(cycle) * 1.83;
                 var lateral = tangent * Math.Cos(angle) + bitangent * Math.Sin(angle);
-                var tail = origin + lateral * (.03 + .1 * phase) + up * (.6 * phase);
-                var tip = tail + up * (.09 + .11 * (1 - phase)) + lateral * .02;
-                float intensity = (float)(5 * (1 - phase) * fade);
-                DrawRibbon(commands, projection, tail, tip, double3.Zero, (float)(.045 * (1 - phase) + .008), .006f,
+                var tail = origin + (lateral * (.03 + .1 * phase) + up * (.6 * phase)) * TreeFireSizeMultiplier;
+                var tip = tail + (up * (.09 + .11 * (1 - phase)) + lateral * .02) * TreeFireSizeMultiplier;
+                float intensity = (float)(5 * (1 - phase) * fade) * TreeFireIntensityMultiplier;
+                DrawRibbon(commands, projection, tail, tip, double3.Zero, (float)(.045 * (1 - phase) + .008) * TreeFireSizeMultiplier, .006f * TreeFireSizeMultiplier,
                     new float4(1, (float)(.22 + .48 * (1 - phase)), .015f, intensity), isChar: false, billboard: true);
             }
         }
