@@ -14,6 +14,7 @@ internal static class ClutterSlicerChecks
             PreparedSplitWaitsForCommitPermission();
             NativeFailureReportsItsOwnReason();
             FailedPreparationRoutesToActualFallback();
+            HeldTargetNeverCommitsOrTopples();
             AlternativeFailureNeverTopples();
             CommittedCutSurvivesEffectFaults();
             UnexpectedPostCommitFaultRetainsSuccess();
@@ -28,6 +29,26 @@ internal static class ClutterSlicerChecks
             SerialJobDiagnostics();
         });
         Console.WriteLine("PASS: production clutter slicing orchestration: deferred native commits, truthful fallback, committed-cut fault containment, bounded effects, stale-scene cancellation and nonblocking retirement");
+    }
+
+    private static void HeldTargetNeverCommitsOrTopples()
+    {
+        foreach (string phase in new[] { "capture", "worker", "upload" })
+        {
+            ClutterScenario.Reset();
+            using var slicer = new ClutterSlicer(); var owner = new KittenEva(); var target = new ClutterForceTarget();
+            Start(slicer, owner, target);
+            if (phase == "worker")
+                Check(SpinWait.SpinUntil(() => { slicer.Update(owner, false, 1, 0); return ClutterScenario.WorkerThread != 0; }, TimeSpan.FromSeconds(5)),
+                    "worker fixture starts before Furce captures target");
+            if (phase == "upload")
+                Check(SpinWait.SpinUntil(() => { slicer.Update(owner, false, 1, 0); return ClutterScenario.UploadAdvances > 0; }, TimeSpan.FromSeconds(5)),
+                    "upload fixture prepares before Furce captures target");
+            target.Held = true;
+            slicer.Update(owner, true, 2, 0);
+            Check(!slicer.Active && ClutterScenario.Replacements == 0 && ClutterScenario.Topples == 0
+                && slicer.Status.Contains("held by Furce"), phase + " held target cancels without replacement or toppling");
+        }
     }
 
     private static void SerialJobDiagnostics()

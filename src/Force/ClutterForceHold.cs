@@ -23,6 +23,12 @@ internal sealed class ClutterForceHold : IDisposable
     private ClutterForceHold(ClutterForceTarget target, BodyReference body, ForceRigidState original)
     { Target = target; _handle = body.Handle; _inertia = body.LocalInertia; _lastState = original; }
 
+    // Settled-thread ownership check: the immutable registry carries the native
+    // object's identity, not just its recyclable Bepu body handle. No native
+    // simulation or clutter dictionary is accessed by this check.
+    internal static bool IsHeld(ClutterForceTarget target) => Volatile.Read(ref _active).Any(entry =>
+        !entry._released && Volatile.Read(ref entry._cleared) == 0 && entry.Target.StableKey == target.StableKey);
+
     internal static bool TryCapture(ClutterForceTarget target, out ClutterForceHold? hold, out string reason)
     {
         hold = null; reason = "The selected ground object is no longer available.";
@@ -76,7 +82,7 @@ internal sealed class ClutterForceHold : IDisposable
         var angularCcf = angularCci.Transform(cci2Ccf);
         var pose = new RigidPose(local.ToBepu(), rotationCcf.ToBepu());
         var velocity = new BodyVelocity(velocityCcf.ToBepu(), angularCcf.ToBepu());
-        if (!Finite(pose.Position) || !Finite(velocity.Linear) || !Finite(velocity.Angular))
+        if (!Finite(pose.Position) || !ValidNativeOrientation(pose.Orientation) || !Finite(velocity.Linear) || !Finite(velocity.Angular))
             throw new InvalidOperationException("The ground object's native state overflowed.");
         // Bepu integrates kinematic poses even though it skips their gravity integration. Keep
         // the held body stationary between settled follow writes; inherit rates only on release.
@@ -149,4 +155,10 @@ internal sealed class ClutterForceHold : IDisposable
     private static void Unregister(ClutterForceHold hold)
     { lock (RegistryLock) Volatile.Write(ref _active, _active.Where(item => !ReferenceEquals(item, hold)).ToArray()); }
     private static bool Finite(System.Numerics.Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+    internal static bool ValidNativeOrientation(System.Numerics.Quaternion value)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z) || !float.IsFinite(value.W)) return false;
+        float lengthSquared = value.LengthSquared();
+        return float.IsFinite(lengthSquared) && MathF.Abs(lengthSquared - 1f) <= .0001f;
+    }
 }

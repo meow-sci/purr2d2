@@ -81,6 +81,8 @@ internal static partial class ClutterForceNative
     {
         reason = "The ground object changed before replacement.";
         var target = source.Target;
+        if (ClutterForceHold.IsHeld(target))
+        { reason = "The ground object is currently held by Furce."; return false; }
         if (!TryDescribeSlice(target, out var current) || current!.ObjectId != source.ObjectId || current.ScaleId != source.ScaleId
             || !ReferenceEquals(current.Object, source.Object) || !target.TryResolve(out _, out _, out _, out var body)) return false;
         var renderer = Program.GetPlanetRenderer()?.GroundClutterRenderer;
@@ -146,6 +148,8 @@ internal static partial class ClutterForceNative
     internal static bool ToppleClutter(ClutterSliceDescription source, double3 motionCci, out string reason)
     {
         reason = "The ground object could not enter native physics.";
+        if (ClutterForceHold.IsHeld(source.Target))
+        { reason = "The ground object is currently held by Furce."; return false; }
         if (!TrySliceFrame(source, out var frame) || !Promote(source.Target, out _, out reason)) return false;
         if (!source.Target.TryResolveBody(out var body))
         { reason = "The ground object lost its native body before toppling."; return false; }

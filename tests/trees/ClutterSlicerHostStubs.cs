@@ -57,9 +57,11 @@ namespace Purr2D2.Force
         private static int _next;
         internal ClutterForceIdentity StableKey { get; } = new(Interlocked.Increment(ref _next));
         internal bool IsValid = true, Local = true;
+        internal bool Held;
         internal long EstimateBytes = 4L * 1024 * 1024, RetainedBytes;
         internal bool IsLocalTo(KSA.KittenEva owner) => Local;
     }
+    internal static class ClutterForceHold { internal static bool IsHeld(ClutterForceTarget target) => target.Held; }
     internal sealed record ClutterSliceDescription(ClutterForceTarget Target, bool Tree = true);
     internal readonly record struct ClutterSliceFrame(double3 PositionCci, doubleQuat Object2Cci);
     internal static class ClutterForceNative

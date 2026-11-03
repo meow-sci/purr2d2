@@ -18,6 +18,13 @@ internal static class ForceClutterBepuChecks
 {
     internal static void Run()
     {
+        HeldSliceGuards();
+        Check(ClutterForceHold.ValidNativeOrientation(Quaternion.Identity)
+            && ClutterForceHold.ValidNativeOrientation(Quaternion.CreateFromAxisAngle(Vector3.UnitY, 1.2f)),
+            "native clutter writes accept finite normalized rotations");
+        foreach (var invalid in new[] { default(Quaternion), new Quaternion(float.NaN, 0, 0, 1),
+                     new Quaternion(0, float.PositiveInfinity, 0, 1), new Quaternion(0, 0, 0, 2) })
+            Check(!ClutterForceHold.ValidNativeOrientation(invalid), "native clutter writes reject zero, nonfinite and nonunit rotations");
         var pool = new BufferPool();
         using (var sim = Simulation.Create(pool, new Contacts(), new Integrator(), new SolveDescription(1, 1)))
         {
@@ -81,6 +88,33 @@ internal static class ForceClutterBepuChecks
                 "release restores the complete native inertia tensor, shape, linear velocity and angular velocity");
         }
         pool.Clear();
+    }
+
+    private static void HeldSliceGuards()
+    {
+        // Exercise the real published lease registry and destructive entry points;
+        // no game scene or native body is needed because the held check must run first.
+        var target = (ClutterForceTarget)RuntimeHelpers.GetUninitializedObject(typeof(ClutterForceTarget));
+        var lease = (ClutterForceHold)RuntimeHelpers.GetUninitializedObject(typeof(ClutterForceHold));
+        AccessTools.Field(typeof(ClutterForceHold), "<Target>k__BackingField").SetValue(lease, target);
+        var register = AccessTools.Method(typeof(ClutterForceHold), "Register");
+        var unregister = AccessTools.Method(typeof(ClutterForceHold), "Unregister");
+        register.Invoke(null, [lease]);
+        try
+        {
+            var same = (ClutterForceTarget)RuntimeHelpers.GetUninitializedObject(typeof(ClutterForceTarget));
+            var other = (ClutterForceTarget)RuntimeHelpers.GetUninitializedObject(typeof(ClutterForceTarget));
+            AccessTools.Field(typeof(ClutterForceTarget), "_generation").SetValue(other, 1);
+            Check(ClutterForceHold.IsHeld(target) && ClutterForceHold.IsHeld(same) && !ClutterForceHold.IsHeld(other),
+                "held clutter registry matches stable native identity rather than target object or recycled body handle");
+            var source = new ClutterSliceDescription(target, null!, null!, 0, 0, 0, 1, 1, true);
+            Check(!ClutterForceNative.ToppleClutter(source, double3.UnitX, out var toppleReason)
+                && toppleReason.Contains("held by Furce"), "held native clutter is never passed to destructive toppling");
+            Check(!ClutterForceNative.RemoveSlicedOriginal(source, out var removeReason)
+                && removeReason.Contains("held by Furce"), "held native clutter is never removed by slice replacement");
+        }
+        finally { unregister.Invoke(null, [lease]); }
+        Check(!ClutterForceHold.IsHeld(target), "released identity no longer blocks later slicing");
     }
 
     private static BodyReference _toppleBody;

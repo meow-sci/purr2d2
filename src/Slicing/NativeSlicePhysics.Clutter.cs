@@ -13,6 +13,8 @@ internal static partial class NativeSlicePhysics
         out IReadOnlyList<Vehicle> created, out string reason)
     {
         created = []; reason = "The ground-object replacement is unavailable.";
+        if (ClutterForceHold.IsHeld(source.Target))
+        { reason = "The ground object is currently held by Furce."; return false; }
         if (SetBodyRates == null || AdoptSeparated == null || WorkerState == null || !source.Target.IsLocalTo(owner)
             || !ClutterForceNative.TrySliceFrame(source, out var frame) || pieces.Count is < 2 or > MaximumPieces) return false;
         if (owner.BubbleVehicleCount + pieces.Count > VehicleLimit)

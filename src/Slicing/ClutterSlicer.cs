@@ -102,6 +102,8 @@ internal sealed class ClutterSlicer : IDisposable
         if (_source == null) return;
         if (!ReferenceEquals(owner, _owner) || owner == null || !_source.Target.IsLocalTo(owner) || !_source.Target.IsValid)
         { Status = "Ground-object cut cancelled: its owner or scene changed."; FinishDiagnostic(SliceJobOutcome.Stale); Cancel(); return; }
+        if (ClutterForceHold.IsHeld(_source.Target))
+        { Status = "Ground-object cut cancelled: the object is held by Furce."; FinishDiagnostic(SliceJobOutcome.Stale); Cancel(); return; }
         bool committed = false;
         try
         {
@@ -260,6 +262,8 @@ internal sealed class ClutterSlicer : IDisposable
 
     private void Fallback(string reason, bool permitCommit)
     {
+        if (_source != null && ClutterForceHold.IsHeld(_source.Target))
+        { Status = "Ground-object cut cancelled: the object is held by Furce."; FinishDiagnostic(SliceJobOutcome.Stale); Cancel(); return; }
         if (!_allowLegacyFallback)
         {
             Status = "Ground mesh cut failed: " + reason;
