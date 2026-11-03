@@ -23,7 +23,8 @@ refraction distortion.
 Moving blades and assisted selection can cut ground rocks and trees into physical
 fragments. Tree cuts split the wood and carry the leaves with the resulting pieces,
 preserving leaf transparency and two-sided rendering. Unsupported custom geometry
-can still fall back to felling the whole tree. Rock cut faces cool from a glow; split
+can still fall back to felling the whole tree. Trunk cut ends are solid wood faces
+with centered growth rings. Rock cut faces cool from a glow; split
 tree ends burn for **10 seconds** by default. Adjust or disable that fire under
 **Settings → Clutter Slicing**.
 

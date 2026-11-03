@@ -133,6 +133,7 @@ internal static class FragmentAssetChecks
         Check(multiple.Uploads.Length == 5 && capNames.Length == 2 && capNames.Distinct().Count() == 2
             && capNames.All(n => n[..n.IndexOf("_s", FragmentAssetWriter.Prefix.Length, StringComparison.Ordinal)] == multiple.Id),
             "distinct cap material/pass groups have unique names and retain their heat owner");
+        CheckWoodCaps();
         Console.WriteLine("PASS: merged fragment surfaces, one visual SubPart, material/glass/cap identity, exact geometry and reslicing; 12 legacy surfaces -> 4 render surfaces");
 
         SliceMaterialData Material(int index) => index == -1 ? new(FragmentAssetWriter.CapMaterial, false) : materials[index];
@@ -146,6 +147,66 @@ internal static class FragmentAssetChecks
             try { FragmentTopology.Remember(xml); }
             catch (InvalidDataException) { return; }
             throw new Exception("Fragment export: " + message);
+        }
+    }
+
+    private static void CheckWoodCaps()
+    {
+        var (fixture, materials) = Fixture();
+        SliceVertex RingUv(SliceVertex vertex) => vertex with { U = .17 + vertex.U * .61, V = .21 + vertex.V * .53 };
+        var solids = fixture.Solids.Select(s => s.Select(f => f.Material == -1
+            ? f with { A = RingUv(f.A), B = RingUv(f.B), C = RingUv(f.C) } : f).ToArray()).ToArray();
+        var source = fixture with { Solids = solids };
+        var metal = FragmentAssetWriter.Build(source, materials, default);
+        var wood = FragmentAssetWriter.Build(source with { CutKind = SliceCutKind.Wood }, materials, default);
+        var xml = XDocument.Parse(Encoding.UTF8.GetString(wood.Xml));
+        var topology = FragmentTopology.Read(xml)!;
+        Check(wood.Id != metal.Id && topology.CutKind == SliceCutKind.Wood
+            && (int?)xml.Root!.Element("Purr2D2SliceTopology")!.Attribute("Version") == 3,
+            "wood export has a distinct durable identity and explicit v3 cut kind, even without foliage");
+        var models = xml.Root!.Elements("SubPart").Elements("PartModel").ToArray();
+        string freshMesh = Mesh(FragmentAssetWriter.WoodCapMaterial);
+        string previousMesh = Mesh(FragmentAssetWriter.CapMaterial);
+        Check(freshMesh.EndsWith("_cap", StringComparison.Ordinal) && previousMesh.EndsWith("_cap", StringComparison.Ordinal)
+            && FragmentAssetWriter.IsCapMaterial(FragmentAssetWriter.WoodCapMaterial)
+            && FragmentAssetWriter.IsCapMaterial(FragmentAssetWriter.CapMaterial),
+            "fresh wood and preserved older generic cap surfaces retain distinct materials and cap ownership names");
+        CheckUv(freshMesh, solids.SelectMany(s => s).Where(f => f.Material == -1));
+        CheckUv(previousMesh, solids.SelectMany(s => s).Where(f => f.Material is 4 or 5));
+        var repeated = FragmentAssetWriter.Build(source with { CutKind = SliceCutKind.Wood }, materials, default);
+        Check(wood.Id == repeated.Id && wood.Xml.SequenceEqual(repeated.Xml) && wood.Glb.SequenceEqual(repeated.Glb),
+            "wood export is immutable and deterministic");
+        var noNewCaps = source with { Solids = solids.Select(s => s.Select(f => f.Material == -1 ? f with { Material = 0 } : f).ToArray()).ToArray() };
+        var bareMetal = FragmentAssetWriter.Build(noNewCaps, materials, default);
+        var bareWood = FragmentAssetWriter.Build(noNewCaps with { CutKind = SliceCutKind.Wood }, materials, default);
+        Check(bareWood.Id != bareMetal.Id && FragmentTopology.Read(XDocument.Parse(Encoding.UTF8.GetString(bareWood.Xml)))!.CutKind == SliceCutKind.Wood,
+            "future wood recut behavior remains part of durable identity even when no newly generated cap is present");
+        bool rejected = false;
+        try { FragmentAssetWriter.Build(source with { CutKind = (SliceCutKind)999 }, materials, default); }
+        catch (InvalidDataException) { rejected = true; }
+        Check(rejected, "unsupported cut kinds cannot publish an ambiguous durable asset");
+        Console.WriteLine("PASS: separate wood/generic cap materials, centered UV preservation in GPU and GLB bytes, v3 durable wood identity, legacy cap UVs and deterministic export");
+
+        string Mesh(string material) => (string)models.Single(m => (string?)m.Element("Material")?.Attribute("Id") == material)
+            .Element("Mesh")!.Attribute("Id")!;
+        void CheckUv(string meshName, IEnumerable<SliceFace> faces)
+        {
+            var expected = faces.SelectMany(f => new[] { f.A, f.B, f.C }).ToArray();
+            var upload = wood.Uploads.Single(u => u.Name == meshName);
+            using var json = JsonDocument.Parse(wood.Glb.AsMemory(20, BitConverter.ToInt32(wood.Glb, 12)));
+            var gltf = json.RootElement;
+            var mesh = gltf.GetProperty("meshes").EnumerateArray().Single(m => m.GetProperty("name").GetString() == meshName);
+            var accessor = gltf.GetProperty("accessors")[mesh.GetProperty("primitives")[0].GetProperty("attributes").GetProperty("TEXCOORD_0").GetInt32()];
+            var view = gltf.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+            int offset = 28 + BitConverter.ToInt32(wood.Glb, 12) + view.GetProperty("byteOffset").GetInt32();
+            Check(accessor.GetProperty("count").GetInt32() == expected.Length && upload.VertexBytes == expected.Length * 32,
+                "both persisted and uploaded cap meshes retain the complete section");
+            for (int i = 0; i < expected.Length; i++)
+                Check(BitConverter.ToSingle(upload.Bytes, i * 32 + 24) == (float)expected[i].U
+                    && BitConverter.ToSingle(upload.Bytes, i * 32 + 28) == (float)expected[i].V
+                    && BitConverter.ToSingle(wood.Glb, offset + i * 8) == (float)expected[i].U
+                    && BitConverter.ToSingle(wood.Glb, offset + i * 8 + 4) == (float)expected[i].V,
+                    "export preserves fresh normalized ring UVs and earlier material-bound cap UVs without renormalizing either");
         }
     }
 

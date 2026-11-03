@@ -10,10 +10,11 @@ internal readonly record struct FragmentFoliageRun(int Triangles, bool DoubleSid
 
 /// <summary>Durable structural solids and canonical open foliage, independent of render batching.</summary>
 internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<string, FragmentSolidRun[]> surfaces,
-    IReadOnlyDictionary<string, FragmentFoliageRun>? foliage = null)
+    IReadOnlyDictionary<string, FragmentFoliageRun>? foliage = null, SliceCutKind cutKind = SliceCutKind.Metal)
 {
     private const string ElementName = "Purr2D2SliceTopology";
     private static readonly ConcurrentDictionary<string, FragmentTopology> Cache = new(StringComparer.Ordinal);
+    internal SliceCutKind CutKind => cutKind;
 
     internal static FragmentTopology? Find(string partId, bool required = false)
     {
@@ -30,7 +31,8 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
 
     internal Capture BeginCapture() => new(solidCount, surfaces, foliage);
 
-    internal XElement ToXml() => new(ElementName, new XAttribute("Version", foliage?.Count > 0 ? 2 : 1), new XAttribute("Solids", solidCount),
+    internal XElement ToXml() => new(ElementName, new XAttribute("Version", cutKind == SliceCutKind.Wood ? 3 : foliage?.Count > 0 ? 2 : 1), new XAttribute("Solids", solidCount),
+        cutKind == SliceCutKind.Wood ? new XAttribute("CutKind", "Wood") : null,
         surfaces.Select(surface => new XElement("Surface", new XAttribute("Mesh", surface.Key),
             surface.Value.Select(run => new XElement("Run", new XAttribute("Solid", run.Solid), new XAttribute("Triangles", run.Triangles))))),
         foliage?.Select(surface => new XElement("Foliage", new XAttribute("Mesh", surface.Key),
@@ -64,7 +66,10 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
         if (document.Root!.Elements(ElementName).Skip(1).Any())
             throw new InvalidDataException("Fragment contains duplicate closed-solid topology.");
         int version = (int?)element.Attribute("Version") ?? 0;
-        if (version is not (1 or 2)) throw new InvalidDataException("Unsupported fragment topology version.");
+        if (version is not (1 or 2 or 3)) throw new InvalidDataException("Unsupported fragment topology version.");
+        var kind = version == 3 && (string?)element.Attribute("CutKind") == "Wood" ? SliceCutKind.Wood : SliceCutKind.Metal;
+        if (version == 3 && kind != SliceCutKind.Wood || version < 3 && element.Attribute("CutKind") != null)
+            throw new InvalidDataException("Fragment topology has an unsupported or missing cut kind.");
         int count = (int?)element.Attribute("Solids") ?? 0;
         if (count < 1 || count > geometry.Solids)
             throw new InvalidDataException($"Fragment topology solid count is outside the geometry budget ({count:N0} / {geometry.Solids:N0}).");
@@ -95,7 +100,7 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
             bool doubleSided = (bool?)surface.Attribute("DoubleSided") ?? false;
             bool keepBackfaceNormals = (bool?)surface.Attribute("KeepBackfaceNormals") ?? false;
             long rendered = (long)triangles * (doubleSided ? 2 : 1);
-            if (version != 2 || mesh.Length == 0 || triangles < 1 || rendered > geometry.FragmentTriangles
+            if (version < 2 || mesh.Length == 0 || triangles < 1 || rendered > geometry.FragmentTriangles
                 || total > geometry.FragmentTriangles - rendered || result.ContainsKey(mesh)
                 || !visual.TryAdd(mesh, new(triangles, doubleSided, keepBackfaceNormals)))
                 throw new InvalidDataException("Fragment foliage topology is outside the geometry budget or duplicates a surface.");
@@ -109,7 +114,7 @@ internal sealed class FragmentTopology(int solidCount, IReadOnlyDictionary<strin
         if (result.Count < 1 || result.Count + visual.Count > SliceResourceLimits.MaximumRenderSurfaces || seen.Count != count
             || !models.SetEquals(result.Keys.Concat(visual.Keys)))
             throw new InvalidDataException("Fragment topology does not cover every visual surface and closed solid.");
-        return new(count, result, visual);
+        return new(count, result, visual, kind);
     }
 
     /// <summary>Partitions the same bounded triangle chunks used by native source capture.</summary>

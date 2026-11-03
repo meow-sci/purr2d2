@@ -66,19 +66,26 @@ internal static class ClutterStockSliceChecks
     private static void Near(double actual, double expected)
     { if (Math.Abs(actual - expected) > Math.Max(1e-7, expected * .00002)) throw new Exception($"Foliage area lost/duplicated: {actual:R} != {expected:R}"); }
 
-    private static SliceInput Restore(CpuFragmentAsset fragment, IReadOnlyDictionary<int, SliceMaterialData> materials)
+    internal static SliceInput Restore(CpuFragmentAsset fragment, IReadOnlyDictionary<int, SliceMaterialData> materials)
     {
         var xml = System.Xml.Linq.XDocument.Parse(System.Text.Encoding.UTF8.GetString(fragment.Xml));
         var topology = FragmentTopology.Read(xml)!;
         var capture = topology.BeginCapture();
-        var ids = materials.ToDictionary(m => m.Value.Id, m => m.Key, StringComparer.Ordinal);
+        var capturedMaterials = materials.ToDictionary(m => m.Key, m => m.Value);
+        var ids = capturedMaterials.ToDictionary(m => m.Value.Id, m => m.Key, StringComparer.Ordinal);
         var models = xml.Root!.Elements("SubPart").SelectMany(p => p.Elements("PartModel"))
             .ToDictionary(m => (string)m.Element("Mesh")!.Attribute("Id")!, m => m);
         foreach (var upload in fragment.Uploads)
         {
             var model = models[upload.Name];
             string id = (string)model.Element("Material")!.Attribute("Id")!;
-            int material = id == FragmentAssetWriter.CapMaterial ? -1 : ids[id];
+            if (!ids.TryGetValue(id, out int material))
+            {
+                if (!FragmentAssetWriter.IsCapMaterial(id)) throw new Exception("Unexpected restored material: " + id);
+                material = capturedMaterials.Keys.DefaultIfEmpty(-1).Max() + 1;
+                ids.Add(id, material);
+                capturedMaterials.Add(material, new(id, false));
+            }
             var faces = new SliceFace[upload.IndexBytes / 12];
             for (int f = 0; f < faces.Length; f++) faces[f] = new(Read(f * 3), Read(f * 3 + 1), Read(f * 3 + 2), material);
             capture.BeginSurface(upload.Name); capture.AppendChunk(faces); capture.EndSurface();
@@ -94,8 +101,8 @@ internal static class ClutterStockSliceChecks
                 return new(new(Value(0), Value(1), Value(2)), new(Value(3), Value(4), Value(5)), Value(6), Value(7));
             }
         }
-        return new(capture.Complete().ToArray(), [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, fragment.MassKg)
-        { GeneratedClosedGeometry = true, Foliage = capture.CompleteFoliage() };
+        return new(capture.Complete().ToArray(), [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], capturedMaterials, fragment.MassKg)
+        { GeneratedClosedGeometry = true, Foliage = capture.CompleteFoliage(), CutKind = topology.CutKind };
     }
     private static void Check(CpuSlice cut, float mass, uint color, uint luminosity)
     {

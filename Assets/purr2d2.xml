@@ -20,6 +20,12 @@
     <AoRoughMetal Path="Assets/Textures/Purr2D2_CutSurface_ORM.png" Category="Default" />
     <Emissive Id="EmptyWhite" />
   </PbrMaterial>
+  <!-- Fresh wood ends use absolute-albedo PBR maps, without metallic cut heat. -->
+  <PbrMaterial Id="Purr2D2_WoodCutSurface">
+    <Diffuse Path="Assets/Textures/Purr2D2_WoodCutSurface_Diffuse.png" Category="Default" />
+    <Normal Path="Assets/Textures/Purr2D2_WoodCutSurface_Normal.png" Category="Default" />
+    <AoRoughMetal Path="Assets/Textures/Purr2D2_WoodCutSurface_ORM.png" Category="Default" />
+  </PbrMaterial>
   <Shader Id="Purr2D2_Glow_Vert" Path="Assets/Shaders/SaberGlow.vert" />
   <Shader Id="Purr2D2_Glow_Frag" Path="Assets/Shaders/SaberGlow.frag" />
   <Shader Id="Purr2D2_Light_Vert" Path="Assets/Shaders/SaberLight.vert" />

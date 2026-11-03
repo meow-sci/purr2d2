@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from check_saber_shaders import NATIVE_WATER_INCLUDES, check_shader_includes, run_shader_checks
 import check_cape_assets
+import check_wood_cut_assets
 
 
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1]
@@ -462,6 +463,11 @@ def _validate_asset_tree(root: Path, label: str) -> list[str]:
     except (OSError, ValueError, KeyError, TypeError, ET.ParseError, check_cape_assets.CheckError, struct.error) as exc:
         issues.append(f"{label}: cape assets: {exc}")
 
+    try:
+        check_wood_cut_assets.check(root)
+    except (OSError, ValueError, KeyError, TypeError, ET.ParseError, check_cape_assets.CheckError, struct.error) as exc:
+        issues.append(f"{label}: wood cut assets: {exc}")
+
     wave_cache: dict[Path, tuple[int, int]] = {}
     for path in asset_files:
         context = f"{label} {path.relative_to(root).as_posix()}"
@@ -696,6 +702,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Cutting/ClosedMeshPreparation.cs",
         source / "src/Cutting/SliceShellBuilder.cs",
         source / "src/Cutting/AssistedSliceGeometry.cs",
+        source / "src/Cutting/TreeSolidPreparation.cs",
+        source / "src/Cutting/WoodCapGeometry.cs",
         source / "src/Slicing/SlicePrincipalFrame.cs",
         source / "src/Slicing/SliceMeshPrecision.cs",
         source / "src/Slicing/SliceColliderGeometry.cs",

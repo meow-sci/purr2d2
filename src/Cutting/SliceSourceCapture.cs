@@ -140,6 +140,7 @@ internal sealed class SliceSourceCapture : IDisposable
             GeneratedClosedGeometry = RuntimeFragmentAssets.IsGeneratedTemplate(_full.Template.Id),
             Geometry = _geometry,
             Contact = contact,
+            CutKind = provenance?.CutKind ?? SliceCutKind.Metal,
             Foliage = topology?.CompleteFoliage() ?? []
         };
         if (!IsCurrent(_full)) throw new InvalidOperationException("Source changed during capture; try again.");

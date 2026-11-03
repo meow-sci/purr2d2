@@ -69,7 +69,7 @@ for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/Fragmen
                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentTopology.cs',
                'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/ClosedMeshPreparation.cs', 'src/Cutting/SliceShellBuilder.cs',
                'src/Cutting/ContactSliceGeometry.cs',
-               'src/Cutting/AssistedSliceGeometry.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs',
+               'src/Cutting/AssistedSliceGeometry.cs', 'src/Cutting/TreeSolidPreparation.cs', 'src/Cutting/WoodCapGeometry.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs',
                'src/Slicing/QuietSliceQuiescence.cs', 'tests/QuietSliceHooksChecks.cs',
                'src/Slicing/SliceColliderGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs',
                'src/Slicing/SliceMeshPrecision.cs', 'src/Core/SaberLimits.cs', 'src/Core/SliceResourceLimits.cs',

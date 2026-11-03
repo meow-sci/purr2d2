@@ -13,6 +13,8 @@ internal sealed record SliceInput(SliceFace[][] Groups, CutPoint[] Axes,
 {
     internal SliceGeometryBudget Geometry { get; init; } = SliceGeometryBudget.Current;
     internal bool GeneratedClosedGeometry { get; init; }
+    internal bool SourceSolidWood { get; init; }
+    internal SliceCutKind CutKind { get; init; }
     internal ContactSlice? Contact { get; init; }
     // Open visual cards never enter closed-solid preparation, mass or collision.
     internal SliceFace[] Foliage { get; init; } = [];
@@ -22,6 +24,7 @@ internal sealed record CpuFragment(SlicePiece Piece, PrincipalFragment Frame, Sl
 {
     // Canonical faces only. The exporter adds any render-only reversed faces.
     internal SliceFace[] Foliage { get; init; } = [];
+    internal SliceCutKind CutKind { get; init; }
 }
 internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments)
 {
@@ -38,12 +41,17 @@ internal static class SliceGeometryWork
     {
         cancel.ThrowIfCancellationRequested();
         var geometry = input.Geometry;
+        if (input.SourceSolidWood && input.GeneratedClosedGeometry)
+            throw new InvalidDataException("Generated closed fragments cannot be reinterpreted as native tree tubes.");
         if (!geometry.AllowsSource(input.Groups.Length, input.Groups.Sum(g => (long)g.Length) + input.Foliage.LongLength))
             throw new InvalidDataException("The source wood and foliage exceed the configured triangle budget.");
-        if (!SliceShellBuilder.TryPrepare(input.Groups, out var source, out string reason, cancel, input.GeneratedClosedGeometry, geometry))
+        bool preparedSource = input.SourceSolidWood
+            ? TreeSolidPreparation.TryPrepare(input.Groups, out var source, out string reason, cancel, geometry)
+            : SliceShellBuilder.TryPrepare(input.Groups, out source, out reason, cancel, input.GeneratedClosedGeometry, geometry);
+        if (!preparedSource)
         {
             if (input.Contact is not null) throw new InvalidDataException("Cannot slice at contact: " + reason);
-            if (input.Foliage.Length != 0) throw new InvalidDataException(reason);
+            if (input.Foliage.Length != 0 || input.CutKind == SliceCutKind.Wood) throw new InvalidDataException(reason);
             if (QuietSubpartBreakup.TryBuild(input, out var authored, out var authoredFailure, cancel))
             { publish(new(authored!.Plane)); return authored with { FacetFallback = reason }; }
             throw new InvalidDataException(reason + " Authored-subpart fallback: " + authoredFailure);
@@ -60,7 +68,7 @@ internal static class SliceGeometryWork
         {
             var candidates = AssistedSliceGeometry.Candidates(source, input.Axes, input.Seed).ToArray();
             // A faceted section has no single plane along which to clip open cards.
-            attemptsToTry = candidates.Take(input.Foliage.Length == 0 ? 3 : 0).Select((plane, i) => (Plane: plane, Faceted: true, Index: i))
+            attemptsToTry = candidates.Take(input.Foliage.Length == 0 && input.CutKind != SliceCutKind.Wood ? 3 : 0).Select((plane, i) => (Plane: plane, Faceted: true, Index: i))
                 .Concat(candidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i)));
         }
 
@@ -96,9 +104,10 @@ internal static class SliceGeometryWork
                 if (output > geometry.OutputTriangles)
                 { failure = "The cut wood and foliage exceed the configured output triangle budget."; continue; }
             }
-            foreach (var piece in result.Pieces)
+            foreach (var rawPiece in result.Pieces)
             {
                 cancel.ThrowIfCancellationRequested();
+                var piece = input.CutKind == SliceCutKind.Wood ? WoodCapGeometry.Map(rawPiece, result.EffectivePlane, cancel) : rawPiece;
                 if (!SlicePrincipalFrame.TryCreate(piece, out var frame, out failure)
                     || !SliceMeshPrecision.TryPrepare(piece, frame.SourceToFragment, out var solids, out var extents, out failure, cancel, geometry)) break;
                 var foliage = FoliageSliceGeometry.Prepare(piece.PositiveSide ? positiveFoliage : negativeFoliage,
@@ -113,12 +122,12 @@ internal static class SliceGeometryWork
                 {
                     foreach (var f in solid) { points.Add(f.A.Position); points.Add(f.B.Position); points.Add(f.C.Position); }
                 }
-                int groups = FragmentAssetWriter.CountRenderSurfaces(visualGroups, input.Materials);
+                int groups = FragmentAssetWriter.CountRenderSurfaces(visualGroups, input.Materials, cutKind: input.CutKind);
                 if (groups > SliceResourceLimits.MaximumRenderSurfaces || points.Count > SliceResourceLimits.MaximumFragmentVertices)
                 { failure = $"This cut exceeds the fragment export budget ({groups:N0} / {SliceResourceLimits.MaximumRenderSurfaces:N0} render surfaces; {points.Count:N0} / {SliceResourceLimits.MaximumFragmentVertices:N0} unique positions)."; break; }
                 float mass = (float)(input.MassKg * piece.Volume / volume);
                 if (!float.IsFinite(mass) || mass <= .0001f) { failure = "Slice fragment mass is invalid."; break; }
-                prepared.Add(new(piece, frame, solids, extents, mass) { Foliage = foliage });
+                prepared.Add(new(piece, frame, solids, extents, mass) { Foliage = foliage, CutKind = input.CutKind });
             }
             if (prepared.Count != result.Pieces.Length) { if (attempt.Faceted) facetFailure = failure; continue; }
             var assets = new CpuFragmentAsset[prepared.Count];
@@ -147,7 +156,7 @@ internal static class SliceGeometryWork
         }
         if (input.Contact is null)
         {
-            if (input.Foliage.Length != 0) throw new InvalidDataException("This tree could not be sliced: " + failure);
+            if (input.Foliage.Length != 0 || input.CutKind == SliceCutKind.Wood) throw new InvalidDataException("This tree could not be sliced: " + failure);
             if (QuietSubpartBreakup.TryBuild(input, out var fallback, out var fallbackFailure, cancel))
             {
                 publish(new(fallback!.Plane));

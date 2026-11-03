@@ -3,6 +3,7 @@ using System.Xml.Serialization;
 using System.Xml.Linq;
 using KSA;
 using Purr2D2.Rendering;
+using Purr2D2.Cutting;
 
 // Runs against the real KSA types, without creating a renderer, registry or physics world.
 internal static class FragmentTemplateChecks
@@ -19,6 +20,7 @@ internal static class FragmentTemplateChecks
         SwimmingAnimationHostChecks.Run();
         SaberWaterHostChecks.Run();
         CapEmissionHostChecks.Run();
+        CheckWoodMaterial();
         var xml = Encoding.UTF8.GetBytes("""
             <Assets>
               <MeshAtlas Id="fragment_atlas" Path="fixture.glb"/>
@@ -114,5 +116,26 @@ internal static class FragmentTemplateChecks
             throw new Exception(message);
         }
         static byte[] Encode(XDocument input) => Encoding.UTF8.GetBytes(input.ToString());
+    }
+
+    private static void CheckWoodMaterial()
+    {
+        using var stream = File.OpenRead("Assets/purr2d2.xml");
+        var assets = (AssetBundle)new XmlSerializer(typeof(AssetBundle)).Deserialize(stream)!;
+        var wood = assets.Assets.OfType<PbrMaterialReference>().Single(m => m.Id == FragmentAssetWriter.WoodCapMaterial);
+        var metal = assets.Assets.OfType<PbrMaterialReference>().Single(m => m.Id == FragmentAssetWriter.CapMaterial);
+        if (wood.DiffuseReference?.LocalPath != "Assets/Textures/Purr2D2_WoodCutSurface_Diffuse.png"
+            || wood.NormalReference?.LocalPath != "Assets/Textures/Purr2D2_WoodCutSurface_Normal.png"
+            || wood.PBRMap?.LocalPath != "Assets/Textures/Purr2D2_WoodCutSurface_ORM.png"
+            || wood.EmissiveMap != null || wood.AlphaMap != null || metal.EmissiveMap?.Id != "EmptyWhite")
+            throw new Exception("Native asset XML lost opaque nonemissive wood maps or changed the generic metal material.");
+        var (fixture, materials) = FragmentAssetChecks.Fixture();
+        var generated = FragmentAssetWriter.Build(fixture with { CutKind = SliceCutKind.Wood }, materials, default);
+        var decoded = FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), generated.Xml, generated.Id, generated.Uploads.Length);
+        var woodModel = decoded.Assets.OfType<PartTemplate>().SelectMany(p => p.Components).OfType<PartModelModule.Template>()
+            .Single(p => p.Material?.Id == FragmentAssetWriter.WoodCapMaterial);
+        if (woodModel.Mesh?.Id.EndsWith("_cap", StringComparison.Ordinal) != true || !woodModel.ShadowCaster)
+            throw new Exception("Native generated wood cap XML lost its real opaque shadow-casting model.");
+        Console.WriteLine("PASS: actual native XML loader retains separate opaque nonemissive wood texture maps, original generic metal emission and generated solid wood cap model");
     }
 }

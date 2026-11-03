@@ -18,11 +18,13 @@ internal sealed record CpuFragmentAsset(string Id, byte[] Glb, byte[] Xml, CpuMe
 /// <summary>Pure worker-side export. No game objects, native registry, renderer or shared shape pool.</summary>
 internal static class FragmentAssetWriter
 {
-    internal const string Prefix = "Purr2D2_Fragment_", CapMaterial = "Purr2D2_CutSurface";
+    internal const string Prefix = "Purr2D2_Fragment_", CapMaterial = "Purr2D2_CutSurface", WoodCapMaterial = "Purr2D2_WoodCutSurface";
     private static readonly SliceMaterialData CutSurface = new(CapMaterial, false);
+    private static readonly SliceMaterialData WoodCutSurface = new(WoodCapMaterial, false);
+    internal static bool IsCapMaterial(string? id) => id is CapMaterial or WoodCapMaterial;
     private readonly record struct SurfaceGroup(SliceMaterialData Material, SliceFace[] Faces, FragmentSolidRun[] SolidRuns)
     {
-        internal bool Cap => Material.Id == CapMaterial;
+        internal bool Cap => IsCapMaterial(Material.Id);
         internal bool Foliage => Material.Foliage;
         internal SliceFace[] RenderFaces => !Foliage || !Material.DoubleSided ? Faces
             : Faces.Concat(Faces.Select(Backface)).ToArray();
@@ -32,12 +34,13 @@ internal static class FragmentAssetWriter
     }
 
     internal static int CountRenderSurfaces(IEnumerable<SliceFace[]> solids, IReadOnlyDictionary<int, SliceMaterialData> materials,
-        IEnumerable<SliceFace>? foliage = null)
-        => solids.SelectMany(s => s).Concat(foliage ?? []).Select(f => ResolveMaterial(f.Material, materials)).Distinct().Count();
+        IEnumerable<SliceFace>? foliage = null, SliceCutKind cutKind = SliceCutKind.Metal)
+        => solids.SelectMany(s => s).Concat(foliage ?? []).Select(f => ResolveMaterial(f.Material, materials, cutKind)).Distinct().Count();
 
-    private static SliceMaterialData ResolveMaterial(int index, IReadOnlyDictionary<int, SliceMaterialData> materials)
+    private static SliceMaterialData ResolveMaterial(int index, IReadOnlyDictionary<int, SliceMaterialData> materials,
+        SliceCutKind cutKind = SliceCutKind.Metal)
     {
-        if (index == -1) return CutSurface;
+        if (index == -1) return cutKind == SliceCutKind.Wood ? WoodCutSurface : CutSurface;
         if (!materials.TryGetValue(index, out var material) || string.IsNullOrEmpty(material.Id))
             throw new InvalidDataException("A source surface has no durable material ID.");
         return material;
@@ -47,6 +50,8 @@ internal static class FragmentAssetWriter
         SliceGeometryBudget? geometry = null)
     {
         geometry ??= SliceGeometryBudget.Current;
+        if (fragment.CutKind is not (SliceCutKind.Metal or SliceCutKind.Wood))
+            throw new InvalidDataException("Fragment cut-surface kind is unsupported.");
         long triangles = fragment.Solids.Sum(s => (long)s.Length) + fragment.Foliage.Length;
         if (!geometry.AllowsFragment(fragment.Solids.Length, triangles))
             throw new InvalidDataException($"Fragment exceeds the export geometry budget ({geometry.FragmentUsage(fragment.Solids.Length, triangles)}). {SliceGeometryBudget.SettingsHint}");
@@ -56,13 +61,13 @@ internal static class FragmentAssetWriter
         var transformed = fragment.Solids.SelectMany(s => s).ToArray();
         var surfaces = fragment.Solids.SelectMany((solid, i) => solid.Select(face => (Solid: i, Face: face)))
             .Concat(fragment.Foliage.Select(face => (Solid: -1, Face: face)))
-            .GroupBy(f => ResolveMaterial(f.Face.Material, materials))
+            .GroupBy(f => ResolveMaterial(f.Face.Material, materials, fragment.CutKind))
             .OrderBy(g => g.Key.Id, StringComparer.Ordinal).ThenBy(g => g.Key.Glass)
             .Select(g => new SurfaceGroup(g.Key, g.Select(f => f.Face).ToArray(),
                 g.Key.Foliage ? [] : CountSolidRuns(g.Select(f => f.Solid)))).ToArray();
         if (surfaces.Any(s => s.Foliage && (s.Cap || s.Material.Glass))
-            || fragment.Foliage.Any(f => !ResolveMaterial(f.Material, materials).Foliage)
-            || fragment.Solids.SelectMany(s => s).Any(f => ResolveMaterial(f.Material, materials).Foliage))
+            || fragment.Foliage.Any(f => !ResolveMaterial(f.Material, materials, fragment.CutKind).Foliage)
+            || fragment.Solids.SelectMany(s => s).Any(f => ResolveMaterial(f.Material, materials, fragment.CutKind).Foliage))
             throw new InvalidDataException("Fragment closed solids and visual foliage have mixed surface provenance.");
         if (surfaces.Length > SliceResourceLimits.MaximumRenderSurfaces)
             throw new InvalidDataException($"Fragment surface count exceeds the export budget ({surfaces.Length:N0} / {SliceResourceLimits.MaximumRenderSurfaces:N0}).");
@@ -74,7 +79,7 @@ internal static class FragmentAssetWriter
         var picker = fragment.Foliage.Length == 0 ? transformed : transformed.Concat(fragment.Foliage).ToArray();
         var inertia = fragment.Frame.PrincipalSpecificInertia;
         string id;
-        using (var hash = new IdentityHash(cancel, fragment.Foliage.Length != 0))
+        using (var hash = new IdentityHash(cancel, fragment.Foliage.Length != 0, fragment.CutKind))
         {
             hash.Int32(surfaces.Length);
             foreach (var surface in surfaces)
@@ -139,7 +144,7 @@ internal static class FragmentAssetWriter
             var normal = double3.TransformNormal(new(f.A.Normal.X, f.A.Normal.Y, f.A.Normal.Z), fragment.Frame.SourceToFragment);
             sparks.Add(new(point, normal));
         }
-        var xml = AssetXml(id, "Generated/Slices/" + id + ".glb", groups, surfaces, fragment.MassKg, inertia);
+        var xml = AssetXml(id, "Generated/Slices/" + id + ".glb", groups, surfaces, fragment.MassKg, inertia, fragment.CutKind);
         // Cancellation between expensive serialization stages bounds abandoned work.
         cancel.ThrowIfCancellationRequested();
         var glb = FragmentGlbWriter.Write(groups, geometry);
@@ -148,7 +153,7 @@ internal static class FragmentAssetWriter
     }
 
     private static XDocument AssetXml(string id, string glbPath, IReadOnlyList<FragmentGlbWriter.Group> groups,
-        IReadOnlyList<SurfaceGroup> surfaces, float mass, double3 inertia)
+        IReadOnlyList<SurfaceGroup> surfaces, float mass, double3 inertia, SliceCutKind cutKind)
     {
         var part = new XElement("Part", new XAttribute("Id", id), new XAttribute("DisplayName", "Sliced fragment"));
         string subpartId = id + "_visual";
@@ -184,7 +189,7 @@ internal static class FragmentAssetWriter
                 .ToDictionary(s => s.Name, s => s.SolidRuns, StringComparer.Ordinal),
             surfaces.Select((s, i) => (Name: groups[i].Name, Surface: s)).Where(s => s.Surface.Foliage)
                 .ToDictionary(s => s.Name, s => new FragmentFoliageRun(s.Surface.Faces.Length,
-                    s.Surface.Material.DoubleSided, s.Surface.Material.KeepBackfaceNormals), StringComparer.Ordinal));
+                    s.Surface.Material.DoubleSided, s.Surface.Material.KeepBackfaceNormals), StringComparer.Ordinal), cutKind);
         return new XDocument(new XElement("Assets", new XElement("MeshAtlas", new XAttribute("Id", id + "_atlas"),
             new XAttribute("Path", glbPath)), subpart, part, topology.ToXml()));
     }
@@ -215,12 +220,13 @@ internal static class FragmentAssetWriter
         private readonly CancellationToken _cancel;
         private int _used;
 
-        internal IdentityHash(CancellationToken cancel, bool foliage = false)
+        internal IdentityHash(CancellationToken cancel, bool foliage = false, SliceCutKind cutKind = SliceCutKind.Metal)
         {
             _cancel = cancel;
             cancel.ThrowIfCancellationRequested();
             _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            Text(foliage ? "Purr2D2|wood-solids-foliage-v6|durable-clutter-tint|canonical-le" : Version);
+            Text(cutKind == SliceCutKind.Wood ? "Purr2D2|solid-wood-rings-v7|durable-cut-kind|canonical-le"
+                : foliage ? "Purr2D2|wood-solids-foliage-v6|durable-clutter-tint|canonical-le" : Version);
         }
 
         internal void Int32(int value)

@@ -80,7 +80,8 @@ internal sealed class ClutterSliceSourceCapture : IDisposable
         if (groups.Count == 0 || !geometry.AllowsSource(groups.Count, (long)total + foliage.Count))
             throw new InvalidDataException("The ground object exceeds the configured closed-geometry budget.");
         Input = new(groups.ToArray(), [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, _source.MassKg)
-        { Geometry = geometry, Contact = _contact, Foliage = foliage.ToArray() };
+        { Geometry = geometry, Contact = _contact, Foliage = foliage.ToArray(),
+            SourceSolidWood = _source.Tree, CutKind = _source.Tree ? SliceCutKind.Wood : SliceCutKind.Metal };
     }
 
     private static void CopyChunk(MeshAsset primitive, int start, List<SliceFace> faces, double scale, int material)

@@ -90,6 +90,7 @@ if __name__ == '__main__':
     required = [DEFAULT_SOURCE / p for p in (
         'src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/ClosedMeshPreparation.cs',
         'src/Cutting/ContactSliceGeometry.cs', 'src/Cutting/ClutterSliceGeometry.cs',
+        'src/Cutting/TreeSolidPreparation.cs', 'src/Cutting/WoodCapGeometry.cs',
         'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentAssetWriter.cs', 'src/Rendering/FragmentTopology.cs',
         'src/Rendering/ClutterSurfaceTint.cs',
         'src/Rendering/ClutterFoliageSurface.cs',
@@ -99,4 +100,9 @@ if __name__ == '__main__':
     code, log = _run_managed_project(DEFAULT_SOURCE, 'ClutterStockSliceChecks', required,
         'internal static class Program { static void Main() => ClutterStockSliceChecks.Run(' + json.dumps(str(output)) + '); }')
     print(log)
+    if code == 0:
+        code, log = _run_managed_project(DEFAULT_SOURCE, 'TreeEndChecks',
+            [*required, DEFAULT_SOURCE / 'tests/TreeEndChecks.cs'],
+            'internal static class Program { static void Main() => TreeEndChecks.Run(' + json.dumps(str(output)) + '); }')
+        print(log)
     sys.exit(code)

@@ -9,6 +9,7 @@ internal static class ClutterSliceGeometry
 
     internal static CpuSlice Calculate(SliceInput input, bool tree, CancellationToken cancel, Action<SlicePlan> publish)
     {
+        if (tree) input = input with { SourceSolidWood = !input.GeneratedClosedGeometry, CutKind = SliceCutKind.Wood };
         try { return SliceGeometryWork.Calculate(input, cancel, publish); }
         catch (InvalidDataException) when (!tree && input.Contact is not null)
         {

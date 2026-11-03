@@ -14,6 +14,7 @@ internal readonly record struct SliceVertex(CutPoint Position, CutPoint Normal, 
 }
 internal readonly record struct SliceFace(SliceVertex A, SliceVertex B, SliceVertex C, int Material);
 internal readonly record struct SlicePlane(CutPoint Normal, double Offset);
+internal enum SliceCutKind { Metal, Wood }
 internal readonly record struct SliceInertia(double XX, double YY, double ZZ, double XY, double XZ, double YZ);
 internal sealed record SlicePiece(SliceFace[] Faces, double Volume, CutPoint Centroid, SliceInertia Inertia, bool PositiveSide)
 {
