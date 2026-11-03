@@ -19,13 +19,14 @@ internal sealed partial class PartSliceTargeting
         SlicedParts = 0; _wielder = null; BudgetLimited = false; Status = "Ready";
     }
 
-    private bool CanCut(Part full, out string reason)
+    private bool CanCut(Part full, out string reason) => CanCut(full, _wielder, out reason);
+    private static bool CanCut(Part full, KittenEva? wielder, out string reason)
     {
         var owner = full.Tree?.OwningVehicle;
         reason = "The source part is unavailable.";
         if (owner == null || owner.IsDisposed || owner is KittenEva) return false;
         if (!owner.HasPhysicsBubble) reason = "Slicing requires a physics bubble";
-        else if (!ReferenceEquals(owner.Parent, _wielder?.Parent)) reason = "Slicing requires the same parent body";
+        else if (!ReferenceEquals(owner.Parent, wielder?.Parent)) reason = "Slicing requires the same parent body";
         else if (owner.BubbleVehicleCount >= NativeSlicePhysics.VehicleLimit)
             reason = $"Physics vehicle limit reached ({NativeSlicePhysics.VehicleLimit} local vehicles). Raise the limit or remove generated debris in Settings.";
         else if (full.IsAttachedInternal) reason = "Internal parts cannot be selected independently";

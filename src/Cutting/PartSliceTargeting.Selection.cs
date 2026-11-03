@@ -178,12 +178,19 @@ internal sealed partial class PartSliceTargeting
     // Accepted strokes may finish after moving out of reach, but never on stale geometry/ownership.
     internal bool CheckPendingSliceTarget(KittenEva wielder, SliceTarget target, out string reason)
     {
+        if (_wielder != wielder) { reason = "The selected part is no longer available."; return false; }
+        return CheckQueuedSliceTarget(wielder, target, out reason);
+    }
+
+    // Batch jobs validate their own owner rather than consulting mutable picker state.
+    internal static bool CheckQueuedSliceTarget(KittenEva wielder, SliceTarget target, out string reason)
+    {
         reason = "The selected part is no longer available.";
-        if (_wielder != wielder || target.Vehicle.IsDisposed || target.Part.Tree?.OwningVehicle != target.Vehicle
+        if (target.Vehicle.IsDisposed || target.Part.Tree?.OwningVehicle != target.Vehicle
             || !target.Part.MatrixAsmb2VehicleAsmb.Equals(target.PartTransform)
             || Program.GetMainCamera() is not { } camera || Program.EditorFlag
             || !ToPoint(target.HitAssembly.Transform(target.Vehicle.GetMatrixAsmb2Ego(camera))).Finite) return false;
-        return CanCut(target.Part, out reason);
+        return CanCut(target.Part, wielder, out reason);
     }
 
     internal SliceAttempt CommitAssistedSlice(KittenEva wielder, SliceTarget target, double3 baseBody, double reach, SlicePlane plane)

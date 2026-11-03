@@ -1,3 +1,7 @@
 <Solution>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/cached-ribbon/">
+    <Project Path="tests/cached-ribbon/CachedRibbonChecks.csproj" />
+  </Folder>
   <Project Path="Purr2D2.csproj" />
 </Solution>

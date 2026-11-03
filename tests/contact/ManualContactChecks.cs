@@ -3,18 +3,33 @@ using KSA;
 using Purr2D2.Core;
 using Purr2D2.Cutting;
 using Purr2D2.Rendering;
+using Purr2D2.Slicing.Detection;
 
 internal static class ManualContactChecks
 {
     internal static void Run()
     {
-        Geometry(); Gestures();
+        Geometry(); Gestures(); PassiveStrokeEpochs(); CachedProbe(); MultiTargetProbe(); FrozenDrain();
         foreach (bool debug in new[] { false, true })
         {
             DebugTimings.Enabled = debug;
             try { Probe(); }
             finally { DebugTimings.Enabled = false; }
         }
+    }
+    private static void PassiveStrokeEpochs()
+    {
+        var state = new SliceActivationPolicy();
+        Check(state.Update(false, 0, true, true), "passive eligibility begins an epoch");
+        ulong first = state.Epoch;
+        Check(!state.ObservePassiveMotion(0, true) && !state.ObservePassiveMotion(.2, true)
+            && !state.ObservePassiveMotion(.44, false) && state.Epoch == first,
+            "continuous passive movement and quiet alone retain the stroke");
+        Check(state.ObservePassiveMotion(.46, true) && state.Epoch == first + 1,
+            "movement after 250 ms of quiet starts a fresh passive stroke");
+        ulong second = state.Epoch;
+        Check(state.Update(true, 3, true, true) && state.Epoch == second + 1
+            && !state.ObservePassiveMotion(1, true), "manual authorization starts its own epoch");
     }
     private static void Geometry()
     {
@@ -75,6 +90,159 @@ internal static class ManualContactChecks
     }
     private static ManualContactProbe.Sample Pose(double x, double time, float drag = 0, ulong gesture = 1) => new(gesture, time, new(x, -1, 0), new(x, 1, 0), new(drag, 0));
     private static double3[] TriangleAt(double x) => [new(x, -.2, -.2), new(x, .2, -.2), new(x, 0, .2)];
+    private static void CachedProbe()
+    {
+        var scene = Scene();
+        var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity, CacheableMesh = _ => true };
+        try
+        {
+            probe.Advance(scene.Owner, Pose(-.1, 0), out _);
+            Check(probe.Advance(scene.Owner, Pose(.1, .01, .1f), out _), "cold cached mode uses confirmed triangle scanner");
+            int sequence = 2;
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (probe.CacheHits == 0 && DateTime.UtcNow < deadline)
+            {
+                double x = sequence % 2 == 0 ? -.1 : .1;
+                probe.Advance(scene.Owner, Pose(x, sequence * .01, sequence * .1f), out _);
+                sequence++; Thread.Yield();
+            }
+            Check(probe.CacheFallbacks > 0 && probe.CacheHits > 0, "future frozen sweeps use the completed copied BVH");
+            int before = probe.CacheFallbacks;
+            probe.InvalidateMeshGeometry(scene.Mesh);
+            probe.Advance(scene.Owner, Pose(sequence % 2 == 0 ? -.1 : .1, sequence * .01, sequence * .1f), out _);
+            Check(probe.CacheFallbacks > before, "explicit mesh revision invalidates the cached query");
+        }
+        finally { probe.DisposeCache(); }
+        scene = Scene();
+        scene.Mesh.PositionsCompare = [[new(0, -2, -1), new(0, 2, -1), new(0, 0, 3)]];
+        probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity, CacheableMesh = _ => false };
+        var contacts = new List<ManualContactProbe.Contact>();
+        try
+        {
+            var before = new ManualContactProbe.Sample(1, 0, new(-1, -1, 0), new(-1, 1, 0), default)
+                { NominalLength = 2, VisualScale = 3, VisualAxes = new(3) };
+            var after = new ManualContactProbe.Sample(1, .01, new(1, -1, 0), new(1, 1, 1), new(.1f, 0))
+                { NominalLength = 2, VisualScale = 3, VisualAxes = new(3) };
+            var sweep = new BladeSweep(new(-1, -1, 0), new(-1, 1, 0), new(1, -1, 0), new(1, 1, 1),
+                BladeSweep.ApproximationMeters / Math.Sqrt(3));
+            Check(sweep.Subdivisions > BladeSweep.MaximumSubdivisions, "cold-path fixture requires ribbon bisection");
+            probe.AdvanceMany(scene.Owner, before, contacts);
+            int count = probe.AdvanceMany(scene.Owner, after, contacts);
+            Check(count == 1 && Math.Abs(contacts[0].HitTime01 - .5) < .01,
+                "cold multi-target scan bisects a twisted ribbon and restores original hit time");
+        }
+        finally { probe.DisposeCache(); }
+
+    }
+    private static void MultiTargetProbe()
+    {
+        var scene = Scene();
+        scene.Mesh.PositionsCompare = [TriangleAt(-.05)];
+        var other = new Part { Tree = scene.Vehicle.Parts };
+        var otherMesh = new MeshReference { PositionsCompare = [TriangleAt(.05)], BoundingSphereRadius = 10 };
+        other.Modules.Add(new MeshViewModule(otherMesh)); scene.Vehicle.Parts.Parts.Add(other);
+        var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity, CacheableMesh = _ => true };
+        var contacts = new List<ManualContactProbe.Contact>();
+        try
+        {
+            Check(probe.AdvanceMany(scene.Owner, Pose(-.1, 0), contacts) == 0,
+                "multi-target detector primes target-relative historical samples");
+            Check(probe.AdvanceMany(scene.Owner, Pose(.1, .01, .1f), contacts) == 2
+                && contacts[0].Part == scene.Part && contacts[1].Part == other,
+                "multi-target detector returns two ordered structural targets in one sweep");
+            Check(Math.Abs(contacts[0].HitTime01 - .25) < 1e-8 && Math.Abs(contacts[1].HitTime01 - .75) < 1e-8
+                && contacts[0].PreviousBaseLocal.X == -.1 && contacts[0].CurrentBaseLocal.X == .1,
+                "multi-target evidence preserves frozen endpoints and per-target hit time");
+            var observed = contacts[0];
+            Check(probe.IsEvidenceCurrent(observed), "accepted evidence records its observed mesh identity and revision");
+            Check(probe.TestedTriangles <= ManualContactProbe.TriangleBudget && probe.FrameReads <= ManualContactProbe.FrameBudget
+                && probe.DiscoveryUnits <= ManualContactProbe.DiscoveryBudget && probe.PrimitiveReads <= ManualContactProbe.PrimitiveBudget,
+                "multi-target traversal respects shared per-update operation limits");
+            int sequence = 2; var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (probe.CacheHits == 0 && DateTime.UtcNow < deadline)
+            {
+                probe.AdvanceMany(scene.Owner, Pose(sequence % 2 == 0 ? -.1 : .1, sequence * .01, sequence * .1f), contacts);
+                sequence++; Thread.Yield();
+            }
+            Check(probe.CacheHits > 0, "multi-target probe uses the completed copied BVH on later intervals");
+            scene.Mesh.PositionsCompare = [TriangleAt(-.05)];
+            Check(!probe.IsEvidenceCurrent(observed), "replaced source arrays invalidate previously confirmed evidence");
+            scene.Mesh.PositionsCompare = observed.HitPrimitives;
+            Check(probe.IsEvidenceCurrent(observed), "restoring the same unmodified source preserves observed identity");
+            probe.InvalidateMeshGeometry(scene.Mesh);
+            Check(!probe.IsEvidenceCurrent(observed), "explicit in-place mesh revision invalidates confirmed evidence");
+        }
+        finally { probe.DisposeCache(); }
+        scene = Scene(5000);
+        other = new Part { Tree = scene.Vehicle.Parts };
+        otherMesh = new MeshReference { PositionsCompare = [scene.Mesh.PositionsCompare![0]], BoundingSphereRadius = 10 };
+        other.Modules.Add(new MeshViewModule(otherMesh)); scene.Vehicle.Parts.Parts.Add(other);
+        probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity, CacheableMesh = _ => true };
+        contacts.Clear(); var found = new HashSet<Part>();
+        try
+        {
+            probe.AdvanceMany(scene.Owner, Pose(-.1, 0), contacts);
+            for (int step = 1; step <= 7 && found.Count < 2; step++)
+            {
+                probe.AdvanceMany(scene.Owner, Pose(.1, step * .01, .1f), contacts);
+                foreach (var hit in contacts) found.Add(hit.Part);
+                Check(probe.TestedTriangles <= ManualContactProbe.TriangleBudget,
+                    "resumed multi-target cursors share one triangle budget");
+            }
+            Check(found.SetEquals([scene.Part, other]),
+                "independent dense target cursors resume and both publish their frozen contacts");
+        }
+        finally { probe.DisposeCache(); }
+    }
+    private static void FrozenDrain()
+    {
+        foreach (bool cached in new[] { false, true })
+        {
+            var scene = Scene(5000);
+            var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity, CacheableMesh = _ => false };
+            var hits = new List<ManualContactProbe.Contact>();
+            try
+            {
+                if (cached)
+                { probe.AdvanceMany(scene.Owner, Pose(-.1, 0, gesture: 42), hits); probe.AdvanceMany(scene.Owner, Pose(.1, .01, .1f, 42), hits); }
+                else
+                { probe.Advance(scene.Owner, Pose(-.1, 0, gesture: 42), out _); probe.Advance(scene.Owner, Pose(.1, .01, .1f, 42), out _); }
+                Check(probe.Pending && hits.Count == 0, "manual dense query remains pending at release");
+                scene.Vehicle.PositionEgo = new(100, -50, 20);
+                scene.Vehicle.Asmb2Ego = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .4);
+                Check(probe.DrainFrozen(scene.Owner, .02, hits) == 1 && hits[0].Part == scene.Part
+                    && hits[0].TriggerEpoch == 42 && hits[0].PreviousBaseLocal.X == -.1
+                    && hits[0].CurrentBaseLocal.X == .1 && probe.DiscoveryUnits == 0 && probe.FrameReads == 0,
+                    "released manual query completes only its originally authorized frozen interval");
+                scene.Vehicle.PositionEgo = default; scene.Vehicle.Asmb2Ego = doubleQuat.Identity;
+                Check(probe.DrainFrozen(scene.Owner, .03, hits) == 0 && !probe.Pending,
+                    "draining an empty probe never discovers or samples new contacts");
+                if (cached)
+                { probe.Reset(); probe.AdvanceMany(scene.Owner, Pose(-.1, .1, gesture: 43), hits); probe.AdvanceMany(scene.Owner, Pose(.1, .11, .1f, 43), hits); }
+                else
+                { probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, .1, gesture: 43), out _); probe.Advance(scene.Owner, Pose(.1, .11, .1f, 43), out _); }
+                Check(probe.Pending && probe.DrainFrozen(scene.Owner, .27, hits) == 0 && !probe.Pending,
+                    "released manual query expires rather than querying an old interval");
+                probe.Reset();
+                if (cached)
+                { probe.AdvanceMany(scene.Owner, Pose(-.1, .28, gesture: 45), hits); probe.AdvanceMany(scene.Owner, Pose(.1, .29, .1f, 45), hits); }
+                else
+                { probe.Advance(scene.Owner, Pose(-.1, .28, gesture: 45), out _); probe.Advance(scene.Owner, Pose(.1, .29, .1f, 45), out _); }
+                scene.Part.PositionParentAsmb = new(.01, 0, 0);
+                Check(probe.Pending && probe.DrainFrozen(scene.Owner, .30, hits) == 0 && !probe.Pending,
+                    "released manual query rejects a changed source transform");
+                scene.Part.PositionParentAsmb = default;
+                probe.Reset();
+                var passive0 = Pose(-.1, .3, gesture: 44) with { PassiveContact = true };
+                var passive1 = Pose(.1, .31, .1f, 44) with { PassiveContact = true };
+                if (cached) { probe.AdvanceMany(scene.Owner, passive0, hits); probe.AdvanceMany(scene.Owner, passive1, hits); }
+                else { probe.Advance(scene.Owner, passive0, out _); probe.Advance(scene.Owner, passive1, out _); }
+                Check(probe.Pending && probe.DrainFrozen(scene.Owner, .32, hits) == 0 && !probe.Pending,
+                    "passive provisional work is discarded by the manual-release drain");
+            }
+            finally { probe.DisposeCache(); }
+        }
+    }
     private static void PlaceTriangle(double3[] vertices, int triangle, double x) => Array.Copy(TriangleAt(x), 0, vertices, triangle * 3, 3);
     private static double LayeredContactX(bool reverse, ManualContactProbe probe, double time)
     {

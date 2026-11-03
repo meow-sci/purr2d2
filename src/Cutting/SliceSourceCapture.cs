@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Brutal.Numerics;
 using Brutal.Render.Mesh;
 using KSA;
 using Purr2D2.Core;
 using Purr2D2.Rendering;
 using Purr2D2.Slicing;
+using Purr2D2.Slicing.Planes;
 using RenderCore;
 
 namespace Purr2D2.Cutting;
@@ -14,22 +16,60 @@ internal sealed class SliceSourceCapture : IDisposable
 {
     private static int _cutSequence = Environment.TickCount;
     private readonly uint _seed = unchecked((uint)Interlocked.Increment(ref _cutSequence));
-    private readonly SliceGeometryBudget _geometry = SliceGeometryBudget.Current;
+    private readonly SliceGeometryBudget _geometry;
     private sealed record Node(Part Part, double4x4 Transform, MeshReference?[] Meshes, SliceMaterialData[] Materials);
     private readonly Part _full;
     private readonly Vehicle _vehicle;
     private readonly List<Node> _nodes = new();
     private readonly IEnumerator<int> _steps;
+    private readonly IEnumerator<int> _estimateSteps;
+    private long _triangles, _metadataBytes;
+    internal long EstimatedBytes { get; private set; }
+    internal bool EstimateDone { get; private set; }
+    internal long RetainedBytes => Input == null ? 0 : checked((Input.Groups.Sum(g => (long)g.Length) + Input.Foliage.LongLength)
+        * Unsafe.SizeOf<SliceFace>() + _metadataBytes);
     private readonly float _mass;
     internal SliceInput? Input { get; private set; }
     internal bool Done { get; private set; }
-    internal SliceSourceCapture(Part struck, ContactSlice? contact = null)
+    internal SliceSourceCapture(Part struck, ContactSlice? contact = null, SlicePlaneRequest? planeRequest = null,
+        SliceGeometryBudget? geometry = null)
     {
+        _geometry = geometry ?? SliceGeometryBudget.Current;
         _full = struck.StructuralPart;
         _vehicle = _full.Tree?.OwningVehicle ?? throw new InvalidOperationException("Source vessel is unavailable.");
         if (!NativeSlicePhysics.ValidateSource(_full, out var reason)) throw new InvalidDataException(reason);
         _mass = NativeSlicePhysics.SourceMass(_full);
-        _steps = Copy(contact).GetEnumerator();
+        _steps = Copy(contact, planeRequest).GetEnumerator();
+        _estimateSteps = Estimate().GetEnumerator();
+    }
+    internal void AdvanceEstimate()
+    {
+        if (EstimateDone) return;
+        long start = Stopwatch.GetTimestamp(); int units = 0;
+        do { if (!_estimateSteps.MoveNext()) { EstimateDone = true; _estimateSteps.Dispose(); return; } }
+        while (++units < 8 && Stopwatch.GetElapsedTime(start).TotalMilliseconds < 1.5);
+    }
+    private IEnumerable<int> Estimate()
+    {
+        foreach (var part in new[] { _full }.Concat(_full.SubParts.ToArray()))
+        {
+            if (_vehicle.IsDisposed || part.FullPart.Tree?.OwningVehicle != _vehicle)
+                throw new InvalidDataException("Source changed during estimation.");
+            foreach (var model in Models(part))
+            {
+                var mesh = model.Mesh?.Get();
+                if (mesh?.HostPrimitives == null) throw new InvalidDataException("Source mesh is unavailable.");
+                foreach (var primitive in mesh.HostPrimitives)
+                {
+                    if (primitive.IndexBuffer == null || primitive.IndexBuffer.Stride != 4 || primitive.IndexBuffer.Count % 3 != 0)
+                        throw new InvalidDataException("Source mesh has no indexed triangles.");
+                    checked { _triangles += primitive.IndexBuffer.Count / 3; _metadataBytes += 256; }
+                    yield return 0;
+                }
+            }
+            yield return 0;
+        }
+        EstimatedBytes = checked(Math.Max(4L * 1024 * 1024, 16L * _triangles * Unsafe.SizeOf<SliceFace>()) + _metadataBytes);
     }
     internal void Advance()
     {
@@ -62,7 +102,7 @@ internal sealed class SliceSourceCapture : IDisposable
         }
         return Math.Abs(NativeSlicePhysics.SourceMass(_full) - _mass) <= Math.Max(.001, _mass * 2e-5);
     }
-    private IEnumerable<int> Copy(ContactSlice? contact)
+    private IEnumerable<int> Copy(ContactSlice? contact, SlicePlaneRequest? planeRequest)
     {
         var groups = new List<SliceFace[]>();
         var materials = new Dictionary<int, SliceMaterialData>();
@@ -140,18 +180,24 @@ internal sealed class SliceSourceCapture : IDisposable
             GeneratedClosedGeometry = RuntimeFragmentAssets.IsGeneratedTemplate(_full.Template.Id),
             Geometry = _geometry,
             Contact = contact,
+            PlaneRequest = planeRequest,
             CutKind = provenance?.CutKind ?? SliceCutKind.Metal,
             Foliage = topology?.CompleteFoliage() ?? []
         };
         if (!IsCurrent(_full)) throw new InvalidOperationException("Source changed during capture; try again.");
     }
-    private static List<(MeshReference? Mesh, PbrMaterialReference? Material, bool Glass)> Models(Part part)
+    internal static List<(MeshReference? Mesh, PbrMaterialReference? Material, bool Glass)> Models(Part part)
     {
-        var models = new List<(MeshReference?, PbrMaterialReference?, bool)>();
-        foreach (var model in part.Modules.Get<PartModelModule>()) models.Add((model.PartModel.Template.Mesh, model.PartModel.Template.Material, false));
-        foreach (var model in part.Modules.Get<PartModelDynamicModule>()) models.Add((model.PartModelDynamic.Template.Mesh, model.PartModelDynamic.Template.Material, false));
-        foreach (var model in part.Modules.Get<PartModelGlassModule>()) models.Add((model.PartModelGlass.Template.Mesh, model.PartModelGlass.Template.Material, true));
-        return models;
+        return EnumerateModels(part).ToList();
+    }
+    internal static IEnumerable<(MeshReference? Mesh, PbrMaterialReference? Material, bool Glass)> EnumerateModels(Part part)
+    {
+        for (int i = 0; i < part.Modules.Get<PartModelModule>().Length; i++)
+        { var model = part.Modules.Get<PartModelModule>()[i]; yield return (model.PartModel.Template.Mesh, model.PartModel.Template.Material, false); }
+        for (int i = 0; i < part.Modules.Get<PartModelDynamicModule>().Length; i++)
+        { var model = part.Modules.Get<PartModelDynamicModule>()[i]; yield return (model.PartModelDynamic.Template.Mesh, model.PartModelDynamic.Template.Material, false); }
+        for (int i = 0; i < part.Modules.Get<PartModelGlassModule>().Length; i++)
+        { var model = part.Modules.Get<PartModelGlassModule>()[i]; yield return (model.PartModelGlass.Template.Mesh, model.PartModelGlass.Template.Material, true); }
     }
     private static void CopyChunk(MeshAsset primitive, int start, List<SliceFace> faces, double4x4 transform, double4x4 inverse, bool reflected, int material)
     {
@@ -178,5 +224,5 @@ internal sealed class SliceSourceCapture : IDisposable
             normal.X * inverse.M31 + normal.Y * inverse.M32 + normal.Z * inverse.M33).Normalized;
         return new(new(position.X, position.Y, position.Z), n, uv.X, uv.Y);
     }
-    public void Dispose() => _steps.Dispose();
+    public void Dispose() { _steps.Dispose(); _estimateSteps.Dispose(); }
 }

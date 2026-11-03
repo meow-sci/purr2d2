@@ -3,6 +3,7 @@ using Purr2D2.Cutting;
 using Purr2D2.Force;
 using Purr2D2.Rendering;
 using Purr2D2.Slicing;
+using Purr2D2.Slicing.Planes;
 
 // Only the external capture/render/native boundaries are controlled. The
 // production ClutterSlicer and actual asynchronous worker run unchanged.
@@ -10,26 +11,34 @@ internal static class ClutterScenario
 {
     internal static string? CaptureError, WorkerError, UploadError;
     internal static bool ToppleSucceeds = true, ReplaceSucceeds = true, MarkHotThrows, SparkDataThrows;
+    internal static bool HoldUploads;
     internal static string ToppleReason = "The tree entered native physics and is toppling.";
     internal static string ReplaceReason = "";
     internal static int Topples, Replacements, HotMarks, CaptureDisposals, UploadDisposals, UploadAdvances;
     internal static int MainThread, CaptureThread, CommitThread, WorkerThread;
+    internal static int WorkersRunning, MaximumWorkers, UploadsLive, MaximumUploads;
+    internal static int LoadersRunning, MaximumLoaders;
     internal static Action? WorkerEntered;
     internal static ManualResetEventSlim? WorkerRelease;
+    internal static ManualResetEventSlim? LoaderRelease;
     internal static void Reset()
     {
         CaptureError = WorkerError = UploadError = null;
         ToppleSucceeds = ReplaceSucceeds = true; MarkHotThrows = SparkDataThrows = false;
+        HoldUploads = false;
         ToppleReason = "The tree entered native physics and is toppling."; ReplaceReason = "";
         Topples = Replacements = HotMarks = CaptureDisposals = UploadDisposals = UploadAdvances = 0;
         MainThread = Environment.CurrentManagedThreadId; CaptureThread = CommitThread = WorkerThread = 0;
+        WorkersRunning = MaximumWorkers = UploadsLive = MaximumUploads = 0;
+        LoadersRunning = MaximumLoaders = 0; LoaderRelease = null;
         WorkerEntered = null; WorkerRelease = null;
+        NativeSlicePhysics.VehicleLimit = 256;
     }
 }
 
 namespace KSA
 {
-    internal sealed class KittenEva;
+    internal sealed class KittenEva { internal int BubbleVehicleCount { get; set; } }
     internal sealed class Part;
     internal sealed class Vehicle { internal PartTree Parts { get; } = new(); }
     internal sealed class PartTree { internal Part Root { get; } = new(); }
@@ -42,9 +51,13 @@ namespace KSA
 
 namespace Purr2D2.Force
 {
+    internal readonly record struct ClutterForceIdentity(int Value);
     internal sealed class ClutterForceTarget
     {
+        private static int _next;
+        internal ClutterForceIdentity StableKey { get; } = new(Interlocked.Increment(ref _next));
         internal bool IsValid = true, Local = true;
+        internal long EstimateBytes = 4L * 1024 * 1024, RetainedBytes;
         internal bool IsLocalTo(KSA.KittenEva owner) => Local;
     }
     internal sealed record ClutterSliceDescription(ClutterForceTarget Target, bool Tree = true);
@@ -77,8 +90,13 @@ namespace Purr2D2.Cutting
     internal sealed class ClutterSliceSourceCapture : IDisposable
     {
         internal bool Done { get; private set; }
+        internal bool EstimateDone { get; private set; }
+        internal long EstimatedBytes => _source.Target.EstimateBytes;
+        internal long RetainedBytes => Done ? _source.Target.RetainedBytes : 0;
+        private readonly ClutterSliceDescription _source;
+        internal void AdvanceEstimate() => EstimateDone = true;
         internal SliceInput? Input { get; private set; }
-        internal ClutterSliceSourceCapture(ClutterSliceDescription source, ContactSlice contact) { }
+        internal ClutterSliceSourceCapture(ClutterSliceDescription source, ContactSlice contact, SlicePlaneRequest? request = null) { _source = source; }
         internal void Advance()
         {
             ClutterScenario.CaptureThread = Environment.CurrentManagedThreadId;
@@ -92,11 +110,32 @@ namespace Purr2D2.Cutting
         internal static CpuSlice Calculate(SliceInput input, bool tree, CancellationToken cancel, Action<SlicePlan> publish)
         {
             ClutterScenario.WorkerThread = Environment.CurrentManagedThreadId;
-            ClutterScenario.WorkerEntered?.Invoke(); ClutterScenario.WorkerRelease?.Wait();
-            cancel.ThrowIfCancellationRequested();
-            if (ClutterScenario.WorkerError is { } error) throw new InvalidDataException(error);
-            return new(default, [new(), new()]);
+            int running = Interlocked.Increment(ref ClutterScenario.WorkersRunning);
+            int old;
+            do { old = ClutterScenario.MaximumWorkers; if (old >= running) break; }
+            while (Interlocked.CompareExchange(ref ClutterScenario.MaximumWorkers, running, old) != old);
+            try
+            {
+                ClutterScenario.WorkerEntered?.Invoke(); ClutterScenario.WorkerRelease?.Wait();
+                cancel.ThrowIfCancellationRequested();
+                if (ClutterScenario.WorkerError is { } error) throw new InvalidDataException(error);
+                return new(default, [new(), new()]);
+            }
+            finally { Interlocked.Decrement(ref ClutterScenario.WorkersRunning); }
         }
+    }
+}
+
+namespace Purr2D2.Slicing.Planes
+{
+    internal readonly record struct SliceSweepSamples
+    {
+        internal SliceSweepSamples Map(Func<CutPoint, CutPoint> transform) => this;
+    }
+    internal sealed record SlicePlaneRequest(string StrategyId, string Trigger, string TargetKind,
+        CutPoint Anchor, CutPoint BladeAtHit, CutPoint MotionAtHit, SliceSweepSamples? Samples = null)
+    {
+        internal bool AllowsLegacyFallbacks => StrategyId == "legacy-contact";
     }
 }
 
@@ -107,20 +146,25 @@ namespace Purr2D2.Slicing
     internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments);
     internal sealed class CpuFragmentAsset
     {
+        internal byte[] Glb = [], Xml = [];
+        internal CpuMeshUpload[] Uploads = [];
         internal CutSpark[] Sparks => ClutterScenario.SparkDataThrows
             ? throw new InvalidOperationException("post-commit fixture data fault")
             : Enumerable.Range(0, 6).Select(_ => new CutSpark(default, default)).ToArray();
     }
+    internal sealed record CpuMeshUpload(byte[] Bytes);
     internal readonly record struct CutSpark(double3 Point, double3 Normal);
     internal sealed record PreparedPhysicsFragment(object Asset);
     internal static class NativeSlicePhysics
     {
+        internal static int VehicleLimit = 256;
         internal static bool TryReplaceClutter(KSA.KittenEva owner, ClutterSliceDescription source,
             IReadOnlyList<PreparedPhysicsFragment> pieces, SlicePlane plane,
             out IReadOnlyList<KSA.Vehicle> created, out string reason)
         {
             ClutterScenario.Replacements++; ClutterScenario.CommitThread = Environment.CurrentManagedThreadId;
             created = ClutterScenario.ReplaceSucceeds ? [new(), new()] : [];
+            owner.BubbleVehicleCount += created.Count;
             reason = ClutterScenario.ReplaceReason; return ClutterScenario.ReplaceSucceeds;
         }
     }
@@ -133,8 +177,19 @@ namespace Purr2D2.Rendering
     internal static class RuntimeFragmentAssets
     {
         internal static (string Directory, object Mod) CaptureWorkerContext() => ("", new());
-        internal static LoadedSlice LoadDetached(CpuSlice calculated, string directory, object mod, CancellationToken cancel) =>
-            new(calculated, calculated.Fragments.Select(fragment => new LoadedFragment(fragment)).ToArray());
+        internal static LoadedSlice LoadDetached(CpuSlice calculated, string directory, object mod, CancellationToken cancel)
+        {
+            int running = Interlocked.Increment(ref ClutterScenario.LoadersRunning);
+            int old;
+            do { old = ClutterScenario.MaximumLoaders; if (old >= running) break; }
+            while (Interlocked.CompareExchange(ref ClutterScenario.MaximumLoaders, running, old) != old);
+            try
+            {
+                ClutterScenario.LoaderRelease?.Wait(); cancel.ThrowIfCancellationRequested();
+                return new(calculated, calculated.Fragments.Select(fragment => new LoadedFragment(fragment)).ToArray());
+            }
+            finally { Interlocked.Decrement(ref ClutterScenario.LoadersRunning); }
+        }
         internal static void MarkHot(object asset, double now)
         {
             ClutterScenario.HotMarks++;
@@ -145,10 +200,11 @@ namespace Purr2D2.Rendering
             internal readonly List<PreparedPhysicsFragment> Fragments = [new(new()), new(new())];
             internal bool Done { get; private set; }
             internal string? Error { get; private set; }
-            internal UploadJob(LoadedSlice source) { }
-            internal void Advance() { ClutterScenario.UploadAdvances++; Done = true; Error = ClutterScenario.UploadError; }
+            internal UploadJob(LoadedSlice source)
+            { ClutterScenario.UploadsLive++; ClutterScenario.MaximumUploads = Math.Max(ClutterScenario.MaximumUploads, ClutterScenario.UploadsLive); }
+            internal void Advance() { ClutterScenario.UploadAdvances++; Done = !ClutterScenario.HoldUploads; Error = ClutterScenario.UploadError; }
             internal void Cancel() { }
-            public void Dispose() => ClutterScenario.UploadDisposals++;
+            public void Dispose() { ClutterScenario.UploadDisposals++; ClutterScenario.UploadsLive--; }
         }
     }
 }

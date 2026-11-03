@@ -5,6 +5,11 @@ internal static class TreeCutFireSettingsChecks
     internal static void Run()
     {
         var settings = new SaberSettings();
+        Check(!settings.PassiveContactCutsEnabled, "new and reset settings default to intentional cuts");
+        settings.ContactPlaneStrategy = "sweep-fit";
+        Check(settings.EffectiveContactPlaneStrategy == "sweep-fit", "fit plane preference is active");
+        settings.ContactPlaneStrategy = "blade-strict";
+        Check(settings.EffectiveContactPlaneStrategy == "blade-strict", "available plane preferences are active");
         Check(settings.TreeCutFireSeconds == 10, "new settings use ten seconds of tree fire");
         foreach (float value in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
         {
@@ -24,7 +29,17 @@ internal static class TreeCutFireSettingsChecks
         {
             Directory.CreateDirectory(directory);
             File.WriteAllText(path, "{\"BladeLength\":1.4}");
-            Check(SaberSettings.Load(path).TreeCutFireSeconds == 10, "old preference files receive the default");
+            var migrated = SaberSettings.Load(path);
+            Check(migrated.TreeCutFireSeconds == 10 && !migrated.PassiveContactCutsEnabled,
+                "old preference files receive the defaults including intentional cuts");
+            settings.PassiveContactCutsEnabled = true;
+            settings.Save(path);
+            Check(SaberSettings.Load(path).PassiveContactCutsEnabled, "passive contact preference survives save/load");
+            File.WriteAllText(path, "{\"VesselContactDetector\":\"unknown\",\"ClutterContactDetector\":null,\"ContactPlaneStrategy\":\"bad\",\"SliceExecutionMode\":\"invalid\",\"SliceWorkerCount\":99}");
+            migrated = SaberSettings.Load(path);
+            Check(migrated.VesselContactDetector == "legacy-ribbon" && migrated.ClutterContactDetector == "legacy-rays"
+                && migrated.ContactPlaneStrategy == "legacy-contact" && migrated.SliceExecutionMode == "legacy-serial"
+                && migrated.SliceWorkerCount == 4, "invalid methods and numeric limits are validated on load");
             foreach (float seconds in new[] { 0f, 7.5f, 60f })
             {
                 settings.TreeCutFireSeconds = seconds;

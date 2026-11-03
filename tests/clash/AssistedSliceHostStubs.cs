@@ -158,7 +158,8 @@ namespace Purr2D2.Runtime
             internal string? Error;
             internal string Phase = "Preparing";
             internal TestIsolation? Isolation;
-            internal void Begin(Part part) => BeginCount++;
+            internal void Begin(Part part, string? diagnosticDetector = null, double diagnosticTime = double.NaN) => BeginCount++;
+            internal void FinishSerialDiagnostic(Purr2D2.Core.SliceJobOutcome outcome, double now) { }
             internal void Advance() => AdvanceCount++;
             internal void Cancel() => CancelCount++;
         }

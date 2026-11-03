@@ -8,6 +8,7 @@ using BepuPhysics.Trees;
 using BepuUtilities;
 using BepuUtilities.Memory;
 using Purr2D2.Force;
+using Purr2D2.Slicing.Detection;
 using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
@@ -23,6 +24,8 @@ internal static class ForceClutterBepuChecks
             TypedIndex sphere = sim.Shapes.Add(new Sphere(1));
             TypedIndex box = sim.Shapes.Add(new Box(2, 2, 2));
             TypedIndex capsule = sim.Shapes.Add(new Capsule(1, 4.5f));
+            AllHitRayPicking(sim, pool, sphere);
+            CapsuleSweepPicking(sim, pool, sphere);
             Vector3[] corners = [new(-1, -1, -1), new(-1, -1, 1), new(-1, 1, -1), new(-1, 1, 1),
                 new(1, -1, -1), new(1, -1, 1), new(1, 1, -1), new(1, 1, 1)];
             TypedIndex convex = sim.Shapes.Add(new ConvexHull(corners, pool, out _));
@@ -271,6 +274,87 @@ internal static class ForceClutterBepuChecks
     {
         public bool Accept(CollidableReference collidable) => collidable.Mobility == CollidableMobility.Static
             && collidable.StaticHandle != excluded;
+    }
+
+    private static void AllHitRayPicking(Simulation sim, BufferPool pool, TypedIndex sphere)
+    {
+        var near = sim.Statics.Add(new StaticDescription(new Vector3(5, 0, 0), sphere));
+        var far = sim.Statics.Add(new StaticDescription(new Vector3(10, 0, 0), sphere));
+        var hits = new List<ClutterForceTargets.AllRayHit>();
+        var query = new ClutterForceTargets.AllRayQuery<StaticPickFilter>(new(null), hits, 512);
+        sim.RayCast(Vector3.Zero, Vector3.UnitX, 12, pool, ref query);
+        Check(!query.Exceeded && !query.Overflow && hits.Count == 2
+            && hits.Any(h => h.Collidable.StaticHandle == near && Math.Abs(h.Distance - 4) < .001f)
+            && hits.Any(h => h.Collidable.StaticHandle == far && Math.Abs(h.Distance - 9) < .001f),
+            "all-hit native ray retains both near and far surfaces without shortening its range");
+        hits.Clear();
+        query = new ClutterForceTargets.AllRayQuery<StaticPickFilter>(new(null), hits, 512);
+        sim.RayCast(Vector3.Zero, Vector3.UnitX, 6, pool, ref query);
+        Check(hits.Count == 1 && hits[0].Collidable.StaticHandle == near,
+            "all-hit native ray respects the finite segment length");
+        hits.Clear();
+        query = new ClutterForceTargets.AllRayQuery<StaticPickFilter>(new(null), hits, 1);
+        sim.RayCast(Vector3.Zero, Vector3.UnitX, 12, pool, ref query);
+        Check(hits.Count == 1 && query.Overflow, "all-hit collector reports bounded capacity overflow");
+        sim.Statics.Remove(near); sim.Statics.Remove(far);
+
+        var overlap = sim.Statics.Add(new StaticDescription(Vector3.Zero, sphere));
+        hits.Clear();
+        query = new ClutterForceTargets.AllRayQuery<StaticPickFilter>(new(null), hits, 512);
+        sim.RayCast(Vector3.Zero, Vector3.UnitX, 3, pool, ref query);
+        Check(hits.Count == 1 && hits[0].Distance <= .000001f,
+            "native origin-inside hit is distinguishable from a confirmed surface");
+        hits.Clear();
+        query = new ClutterForceTargets.AllRayQuery<StaticPickFilter>(new(null), hits, 512);
+        sim.RayCast(new Vector3(3, 0, 0), -Vector3.UnitX, 3, pool, ref query);
+        Check(hits.Count == 1 && Math.Abs(hits[0].Distance - 2) < .001f,
+            "reversed finite ray finds a positive boundary for an origin-inside segment");
+        hits.Clear();
+        query = new ClutterForceTargets.AllRayQuery<StaticPickFilter>(new(null), hits, 512);
+        sim.RayCast(new Vector3(.5f, 0, 0), -Vector3.UnitX, .5f, pool, ref query);
+        Check(hits.Count == 1 && hits[0].Distance <= .000001f,
+            "reversing a segment with both ends inside cannot fabricate a surface");
+        sim.Statics.Remove(overlap);
+    }
+
+    private static void CapsuleSweepPicking(Simulation sim, BufferPool pool, TypedIndex sphere)
+    {
+        var near = sim.Statics.Add(new StaticDescription(new Vector3(3, 0, 0), sphere));
+        var far = sim.Statics.Add(new StaticDescription(new Vector3(6, 0, 0), sphere));
+        var hits = new List<ClutterForceTargets.CapsuleHit>();
+        var query = new ClutterForceTargets.CapsuleQuery<StaticPickFilter>(sim, new(null), hits, 512);
+        var pose = new RigidPose(Vector3.Zero); var velocity = new BodyVelocity(new Vector3(10, 0, 0));
+        sim.Sweep(new Capsule(.01f, 4), in pose, in velocity, 1, pool, ref query, .0001f, .00001f, 64);
+        Check(!query.Exceeded && !query.Unsupported && hits.Count == 2
+            && hits.Any(h => h.Collidable.StaticHandle == near && h.Time > 0)
+            && hits.Any(h => h.Collidable.StaticHandle == far && h.Time > 0),
+            "capsule collector retains multiple positive-time native collisions");
+        hits.Clear(); query = new ClutterForceTargets.CapsuleQuery<StaticPickFilter>(sim, new(null), hits, 1);
+        sim.Sweep(new Capsule(.01f, 4), in pose, in velocity, 1, pool, ref query, .0001f, .00001f, 64);
+        Check(hits.Count == 1 && query.Overflow, "capsule candidate storage is bounded and reports overflow");
+        var rayHits = new List<ClutterForceTargets.AllRayHit>();
+        var ray = new ClutterForceTargets.AllRayQuery<StaticPickFilter>(new(null), rayHits, 512);
+        sim.RayCast(new Vector3(1.975f, 0, 0), Vector3.UnitX, .05f, pool, ref ray);
+        Check(rayHits.Count == 1 && CapsuleClutterDetector.PositiveBoundary(rayHits[0].Distance, .05)
+            && CapsuleClutterDetector.TryBladeProjection(new Vector3(2, 0, 0), new Vector3(1.99f, 0, 0), Vector3.UnitY, 4, out float along)
+            && Math.Abs(along - .5f) < .0001f,
+            "native confirmation ray has a positive boundary near the capsule centerline");
+        Check(!CapsuleClutterDetector.PositiveBoundary(0, .05)
+            && !CapsuleClutterDetector.PositiveBoundary(.051, .05)
+            && !CapsuleClutterDetector.TryBladeProjection(new Vector3(2.02f, 0, 0), new Vector3(2, 0, 0), Vector3.UnitY, 4, out _),
+            "zero-distance and out-of-segment rays and contacts outside capsule tolerance are rejected");
+        Check(!CapsuleClutterDetector.ProvisionalExpired(10.9, 10)
+            && CapsuleClutterDetector.ProvisionalExpired(11.01, 10)
+            && CapsuleClutterDetector.ProvisionalExpired(9, 10)
+            && CapsuleClutterDetector.ProvisionalExpired(double.NaN, 10),
+            "provisional contacts expire after one second and invalid time fails closed");
+        sim.Statics.Remove(near); sim.Statics.Remove(far);
+        var overlap = sim.Statics.Add(new StaticDescription(Vector3.Zero, sphere));
+        hits.Clear(); query = new ClutterForceTargets.CapsuleQuery<StaticPickFilter>(sim, new(null), hits, 512);
+        sim.Sweep(new Capsule(.01f, 4), in pose, in velocity, 1, pool, ref query, .0001f, .00001f, 64);
+        Check(hits.Count == 1 && hits[0].InitialOverlap,
+            "capsule collector labels zero-time overlaps without a fabricated contact point");
+        sim.Statics.Remove(overlap);
     }
 
     private static void DistantCameraPicking(Simulation sim, BufferPool pool, TypedIndex sphere)

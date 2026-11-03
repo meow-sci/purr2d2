@@ -22,13 +22,26 @@ the blade. Ocean views apply water attenuation at the blade's own distance while
 solid objects still block it; the glowing blade does not reproduce water's
 refraction distortion.
 
-Moving blades and assisted selection can cut ground rocks and trees into physical
+Manual SWING and assisted Slice selection can cut ground rocks and trees into physical
 fragments. Tree cuts split the wood and carry the leaves with the resulting pieces,
 preserving leaf transparency and two-sided rendering. Unsupported custom geometry
 can still fall back to felling the whole tree. Trunk cut ends are solid wood faces
 with centered growth rings. Rock cut faces cool from a glow; split
 tree ends burn for **10 seconds** by default. Adjust or disable that fire under
 **Settings → Clutter Slicing**.
+
+By default, ordinary walking and pose motion do not initiate cuts. Enable
+**Settings → Slicing methods → Cut during ordinary movement** to allow them.
+That setting also applies to vessel parts. The same section selects contact
+detectors, cut-plane strategies, and queued processing for vessels, trees, and
+rocks. Queued processing retains accepted cuts after the swing and prepares
+geometry on bounded background workers. Cached ribbon, capsule sweep, and
+extended clutter coverage are experimental. Extended coverage is off by default;
+it warms physical clutter cells asynchronously and reports coverage status.
+The actual 50 m forest behavior and game performance still need native testing.
+
+**Slicing Diagnostics** can record timings and capture one confirmed vessel
+mesh interval for offline comparison. See [the replay instructions](tools/SliceReplay/README.md).
 
 # media
 

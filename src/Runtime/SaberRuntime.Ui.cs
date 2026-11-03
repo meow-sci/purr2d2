@@ -91,6 +91,7 @@ internal sealed partial class SaberRuntime
                 if (ImGui.CollapsingHeader("Cape Settings")) DrawCapeSettings();
                 if (ImGui.CollapsingHeader("Character & Grip")) DrawSaberCharacterSettings();
                 if (ImGui.CollapsingHeader("Clutter Slicing")) DrawClutterSliceSettings();
+                if (ImGui.CollapsingHeader("Slicing methods")) DrawSliceMethodSettings();
                 if (ImGui.CollapsingHeader("Slicing Resources")) DrawSliceResourceSettings();
                 else _confirmSliceDebrisRemoval = false;
                 if (ImGui.CollapsingHeader("Slicing Diagnostics"))
@@ -107,8 +108,25 @@ internal sealed partial class SaberRuntime
                         + $"discovery {_manualProbe.DiscoveryUnits}, frames {_manualProbe.FrameReads}, primitives {_manualProbe.PrimitiveReads}, triangles {_manualProbe.TestedTriangles}; "
                         + $"budget stops {_manualProbe.Saturations}, expired queries {_manualProbe.ExpiredQueries}"
                         : "Debug timing collection and console logging are off.";
+                    diagnostics += $"\nMethods: vessel {_activeVesselDetector}, ground {_activeClutterDetector}, plane {_settings.EffectiveContactPlaneStrategy}"
+                        + $"\nQueued targets: {_vesselQueue?.Count ?? 0} vessel / {_clutterQueue?.Count ?? 0} ground; "
+                        + $"geometry workers configured {_clutterQueue?.WorkerCount ?? 0}; loader slots {(_vesselQueue?.LoadSlots ?? 0) + (_clutterQueue?.LoadSlots ?? 0)}; "
+                        + $"tracked memory {((_vesselQueue?.ChargedBytes ?? 0) + (_clutterQueue?.ChargedBytes ?? 0)) / (1024d * 1024d):F1} MiB"
+                        + $"\nCached vessel: {_manualProbe.CacheHits} hits, {_manualProbe.CacheFallbacks} cold fallbacks, {_manualProbe.CacheIncomplete} unfinished, {_manualProbe.CacheUnsupported} unsupported."
+                        + "\nDetector timing is per call, not cut completion; the last 256 timed calls are retained.";
+                    foreach (SliceDetectorKind kind in Enum.GetValues<SliceDetectorKind>())
+                        diagnostics += "\n" + SliceDetectionDiagnostics.Describe(kind);
+                    if (_clutterQueue?.Scheduler is Purr2D2.Slicing.SliceWorkerPool pool)
+                        diagnostics += $"\nGeometry workers active {pool.ActiveCount}/{pool.WorkerCount}, scheduled {pool.PendingCount}.";
+                    diagnostics += "\n" + SliceJobDiagnostics.Describe();
                     ImGui.TextWrapped(diagnostics);
                     if (ImGui.Button("Copy slice diagnostics")) ImGui.SetClipboardText(diagnostics);
+                    if (ImGui.Button("Reset detector counters")) { SliceDetectionDiagnostics.Reset(); SliceJobDiagnostics.Reset(); }
+                    ImGui.Separator();
+                    if (ImGui.Button("Capture next confirmed vessel hit for SliceReplay")) ArmSliceReplayCapture();
+                    ShowSaberControlTip("One-shot developer capture. Copies only the confirmed hit mesh and its target-local blade interval, with a 40,000-triangle cap and a 0.25 ms copy budget per settled update. The background writer is capped at 16 MiB. This does not change cut behavior; the capture is disabled until armed.");
+                    ImGui.TextWrapped(_sliceReplayCapture.Status);
+                    if (_sliceReplayCapture.OutputPath is { } replayPath) ImGui.TextWrapped("Replay fixture: " + replayPath);
                 }
                 ImGui.Separator();
                 if (ImGui.Button("Reset all settings")) ResetAllSettings();

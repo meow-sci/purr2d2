@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Cutting/CutGeometry.cs" Link="CutGeometry.cs" />
+    <Compile Include="../../src/Cutting/BladeSweep.cs" Link="BladeSweep.cs" />
+    <Compile Include="../../src/Slicing/Detection/CachedRibbonGeometry.cs" Link="CachedRibbonGeometry.cs" />
+    <Compile Include="../../src/Slicing/Detection/CachedRibbonCapture.cs" Link="CachedRibbonCapture.cs" />
+    <Compile Include="../../src/Slicing/Detection/SliceReplayFixtureCapture.cs" Link="SliceReplayFixtureCapture.cs" />
+  </ItemGroup>
+</Project>

@@ -2,6 +2,7 @@ using Brutal.Numerics;
 using Purr2D2.Core;
 using Purr2D2.Cutting;
 using Purr2D2.Rendering;
+using Purr2D2.Slicing.Planes;
 
 namespace Purr2D2.Slicing;
 
@@ -16,6 +17,7 @@ internal sealed record SliceInput(SliceFace[][] Groups, CutPoint[] Axes,
     internal bool SourceSolidWood { get; init; }
     internal SliceCutKind CutKind { get; init; }
     internal ContactSlice? Contact { get; init; }
+    internal SlicePlaneRequest? PlaneRequest { get; init; }
     // Open visual cards never enter closed-solid preparation, mass or collision.
     internal SliceFace[] Foliage { get; init; } = [];
 }
@@ -33,6 +35,11 @@ internal sealed record CpuSlice(SlicePlane Plane, CpuFragmentAsset[] Fragments)
     internal string FacetFallback { get; init; } = "";
     internal bool AuthoredSubpartFallback { get; init; }
     internal bool ContactDirectionFallback { get; init; }
+    internal SlicePlane? RequestedPlane { get; init; }
+    internal SlicePlaneFallback PlaneFallback { get; init; }
+    internal double? FitResidualMetres { get; init; }
+    internal double? AnchorResidualMetres { get; init; }
+    internal double? PlaneDeviationRadians { get; init; }
 }
 
 internal static class SliceGeometryWork
@@ -41,6 +48,7 @@ internal static class SliceGeometryWork
     {
         cancel.ThrowIfCancellationRequested();
         var geometry = input.Geometry;
+        bool contactCut = input.Contact is not null || input.PlaneRequest is not null;
         if (input.SourceSolidWood && input.GeneratedClosedGeometry)
             throw new InvalidDataException("Generated closed fragments cannot be reinterpreted as native tree tubes.");
         if (!geometry.AllowsSource(input.Groups.Length, input.Groups.Sum(g => (long)g.Length) + input.Foliage.LongLength))
@@ -50,29 +58,36 @@ internal static class SliceGeometryWork
             : SliceShellBuilder.TryPrepare(input.Groups, out source, out reason, cancel, input.GeneratedClosedGeometry, geometry);
         if (!preparedSource)
         {
-            if (input.Contact is not null) throw new InvalidDataException("Cannot slice at contact: " + reason);
+            if (contactCut) throw new InvalidDataException("Cannot slice at contact: " + reason);
             if (input.Foliage.Length != 0 || input.CutKind == SliceCutKind.Wood) throw new InvalidDataException(reason);
             if (QuietSubpartBreakup.TryBuild(input, out var authored, out var authoredFailure, cancel))
             { publish(new(authored!.Plane)); return authored with { FacetFallback = reason }; }
             throw new InvalidDataException(reason + " Authored-subpart fallback: " + authoredFailure);
         }
-        IEnumerable<(SlicePlane Plane, bool Faceted, int Index)> attemptsToTry;
-        if (input.Contact is { } contact)
+        IEnumerable<(SlicePlane Plane, bool Faceted, int Index, SlicePlaneFallback Fallback)> attemptsToTry;
+        double? fitResidual = null;
+        if (contactCut)
         {
-            if (!ContactSliceGeometry.TryCandidates(contact, out var contactCandidates, out var contactReason))
+            SlicePlaneSelection selection;
+            string contactReason;
+            bool selected = input.PlaneRequest is { } request
+                ? SlicePlaneStrategies.TrySelect(request, input.Axes, out selection, out contactReason)
+                : LegacyContactPlaneStrategy.TrySelect(input.Contact!.Value, input.Axes, out selection, out contactReason);
+            if (!selected)
                 throw new InvalidDataException("Cannot slice at contact: " + contactReason);
-            attemptsToTry = contactCandidates.Concat(ContactSliceGeometry.AxisCandidates(contact, input.Axes))
-                .Select((plane, i) => (Plane: plane, Faceted: false, Index: i));
+            fitResidual = selection.FitResidualMetres;
+            attemptsToTry = selection.Candidates.Select(candidate =>
+                (candidate.Plane, Faceted: false, candidate.Index, candidate.Fallback));
         }
         else
         {
             var candidates = AssistedSliceGeometry.Candidates(source, input.Axes, input.Seed).ToArray();
             // A faceted section has no single plane along which to clip open cards.
-            attemptsToTry = candidates.Take(input.Foliage.Length == 0 && input.CutKind != SliceCutKind.Wood ? 3 : 0).Select((plane, i) => (Plane: plane, Faceted: true, Index: i))
-                .Concat(candidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i)));
+            attemptsToTry = candidates.Take(input.Foliage.Length == 0 && input.CutKind != SliceCutKind.Wood ? 3 : 0).Select((plane, i) => (Plane: plane, Faceted: true, Index: i, Fallback: SlicePlaneFallback.None))
+                .Concat(candidates.Select((plane, i) => (Plane: plane, Faceted: false, Index: i, Fallback: SlicePlaneFallback.None)));
         }
 
-        string failure = input.Contact is null ? "No broad section could be found." : "No valid section passed through the contact point.";
+        string failure = !contactCut ? "No broad section could be found." : "No valid section passed through the contact point.";
         string facetFailure = ""; int attempts = 0;
         // Manual cuts use only the bounded anchored planes; assisted cuts retain
         // their existing three faceted attempts followed by the oblique/axis fallbacks.
@@ -85,11 +100,18 @@ internal static class SliceGeometryWork
                 ? FacetedSliceGeometry.TrySlice(source, candidate, input.Seed + (uint)attempt.Index * 0x9e3779b9u, out result, out failure, cancel, geometry)
                 : PlaneSlicer.TrySliceCompound(source, candidate, out result, out failure, cancellation: cancel, geometry: geometry);
             if (!sliced) { if (attempt.Faceted) facetFailure = failure; continue; }
+            double? anchorResidual = null;
+            if (input.PlaneRequest is { AllowsLegacyFallbacks: false } bounded)
+            {
+                if (!AcceptEffectivePlane(result!.EffectivePlane, bounded.Anchor, out double measuredResidual))
+                { failure = "The effective plane moved more than 1 mm from the contact."; continue; }
+                anchorResidual = measuredResidual;
+            }
             var prepared = new List<CpuFragment>();
             double volume = result!.Pieces.Sum(p => p.Volume);
             if (result.Pieces.Length is < 2 or > 8 || !double.IsFinite(volume) || volume <= 0)
             {
-                if (input.Contact is not null) failure = "The anchored plane did not produce two valid fragments.";
+                if (contactCut) failure = "The anchored plane did not produce two valid fragments.";
                 continue;
             }
             SliceFace[] positiveFoliage = [], negativeFoliage = [];
@@ -151,10 +173,14 @@ internal static class SliceGeometryWork
             return new(result.EffectivePlane, assets)
             {
                 Faceted = attempt.Faceted, Attempts = attempts, FacetFallback = attempt.Faceted ? "" : facetFailure,
-                ContactDirectionFallback = input.Contact is not null && attempt.Index >= ContactSliceGeometry.CandidateCount
+                ContactDirectionFallback = contactCut && attempt.Fallback == SlicePlaneFallback.AxisFallback,
+                RequestedPlane = candidate, PlaneFallback = attempt.Fallback,
+                FitResidualMetres = fitResidual, AnchorResidualMetres = anchorResidual,
+                PlaneDeviationRadians = Math.Acos(Math.Clamp(CutPoint.Dot(candidate.Normal.Normalized,
+                    result.EffectivePlane.Normal.Normalized), -1, 1))
             };
         }
-        if (input.Contact is null)
+        if (!contactCut)
         {
             if (input.Foliage.Length != 0 || input.CutKind == SliceCutKind.Wood) throw new InvalidDataException("This tree could not be sliced: " + failure);
             if (QuietSubpartBreakup.TryBuild(input, out var fallback, out var fallbackFailure, cancel))
@@ -166,6 +192,12 @@ internal static class SliceGeometryWork
         }
         if (string.IsNullOrWhiteSpace(failure)) failure = "The anchored plane did not produce exportable fragments.";
         throw new InvalidDataException("Cannot slice at contact: " + failure);
+    }
+
+    internal static bool AcceptEffectivePlane(SlicePlane plane, CutPoint anchor, out double residual)
+    {
+        residual = Math.Abs(CutPoint.Dot(plane.Normal, anchor) - plane.Offset);
+        return double.IsFinite(residual) && residual <= .001;
     }
 }
 

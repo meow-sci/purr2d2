@@ -1,5 +1,9 @@
 namespace Purr2D2.Core;
 
+// Asset loading touches shared mod storage. Geometry may run concurrently, but
+// detached loaders from every target domain must use the same serialization gate.
+internal static class SliceDetachedLoad { internal static readonly object Gate = new(); }
+
 /// <summary>One cancellable worker. Polling and cancellation never join it on the game thread.</summary>
 internal sealed class BackgroundSliceWork<TPlan, TResult> where TPlan : class where TResult : class
 {
@@ -9,7 +13,7 @@ internal sealed class BackgroundSliceWork<TPlan, TResult> where TPlan : class wh
     private bool _cancelled, _released;
     internal TPlan? Plan => Volatile.Read(ref _plan);
     internal bool Finished => _task.IsCompleted;
-    internal BackgroundSliceWork(Func<CancellationToken, Action<TPlan>, TResult> calculate)
+    internal BackgroundSliceWork(Func<CancellationToken, Action<TPlan>, TResult> calculate, TaskScheduler? scheduler = null)
     {
         _task = Task.Factory.StartNew(() =>
         {
@@ -24,7 +28,8 @@ internal sealed class BackgroundSliceWork<TPlan, TResult> where TPlan : class wh
             {
                 try { Thread.CurrentThread.Priority = previous; } catch (PlatformNotSupportedException) { }
             }
-        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        }, CancellationToken.None, scheduler == null ? TaskCreationOptions.LongRunning : TaskCreationOptions.None,
+            scheduler ?? TaskScheduler.Default);
     }
     internal bool TryTake(out TResult? result, out string? error)
     {

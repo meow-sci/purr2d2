@@ -74,6 +74,7 @@ internal sealed partial class SaberRuntime : IDisposable
         QuietSliceQuiescence.Install(harmony);
         _audio.Initialize();
         _debugTimingHarmony = harmony;
+        _coverageHarmony = harmony;
         ApplyDebugTimingSettings();
         _ready = true;
     }
@@ -99,7 +100,7 @@ internal sealed partial class SaberRuntime : IDisposable
             SceneSaves.ObserveSystem(Universe.CurrentSystem);
             ApplyKittenProfileRecovery();
             if (!ApplyActivation() || SceneSaves.Suspended || _fault is not null)
-            { _slicer.PumpRetired(); _clutterSlicer.PumpRetired(); return; }
+            { ResetClutterCoverage(); _slicer.PumpRetired(); PumpClutterSliceRetired(); return; }
             double playerDt = double.IsFinite(dtPlayer) ? Math.Clamp(dtPlayer, 0, .1) : 0;
             _playerTime += playerDt;
             var selected = !Program.EditorFlag ? Program.ControlledVehicle as KittenEva : null;
@@ -125,7 +126,7 @@ internal sealed partial class SaberRuntime : IDisposable
                 {
                     case Command.SelectSlice: SelectPartToSlice(); break;
                     case Command.CutPicked: BeginAssistedSlice(item.PartTarget, item.PickRay); break;
-                    case Command.CancelSlice: CancelAssistedSlice("Slice cancelled."); break;
+                    case Command.CancelSlice: _vesselQueue?.Cancel(); _clutterQueue?.Cancel(); CancelAssistedSlice("Slice cancelled."); break;
                 }
             }
             // The audited PrepareFrame handoff precedes all new draw recording.
@@ -150,7 +151,9 @@ internal sealed partial class SaberRuntime : IDisposable
             if (SaberHeldForActions) UpdateManualSwingSwoosh(Environment.TickCount64);
             // Assisted and intentional manual contact share the settled slice worker.
             if (_sliceSequence.Active) UpdateAssistedSlice(_pose.ClashHeld ? 0 : playerDt);
-            UpdateManualContact(SaberHeldForActions && simulationDt > 0);
+            UpdateManualContact(simulationDt > 0);
+            AdvanceSliceReplayCapture();
+            UpdateClutterCoverage();
             UpdateClutterSlicing(simulationDt > 0);
             if (!_overlayDrag.Held && !_manualSliceActive && (!_sliceSequence.Active || _sliceSequence.EndPresented)
                 && SaberHeldForActions && _owner != null && _blade.Equipped && !_pose.ClashHeld && simulationDt > 0 && _freshPoseThisTick
@@ -251,6 +254,7 @@ internal sealed partial class SaberRuntime : IDisposable
 
     internal void ResetWorld()
     {
+        ResetClutterCoverage();
         ResetSliceResourceRequests();
         ResetForce();
         ResetClutterSlicing();
@@ -275,6 +279,7 @@ internal sealed partial class SaberRuntime : IDisposable
             Console.WriteLine("[purr2d2] " + _settingsAutosaver.LastError);
         _disposed = true; _ready = false;
         JobSystems.WaitAll();
+        SliceClutterCoverageHooks.Uninstall(); _coverageHarmony = null;
         Cleanup(DisposeForce, "Force capture"); Cleanup(_forcePose.Dispose, "Force pose");
         Cleanup(_somersaultMotion.Dispose, "Somersault motion"); Cleanup(_somersaultPose.Dispose, "Somersault pose");
         Cleanup(ResetWorld, "World"); Cleanup(QuietSliceContacts.RetireToNative, "Quiet slice contacts"); Cleanup(QuietSliceQuiescence.Clear, "Quiet slice modules"); Cleanup(_slicer.Dispose, "Slice worker"); Cleanup(DisposeClutterSlicing, "Clutter slice worker"); Cleanup(_audio.Shutdown, "Audio"); Cleanup(_renderer.Dispose, "Renderer"); Cleanup(_pose.Dispose, "Pose");

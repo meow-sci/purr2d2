@@ -1,5 +1,19 @@
 # Acceptance record
 
+## Selectable slice detection and queued processing
+
+The passive-cut setting defaults off. Manual SWING and the Slice control remain available; opting into ordinary-movement cuts applies to vessels and ground clutter. Settings provide detector, contact-plane and processing choices, including queued geometry workers and experimental long-blade clutter coverage. Coverage hooks, capsule sweeps and cached ribbon detection have focused host checks, but native game performance and behavior have not been established.
+
+Focused checks pass for the manual activation path, multi-target ribbon probing, shared vessel/clutter queue lanes, isolation followed by revalidation and later replacement, detector and job diagnostics, replay capture, native hook signatures and the game-assembly Bepu queries. All 49 managed checks pass when run with four-way bounded parallelism using the same harnesses as `tools/validate.py --run-tests`; shader checks also pass. The Release build has no warnings or errors, source and staged asset validation passes, and the release ZIP matches its stage and checksum. See `docs/slice-strategies-refactor-plan.md` for the full implementation and acceptance criteria.
+
+Live acceptance, to be performed by the user:
+
+- [ ] Confirm walking into a vessel, tree or rock does not start a cut by default. Confirm manual SWING and Slice do; then enable ordinary-movement cuts and check them again.
+- [ ] Compare the detector and contact-plane options on vessel parts, trees and rocks. Check that changing a method does not alter already accepted work.
+- [ ] Select queued processing, cached vessel ribbon, capsule clutter detection and experimental extended clutter coverage. With ground clutter collisions enabled, extend the blade to 50 m and allow coverage to warm. Swing through a forest and record detected, queued, completed and missed cuts, timing, frame behavior and any coverage warning.
+- [ ] Release SWING while cuts are pending, cancel a separate batch, and change method or worker settings during a batch. Check that accepted work and cancellation behave as labeled.
+- [ ] Inspect fragment appearance and motion; save/reload and recut vessel and clutter fragments. Record any exception, refused source or unexpected fallback.
+
 ## Larger, more intense tree fire
 
 Tree cut-end flames now use 3× spatial scale and 3× HDR brightness. Rise, lateral spread, ribbon length, width and core all scale together; the frustum bound expands to cover the larger effect. The existing lifetime setting, animation speed and bounded ribbon/source counts are preserved.

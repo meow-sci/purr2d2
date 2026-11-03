@@ -3,6 +3,8 @@ using KSA;
 using Purr2D2.Core;
 using Purr2D2.Cutting;
 using Purr2D2.Rendering;
+using Purr2D2.Slicing;
+using Purr2D2.Slicing.Planes;
 
 namespace Purr2D2.Runtime;
 
@@ -22,7 +24,14 @@ internal sealed partial class SaberRuntime
     private readonly FakeRenderer _renderer = new();
     private readonly FakeAudio _audio = new();
     private readonly FakeSettings _settings = new();
-    private sealed class FakeSettings { internal float Volume = .6f; }
+    private sealed class FakeSettings
+    {
+        internal float Volume = .6f;
+        internal bool PassiveContactCutsEnabled;
+        internal string EffectiveContactPlaneStrategy = "legacy-contact";
+        internal string SliceExecutionMode = "legacy-serial", VesselContactDetector = "legacy-ribbon";
+        internal int SliceWorkerCount = 2, SlicePendingTargetLimit = 128, SliceWorkingMemoryMiB = 256;
+    }
     private sealed class FakeAudio
     {
         internal int Slices, Swooshes;
@@ -44,6 +53,13 @@ internal sealed partial class SaberRuntime
     private readonly AssistedSliceSequence _sliceSequence = new();
     private readonly ArbitrarySlicer _slicer = new();
     private readonly PartSliceTargeting _targeting = new();
+    private ClutterSliceQueue? _clutterQueue = null;
+    private int _clutterQueueWorkers = 2, _clutterQueueLimit = 128, _clutterQueueMemory = 256;
+    private bool _cancelQueuedClutterRequested = false;
+    // Replay capture is exercised in its isolated writer project; the manual runtime
+    // fixture keeps only the production detection/queue transaction boundaries.
+    private void OfferSliceReplayContact(ManualContactProbe.Contact contact, string detector) { }
+    private void AdvanceSliceReplayCapture() { }
     private SliceTarget? _sliceTarget;
     private bool _sliceStarted;
     private string? _sliceError;
@@ -139,6 +155,19 @@ internal sealed partial class SaberRuntime
         DebugTimings.Enabled = false;
         var r = Scene(); r.Tick(-.1, 0); r.Tick(.1, .02);
         Check(r._slicer.Begins == 0, "runtime idle poses cannot query or cut");
+        r = Scene(); r._settings.PassiveContactCutsEnabled = true;
+        r.Tick(-.1, 0, move: false); r.Tick(.1, .02, move: false);
+        Check(r._manualSliceActive && r._slicer.Begins == 1, "opt-in passive blade motion can contact a vessel without a drag");
+        r._settings.PassiveContactCutsEnabled = false; r.Tick(.1, .03, move: false);
+        Check(r._manualSliceActive, "turning passive off retains an accepted cut");
+        r = Scene(); r.Tick(-.1, 0, move: false); r._settings.PassiveContactCutsEnabled = true;
+        r.Tick(.1, .02, move: false);
+        Check(r._slicer.Begins == 0, "enabling passive detection cannot sweep across the disabled interval");
+        r.Tick(-.1, .04, move: false);
+        Check(r._slicer.Begins == 1, "passive detection starts after a fresh sample pair");
+        r = Scene(); r._settings.PassiveContactCutsEnabled = true; r.Begin();
+        r.Tick(-.1, 0, move: false); r.Tick(.1, .02, move: false);
+        Check(r._slicer.Begins == 0, "stationary SWING takes precedence over passive motion");
         r.Begin(); r.Tick(-.1, .1, move: false); r.Tick(.1, .12, move: false);
         Check(r._slicer.Begins == 0, "runtime ignition or held-but-unmoved SWING cannot cut");
         r = Scene(); r._pose.ClashHeld = true; r.Begin(); r.Tick(-.1, .0); r.Tick(.1, .02);
@@ -300,7 +329,151 @@ internal sealed partial class SaberRuntime
             r = Scene(); r.Begin(); r.Tick(-.1, 10); gate.Apply(r); r.Tick(.1, 10.02);
             Check(r._slicer.Begins == 0, $"runtime {gate.Name} gate blocks contact detection");
         }
+        QueueSharedLaneChecks();
+        QueueRetiredUploadLane();
+        QueueSplitVehicleLease();
+        QueueReadyValidationPriority();
+        QueueProvenanceSurvivesReplacement();
         SwooshRuntimeChecks();
+    }
+
+    private static (Part Part, SliceTarget Target, MeshReference Mesh) QueueTarget(KittenEva actor, Vehicle? vehicle = null)
+    {
+        vehicle ??= new Vehicle { Parent = actor.Parent };
+        var part = new Part { Tree = vehicle.Parts };
+        var mesh = new MeshReference { PositionsCompare = [[new(0, 0, 0), new(0, 1, 0), new(0, 0, 1)]] };
+        part.Modules.Add(new MeshViewModule(mesh)); vehicle.Parts.Parts.Add(part);
+        return (part, new(part, vehicle, default, part.MatrixAsmb2VehicleAsmb), mesh);
+    }
+    private static void Enqueue(VesselSliceQueue queue, KittenEva actor, (Part Part, SliceTarget Target, MeshReference Mesh) item)
+    {
+        var request = new SlicePlaneRequest("legacy-contact", "ManualContact", "Vessel", default, new(0, 1, 0), new(1, 0, 0));
+        Check(queue.Begin(actor, item.Target, request, 0, 1, 0, item.Mesh, item.Mesh.PositionsCompare, () => true), "vessel test intent admitted");
+    }
+    private static void TickQueue(VesselSliceQueue queue, KittenEva actor, bool commit = false) =>
+        queue.Update(actor, commit, 1, true, true, 0, 0, 0, 0);
+
+    private static void QueueRetiredUploadLane()
+    {
+        var scene = Scene(); var actor = scene._owner!; ArbitrarySlicer.ResetQueueFixture();
+        using var queue = new VesselSliceQueue(TaskScheduler.Default, TaskScheduler.Default, 2, 16, 64);
+        var first = QueueTarget(actor); var second = QueueTarget(actor);
+        Enqueue(queue, actor, first); Enqueue(queue, actor, second);
+        for (int i = 0; i < 80 && (ArbitrarySlicer.CaptureOperations < 2 || ArbitrarySlicer.UploadOperations < 1); i++) TickQueue(queue, actor);
+        Check(ArbitrarySlicer.CaptureOperations == 2 && ArbitrarySlicer.UploadOperations == 1, "two vessel sources reach one shared upload lane");
+        first.Part.PositionParentAsmb = new(1, 0, 0); // stale source cancels the first upload
+        TickQueue(queue, actor);
+        TickQueue(queue, actor);
+        Check(ArbitrarySlicer.UploadRetirements == 1 && ArbitrarySlicer.UploadOperations == 1,
+            "retiring a cancelled vessel upload consumes the entire handoff upload lane");
+        TickQueue(queue, actor);
+        Check(ArbitrarySlicer.UploadOperations == 2, "the next vessel upload starts on a later handoff");
+    }
+
+    private static void QueueSplitVehicleLease()
+    {
+        var scene = Scene(); var actor = scene._owner!; ArbitrarySlicer.ResetQueueFixture();
+        using var queue = new VesselSliceQueue(TaskScheduler.Default, TaskScheduler.Default, 2, 16, 64);
+        var owner = new Vehicle { Parent = actor.Parent };
+        var first = QueueTarget(actor, owner); var pending = QueueTarget(actor, owner);
+        Enqueue(queue, actor, first); Enqueue(queue, actor, pending);
+        ArbitrarySlicer.NextIsolationMovedPart = pending.Part;
+        for (int i = 0; i < 80 && ArbitrarySlicer.LastIsolationNeighbor == null; i++) TickQueue(queue, actor, true);
+        Check(ArbitrarySlicer.LastIsolationNeighbor != null, "coordinator isolation rebases a pending sibling onto a neighbor vehicle");
+        var later = QueueTarget(actor, ArbitrarySlicer.LastIsolationNeighbor);
+        Enqueue(queue, actor, later);
+        for (int i = 0; i < 80 && ArbitrarySlicer.CommitOperations == 0; i++) TickQueue(queue, actor, true);
+        Check(ArbitrarySlicer.CommitOperations == 1, "the first isolated source commits before its siblings");
+        for (int i = 0; i < 80 && ArbitrarySlicer.Instances < 2; i++) TickQueue(queue, actor);
+        Check(ArbitrarySlicer.Instances == 2 && ReferenceEquals(ArbitrarySlicer.LastInstance?.LastPart, pending.Part),
+            "the original queued sibling acquires the new vehicle lease first");
+        for (int i = 0; i < 20; i++) TickQueue(queue, actor);
+        Check(ArbitrarySlicer.Instances == 2, "a later intent cannot capture concurrently on that same rebased vehicle");
+    }
+
+    private static void QueueReadyValidationPriority()
+    {
+        var scene = Scene(); var actor = scene._owner!; ArbitrarySlicer.ResetQueueFixture();
+        using var queue = new VesselSliceQueue(TaskScheduler.Default, TaskScheduler.Default, 2, 16, 64);
+        var first = QueueTarget(actor); Enqueue(queue, actor, first);
+        for (int i = 0; i < 40 && ArbitrarySlicer.CaptureOperations == 0; i++)
+            queue.Update(actor, false, 1, true, false, 0, 0, 0, 0);
+        for (int i = 0; i < 10 && ArbitrarySlicer.UploadOperations == 0; i++)
+            queue.Update(actor, false, 1, false, true, 0, 0, 0, 0);
+        Check(queue.WantsCapture && !queue.WantsCommit, "ready source awaits incremental validation");
+        Enqueue(queue, actor, QueueTarget(actor));
+        queue.Update(actor, false, 1, true, false, 0, 0, 0, 0);
+        Check(queue.WantsCommit && ArbitrarySlicer.Instances == 1,
+            "ready source validation takes priority over a newly queued source");
+    }
+
+    private static void QueueProvenanceSurvivesReplacement()
+    {
+        var scene = Scene(); var actor = scene._owner!; var item = QueueTarget(actor);
+        var provenance = new SliceStrokeProvenance<Part>(); provenance.Observe(44);
+        using (var first = new VesselSliceQueue(TaskScheduler.Default, TaskScheduler.Default, 2, 16, 64, provenance))
+            first.MarkGenerated(item.Part, 44);
+        using var replacement = new VesselSliceQueue(TaskScheduler.Default, TaskScheduler.Default, 2, 16, 64, provenance);
+        var request = new SlicePlaneRequest("legacy-contact", "ManualContact", "Vessel", default, new(0, 1, 0), new(1, 0, 0));
+        Check(!replacement.Begin(actor, item.Target, request, 0, 44, 0, item.Mesh, item.Mesh.PositionsCompare, () => true),
+            "queue replacement retains same-stroke fragment suppression");
+        provenance.Observe(45);
+        Check(replacement.Begin(actor, item.Target, request, 0, 45, 0, item.Mesh, item.Mesh.PositionsCompare, () => true),
+            "a later stroke can cut the fragment after queue replacement");
+    }
+
+    private static void QueueSharedLaneChecks()
+    {
+        var r = Scene();
+        r._settings.SliceExecutionMode = "queued";
+        r._clutterQueue = new ClutterSliceQueue { Active = true, ReservationCount = 2, LoadSlots = 2 };
+        r.Begin(); r.Tick(-.1, 0); r.Tick(.1, .02);
+        Check(r._vesselQueue is { Count: 1 }, $"queued manual contact enters the production vessel queue alongside clutter work (count {r._vesselQueue?.Count ?? -1}, status '{r._sliceStatus}', audio {r._audio.Slices})");
+
+        ArbitrarySlicer.ResetQueueFixture();
+        double now = .03;
+        for (int i = 0; i < 40 && (ArbitrarySlicer.LastInstance == null || !ArbitrarySlicer.LastInstance.EstimateDone); i++, now += .01)
+            r.Tick(.1, now, move: false);
+        var slicer = ArbitrarySlicer.LastInstance;
+        Check(slicer != null && slicer.EstimateDone && r._vesselQueue is { ReservationCount: 0 }
+            && ArbitrarySlicer.CaptureOperations == 0,
+            $"vessel capture waits while the shared clutter reservation budget is full (slicer {slicer != null}, estimate {slicer?.EstimateDone}, reservations {r._vesselQueue?.ReservationCount}, captures {ArbitrarySlicer.CaptureOperations}, queue '{r._vesselQueue?.Status}', now {now:F2})");
+
+        r._clutterQueue.ReservationCount = 0;
+        for (int i = 0; i < 20 && ArbitrarySlicer.CaptureOperations == 0; i++, now += .01)
+            r.Tick(.1, now, move: false);
+        Check(ArbitrarySlicer.CaptureOperations == 1 && ArbitrarySlicer.LastAdvanceCapture
+            && !ArbitrarySlicer.LastAdvanceLoadSlot && slicer is { HoldsLoadSlot: false },
+            "vessel source capture proceeds when a reservation frees but respects clutter's saturated loader slots");
+
+        r._clutterQueue.HasUpload = true;
+        r.Tick(.1, now += .01, move: false);
+        Check(!r._vesselUploadLane && !ArbitrarySlicer.LastAdvanceUpload && ArbitrarySlicer.UploadOperations == 0,
+            "clutter's active upload prevents a simultaneous vessel upload");
+
+        r._clutterQueue.HasUpload = false;
+        r._clutterQueue.LoadSlots = 0;
+        r.Tick(.1, now += .01, move: false);
+        Check(r._vesselUploadLane && ArbitrarySlicer.LastAdvanceUpload && ArbitrarySlicer.UploadOperations == 1
+            && ArbitrarySlicer.LastAdvanceLoadSlot && slicer is { HoldsLoadSlot: true },
+            "vessel upload and loader admission resume after clutter releases their shared lanes");
+
+        Check(r._vesselQueue is { WantsCapture: true },
+            "a ready vessel remains capture-lane eligible until its source signature is revalidated");
+        r._clutterQueue.Active = false;
+        r.Tick(.1, now += .01, advancing: false, move: false);
+        Check(r._vesselCaptureLane && r._vesselQueue is { WantsCommit: true } && !r._vesselCommitLane,
+            "ready-but-unverified vessel work uses the capture lane for revalidation while no-step keeps commit closed");
+        r.Tick(.1, now += .01, advancing: true, move: false);
+        Check(r._vesselCommitLane && slicer is { Isolations: 1, Commits: 0 }
+            && r._vesselQueue is { WantsCapture: true },
+            "a settled vessel handoff isolates once, then returns to capture-lane source verification before commit");
+        r.Tick(.1, now += .01, advancing: false, move: false);
+        Check(r._vesselCaptureLane && !r._vesselCommitLane && r._vesselQueue is { WantsCommit: true },
+            "post-isolation verification preserves the no-step commit barrier");
+        r.Tick(.1, now += .01, advancing: true, move: false);
+        Check(r._vesselCommitLane && ArbitrarySlicer.CommitOperations == 1,
+            "vessel replacement commits on a later permitted settled handoff");
     }
 
     private static void SwooshRuntimeChecks()

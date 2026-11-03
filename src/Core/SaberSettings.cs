@@ -91,6 +91,18 @@ public sealed class SaberSettings
     public bool DebugTimingsEnabled { get; set; } = false;
     public float SliceReachMultiplier { get; set; } = SaberLimits.DefaultSliceReachMultiplier;
     public float TreeCutFireSeconds { get; set; } = 10;
+    public bool PassiveContactCutsEnabled { get; set; } = false;
+    public string VesselContactDetector { get; set; } = "legacy-ribbon";
+    public string ClutterContactDetector { get; set; } = "legacy-rays";
+    public string ContactPlaneStrategy { get; set; } = "legacy-contact";
+    public string SliceExecutionMode { get; set; } = "legacy-serial";
+    public int SliceWorkerCount { get; set; } = 2;
+    public int SlicePendingTargetLimit { get; set; } = 128;
+    public int SliceWorkingMemoryMiB { get; set; } = 256;
+    public bool SliceClutterReachExtension { get; set; } = false;
+    [JsonIgnore]
+    public string EffectiveContactPlaneStrategy => ContactPlaneStrategy is "blade-strict" or "blade-limited" or "sweep-fit"
+        ? ContactPlaneStrategy : "legacy-contact";
     public float ColorR { get; set; } = .12f;
     public float ColorG { get; set; } = .75f;
     public float ColorB { get; set; } = 1f;
@@ -144,6 +156,13 @@ public sealed class SaberSettings
 
     public void Validate()
     {
+        VesselContactDetector = ValidId(VesselContactDetector, "legacy-ribbon", "cached-ribbon");
+        ClutterContactDetector = ValidId(ClutterContactDetector, "legacy-rays", "all-hit-rays", "capsule-sweep");
+        ContactPlaneStrategy = ValidId(ContactPlaneStrategy, "legacy-contact", "blade-strict", "blade-limited", "sweep-fit");
+        SliceExecutionMode = ValidId(SliceExecutionMode, "legacy-serial", "queued");
+        SliceWorkerCount = Math.Clamp(SliceWorkerCount, 1, 4);
+        SlicePendingTargetLimit = Math.Clamp(SlicePendingTargetLimit, 16, 512);
+        SliceWorkingMemoryMiB = Math.Clamp(SliceWorkingMemoryMiB, 64, 1024);
         BladeLength = Clamp(BladeLength, .25f, SaberLimits.MaximumBladeLength, 1.4f);
         SliceReachMultiplier = SaberLimits.ValidateSliceReachMultiplier(SliceReachMultiplier);
         TreeCutFireSeconds = Clamp(TreeCutFireSeconds, 0, 60, 10);
@@ -186,13 +205,23 @@ public sealed class SaberSettings
     private static float Clamp(float value, float min, float max, float fallback) =>
         float.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
 
+    private static string ValidId(string? value, string fallback, params string[] alternatives) =>
+        value == fallback || Array.IndexOf(alternatives, value) >= 0 ? value! : fallback;
+
     public static SaberSettings Load(string path)
     {
         if (!File.Exists(path)) return new();
         var value = JsonSerializer.Deserialize<SaberSettings>(File.ReadAllText(path)) ?? new();
+        if (!Known(value.VesselContactDetector, "legacy-ribbon", "cached-ribbon")
+            || !Known(value.ClutterContactDetector, "legacy-rays", "all-hit-rays", "capsule-sweep")
+            || !Known(value.ContactPlaneStrategy, "legacy-contact", "blade-strict", "blade-limited", "sweep-fit")
+            || !Known(value.SliceExecutionMode, "legacy-serial", "queued"))
+            Console.WriteLine("[purr2d2] Unknown slicing method in preferences; using its default.");
         value.Validate();
         return value;
     }
+
+    private static bool Known(string? value, params string[] choices) => Array.IndexOf(choices, value) >= 0;
 
     public void Save(string path)
     {

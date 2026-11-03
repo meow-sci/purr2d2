@@ -11,10 +11,11 @@ internal static class ClutterSliceGeometry
     {
         if (tree) input = input with { SourceSolidWood = !input.GeneratedClosedGeometry, CutKind = SliceCutKind.Wood };
         try { return SliceGeometryWork.Calculate(input, cancel, publish); }
-        catch (InvalidDataException) when (!tree && input.Contact is not null)
+        catch (InvalidDataException) when (!tree && (input.Contact is not null || input.PlaneRequest is not null)
+            && (input.PlaneRequest?.AllowsLegacyFallbacks ?? true))
         {
             cancel.ThrowIfCancellationRequested();
-            return SliceGeometryWork.Calculate(input with { Contact = null }, cancel, publish);
+            return SliceGeometryWork.Calculate(input with { Contact = null, PlaneRequest = null }, cancel, publish);
         }
     }
 }

@@ -20,6 +20,7 @@ internal sealed partial class SaberRuntime
     private float3 _sliceAim = float3.UnitZ;
     private double _sliceNextSpark;
     private double _sliceMessageUntil;
+    private double _sliceObservationTime;
     private string _sliceStatus = "";
     private bool SliceStatusVisible => _sliceStatus.Length > 0
         && (_selectingSlice || SliceWorkActive || _playerTime < _sliceMessageUntil);
@@ -82,6 +83,7 @@ internal sealed partial class SaberRuntime
             _sliceSelection = _targeting.BeginSelection(_owner, pick.Origin, pick.Direction, baseBody, reach);
         if (target == null && _sliceSelection == null) return;
         _sliceStarted = false; _sliceError = null;
+        _sliceObservationTime = _playerTime;
         _sliceSequence.Start(); _sliceNextSpark = .2;
         _sliceStatus = "Slicing the selected part...";
     }
@@ -157,13 +159,13 @@ internal sealed partial class SaberRuntime
             if (!_targeting.CheckSliceTarget(_owner, _sliceTarget, baseBody, reach, out reason))
             { CancelAssistedSlice(reason); _selectingSlice = true; return; }
             _sliceStarted = true;
-            try { _slicer.Begin(_sliceTarget.Part); }
+            try { _slicer.Begin(_sliceTarget.Part, diagnosticDetector: "assisted-selection", diagnosticTime: _sliceObservationTime); }
             catch (Exception error) { _sliceError = error.Message; }
         }
         _slicer.Advance();
         _sliceError ??= _slicer.Error;
         if (!_targeting.CheckPendingSliceTarget(_owner, _sliceTarget, out var refusal))
-            _sliceError ??= refusal;
+        { _sliceError ??= refusal; _slicer.FinishSerialDiagnostic(SliceJobOutcome.Stale, _playerTime); }
         double speed = Universe.GetSimulationSpeed();
         if (!SaberLimits.SupportsSpeed(speed)) return;
         double3 bladeBaseBody = default;
@@ -171,7 +173,7 @@ internal sealed partial class SaberRuntime
         // Ignition or fallback picking may span frames: validate again at the start of the stroke.
         if (!_sliceSequence.Swinging && _sliceSequence.Progress == 0
             && !_targeting.CheckSliceTarget(_owner, _sliceTarget, bladeBaseBody, SliceReach, out refusal))
-        { CancelAssistedSlice(refusal); _selectingSlice = true; return; }
+        { _slicer.FinishSerialDiagnostic(SliceJobOutcome.Stale, _playerTime); CancelAssistedSlice(refusal); _selectingSlice = true; return; }
 
         if (!_sliceSequence.EndPresented && !_sliceTarget.Vehicle.IsDisposed && Program.GetMainCamera() is { } camera)
         {
@@ -203,17 +205,18 @@ internal sealed partial class SaberRuntime
         _sliceStatus = !_sliceSequence.EndPresented ? "Slicing " + _sliceTarget.Part.DisplayName + "..." : _slicer.Phase;
         if (cue == SliceCue.Isolate)
         {
-            if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
+            if (_sliceError != null) { _slicer.FinishSerialDiagnostic(SliceJobOutcome.Failed, _playerTime); CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
             var result = IsolateSliceTarget();
-            if (!result.Success) { CancelAssistedSlice("Slice failed: " + result.Message); return; }
+            if (!result.Success) { _slicer.FinishSerialDiagnostic(SliceJobOutcome.Failed, _playerTime); CancelAssistedSlice("Slice failed: " + result.Message); return; }
             _sliceStatus = _slicer.Phase;
             return;
         }
         if (cue == SliceCue.Commit)
         {
-            if (_sliceError != null) { CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
+            if (_sliceError != null) { _slicer.FinishSerialDiagnostic(SliceJobOutcome.Failed, _playerTime); CancelAssistedSlice("Cannot slice: " + _sliceError); return; }
             // Reach was checked at the click and stroke start. Moving afterward does not undo the cut.
             var result = _targeting.CommitAcceptedSlice(_owner, _sliceTarget, default);
+            if (!result.Success) _slicer.FinishSerialDiagnostic(SliceJobOutcome.Failed, _playerTime);
             CancelAssistedSlice((result.Success ? "Slice complete: " : "Slice failed: ") + result.Message);
         }
     }

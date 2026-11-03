@@ -1,5 +1,6 @@
 using Brutal.Numerics;
 using KSA;
+using Purr2D2.Core;
 using Purr2D2.Force;
 using Purr2D2.Slicing;
 
@@ -13,12 +14,85 @@ internal static class ClutterSlicerChecks
             PreparedSplitWaitsForCommitPermission();
             NativeFailureReportsItsOwnReason();
             FailedPreparationRoutesToActualFallback();
+            AlternativeFailureNeverTopples();
             CommittedCutSurvivesEffectFaults();
             UnexpectedPostCommitFaultRetainsSuccess();
             OwnerAndTargetChangesCancel();
             CancellationDoesNotJoinWorker();
+            QueueIsBoundedAndKeepsAcceptedWork();
+            QueueMemoryAdmissionAndRetirement();
+            QueueMemorySkipsTemporarilyBlockedIntents();
+            QueueReservesNativeVehicleSlots();
+            QueueCancellationRetiresWithoutJoiningWorker();
+            QueueDisposeDoesNotJoinBlockedWorker();
+            SerialJobDiagnostics();
         });
         Console.WriteLine("PASS: production clutter slicing orchestration: deferred native commits, truthful fallback, committed-cut fault containment, bounded effects, stale-scene cancellation and nonblocking retirement");
+    }
+
+    private static void SerialJobDiagnostics()
+    {
+        SliceJobDiagnostics.Reset(); DebugTimings.Enabled = true;
+        try
+        {
+            ClutterScenario.Reset(); var owner = new KittenEva();
+            using (var slicer = new ClutterSlicer())
+            {
+                Check(slicer.Begin(owner, new(), default, double3.UnitY, double3.UnitX,
+                    diagnosticDetector: "legacy-rays", diagnosticTime: 1), "serial contact job starts with diagnostics");
+                Check(SpinWait.SpinUntil(() => { slicer.Update(owner, true, 1.25, 0); return !slicer.Active; }, TimeSpan.FromSeconds(5)),
+                    "serial contact job completes");
+                var sample = SliceJobDiagnostics.Latest;
+                Check(SliceJobDiagnostics.CountFor(SliceJobOutcome.SerialStarted) == 1
+                    && SliceJobDiagnostics.CountFor(SliceJobOutcome.Queued) == 0
+                    && SliceJobDiagnostics.CountFor(SliceJobOutcome.MeshCut) == 1
+                    && SliceJobDiagnostics.CountForMode(SliceJobOutcome.MeshCut, "serial") == 1
+                    && SliceJobDiagnostics.CountForMode(SliceJobOutcome.MeshCut, "queued") == 0
+                    && sample is { Mode: "serial", Detector: "legacy-rays", Outcome: SliceJobOutcome.MeshCut }
+                    && Math.Abs(sample.Value.PlayerLatencyMs - 250) < .001
+                    && sample.Value.CaptureMs > 0 && sample.Value.GeometryMs > 0 && sample.Value.LoaderMs > 0
+                    && sample.Value.UploadMs > 0 && sample.Value.CommitMs > 0,
+                    "serial mesh cut is timed and counted once without a queued admission");
+            }
+            Check(SliceJobDiagnostics.CountFor(SliceJobOutcome.Cancelled) == 0,
+                "cleanup after a successful serial cut does not add a cancellation");
+            ClutterScenario.Reset(); ClutterScenario.CaptureError = "fixture source refusal";
+            using (var slicer = new ClutterSlicer())
+            {
+                Check(slicer.Begin(owner, new(), default, double3.UnitY, double3.UnitX,
+                    trigger: "AssistedClutter", diagnosticDetector: "assisted-selection", diagnosticTime: 2), "assisted ground job starts");
+                slicer.Update(owner, true, 2.1, 0);
+                Check(SliceJobDiagnostics.CountFor(SliceJobOutcome.SerialStarted) == 2
+                    && SliceJobDiagnostics.CountFor(SliceJobOutcome.Toppled) == 1
+                    && SliceJobDiagnostics.CountForMode(SliceJobOutcome.Toppled, "serial") == 1
+                    && SliceJobDiagnostics.CountFor(SliceJobOutcome.MeshCut) == 1
+                    && SliceJobDiagnostics.Latest is { Mode: "serial", Detector: "assisted-selection", Outcome: SliceJobOutcome.Toppled },
+                    "assisted toppling remains distinct from a completed mesh cut");
+            }
+            ClutterScenario.Reset();
+            using (var slicer = new ClutterSlicer())
+            {
+                Check(slicer.Begin(owner, new(), default, double3.UnitY, double3.UnitX,
+                    diagnosticDetector: "legacy-rays", diagnosticTime: 3), "cancellable serial job starts");
+                slicer.Cancel(); slicer.Cancel();
+                Check(SliceJobDiagnostics.CountFor(SliceJobOutcome.Cancelled) == 1,
+                    "repeated serial cancellation records one terminal outcome");
+            }
+        }
+        finally { DebugTimings.Enabled = false; SliceJobDiagnostics.Reset(); }
+    }
+
+    private static void AlternativeFailureNeverTopples()
+    {
+        foreach (string mode in new[] { "blade-strict", "blade-limited", "sweep-fit" })
+        {
+            ClutterScenario.Reset(); ClutterScenario.CaptureError = "fixture failure";
+            using var slicer = new ClutterSlicer(); var owner = new KittenEva();
+            Check(slicer.Begin(owner, new(), default, double3.UnitY, double3.UnitX, mode), "alternative cut starts");
+            slicer.Update(owner, true, 1, 0);
+            Check(!slicer.Active && ClutterScenario.Topples == 0 && ClutterScenario.Replacements == 0
+                && slicer.Status.Contains("fixture failure"), "alternative failure reports rejection without toppling");
+        }
     }
 
     private static void PreparedSplitWaitsForCommitPermission()
@@ -151,6 +225,182 @@ internal static class ClutterSlicerChecks
         Check(SpinWait.SpinUntil(() => { slicer.PumpRetired(); return !slicer.Busy; }, TimeSpan.FromSeconds(5)),
             "retired work drains without publishing its stale result");
         Check(ClutterScenario.Replacements == 0 && ClutterScenario.Topples == 0, "a late cancelled result cannot touch the world");
+    }
+
+    private static void QueueIsBoundedAndKeepsAcceptedWork()
+    {
+        ClutterScenario.Reset();
+        SliceJobDiagnostics.Reset();
+        using var release = new ManualResetEventSlim();
+        ClutterScenario.WorkerRelease = release;
+        ClutterScenario.HoldUploads = true;
+        using var queue = new ClutterSliceQueue(2, 16)
+        { CutSparks = (_, _, _, _) => { }, TreeFire = (_, _, _, _, _) => { }, FragmentCreated = (_, _) => { } };
+        var owner = new KittenEva();
+        var target = new ClutterForceTarget();
+        Check(queue.Begin(owner, target, default, double3.UnitY, double3.UnitX), "queue admits a target");
+        Check(!queue.Begin(owner, target, default, double3.UnitY, double3.UnitX), "queue deduplicates an accepted identity");
+        for (int i = 1; i < 16; i++)
+            Check(queue.Begin(owner, new(), default, double3.UnitY, double3.UnitX), "queue admits a distinct target within its limit");
+        Check(queue.Count == 16 && !queue.Begin(owner, new(), default, double3.UnitY, double3.UnitX), "queue enforces pending target limit");
+        Check(SliceJobDiagnostics.CountFor(SliceJobOutcome.Queued) == 16
+            && SliceJobDiagnostics.CountFor(SliceJobOutcome.Deduplicated) == 1
+            && SliceJobDiagnostics.CountFor(SliceJobOutcome.QueueFull) == 1,
+            "queue counters distinguish admissions, duplicates and capacity refusals");
+        int expectedWorkers = Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
+        try
+        {
+            Check(SpinWait.SpinUntil(() => { queue.Update(owner, false, 1, 0); return Volatile.Read(ref ClutterScenario.WorkersRunning) == expectedWorkers; }, TimeSpan.FromSeconds(5)),
+                "the permitted worker count starts on independent accepted targets");
+            var updateTimer = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 30; i++) queue.Update(owner, false, 1, 0);
+            Check(updateTimer.Elapsed.TotalMilliseconds < 100,
+                "main-thread queue updates return while worker tasks remain blocked");
+            Check(ClutterScenario.MaximumWorkers == expectedWorkers && ClutterScenario.Replacements == 0,
+                "worker count is bounded and paused commits do not mutate the world");
+        }
+        finally { release.Set(); }
+        Check(SpinWait.SpinUntil(() => { queue.Update(owner, false, 2, 0); return ClutterScenario.UploadAdvances > 0; }, TimeSpan.FromSeconds(5)),
+            "accepted work continues preparing without new input or commit permission");
+        Check(SpinWait.SpinUntil(() => { queue.Update(owner, false, 2, 0); return ClutterScenario.UploadsLive > 0; }, TimeSpan.FromSeconds(5)),
+            "the first detached upload can remain pending across frames");
+        for (int i = 0; i < 30; i++) queue.Update(owner, false, 2, 0);
+        Check(ClutterScenario.Replacements == 0 && ClutterScenario.UploadsLive == 1
+            && ClutterScenario.MaximumUploads == 1,
+            "prepared jobs wait for permission and only one upload remains live");
+        ClutterScenario.HoldUploads = false;
+        Check(SpinWait.SpinUntil(() => { queue.Update(owner, true, 3, 0); return !queue.Active; }, TimeSpan.FromSeconds(10)),
+            "accepted jobs drain after input release");
+        Check(ClutterScenario.Replacements == 16 && ClutterScenario.Topples == 0 && ClutterScenario.MaximumUploads == 1,
+            "each accepted target commits once and upload jobs are serialized");
+        Check(SliceJobDiagnostics.CountFor(SliceJobOutcome.MeshCut) == 16
+            && SliceJobDiagnostics.CountFor(SliceJobOutcome.Toppled) == 0,
+            "completed mesh cuts are counted separately from displacement fallbacks");
+        Check(!queue.Pending.Contains(target.StableKey)
+            && queue.Begin(owner, target, default, double3.UnitY, double3.UnitX),
+            "a fully retired identity can be accepted again");
+    }
+
+    private static void QueueMemoryAdmissionAndRetirement()
+    {
+        const long MiB = 1024 * 1024;
+        ClutterScenario.Reset(); using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        ClutterScenario.WorkerEntered = entered.Set; ClutterScenario.WorkerRelease = release;
+        using var queue = new ClutterSliceQueue(2, 16, 64);
+        var owner = new KittenEva();
+        var oversized = new ClutterForceTarget { EstimateBytes = 65 * MiB };
+        var large = new ClutterForceTarget { EstimateBytes = 60 * MiB, RetainedBytes = 70 * MiB };
+        var small = new ClutterForceTarget { EstimateBytes = 4 * MiB };
+        Check(queue.Begin(owner, oversized, default, double3.UnitY, double3.UnitX)
+            && queue.Begin(owner, large, default, double3.UnitY, double3.UnitX)
+            && queue.Begin(owner, small, default, double3.UnitY, double3.UnitX), "memory fixtures admitted as intents");
+        try
+        {
+            Check(SpinWait.SpinUntil(() => { queue.Update(owner, false, 1, 0); return entered.IsSet; }, TimeSpan.FromSeconds(5)),
+                "oversized preflight refuses without preventing later work");
+            Check(!queue.Pending.Contains(oversized.StableKey) && queue.Status.Contains("SliceWorkingMemoryMiB"),
+                "oversized source names the setting and releases its identity");
+            for (int i = 0; i < 10; i++) queue.Update(owner, false, 1, 0);
+            Check(queue.EstimatedBytes == 60 * MiB && queue.RetainedBytes == 70 * MiB && queue.ChargedBytes == 70 * MiB,
+                "actual retained input blocks further admissions even above the estimate");
+            queue.Cancel();
+            Check(queue.EstimatedBytes == 60 * MiB && queue.ChargedBytes >= 70 * MiB,
+                "cancellation keeps the reservation while the worker owns its input");
+        }
+        finally { release.Set(); }
+        Check(SpinWait.SpinUntil(() => { queue.PumpRetired(); return !queue.Active; }, TimeSpan.FromSeconds(5)),
+            "retired reservations eventually release");
+        Check(queue.EstimatedBytes == 0 && queue.ChargedBytes == 0, "retirement releases all memory charges");
+    }
+
+    private static void QueueMemorySkipsTemporarilyBlockedIntents()
+    {
+        const long MiB = 1024 * 1024;
+        ClutterScenario.Reset(); using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        ClutterScenario.WorkerEntered = entered.Set; ClutterScenario.WorkerRelease = release;
+        using var queue = new ClutterSliceQueue(2, 16, 64);
+        var owner = new KittenEva();
+        Check(queue.Begin(owner, new ClutterForceTarget { EstimateBytes = 50 * MiB }, default, double3.UnitY, double3.UnitX)
+            && queue.Begin(owner, new ClutterForceTarget { EstimateBytes = 20 * MiB }, default, double3.UnitY, double3.UnitX)
+            && queue.Begin(owner, new ClutterForceTarget { EstimateBytes = 4 * MiB }, default, double3.UnitY, double3.UnitX),
+            "waiting sources admitted in order");
+        try
+        {
+            Check(SpinWait.SpinUntil(() => { queue.Update(owner, false, 1, 0); return entered.IsSet && queue.EstimatedBytes == 54 * MiB; }, TimeSpan.FromSeconds(5)),
+                "a smaller source passes an earlier source that cannot currently fit");
+            queue.Cancel();
+        }
+        finally { release.Set(); }
+        Check(SpinWait.SpinUntil(() => { queue.PumpRetired(); return !queue.Active; }, TimeSpan.FromSeconds(5)),
+            "all waiting and running jobs retire after cancellation");
+    }
+
+    private static void QueueReservesNativeVehicleSlots()
+    {
+        ClutterScenario.Reset(); ClutterScenario.HoldUploads = true;
+        NativeSlicePhysics.VehicleLimit = 3;
+        using var queue = new ClutterSliceQueue(2, 16);
+        var owner = new KittenEva();
+        Check(queue.Begin(owner, new(), default, double3.UnitY, double3.UnitX)
+            && queue.Begin(owner, new(), default, double3.UnitY, double3.UnitX), "vehicle reservation fixtures admitted");
+        Check(SpinWait.SpinUntil(() => { queue.Update(owner, false, 1, 0); return queue.ReservedVehicles == 2 && ClutterScenario.UploadsLive == 1; }, TimeSpan.FromSeconds(5)),
+            "one ready job reserves the available vehicle slots");
+        for (int i = 0; i < 100; i++) queue.Update(owner, false, 1, 0);
+        Check(queue.ReservedVehicles == 2 && ClutterScenario.MaximumUploads == 1,
+            "other work cannot reserve the same vehicle slots");
+        ClutterScenario.HoldUploads = false;
+        Check(SpinWait.SpinUntil(() => { queue.Update(owner, true, 2, 0); return !queue.Active; }, TimeSpan.FromSeconds(5)),
+            "remaining job is refused when the first commit consumes the capacity");
+        Check(ClutterScenario.Replacements == 1 && ClutterScenario.Topples == 0 && queue.ReservedVehicles == 0,
+            "native capacity is rechecked without fallback or leaked reservations");
+    }
+
+    private static void QueueCancellationRetiresWithoutJoiningWorker()
+    {
+        ClutterScenario.Reset(); using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        ClutterScenario.WorkerEntered = entered.Set; ClutterScenario.WorkerRelease = release;
+        using var queue = new ClutterSliceQueue(1, 16)
+        { CutSparks = (_, _, _, _) => { }, TreeFire = (_, _, _, _, _) => { }, FragmentCreated = (_, _) => { } };
+        var owner = new KittenEva(); var target = new ClutterForceTarget();
+        Check(queue.Begin(owner, target, default, double3.UnitY, double3.UnitX), "cancellable queue accepts work");
+        queue.Update(owner, false, 1, 0); queue.Update(owner, false, 1, 0); queue.Update(owner, false, 1, 0);
+        Check(entered.Wait(TimeSpan.FromSeconds(5)), "queued worker reaches the controlled blocking point");
+        try
+        {
+            var elapsed = System.Diagnostics.Stopwatch.StartNew(); queue.Cancel();
+            Check(elapsed.Elapsed.TotalMilliseconds < 100 && queue.Count == 1,
+                "queue cancellation returns promptly while retaining unfinished work for retirement");
+            Check(!queue.Begin(owner, target, default, double3.UnitY, double3.UnitX),
+                "a cancelled identity remains deduplicated until its worker retires");
+        }
+        finally { release.Set(); }
+        Check(SpinWait.SpinUntil(() => { queue.Update(owner, true, 2, 0); return queue.Count == 0; }, TimeSpan.FromSeconds(5)),
+            "cancelled queue work retires after its worker exits");
+        Check(ClutterScenario.Replacements == 0 && ClutterScenario.Topples == 0 && ClutterScenario.WorkersRunning == 0,
+            "retired cancellation never mutates the scene or leaves a worker running");
+    }
+
+    private static void QueueDisposeDoesNotJoinBlockedWorker()
+    {
+        ClutterScenario.Reset(); using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        ClutterScenario.WorkerEntered = entered.Set; ClutterScenario.WorkerRelease = release;
+        var queue = new ClutterSliceQueue(1, 16)
+        { CutSparks = (_, _, _, _) => { }, TreeFire = (_, _, _, _, _) => { }, FragmentCreated = (_, _) => { } };
+        var owner = new KittenEva();
+        Check(queue.Begin(owner, new(), default, double3.UnitY, double3.UnitX), "disposable queue accepts work");
+        queue.Update(owner, false, 1, 0); queue.Update(owner, false, 1, 0); queue.Update(owner, false, 1, 0);
+        Check(entered.Wait(TimeSpan.FromSeconds(5)), "disposal fixture worker reaches the blocking point");
+        try
+        {
+            var elapsed = System.Diagnostics.Stopwatch.StartNew(); queue.Dispose();
+            Check(elapsed.Elapsed.TotalMilliseconds < 100 && ClutterScenario.WorkersRunning == 1,
+                "disposing the worker pool returns while its worker is still blocked");
+        }
+        finally { release.Set(); }
+        Check(SpinWait.SpinUntil(() => Volatile.Read(ref ClutterScenario.WorkersRunning) == 0, TimeSpan.FromSeconds(5)),
+            "the background worker exits after disposal cancellation is released");
+        Check(ClutterScenario.Replacements == 0 && ClutterScenario.Topples == 0,
+            "disposed queue work cannot mutate the scene");
     }
 
     private static void Start(ClutterSlicer slicer, KittenEva owner, ClutterForceTarget? target = null) =>

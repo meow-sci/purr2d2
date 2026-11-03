@@ -1,6 +1,7 @@
 using Purr2D2.Cutting;
 using Purr2D2.Rendering;
 using Purr2D2.Slicing;
+using Purr2D2.Slicing.Planes;
 
 internal static class ContactSliceChecks
 {
@@ -16,6 +17,68 @@ internal static class ContactSliceChecks
         CrossingContourUsesPartAxisFallback();
         ImpossibleContactRefusesAuthoredOrCenterFallback();
         AssistedInputKeepsItsExistingPath();
+        PlaneStrategies();
+    }
+
+    private static void PlaneStrategies()
+    {
+        var anchor = new CutPoint(.5, .5, .5);
+        var ribbon = new SliceRibbonMotion(new(0, 0, .5), new(0, 1, .5),
+            new(1, 0, .5), new(1, 1, .5), .5, .5);
+        var strict = new SlicePlaneRequest("blade-strict", "ManualContact", "Vessel", anchor,
+            new(0, 1, 0), new(1, 0, 0), ribbon);
+        Check(SlicePlaneStrategies.TrySelect(strict, [], out var one, out _) && one.Candidates.Length == 1
+            && (one.Candidates[0].Plane.Normal - new CutPoint(0, 0, -1)).Length < 1e-12
+            && Math.Abs(CutPoint.Dot(one.Candidates[0].Plane.Normal, anchor) - one.Candidates[0].Plane.Offset) < 1e-12,
+            "strict strategy selects the exact anchored blade cross motion plane");
+        var limited = strict with { StrategyId = "blade-limited" };
+        Check(SlicePlaneStrategies.TrySelect(limited, [], out var ring, out _)
+            && ring.Candidates.Length == 9 && ring.Candidates[0].Plane == one.Candidates[0].Plane
+            && ring.Candidates.Skip(1).All(c => Math.Abs(CutPoint.Dot(c.Plane.Normal, one.Candidates[0].Plane.Normal) - Math.Cos(Math.PI / 36)) < 1e-12
+                && Math.Abs(CutPoint.Dot(c.Plane.Normal, anchor) - c.Plane.Offset) < 1e-12)
+            && SlicePlaneStrategies.TrySelect(limited, [], out var ringAgain, out _)
+            && ring.Candidates.SequenceEqual(ringAgain.Candidates),
+            "limited strategy gives deterministic five-degree anchored tilts");
+        Check(SlicePlaneStrategies.TrySelect(strict with { StrategyId = "sweep-fit" }, [], out var fit, out _)
+            && fit.Candidates.Length == 1 && CutPoint.Dot(fit.Candidates[0].Plane.Normal, one.Candidates[0].Plane.Normal) > .999999
+            && fit.FitResidualMetres is < 1e-8,
+            "sweep fit follows the sampled ribbon and reports its residual");
+        Check(SlicePlaneStrategies.TrySelect(strict with { StrategyId = "sweep-fit", Ribbon = null, Samples = ribbon.ToSamples() }, [], out var sampledFit, out _)
+            && sampledFit.Candidates[0].Plane == fit.Candidates[0].Plane
+            && sampledFit.FitResidualMetres == fit.FitResidualMetres,
+            "frozen nine-point evidence produces the same fit as the source ribbon");
+        var shift = new CutPoint(12, -5, 3);
+        var shifted = strict with { StrategyId = "sweep-fit", Anchor = anchor + shift, Ribbon = null,
+            Samples = ribbon.ToSamples().Map(p => p + shift) };
+        Check(SlicePlaneStrategies.TrySelect(shifted, [], out var shiftedFit, out _)
+            && (shiftedFit.Candidates[0].Plane.Normal - fit.Candidates[0].Plane.Normal).Length < 1e-12
+            && Math.Abs(CutPoint.Dot(shiftedFit.Candidates[0].Plane.Normal, anchor + shift)
+                - shiftedFit.Candidates[0].Plane.Offset) < 1e-12,
+            "transforming sampled evidence preserves its fitted orientation and anchor");
+        Check(!SlicePlaneStrategies.TrySelect(strict with { MotionAtHit = new(0, 1, 0) }, [], out _, out _)
+            && !SlicePlaneStrategies.TrySelect(strict with { BladeAtHit = default }, [], out _, out _)
+            && !SlicePlaneStrategies.TrySelect(strict with { StrategyId = "sweep-fit", Ribbon = null }, [], out _, out _),
+            "alternative strategies refuse collinear or missing evidence");
+        // Zero perpendicular spread exercises the specified strict fallback.
+        var stationary = new SliceRibbonMotion(new(.5, 0, .5), new(.5, 1, .5),
+            new(.5, 0, .5), new(.5, 1, .5), .5, .5);
+        Check(SlicePlaneStrategies.TrySelect(strict with { StrategyId = "sweep-fit", Ribbon = stationary }, [], out var fallback, out _)
+            && fallback.Candidates[0].Plane == one.Candidates[0].Plane
+            && !SlicePlaneStrategies.TrySelect(strict with { StrategyId = "sweep-fit", Ribbon = stationary, MotionAtHit = default }, [], out _, out _),
+            "ambiguous sweep fit uses strict only when strict motion is defined");
+        var input = Input([Box()]) with { PlaneRequest = strict };
+        var cut = Calculate(input);
+        Check(cut.Attempts == 1 && cut.RequestedPlane == one.Candidates[0].Plane
+            && cut.AnchorResidualMetres is <= .001 && !cut.AuthoredSubpartFallback,
+            "worker exports strict section only with an effective plane within one millimetre");
+        Check(SliceGeometryWork.AcceptEffectivePlane(new(new(0, 0, 1), .5009), anchor, out _)
+            && !SliceGeometryWork.AcceptEffectivePlane(new(new(0, 0, 1), .5011), anchor, out _)
+            && !SliceGeometryWork.AcceptEffectivePlane(new(new(double.NaN, 0, 1), .5), anchor, out _),
+            "effective plane rejects offsets over one millimetre and nonfinite values");
+        bool refused = false;
+        try { ClutterSliceGeometry.Calculate(input with { PlaneRequest = strict with { Anchor = new(100, 100, 100) } }, false, default, _ => { }); }
+        catch (InvalidDataException) { refused = true; }
+        Check(refused, "nonlegacy rock contact cannot retry with an unanchored section");
     }
 
     private static void DirectionAndCandidates()
