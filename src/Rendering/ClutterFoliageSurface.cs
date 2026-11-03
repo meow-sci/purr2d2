@@ -73,7 +73,6 @@ internal static class ClutterFoliageSurface
                 vec3 purrDirection = normalize(sunPos().xyz - inWorldPosition);
                 vec3 purrView = normalize(-inWorldPosition);
                 float purrDot = pow(clamp(dot(purrView, -(purrDirection + worldNormal * 0.05)), 0.0, 1.0), 3.5) * 0.3;
-                float purrLuminosity = uintBitsToFloat(inStateFlags & 0xfffff000u);
                 float purrShadow = 1.0;
                 if (celestialShadow) {
                     purrShadow *= getCelestialShadow(inWorldPosition, sunPos());
@@ -81,7 +80,8 @@ internal static class ClutterFoliageSurface
                 }
                 float purrDepth = -(global.camera.view * vec4(inWorldPosition, 1.0)).z;
                 purrShadow *= GetCascadedShadow(inWorldPosition, worldNormal, max(dot(worldNormal, purrDirection), 0.0), purrDepth);
-                lightColor += global.lighting.sunColor.rgb * sampledColor * purrLuminosity
+                // sampledColor already includes the native source luminosity.
+                lightColor += global.lighting.sunColor.rgb * sampledColor
                     * vec3(1.0, 0.8, 0.7) * purrShadow * (purrDot + 0.01) * (1.0 - purrThickness);
             }
             """;

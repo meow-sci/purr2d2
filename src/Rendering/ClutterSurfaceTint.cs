@@ -51,7 +51,10 @@ internal static class ClutterSurfaceTint
                 vec3 purrColor = vec3(float((inEmissiveColor >> 22u) & 1023u), float((inEmissiveColor >> 12u) & 1023u), float((inEmissiveColor >> 2u) & 1023u)) / 1023.0;
                 float purrLuminosity = uintBitsToFloat(inStateFlags & 0xfffff000u);
                 sampledColor = mix(pow(purrDiffuse.rgb, vec3(2.2)), purrDiffuse.rgb, purrDiffuse.a) * 2.0;
-                sampledColor *= mix(vec3(purrLuminosity), purrColor, purrDiffuse.a) / purrLuminosity;
+                // Ground clutter normalizes its texture by L, then restores L
+                // before ordinary PBR/environment/punctual lighting. PartModel
+                // already expects absolute albedo, so perform that conversion here.
+                sampledColor *= mix(vec3(purrLuminosity), purrColor, purrDiffuse.a);
             }
             """;
         if (!raytraced) tint = "\n#ifdef ENABLE_EMISSIVE\n" + tint + "\n#endif\n";

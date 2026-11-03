@@ -5,6 +5,11 @@ internal static class ClutterTintChecks
     internal static void Run(string nativeShaders, string output)
     {
         Purr2D2.Core.DebugTimings.Enabled = false;
+        const string restoredLeaf = "Purr2D2_Fragment_saved_s1_fol_ct123456783e5ed000_m0";
+        if (!ClutterSurfaceTint.TryRead(restoredLeaf, out uint restoredColor, out uint restoredLuminosity)
+            || restoredColor != 0x12345678 || restoredLuminosity != 0x3e5ed000
+            || !ClutterFoliageSurface.IsMesh(restoredLeaf))
+            throw new Exception("A pre-fix saved leaf mesh lost its existing tint/luminosity metadata.");
         uint source = (917u << 22) | (301u << 12) | (72u << 2);
         for (int i = 0; i < 1000; i++)
         {
@@ -47,6 +52,16 @@ internal static class ClutterTintChecks
         {
             string sourceCode = File.ReadAllText(Path.Combine(nativeShaders, "Mesh", filename));
             string rewritten = ClutterSurfaceTint.RewriteShader(sourceCode, filename.Contains("Raytraced"));
+            const string declaration = "vec3 sampledColor = gammaToLinear(texture(sampler2D(globalTextures[drawData.diffuseTextureIndex], textureSampler), inUv).xyz);";
+            int insertion = sourceCode.IndexOf(declaration, StringComparison.Ordinal) + declaration.Length;
+            int added = rewritten.Length - sourceCode.Length;
+            if (insertion < declaration.Length || added <= 0 || rewritten[..insertion] != sourceCode[..insertion]
+                || rewritten[(insertion + added)..] != sourceCode[insertion..]
+                || !rewritten.AsSpan(insertion, added).Contains("if ((inStateFlags & 0x800u) != 0u)", StringComparison.Ordinal))
+                throw new Exception("The clutter correction changed ordinary material, AORM, direct/ambient/punctual, frost or cap paths.");
+            if (filename == "MeshIndirect.frag" && rewritten.IndexOf("// PURR_CLUTTER_TINT", StringComparison.Ordinal)
+                > rewritten.IndexOf("sampledColor = mix(sampledColor, frostDiffuse, frostStrength)", StringComparison.Ordinal))
+                throw new Exception("Clutter luminosity was applied after native frost blending.");
             if (!rewritten.Contains("* 2.0", StringComparison.Ordinal) || !rewritten.Contains("purrDiffuse.a", StringComparison.Ordinal)
                 || !rewritten.Contains("uintBitsToFloat", StringComparison.Ordinal)) throw new Exception("Native ground diffuse rule was not retained.");
             rewritten = ClutterFoliageSurface.RewriteShader(rewritten, prepass: false, raytraced: filename.Contains("Raytraced"));

@@ -5,14 +5,122 @@ Usage: python3 tools/check_clutter_tint.py ../ksa-game-assemblies/current/Conten
 Native shader source and compiled files stay in ignored artifacts/checks.
 """
 import argparse
+import itertools
 import json
+import math
 from pathlib import Path
+import re
 import subprocess
 import struct
 import sys
+from types import SimpleNamespace
+import xml.etree.ElementTree as ET
 
 from check_saber_shaders import _compiler
 from validate import DEFAULT_SOURCE, _run_managed_project
+
+
+class Vec3(tuple):
+    """Small numeric GLSL vec3 value for evaluating the actual emitted assignments."""
+    def __new__(cls, *values):
+        return tuple.__new__(cls, values if len(values) == 3 else (values[0],) * 3)
+
+    def apply(self, other, operation):
+        other = other if isinstance(other, Vec3) else Vec3(other)
+        return Vec3(*(operation(a, b) for a, b in zip(self, other)))
+
+    def __add__(self, other): return self.apply(other, lambda a, b: a + b)
+    def __sub__(self, other): return self.apply(other, lambda a, b: a - b)
+    def __mul__(self, other): return self.apply(other, lambda a, b: a * b)
+    def __truediv__(self, other): return self.apply(other, lambda a, b: a / b)
+    def __pow__(self, other): return self.apply(other, lambda a, b: a ** b)
+
+
+def shader_expression(expression, values):
+    # Only local shader arithmetic is evaluated; these environments contain numeric
+    # vectors/samples and the three GLSL functions used by the native diffuse rule.
+    return eval(expression, {'__builtins__': {}, 'vec3': Vec3,
+                            'pow': lambda a, b: a ** b, 'mix': lambda a, b, t: a * (1 - t) + b * t}, values)
+
+
+def shader_assignments(source, values):
+    """Evaluate extracted GLSL assignments, rather than a separately mirrored formula."""
+    for statement in re.sub(r'//[^\n]*', '', source).split(';'):
+        statement = re.sub(r'^\s*(?:vec3|float)\s+', '', statement).strip()
+        if not statement:
+            continue
+        match = re.fullmatch(r'([\w.]+)\s*(\*=|\+=|=)\s*(.+)', statement, re.S)
+        if not match:
+            raise RuntimeError('Native clutter arithmetic contract changed: ' + statement)
+        target, operator, expression = match.groups()
+        value = shader_expression(expression, values)
+        if operator != '=':
+            original = shader_expression(target, values)
+            value = original * value if operator == '*=' else original + value
+        if '.' in target:
+            name, member = target.split('.')
+            setattr(values[name], member, value)
+        else:
+            values[target] = value
+    return values
+
+
+def check_albedo_contract(content, native, output):
+    ground = (native / 'Planet/GroundClutter/Solid.frag').read_text()
+    # This is the native relative-color block, including its actual division by L.
+    block = re.search(r'vec3 diffuseSrgb\s*=.*?diffuseSample\.rgb\s*\*=.*?;', ground, re.S).group()
+    for endpoint in (r'getPBREnvironmentLightingPresampled\([^;]*surfaceColor\s*\*\s*averageLuminosity',
+                     r'SampleForwardLights\([^;]*surfaceColor\s*\*\s*averageLuminosity'):
+        if not re.search(endpoint, ground, re.S):
+            raise RuntimeError('Native environment/punctual absolute-albedo contract changed')
+    native_transmission = re.search(r'outColor\.rgb\s*\+=\s*global\.lighting\.sunColor\.rgb\s*\*\s*(.*?)\s*\*\s*leafAttenuationWavelengthMult', ground, re.S).group(1)
+    earth = ET.parse(content / 'Astronomicals.xml').find(".//Scattering[@Id='Earth_Scattering']/MeanDiffuseLuminosity")
+    earth_luminosity = float(earth.get('Value')) ** 2.2
+    capture = (DEFAULT_SOURCE / 'src/Cutting/ClutterSliceSourceCapture.cs').read_text()
+    default = re.search(r'MeanDiffuseLuminosity\s*\?\?\s*([.\d]+)f,\s*([.\d]+)', capture)
+    default_luminosity = float(default.group(1)) ** float(default.group(2))
+    cases = list(itertools.product((earth_luminosity, default_luminosity, .025, .1, .6, 1.0),
+                                  (0, .125, .5, .875, 1), ((.5, .5, .5), (.01, .3, .8), (.9, .2, .7)),
+                                  ((0, 1023, 1), (103, 205, 51), (917, 301, 72), (1023, 1023, 1023))))
+
+    def native_color(diffuse, alpha, color, luminosity):
+        sample = SimpleNamespace(rgb=Vec3(*diffuse), a=alpha)
+        return shader_assignments(block, {'diffuseSample': sample, 'instanceColor': color,
+            'uboPlanet': SimpleNamespace(meanDiffuseLuminosity=luminosity)})['diffuseSample'].rgb
+
+    def near(actual, expected, relative=2e-12):
+        if any(not math.isfinite(a) or abs(a - e) > max(1e-12, abs(e) * relative) for a, e in zip(actual, expected)):
+            raise RuntimeError(f'Clutter absolute-albedo regression: actual={actual}, native={expected}')
+
+    # Independent endpoints catch normalization and alpha interpretation mistakes.
+    golden = ((0, (.0826759688,) * 3), (.5, (.1040357489, .1399176310, .0860948079)), (1, (.1, .2, .05)))
+    for alpha, expected in golden:
+        near(native_color((.5,) * 3, alpha, Vec3(.1, .2, .05), earth_luminosity) * earth_luminosity, expected, 2e-9)
+
+    for filename in ('MeshIndirect.frag', 'MeshIndirectRaytraced.frag'):
+        production = (output / filename).read_text()
+        assignments = re.search(r'sampledColor = mix\(pow\(purrDiffuse.*?sampledColor\s*\*=.*?;', production, re.S).group()
+        transmission = re.search(r'lightColor\s*\+=\s*global\.lighting\.sunColor\.rgb\s*\*\s*(.*?)\n\s*\*\s*vec3\(1\.0, 0\.8, 0\.7\)', production, re.S).group(1)
+        for exact_luminosity, alpha, diffuse, rgb10 in cases:
+            bits = struct.unpack('<I', struct.pack('<f', exact_luminosity))[0] & 0xfffff000
+            luminosity = struct.unpack('<f', struct.pack('<I', bits))[0]
+            packed_color = rgb10[0] << 22 | rgb10[1] << 12 | rgb10[2] << 2
+            color = Vec3(*(((packed_color >> shift) & 1023) / 1023 for shift in (22, 12, 2)))
+            relative = native_color(diffuse, alpha, color, luminosity)
+            absolute = relative * luminosity
+            values = {'purrDiffuse': SimpleNamespace(rgb=Vec3(*diffuse), a=alpha), 'purrColor': color,
+                      'purrLuminosity': luminosity}
+            actual = shader_assignments(assignments, values)['sampledColor']
+            near(actual, absolute)
+            # Storage quantization is the only expected deviation from native L.
+            near(actual, native_color(diffuse, alpha, color, exact_luminosity) * exact_luminosity, .0005)
+            native_leaf = shader_expression(native_transmission, {'sampledColor': SimpleNamespace(rgb=relative),
+                                                                  'averageLuminosity': luminosity})
+            near(shader_expression(transmission, values), native_leaf)
+            if alpha == 1:
+                near(actual, Vec3(*diffuse) * 2 * color)
+        print(f'PASS: {filename}: {len(cases)} evaluated native/production albedo and transmission cases, alpha0/partial/1, RGB10, durable luminosity quantization')
+    print(f'PASS: actual Earth L={earth_luminosity:.9f}, default L={default_luminosity:.9f}; old relative-albedo amplification={1 / earth_luminosity:.5f}x on Earth')
 
 
 def check_shadow_layout(path):
@@ -55,6 +163,7 @@ if __name__ == '__main__':
     print(log)
     if code:
         sys.exit(code)
+    check_albedo_contract(args.content.resolve(), native, output)
     compiler = _compiler()
     if compiler is None:
         sys.exit('glslangValidator is required for native clutter tint shader checks')
