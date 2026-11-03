@@ -14,6 +14,7 @@ internal sealed partial class SaberRuntime
     private KittenEva? _dropSpinDragOwner;
     private KittenSaber? _dropSpinDragSaber;
     private bool _dropSpinEscapeHeld;
+    private bool _dropDragReturning;
     private string _dropSpinValueText = "0.00x";
     private float _dropSpinDisplayed;
 
@@ -28,13 +29,16 @@ internal sealed partial class SaberRuntime
         if (!BFL9KUiVisible || Program.IsModalOpen() || Program.HasMouseInputLatch || ImGui.GetIO().AppFocusLost
             || !ReferenceEquals(owner, AppearanceKitten) || !_currentKittens.Contains(owner)
             || !_kittenSabers.TryGetValue(owner, out var saber) || !SaberDropButtonAvailable(owner, saber)) return;
-        // Recall and cancellation of the reach remain immediate button actions.
-        if (!saber.Drop.Held) { CancelSaberDropSpinDrag(); QueueSaberDrop(owner); return; }
+        // Canceling a reach remains immediate. A dropped hilt selects its return
+        // duration on release, while a held hilt selects its release spin.
+        if (saber.Drop.Phase == SaberDropSequence.Stage.Reaching)
+        { CancelSaberDropSpinDrag(); QueueSaberDrop(owner); return; }
         if (!_dropSpinDrag.Begin(pointer, layout.DropCenter, layout.IgniteRadius, layout.DropPillTravel)) return;
         _dropSpinDragOwner = owner;
         _dropSpinDragSaber = saber;
+        _dropDragReturning = saber.Drop.Phase == SaberDropSequence.Stage.Dropped;
         _dropSpinDisplayed = 0;
-        _dropSpinValueText = "0.00x";
+        _dropSpinValueText = _dropDragReturning ? "1000 ms" : "0.00x";
     }
 
     private bool SaberDropSpinDragLayoutStillValid(OverlayLayout layout) =>
@@ -42,7 +46,8 @@ internal sealed partial class SaberRuntime
         && !ImGui.GetIO().AppFocusLost && _dropSpinDragOwner is { IsDisposed: false } owner
         && ReferenceEquals(owner, AppearanceKitten) && _currentKittens.Contains(owner)
         && _kittenSabers.TryGetValue(owner, out var saber) && ReferenceEquals(saber, _dropSpinDragSaber)
-        && saber.Drop.Held && SaberDropButtonAvailable(owner, saber) && _dropSpinDrag.Matches(layout);
+        && (_dropDragReturning ? saber.Drop.Phase == SaberDropSequence.Stage.Dropped : saber.Drop.Held)
+        && SaberDropButtonAvailable(owner, saber) && _dropSpinDrag.Matches(layout);
 
     private static bool DropSpinPointerInMainWindow(float2 pointer)
     {
@@ -59,10 +64,14 @@ internal sealed partial class SaberRuntime
         if (!_overlayLayoutAvailable || !SaberDropSpinDragLayoutStillValid(_overlayLayout)
             || !DropSpinPointerInMainWindow(pointer) || !_dropSpinDrag.Move(pointer))
         { CancelSaberDropSpinDrag(); return; }
-        float displayed = MathF.Round(_dropSpinDrag.SpinMultiplier, 2);
+        float displayed = _dropDragReturning
+            ? (float)Math.Round(_dropSpinDrag.ReturnDurationSeconds * 1000)
+            : MathF.Round(_dropSpinDrag.SpinMultiplier, 2);
         if (displayed == _dropSpinDisplayed) return;
         _dropSpinDisplayed = displayed;
-        _dropSpinValueText = displayed.ToString("0.00", CultureInfo.InvariantCulture) + "x";
+        _dropSpinValueText = _dropDragReturning
+            ? displayed.ToString("0", CultureInfo.InvariantCulture) + " ms"
+            : displayed.ToString("0.00", CultureInfo.InvariantCulture) + "x";
     }
 
     private void CompleteSaberDropSpinDrag(float2 pointer)
@@ -72,9 +81,11 @@ internal sealed partial class SaberRuntime
         if (!SaberDropSpinDragLayoutStillValid(layout) || !DropSpinPointerInMainWindow(pointer))
         { CancelSaberDropSpinDrag(); return; }
         var owner = _dropSpinDragOwner!;
-        bool finished = _dropSpinDrag.Finish(pointer, out float spin);
+        bool returning = _dropDragReturning;
+        bool finished = _dropSpinDrag.Finish(pointer, out float spin, out double duration);
         CancelSaberDropSpinDrag();
-        if (finished) QueueSaberDrop(owner, spin);
+        if (finished) QueueSaberDrop(owner, returning ? 0 : spin,
+            returning ? duration : SaberDropSequence.DefaultReturnDuration);
     }
 
     private void CancelSaberDropSpinDrag()
@@ -82,6 +93,7 @@ internal sealed partial class SaberRuntime
         _dropSpinDrag.Cancel();
         _dropSpinDragOwner = null;
         _dropSpinDragSaber = null;
+        _dropDragReturning = false;
         _dropSpinDisplayed = 0;
         _dropSpinValueText = "0.00x";
     }

@@ -44,7 +44,8 @@ internal sealed partial class SaberRuntime
         internal readonly BladeState Blade = new();
         internal readonly SaberDropSequence Drop = new();
         internal DroppedSaberBody? DroppedBody;
-        internal double4x4 ReturnStart;
+        // ECL-aligned axes, with translation relative to the owner's moving COM.
+        internal double4x4 ReturnStartRelative;
         internal readonly SaberAutoSwing AutoSwing = new();
         internal readonly SaberPoseController Pose;
         internal readonly SaberAudio Audio = new();

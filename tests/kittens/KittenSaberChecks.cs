@@ -90,6 +90,7 @@ internal sealed partial class SaberRuntime
         CheckLocomotionTransitions();
         CheckSwimmingLifecycle();
         CheckDropLifecycle();
+        CheckDropRecallReferenceFrame();
         CheckDropSpinSelection();
         var runtime = new SaberRuntime();
         KittenEva first = new("First"), second = new("Second");
@@ -1132,10 +1133,12 @@ internal sealed partial class SaberRuntime
         var driftedFrame = releasedFrame;
         driftedFrame.Translation += new double3(1_000_000, -2_000_000, 3_000_000);
         a.DroppedBody!.MoveTo(driftedFrame);
+        var returnStartRelative = driftedFrame;
+        returnStartRelative.Translation -= first.PositionEcl;
         runtime.QueueSaberDrop(first); runtime.ApplySaberDropRequests();
         Check(a.Drop.Phase == SaberDropSequence.Stage.Returning && a.DroppedBody is null,
             "Undrop retires the collider at the settled boundary before animated return");
-        Check(a.ReturnStart.Equals(driftedFrame) && (a.ReturnStart.Translation - first.PositionEcl).Length() > 1_000_000
+        Check(a.ReturnStartRelative.Equals(returnStartRelative) && a.ReturnStartRelative.Translation.Length() > 1_000_000
             && runtime.TryDetachedSaberFrame(first,a,out var returnStart) && returnStart.Equals(driftedFrame),
             "Undrop begins at the dropped body's current distant world frame without a radius limit or initial snap");
         Program.FrameNumber += 3;
@@ -1148,7 +1151,8 @@ internal sealed partial class SaberRuntime
         Check(hasCurrentHand && hasApproachingFrame,
             "a fresh hand starts the distant return animation");
         var handWorld = currentHand.Translation + first.GetPositionEcl();
-        var expected = driftedFrame.Translation + (handWorld - driftedFrame.Translation) * a.Drop.ReturnBlend;
+        var expected = first.PositionEcl + returnStartRelative.Translation
+            + (currentHand.Translation - returnStartRelative.Translation) * a.Drop.ReturnBlend;
         Check((approaching.Translation - expected).Length() < 1e-7
             && (approaching.Translation - handWorld).Length() > 1000 && !a.Drop.Held,
             "a distant saber travels from its current position with the eased blend instead of snapping to the hand");
@@ -1161,11 +1165,12 @@ internal sealed partial class SaberRuntime
         Check(hasCurrentHand && hasFollowingFrame,
             "recall resamples the moving body's current hand pose");
         handWorld = currentHand.Translation + first.GetPositionEcl();
-        expected = driftedFrame.Translation + (handWorld - driftedFrame.Translation) * a.Drop.ReturnBlend;
+        expected = first.PositionEcl + returnStartRelative.Translation
+            + (currentHand.Translation - returnStartRelative.Translation) * a.Drop.ReturnBlend;
         Check((followingHand.Translation - expected).Length() < 1e-7
-            && (followingHand.Translation - approaching.Translation).Length() > 1 && a.ReturnStart.Equals(driftedFrame),
-            "the return follows the current hand while retaining its captured distant starting frame");
-        for (int i = 0; i < 7; i++) { runtime.AdvanceKittenSaber(a,.1); Pose(first,a); }
+            && (followingHand.Translation - approaching.Translation).Length() > 1 && a.ReturnStartRelative.Equals(returnStartRelative),
+            "the return follows the current hand while retaining its captured distant starting offset");
+        for (int i = 0; i < 12; i++) { runtime.AdvanceKittenSaber(a,.1); Pose(first,a); }
         Check(a.Drop.Held && a.Blade.TargetOn && !runtime._renderer.Detached.ContainsKey(first),
             "animated return finishes on a fresh hand attachment without re-igniting");
         runtime.QueueSaberDrop(first); runtime.ApplySaberDropRequests();
@@ -1187,6 +1192,80 @@ internal sealed partial class SaberRuntime
         runtime.ResetKittenSabers();
         Check(runtime._renderer.Detached.Count == 0 && runtime._kittenSabers.Count == 0,
             "world reset clears detached rendering and all per-kitten drop records");
+    }
+
+    private static void CheckDropRecallReferenceFrame()
+    {
+        var previousViewport = Program.MainViewport;
+        var previousRenderedViewport = Program.RenderedViewport;
+        var viewport = new Viewport(ViewportType.Main);
+        Program.MainViewport = Program.RenderedViewport = viewport;
+        var runtime = new SaberRuntime();
+        var owner = new KittenEva("Recall reference frame")
+        {
+            PositionEcl = new double3(100_000_000_000, -200_000_000_000, 30_000_000_000),
+            Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .7)
+        };
+        viewport.Camera.PositionEcl = owner.PositionEcl;
+        var system = new CelestialSystem(); system.All.Items = [owner]; Universe.CurrentSystem = system;
+        Program.ControlledVehicle = owner;
+        runtime.RefreshOverlayKittens(); runtime.SetControlledKitten(owner);
+        runtime.QueueKittenSaber(owner, true); runtime.ApplyKittenSaberRequests();
+        var saber = runtime._kittenSabers[owner];
+        void Pose()
+        {
+            Program.FrameNumber++;
+            var model = owner.Renderable.Avatar.Core.CharacterModel;
+            foreach (var processor in model.AnimProcessors)
+                processor.UpdateSkeleton(StockModelTransform(owner), model.Skeleton, 0);
+        }
+        try
+        {
+            for (int i = 0; i < 6; i++) { runtime.AdvanceKittenSaber(saber, .1); Pose(); }
+            runtime.QueueSaberDrop(owner); runtime.ApplySaberDropRequests();
+            for (int i = 0; i < 5; i++) { runtime.AdvanceKittenSaber(saber, .1); Pose(); }
+            Check(saber.DroppedBody is not null, "reference-frame regression starts with a native dropped hilt");
+            var start = double4x4.CreateRotationY(1.2);
+            start.Translation = owner.PositionEcl + new double3(-3, 2, -.5);
+            saber.DroppedBody!.MoveTo(start);
+            runtime.QueueSaberDrop(owner); runtime.ApplySaberDropRequests();
+            Check(runtime.TryDetachedSaberFrame(owner, saber, out var initial) && initial.Equals(start),
+                "recall starts exactly at the nearby dropped hilt at astronomical coordinates");
+            var startOffset = start.Translation - owner.PositionEcl;
+            // Both the planet and its camera move hundreds of ECL metres per frame.
+            // The visual return must not treat that common motion as blade travel.
+            var carry = new double3(480, -90, 25);
+            Program.FrameNumber += 3;
+            owner.PositionEcl += carry; viewport.Camera.PositionEcl += carry;
+            runtime.AdvanceKittenSaber(saber, .1);
+            Check(saber.Drop.Time == 0 && runtime.TryDetachedSaberFrame(owner, saber, out var waiting)
+                && (waiting.Translation - owner.PositionEcl - startOffset).Length() < 1e-4,
+                "waiting for an offscreen hand carries the start with the owner instead of leaving it behind in ECL");
+            for (int i = 0; i < 59; i++)
+            {
+                owner.PositionEcl += carry; viewport.Camera.PositionEcl += carry;
+                owner.Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .7 + i * .025);
+                Pose(); runtime.AdvanceKittenSaber(saber, 1d / 60);
+                bool hasHand = saber.Pose.TryGetBodyFrame(out var hand);
+                bool hasFrame = runtime.TryDetachedSaberFrame(owner, saber, out var frame);
+                var handOffset = hand.Translation.Transform(owner.Body2Cce);
+                var expectedOffset = startOffset + (handOffset - startOffset) * saber.Drop.ReturnBlend;
+                Check(hasHand && hasFrame && !saber.Drop.Held
+                    && (frame.Translation - viewport.Camera.PositionEcl - expectedOffset).Length() < 1e-4,
+                    "every 60 Hz recall frame stays on its nearby eased path while the owner translates and turns");
+                runtime.PublishDetachedSaber(owner, saber);
+                Check(runtime._renderer.Detached[owner].Equals(frame),
+                    "detached rendering receives the same corrected world frame as recall and audio");
+            }
+            for (int i = 0; i < 2; i++) { Pose(); runtime.AdvanceKittenSaber(saber, 1d / 60); }
+            Check(saber.Drop.Held && !runtime._renderer.Detached.ContainsKey(owner),
+                "the co-moving return attaches after the default one second without a lingering detached hilt");
+        }
+        finally
+        {
+            runtime.ResetKittenSabers();
+            Program.MainViewport = previousViewport; Program.RenderedViewport = previousRenderedViewport;
+        }
     }
 
     private static void CheckDropSpinSelection()
@@ -1236,10 +1315,24 @@ internal sealed partial class SaberRuntime
                 && body.SpinMultiplier == expectedSpin[index]).All(value => value),
             "delayed native release receives each kitten's original zero, one, two or recovered spin setting");
         var recalled = runtime._kittenSabers[owners[1]];
-        runtime.QueueSaberDrop(owners[1],float.PositiveInfinity); runtime.ApplySaberDropRequests();
+        runtime.QueueSaberDrop(owners[0], returnDurationSeconds: .01);
+        runtime.QueueSaberDrop(owners[1],float.PositiveInfinity, .6);
+        runtime.QueueSaberDrop(owners[2], returnDurationSeconds: 4);
+        runtime.QueueSaberDrop(owners[3], returnDurationSeconds: double.NaN);
+        runtime.SetControlledKitten(owners[0]);
+        Check(recalled.Drop.Phase == SaberDropSequence.Stage.Dropped && recalled.DroppedBody is not null,
+            "selecting a return duration only queues the action until the settled handoff");
+        runtime.ApplySaberDropRequests();
         Check(recalled.Drop.Phase == SaberDropSequence.Stage.Returning && recalled.Drop.SpinMultiplier == 1
             && recalled.DroppedBody is null,
             "Undrop ignores spin input and recalls the existing saber without changing its captured release setting");
+        double[] expectedDurations = [.2, .6, 1, 1];
+        Check(owners.Select((owner,index) => runtime._kittenSabers[owner].Drop.ReturnDuration == expectedDurations[index]
+                && runtime._kittenSabers[owner].Drop.Phase == SaberDropSequence.Stage.Returning).All(value => value),
+            "per-kitten queued return durations survive an owner switch and clamp invalid selections");
+        runtime.AdvanceKittenSaber(recalled, 0);
+        Check(recalled.Drop.ReturnDuration == .6 && recalled.Drop.Time == 0,
+            "pausing preserves a queued 600 ms return without consuming its animation");
         runtime.ResetAllDroppedSabers();
         Check(owners.All(owner => runtime._kittenSabers[owner].Drop.SpinMultiplier == 0),
             "world and save cleanup clear every kitten's transient spin selection");

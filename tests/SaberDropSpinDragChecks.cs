@@ -7,6 +7,19 @@ internal static class SaberDropSpinDragChecks
     {
         var drag = new SaberDropSpinDrag();
         float2 center = new(100, 100);
+        drag.Begin(center, center, 20, 120);
+        Check(drag.ReturnDurationSeconds == 1, "the top of the Undrop pill defaults to one second");
+        drag.Move(center + new float2(0, 60));
+        Check(Math.Abs(drag.ReturnDurationSeconds - .6) < 1e-8,
+            "dragging halfway down the Undrop pill selects 600 ms");
+        drag.Move(center + new float2(0, 500));
+        Check(drag.ReturnDurationSeconds == .2, "the bottom of the Undrop pill clamps at 200 ms");
+        Check(drag.Finish(center + new float2(0, 30), out _, out double duration)
+            && Math.Abs(duration - .8) < 1e-8 && !drag.Held,
+            "Undrop samples its final release coordinate before clearing the transient duration");
+        drag.Begin(center, center, 20, 120);
+        Check(drag.ReturnDurationSeconds == 1, "each new Undrop press restores the one-second default");
+        drag.Cancel();
         Check(drag.Begin(center + new float2(0, 12), center, 20, 120) && drag.SpinMultiplier == 0
             && drag.Thumb == center, "a Drop press starts at zero even away from the button center");
         Check(!drag.Begin(center, center, 20, 120), "duplicate presses preserve the active Drop gesture");

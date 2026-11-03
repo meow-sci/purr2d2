@@ -19,11 +19,12 @@ internal static class SaberDropChecks
         drop.Advance(.1);
         Check(drop.ReturnBlend > 0 && drop.ReturnBlend < 1 && !drop.ReadyToAttach,
             "recall visibly interpolates before attaching");
-        for (int i = 0; i < 4; i++) drop.Advance(.1);
+        for (int i = 0; i < 10; i++) drop.Advance(.1);
         Check(drop.ReadyToAttach && !drop.Held, "recall waits for host hand-frame validation before attachment");
         drop.Reset();
         Check(drop.Held && !drop.Detached && drop.Time == 0, "cleanup clears all transient sequence state");
         ReturnEaseOut();
+        ReturnDurationSelection();
         ReleaseSpin();
         var drift = new double3(1000,-500,20);
         Check(SaberDropMath.ReleaseVelocity(drift,double3.Zero,new(2,0,0),doubleQuat.Identity) == drift,
@@ -88,33 +89,66 @@ internal static class SaberDropChecks
         recall.Advance(-1); recall.Advance(double.NaN); recall.Advance(double.NegativeInfinity);
         Check(recall.ReturnBlend == 0 && recall.Time == 0, "recall easing preserves its exact start and ignores invalid time");
         float previousBlend = 0, previousTravel = float.PositiveInfinity;
-        for (int interval = 1; interval <= 8; interval++)
+        for (int interval = 1; interval <= 16; interval++)
         {
-            recall.Advance(SaberDropSequence.ReturnDuration / 8);
+            recall.Advance(recall.ReturnDuration / 16);
             float blend = recall.ReturnBlend;
             float travel = blend - previousBlend;
             Check(travel > 0 && travel < previousTravel,
                 "each equal recall interval travels less distance as the saber eases toward the hand");
-            if (interval == 4)
+            if (interval == 8)
                 Check(Math.Abs(blend - .875f) < 1e-6f,
                     "half the return duration covers seven eighths of the path with cubic ease-out");
             previousBlend = blend; previousTravel = travel;
         }
         Check(recall.ReturnBlend == 1 && recall.ReadyToAttach,
-            "ease-out reaches the exact hand endpoint at the existing return duration");
+            "ease-out reaches the exact hand endpoint at the selected return duration");
         for (int i = 0; i < 20; i++) recall.Advance(.1);
         Check(recall.ReturnBlend == 1, "return progress clamps at the hand without overshoot after completion");
 
         recall.Released(); recall.BeginReturn();
-        for (int i = 0; i < 4; i++) recall.Advance(.1);
-        recall.Advance(SaberDropSequence.ReturnDuration * .99 - recall.Time);
+        for (int i = 0; i < 9; i++) recall.Advance(.1);
+        recall.Advance(recall.ReturnDuration * .99 - recall.Time);
         float nearEnd = recall.ReturnBlend;
-        double finalInterval = SaberDropSequence.ReturnDuration - recall.Time;
+        double finalInterval = recall.ReturnDuration - recall.Time;
         recall.Advance(finalInterval);
         Check(recall.ReturnBlend == 1 && (1 - nearEnd) / finalInterval < .001,
             "the final one percent of recall time approaches zero arrival speed");
         recall.Reset();
         Check(recall.ReturnBlend == 0, "reset restores the exact zero return endpoint");
+    }
+    private static void ReturnDurationSelection()
+    {
+        var recall = new SaberDropSequence();
+        Check(recall.ReturnDuration == 1, "the default Undrop duration is one second");
+        foreach (double duration in new[] { .2, .6, 1 })
+        {
+            recall.Released(); recall.BeginReturn(duration);
+            for (int i = 0; i < 8; i++) recall.Advance(duration / 16);
+            Check(recall.ReturnDuration == duration && Math.Abs(recall.ReturnBlend - .875f) < 1e-6f
+                && !recall.ReadyToAttach, "every selected duration retains cubic ease-out at its halfway point");
+            double capturedTime = recall.Time;
+            Check(!recall.BeginReturn(.3) && recall.ReturnDuration == duration && recall.Time == capturedTime,
+                "a repeated return request cannot change the captured duration or restart the animation");
+            recall.Advance(0);
+            Check(recall.Time == capturedTime, "a paused return retains its chosen duration and progress");
+            for (int i = 0; i < 8; i++) recall.Advance(duration / 16);
+            // Accommodate accumulation roundoff at the last simulation boundary.
+            recall.Advance(1e-12);
+            Check(recall.ReadyToAttach && recall.ReturnBlend == 1,
+                "each selected duration reaches the exact hand endpoint without overshoot");
+        }
+        foreach (double invalid in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+        {
+            recall.Released(); recall.BeginReturn(invalid);
+            Check(recall.ReturnDuration == 1, "a nonfinite return duration recovers the one-second default");
+        }
+        recall.Released(); recall.BeginReturn(-1);
+        Check(recall.ReturnDuration == .2, "return duration clamps to the 200 ms minimum");
+        recall.Released(); recall.BeginReturn(10);
+        Check(recall.ReturnDuration == 1, "return duration clamps to the one-second maximum");
+        recall.Released(); recall.BeginReturn(.2); recall.Reset(); recall.Released(); recall.BeginReturn();
+        Check(recall.ReturnDuration == 1, "the next default return never inherits a previous fast selection");
     }
     private static bool NearFrame(double4x4 a, double4x4 b, double tolerance)
     {

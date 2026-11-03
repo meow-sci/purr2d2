@@ -4,6 +4,10 @@ namespace Purr2D2.Core;
 
 internal static class SaberDropMath
 {
+    internal static double ValidateReturnDuration(double seconds) => double.IsFinite(seconds)
+        ? Math.Clamp(seconds, SaberDropSequence.MinimumReturnDuration, SaberDropSequence.DefaultReturnDuration)
+        : SaberDropSequence.DefaultReturnDuration;
+
     internal static float ValidateSpinMultiplier(float multiplier) => float.IsFinite(multiplier)
         ? Math.Clamp(multiplier, 0, 2) : 0;
 

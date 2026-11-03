@@ -17,7 +17,7 @@ internal sealed partial class SaberRuntime
     private SaberOverlayLayout _overlayLayout = SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 3);
     private SaberOverlayLayout CurrentSaberOverlayLayout() => _overlayLayout;
     private static readonly ImColor8 MovementButtonFill = new(0, 0, 255, 64);
-    private readonly List<(KittenEva Owner, float Spin)> _queuedDrops = new();
+    private readonly List<(KittenEva Owner, float Spin, double Duration)> _queuedDrops = new();
     private enum SaberTogglePhase { None, Equipping, Retracting, Unequipping }
     private sealed class KittenSaber
     {
@@ -28,7 +28,9 @@ internal sealed partial class SaberRuntime
     }
     private sealed class FakeBlade { internal bool Equipped = true; }
     private sealed class FakePose { internal bool HasFreshBodyFrame = true; }
-    private void QueueSaberDrop(KittenEva owner, float spinMultiplier = 0) => _queuedDrops.Add((owner, spinMultiplier));
+    private void QueueSaberDrop(KittenEva owner, float spinMultiplier = 0,
+        double returnDurationSeconds = SaberDropSequence.DefaultReturnDuration)
+        => _queuedDrops.Add((owner, spinMultiplier, returnDurationSeconds));
 
     private static SaberRuntime Scene(out KittenEva owner, out KittenSaber saber)
     {
@@ -47,7 +49,7 @@ internal sealed partial class SaberRuntime
         r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
         Check(r._dropSpinDrag.Held && r._queuedDrops.Count == 0, "pressing Drop chooses spin without queueing a premature action");
         r.CompleteSaberDropSpinDrag(r._overlayLayout.DropCenter);
-        Check(r._queuedDrops.Count == 1 && r._queuedDrops[0] == (owner, 0), "a tap queues one zero-spin drop for its exact appearance owner");
+        Check(r._queuedDrops.Count == 1 && r._queuedDrops[0] == (owner, 0, 1d), "a tap queues one zero-spin drop for its exact appearance owner");
         r.CompleteSaberDropSpinDrag(r._overlayLayout.DropCenter);
         Check(r._queuedDrops.Count == 1, "paired native and backend release callbacks cannot duplicate a drop");
 
@@ -66,6 +68,7 @@ internal sealed partial class SaberRuntime
             && DropDrawText.Calls[0].Color.R == 0 && DropDrawText.Calls[1].Color.R == 255,
             "the live spin value uses regular font size with a black shadow and no wrapping");
 
+        foreach (bool returning in new[] { false, true })
         foreach (var invalidation in new (string Name, Action<SaberRuntime, KittenEva, KittenSaber> Apply)[] {
             ("owner switch", (x, _, _) => x.AppearanceKitten = new()),
             ("removed owner", (x, o, _) => x._currentKittens.Remove(o)),
@@ -83,13 +86,18 @@ internal sealed partial class SaberRuntime
             ("moved layout", (x, _, _) => x._overlayLayout = x._overlayLayout with { SwingCenter = x._overlayLayout.SwingCenter + new float2(1, 0) }),
             ("missing layout", (x, _, _) => x._overlayLayout = default),
             ("unpublished layout", (x, _, _) => x._overlayLayoutAvailable = false),
+            ("changed drop phase", (_, _, s) => s.Drop.BeginReturn()),
         })
         {
+            if (returning && invalidation.Name is "stale hand" or "missing physics bubble") continue;
+            if (!returning && invalidation.Name == "changed drop phase") continue;
             r = Scene(out owner, out saber);
+            if (returning) saber.Drop.Released();
             r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
             var release = r._overlayLayout.DropCenter;
             invalidation.Apply(r, owner, saber); r.CompleteSaberDropSpinDrag(release);
-            Check(!r._dropSpinDrag.Held && r._queuedDrops.Count == 0, invalidation.Name + " cancels a held Drop without a false release action");
+            Check(!r._dropSpinDrag.Held && r._queuedDrops.Count == 0,
+                invalidation.Name + " cancels a held " + (returning ? "Undrop" : "Drop") + " without a false release action");
         }
 
         r = Scene(out owner, out saber); r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
@@ -108,7 +116,45 @@ internal sealed partial class SaberRuntime
         Check(!r._dropSpinDrag.Held && r._queuedDrops.Count == 1, "Undrop while reaching remains an immediate press action");
         r = Scene(out owner, out saber); saber.Drop.BeginDrop(); saber.Drop.Advance(1); saber.Drop.Released();
         r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
-        Check(!r._dropSpinDrag.Held && r._queuedDrops.Count == 1, "Undrop after release remains an immediate recall press action");
+        Check(r._dropSpinDrag.Held && r._dropDragReturning && r._queuedDrops.Count == 0
+            && r._dropSpinValueText == "1000 ms", "pressing Undrop opens the one-second pill without starting recall early");
+        r.CompleteSaberDropSpinDrag(r._overlayLayout.DropCenter);
+        Check(r._queuedDrops.Count == 1 && r._queuedDrops[0] == (owner, 0, 1d),
+            "a tap on Undrop queues exactly one default one-second return");
+        r.CompleteSaberDropSpinDrag(r._overlayLayout.DropCenter);
+        Check(r._queuedDrops.Count == 1, "paired release callbacks cannot duplicate a recall");
+
+        r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
+        bottom = r._overlayLayout.DropCenter + new float2(0, r._overlayLayout.DropPillTravel);
+        r.UpdateSaberDropSpinDrag(bottom);
+        DropDrawText.Calls.Clear(); r.DrawSaberDropSpinValueLabel(default, r._overlayLayout);
+        Check(r._dropSpinValueText == "200 ms" && DropDrawText.Calls.Count == 2
+            && DropDrawText.Calls.All(c => c.Size == ImGui.GetFontSize() && c.Wrap == 0 && c.Text == "200 ms"),
+            "the fastest Undrop setting displays a regular-font 200 ms value beside its thumb");
+        r.CompleteSaberDropSpinDrag(bottom);
+        Check(r._queuedDrops.Count == 2 && r._queuedDrops[1] == (owner, 0, .2),
+            "the bottom of the runtime pill queues a 200 ms recall with no drop spin");
+        r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
+        Check(r._dropSpinValueText == "1000 ms" && r._dropSpinDrag.ReturnDurationSeconds == 1,
+            "a new Undrop gesture defaults to one second after a previous fast recall");
+        var midpoint = r._overlayLayout.DropCenter + new float2(0, r._overlayLayout.DropPillTravel * .5f);
+        r.CompleteSaberDropSpinDrag(midpoint);
+        Check(r._queuedDrops.Count == 3 && Math.Abs(r._queuedDrops[2].Duration - .6) < 1e-8,
+            "Undrop samples the release coordinate even without a cursor update before release");
+
+        r = Scene(out owner, out saber); saber.Drop.Released();
+        saber.Pose.HasFreshBodyFrame = false; owner.HasPhysicsBubble = false;
+        r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
+        r.CompleteSaberDropSpinDrag(r._overlayLayout.DropCenter);
+        Check(r._queuedDrops.Count == 1 && r._queuedDrops[0].Duration == 1,
+            "Undrop can still be queued for an offscreen owner without a current physics bubble");
+
+        r = Scene(out owner, out saber); saber.Drop.Released();
+        r.BeginSaberDropSpinDrag(owner, r._overlayLayout.DropCenter, r._overlayLayout);
+        r.FilterSaberDropSpinKey(Program.Window, GlfwKey.Escape, GlfwKeyAction.Press);
+        r.CompleteSaberDropSpinDrag(r._overlayLayout.DropCenter);
+        Check(r._queuedDrops.Count == 0 && !r._dropDragReturning,
+            "Escape cancels Undrop and clears the return gesture without recalling the hilt");
     }
 
     private static void Check(bool condition, string message)

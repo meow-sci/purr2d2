@@ -382,9 +382,10 @@ internal sealed partial class SaberRuntime
     private static OverlayLayout WithAutoSwingValueMetrics(OverlayLayout layout)
     {
         var size = ImGui.CalcTextSize("3.00 s", false, 0);
-        var dropSize = ImGui.CalcTextSize("2.00x", false, 0);
+        var dropSize = ImGui.CalcTextSize("1000 ms", false, 0);
+        var spinSize = ImGui.CalcTextSize("2.00x", false, 0);
         return layout with { AutoSwingValueWidth = size.X, AutoSwingValueHeight = size.Y,
-            DropSpinValueWidth = dropSize.X, DropSpinValueHeight = dropSize.Y };
+            DropSpinValueWidth = Math.Max(dropSize.X, spinSize.X), DropSpinValueHeight = Math.Max(dropSize.Y, spinSize.Y) };
     }
 
     /// <summary>Called from Program.OnMouseButton before its viewport latch or game dispatch.</summary>

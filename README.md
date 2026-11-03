@@ -8,8 +8,10 @@ A Kitten Spacy Agency mod to add:
 BFL9K's **DROP** button opens a downward spin pill while held. Each press starts
 at **0×** spin; halfway is the previous **1×** release rate and the bottom is **2×**.
 Release to reach out with an open, palm-down paw and drop the hilt into native
-physics. A tap drops with no initial spin. A lit blade stays lit. **UNDROP** flies
-it back from its current position, easing to a stop in the paw. Saving, unequipping or disabling
+physics. A tap drops with no initial spin. A lit blade stays lit. Hold **UNDROP**
+to choose the return time: **1 second** at the top, down to **200 ms** at the bottom.
+A tap uses 1 second. Release to fly it back from its current position, easing to
+a stop in the paw. Saving, unequipping or disabling
 the mod also returns transient dropped equipment to its owner. Blade length can
 be set up to **50 m** before character scaling.
 

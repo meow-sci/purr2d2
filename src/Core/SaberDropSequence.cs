@@ -4,10 +4,11 @@ namespace Purr2D2.Core;
 internal sealed class SaberDropSequence
 {
     internal enum Stage { Held, Reaching, Dropped, Returning }
-    internal const double ReachDuration = .36, ReturnDuration = .45;
+    internal const double ReachDuration = .36, DefaultReturnDuration = 1, MinimumReturnDuration = .2;
     internal Stage Phase { get; private set; }
     internal double Time { get; private set; }
     internal float SpinMultiplier { get; private set; }
+    internal double ReturnDuration { get; private set; } = DefaultReturnDuration;
     internal bool Held => Phase == Stage.Held;
     internal bool Detached => Phase is Stage.Dropped or Stage.Returning;
     internal float ReturnBlend => EaseOut((float)(Time / ReturnDuration));
@@ -17,9 +18,10 @@ internal sealed class SaberDropSequence
         SpinMultiplier = SaberDropMath.ValidateSpinMultiplier(spinMultiplier);
         Phase = Stage.Reaching; Time = 0; return true;
     }
-    internal bool BeginReturn()
+    internal bool BeginReturn(double durationSeconds = DefaultReturnDuration)
     {
         if (Phase != Stage.Dropped) return false;
+        ReturnDuration = SaberDropMath.ValidateReturnDuration(durationSeconds);
         Phase = Stage.Returning; Time = 0; return true;
     }
     internal void Advance(double dt)
@@ -30,7 +32,7 @@ internal sealed class SaberDropSequence
     internal bool ReadyToRelease => Phase == Stage.Reaching && Time >= ReachDuration;
     internal bool ReadyToAttach => Phase == Stage.Returning && Time >= ReturnDuration;
     internal void Released() { Phase = Stage.Dropped; Time = 0; }
-    internal void Reset() { Phase = Stage.Held; Time = 0; SpinMultiplier = 0; }
+    internal void Reset() { Phase = Stage.Held; Time = 0; SpinMultiplier = 0; ReturnDuration = DefaultReturnDuration; }
     private static float EaseOut(float x)
     {
         x = Math.Clamp(x, 0, 1);

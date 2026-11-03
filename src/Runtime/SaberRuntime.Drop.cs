@@ -6,11 +6,12 @@ namespace Purr2D2.Runtime;
 
 internal sealed partial class SaberRuntime
 {
-    private readonly record struct SaberDropRequest(bool Drop, float SpinMultiplier);
+    private readonly record struct SaberDropRequest(bool Drop, float SpinMultiplier, double ReturnDurationSeconds);
     private readonly Dictionary<KittenEva, SaberDropRequest> _dropRequests = new(ReferenceEqualityComparer.Instance);
     private bool SaberHeldForActions => (_activeSaber ?? _idleSaber).Drop.Held;
 
-    private void QueueSaberDrop(KittenEva owner, float spinMultiplier = 0)
+    private void QueueSaberDrop(KittenEva owner, float spinMultiplier = 0,
+        double returnDurationSeconds = SaberDropSequence.DefaultReturnDuration)
     {
         if (!_enabled || !_ready || _disposed || _fault != null || !_currentKittens.Contains(owner)
             || !_kittenSabers.TryGetValue(owner, out var saber) || !saber.Blade.Equipped
@@ -19,7 +20,8 @@ internal sealed partial class SaberRuntime
             || saber.Drop.Held && (!saber.Pose.HasFreshBodyFrame || !owner.HasPhysicsBubble)) return;
         // A second click while reaching cancels the gesture; requests never mutate native state in UI.
         _dropRequests[owner] = new(saber.Drop.Held,
-            saber.Drop.Held ? SaberDropMath.ValidateSpinMultiplier(spinMultiplier) : 0);
+            saber.Drop.Held ? SaberDropMath.ValidateSpinMultiplier(spinMultiplier) : 0,
+            SaberDropMath.ValidateReturnDuration(returnDurationSeconds));
     }
 
     private void ApplySaberDropRequests()
@@ -47,9 +49,13 @@ internal sealed partial class SaberRuntime
             {
                 if (saber.DroppedBody is not { } dropped || !dropped.TryFrame(out var start))
                 { ResetSaberDrop(request.Key, saber); continue; }
-                saber.ReturnStart = start;
+                // Keep recall in a translating owner-relative frame. A frozen ECL
+                // start is left hundreds of metres behind each frame by orbital
+                // motion, so the blade disappears and returns from the wrong side.
+                start.Translation -= request.Key.GetPositionEcl();
+                saber.ReturnStartRelative = start;
                 saber.DroppedBody?.Dispose(); saber.DroppedBody = null;
-                saber.Drop.BeginReturn();
+                saber.Drop.BeginReturn(request.Value.ReturnDurationSeconds);
             }
             saber.FreshPoseThisTick = saber.HasPreviousTip = false; saber.SwingSpeed = 0;
         }
@@ -91,12 +97,16 @@ internal sealed partial class SaberRuntime
         if (saber.Drop.Phase == SaberDropSequence.Stage.Dropped)
             return saber.DroppedBody?.TryFrame(out emitterToEcl) == true;
         if (saber.Drop.Phase != SaberDropSequence.Stage.Returning) return false;
-        emitterToEcl = saber.ReturnStart;
-        if (!saber.Pose.TryGetBodyFrame(out var hand)) return SaberDropMath.ValidFrame(emitterToEcl);
-        var target = hand * double4x4.CreateFromQuaternion(owner.Body2Cce) * double4x4.CreateTranslation(owner.GetPositionEcl());
-        float t = saber.Drop.ReturnBlend;
-        // Rotate along the shortest rigid path while retaining the observed affine stretch/shear.
-        emitterToEcl = SaberDropMath.Interpolate(saber.ReturnStart, target, t);
+        emitterToEcl = saber.ReturnStartRelative;
+        if (saber.Pose.TryGetBodyFrame(out var hand))
+        {
+            var target = hand * double4x4.CreateFromQuaternion(owner.Body2Cce);
+            // Both endpoints share the current owner's translating frame, but
+            // their axes stay ECL-aligned so turning cannot rotate the start.
+            // Interpolate nearby offsets before adding the astronomical origin.
+            emitterToEcl = SaberDropMath.Interpolate(saber.ReturnStartRelative, target, saber.Drop.ReturnBlend);
+        }
+        emitterToEcl.Translation += owner.GetPositionEcl();
         return SaberDropMath.ValidFrame(emitterToEcl);
     }
 
@@ -128,7 +138,7 @@ internal sealed partial class SaberRuntime
     {
         saber.DroppedBody?.Dispose(); saber.DroppedBody = null;
         saber.Drop.Reset(); saber.Pose.PalmDown = false;
-        saber.ReturnStart = default;
+        saber.ReturnStartRelative = default;
         saber.FreshPoseThisTick = saber.HasPreviousTip = false; saber.SwingSpeed = 0;
         _renderer.RemoveDetachedSaber(owner);
     }

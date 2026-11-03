@@ -2,7 +2,7 @@ using Brutal.Numerics;
 
 namespace Purr2D2.Core;
 
-/// <summary>One transient downward drag choosing release spin; every press starts at zero.</summary>
+/// <summary>One transient downward Drop/Undrop pill; every press starts at the top.</summary>
 public sealed class SaberDropSpinDrag
 {
     public const float MaximumMultiplier = 2f;
@@ -10,6 +10,9 @@ public sealed class SaberDropSpinDrag
 
     public bool Held { get; private set; }
     public float SpinMultiplier { get; private set; }
+    public double ReturnDurationSeconds => SaberDropMath.ValidateReturnDuration(
+        SaberDropSequence.DefaultReturnDuration - SpinMultiplier / MaximumMultiplier
+        * (SaberDropSequence.DefaultReturnDuration - SaberDropSequence.MinimumReturnDuration));
     public float2 Center { get; private set; }
     public float Radius { get; private set; }
     public float Travel { get; private set; }
@@ -44,11 +47,15 @@ public sealed class SaberDropSpinDrag
     }
 
     /// <summary>Samples the final release coordinate and completes at most once.</summary>
-    public bool Finish(float2 pointer, out float spinMultiplier)
+    public bool Finish(float2 pointer, out float spinMultiplier) => Finish(pointer, out spinMultiplier, out _);
+
+    public bool Finish(float2 pointer, out float spinMultiplier, out double returnDurationSeconds)
     {
         spinMultiplier = 0;
+        returnDurationSeconds = SaberDropSequence.DefaultReturnDuration;
         if (!Move(pointer)) { Cancel(); return false; }
         spinMultiplier = SpinMultiplier;
+        returnDurationSeconds = ReturnDurationSeconds;
         Cancel();
         return true;
     }
