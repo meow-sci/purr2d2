@@ -72,6 +72,17 @@ internal static class ClutterCoverageHookChecks
         Check(!SliceClutterCoverageHooks.SameEcotypes(savedEcotypes, nativeEcotypes), "in-place ecotype replacement invalidates interest");
         Check(!SliceClutterCoverageHooks.Installed && SliceClutterCoverageHooks.ReadinessKnown,
             "checked layout supports an explicitly requested installation");
+        var interestField = AccessTools.Field(type, "_interest");
+        var reportField = AccessTools.Field(type, "_coverage");
+        var requestedField = AccessTools.Field(type, "_requested");
+        interestField.SetValue(null, RuntimeHelpers.GetUninitializedObject(interestField.FieldType));
+        reportField.SetValue(null, RuntimeHelpers.GetUninitializedObject(reportField.FieldType));
+        requestedField.SetValue(null, 27d);
+        SliceClutterCoverageHooks.MarkLimited();
+        Check(interestField.GetValue(null) == null && reportField.GetValue(null) == null
+            && SliceClutterCoverageHooks.Status is { State: "limited", Requested: 27, Admitted: 0 },
+            "rejected coverage clears stale interest and report while retaining requested-distance diagnostics");
+        SliceClutterCoverageHooks.Clear();
         var testHarmony = new Harmony("purr2d2.test.coverage");
         Check(SliceClutterCoverageHooks.Install(testHarmony, out var reason), "checked hooks install: " + reason);
         Check(SliceClutterCoverageHooks.Installed, "paired coverage hooks become active together");

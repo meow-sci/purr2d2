@@ -59,7 +59,16 @@ internal static class SliceClutterCoverageHooks
 
     internal static string ClassifyCoverage(int expected, int readbacks, int ready, bool current) => !current ? "unknown"
         : expected > 0 && readbacks == expected && ready == expected ? "ready" : "pending";
-    internal static void MarkLimited() => Volatile.Write(ref _limited, 1);
+    internal static void MarkLimited()
+    {
+        // A rejected request cannot safely keep the previous radius: it may no
+        // longer cover the pending targets or respect the current cell budget.
+        // Keep the readback ledger and requested distance for diagnostics and a
+        // later valid request; only a successful preview republishes interest.
+        Volatile.Write(ref _interest, null);
+        Volatile.Write(ref _coverage, null);
+        Volatile.Write(ref _limited, 1);
+    }
 
     // The checked readback, invalidation and bubble-installation seams are available
     // on the locally verified game layout. Install still validates every target and
