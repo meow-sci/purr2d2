@@ -1,11 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Assets>
-  <!-- Hum: supplied recording prepared as mono; swing, ignite/static/retract/clash/Force creak and break/somersault swoosh: supplied mono Ogg recordings;
+  <!-- Hum: supplied recording prepared as mono; swing, ignite/static/retract/clash/Force creak and break/somersault swoosh/fire crackling: supplied mono Ogg recordings;
        contact: original synthesis.
        See docs/research-audio.md and tools/generate_audio.py for provenance and loop preparation. -->
   <SpatialSoundData Id="Purr2D2SaberSpatial" DistanceFilter="false">
     <VolumeRange Min="1" Max="35" />
   </SpatialSoundData>
+  <SpatialSoundData Id="Purr2D2TreeFireSpatial" DistanceFilter="false">
+    <VolumeRange Min="1" Max="35" />
+  </SpatialSoundData>
+  <Sound Id="Purr2D2TreeFireLoop" ChannelId="Sfx" SimSpeed="Ignore" Priority="118">
+    <SoundFile Path="Assets/Audio/fire-crackling.ogg">
+      <Loop RandomStartTime="true" />
+    </SoundFile>
+    <SpatialSoundData Id="Purr2D2TreeFireSpatial" />
+  </Sound>
   <Sound Id="Purr2D2SaberLightIgnite" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
     <SoundFile Path="Assets/Audio/bfl9k_on.ogg" />
     <SpatialSoundData Id="Purr2D2SaberSpatial" />

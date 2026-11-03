@@ -201,7 +201,12 @@ internal sealed partial class SaberRuntime : IDisposable
             else if (_owner != null && _blade.Equipped) _audio.Suspend(); else _audio.Stop();
             UpdateOtherSaberAudio();
         }
-        catch (Exception ex) { Queue(Command.CancelSlice); _fault = ex.Message; Report("Frame update failed", ex); }
+        catch (Exception ex)
+        {
+            Queue(Command.CancelSlice); _fault = ex.Message;
+            Cleanup(_renderer.ClearTreeFire, "Tree fire");
+            Report("Frame update failed", ex);
+        }
     }
 
     private void DrawSaber(KittenEva owner, IViewport viewport, float4x4 emitterToEgo)

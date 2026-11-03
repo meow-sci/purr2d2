@@ -27,11 +27,13 @@ ignition, static, saber close, clash, mouse swing, somersault swoosh and metal r
 | `Assets/Audio/metal_bang.ogg` | User-supplied `metal_bang.ogg` | Unmodified mono Vorbis, 44,100 Hz, 1.713787 s; plays once on visible Furce breakup or an accepted manual slice. |
 | `Assets/Audio/light_side_static.ogg` | User-supplied `light_side_static.ogg` | Unmodified mono Vorbis, 44,100 Hz, 4.77059 s; full-file loop. |
 | `Assets/Audio/dark_side_static.ogg` | User-supplied `dark_side_static.ogg` | Unmodified mono Vorbis, 48,000 Hz, 8.422646 s; full-file loop. |
+| `Assets/Audio/fire-crackling.ogg` | User-supplied `fire-crackling.ogg` | Unmodified mono Vorbis, 44,100 Hz, 9.630476 s; full-file positional loop for the active tree-fire lifetime. |
 | `Assets/Audio/saber-contact.wav` | `tools/generate_audio.py` | Original periodic oscillator/noise sizzle, fixed seed, mono 16-bit PCM, 48 kHz, 2 s. |
 
 SHA-256 of original input recordings:
 
 ```text
+fire-crackling.ogg    f7151e3db8f9b1fcbfc540fde6cfa8fba2ea5d597391a5d5806da28281ac1c75
 lightsaber-idle.wav   e30a4532683ab70c083d98ee17a0d6f18579c9d640715543022c660342c99c6b
 saber_clash.ogg       dcf4da17373dee9117b47aa16bf718740e32acf16cc637227cb25e443873041f
 sommersault_swoosh.ogg 59550492d7ccffaff9b698a1da26ef3a7bce9a5b1e4816b16b8ea8b56acdb7ca
@@ -89,6 +91,23 @@ Ogg files are included in both the staged folder and release ZIP. In-game listen
 is still needed to assess the supplied loop seams and balance against the hum.
 
 ## Runtime API
+
+Tree cut fires use `TreeFireAudio`, independently of saber ownership and drawing.
+Each burning fragment has one positional loop at the mean of its retained cut-end
+anchors. The emitter follows the part transform using the current audio camera,
+immediately before native audio updates. Multiple particle anchors share that
+channel; separate fragments receive separate channels with randomized loop offsets.
+Playback uses the supplied recording unchanged, the Sfx group, 1–35 m spatial
+falloff and the mod's Volume setting. Doppler is disabled for stable crackling.
+
+The existing fire-source list is the lifetime authority. Its captured fire-duration
+setting controls playback, including full-file repetition beyond the 9.63-second
+recording; zero duration creates no source. Removing the final anchor, expiration,
+capacity eviction, world/save reset, faults, mod shutdown and mixer release stop
+the corresponding channel. Hidden HUD, disabled particles and offscreen rendering
+do not silence active fires. Fire effects already advance in player time during
+simulation pause and warp, so the sound uses `SimSpeed="Ignore"` and the same policy.
+Mute/unmute and bounded recovery from invalid channels never extend fire lifetime.
 
 `src/Audio/SaberAudio.cs`, namespace `Purr2D2.Audio`, owns channels for one equipped saber.
 

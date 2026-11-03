@@ -64,6 +64,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
         _lightVfx = SaberVfxTuning.FromEffects(settings.EffectsFor(SaberType.Light), SaberType.Light);
         _darkVfx = SaberVfxTuning.FromEffects(settings.EffectsFor(SaberType.Dark), SaberType.Dark);
         _slagTuning = DarkSaberSparkTuning.FromEffects(settings.EffectsFor(SaberType.Dark));
+        _treeFireVolume = float.IsFinite(settings.Volume) ? Math.Clamp(settings.Volume, 0, 1) : 0;
     }
 
     public void Initialize(Harmony harmony)
@@ -76,6 +77,10 @@ public sealed unsafe partial class SaberRenderer : IDisposable
             postfix: new HarmonyMethod(typeof(SaberRenderer), nameof(AfterTranslucencyPass)));
         harmony.Patch(AccessTools.Method(typeof(Program), nameof(Program.UpdateRenderingResources)),
             prefix: new HarmonyMethod(typeof(SaberRenderer), nameof(BeforeRenderResources)));
+        harmony.Patch(AccessTools.Method(typeof(GameAudio), nameof(GameAudio.UpdateAudio), [typeof(double)]),
+            prefix: new HarmonyMethod(typeof(SaberRenderer), nameof(BeforeTreeFireAudioUpdate)));
+        harmony.Patch(AccessTools.Method(typeof(GameAudio), nameof(GameAudio.Release)),
+            prefix: new HarmonyMethod(typeof(SaberRenderer), nameof(BeforeTreeFireAudioRelease)));
         // StarMapUnload occurs after the Vulkan device has gone away. Free before KSA tears it down.
         harmony.Patch(AccessTools.DeclaredMethod(typeof(Program), nameof(Program.Dispose)),
             prefix: new HarmonyMethod(typeof(SaberRenderer), nameof(BeforeProgramDispose)));
@@ -597,7 +602,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
         _blades.Clear();
         _sparks.Clear();
         ClearSlag();
-        ClearTreeFire();
+        DisposeTreeFireAudio();
         // Initialization can fail before the host renderer exists. In that case there is
         // nothing GPU-owned to free, and looking up the device would itself be unsafe.
         if (!_hasLayout && _hilt == null && _pipelines.Count == 0) return;

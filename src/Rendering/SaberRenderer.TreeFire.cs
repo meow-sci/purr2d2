@@ -2,14 +2,17 @@ using Brutal.Numerics;
 using Brutal.VulkanApi;
 using Brutal.VulkanApi.Abstractions;
 using KSA;
+using Purr2D2.Audio;
 
 namespace Purr2D2.Rendering;
 
-public sealed unsafe partial class SaberRenderer
+public sealed partial class SaberRenderer
 {
     private const int MaximumTreeFireSources = 32;
     private const float TreeFireSizeMultiplier = 3f, TreeFireIntensityMultiplier = 3f;
     private readonly List<TreeFireSource> _treeFire = new(MaximumTreeFireSources);
+    private readonly TreeFireAudio _treeFireAudio = new(MaximumTreeFireSources);
+    private float _treeFireVolume = 1;
     private readonly record struct TreeFireSource(Part Part, double3 Point, double3 Normal, double Born, double Duration);
 
     internal void AddTreeCutFire(Part part, double3 pointLocal, double3 normalLocal, double now, double seconds)
@@ -18,6 +21,7 @@ public sealed unsafe partial class SaberRenderer
             || !double.IsFinite(seconds) || seconds <= 0 || part.Tree?.OwningVehicle is not { IsDisposed: false }) return;
         if (_treeFire.Count == MaximumTreeFireSources) _treeFire.RemoveAt(0);
         _treeFire.Add(new(part, pointLocal, normalLocal.NormalizeOrZero(), now, Math.Clamp(seconds, 0, 60)));
+        SynchronizeTreeFireAudio();
     }
     private void UpdateTreeFire(double now)
     {
@@ -25,8 +29,21 @@ public sealed unsafe partial class SaberRenderer
             if (now < _treeFire[i].Born || now - _treeFire[i].Born >= _treeFire[i].Duration
                 || _treeFire[i].Part.Tree?.OwningVehicle is not { IsDisposed: false } vehicle
                 || !ReferenceEquals(vehicle.System, Universe.CurrentSystem)) _treeFire.RemoveAt(i);
+        SynchronizeTreeFireAudio();
     }
-    internal void ClearTreeFire() => _treeFire.Clear();
+    private void SynchronizeTreeFireAudio()
+    {
+        _treeFireAudio.BeginSources();
+        foreach (var source in _treeFire) _treeFireAudio.KeepSource(source.Part, source.Point);
+        _treeFireAudio.EndSources();
+    }
+    internal void ClearTreeFire() { _treeFire.Clear(); _treeFireAudio.Clear(); }
+    private void DisposeTreeFireAudio() { ClearTreeFire(); _treeFireAudio.Dispose(); }
+    private static void BeforeTreeFireAudioUpdate()
+    {
+        if (_instance is { _disposed: false } self) self._treeFireAudio.Update(self._now, self._treeFireVolume);
+    }
+    private static void BeforeTreeFireAudioRelease() => _instance?.ClearTreeFire();
 
     private void DrawTreeFire(CommandBuffer commands, float4x4 projection, Camera camera)
     {
