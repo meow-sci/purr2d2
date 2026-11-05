@@ -159,7 +159,10 @@ internal sealed partial class SaberRuntime : IDisposable
                 && SaberHeldForActions && _owner != null && _blade.Equipped && !_pose.ClashHeld && simulationDt > 0 && _freshPoseThisTick
                 && _pose.TryGetBladeSegment(Length, out var contactBase, out var contactTip)
                 && _contactProbe.TrySample(_owner, contactBase, contactTip, _playerTime, out var contact))
+            {
+                _cosmeticVesselContacts++;
                 _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
+            }
             _renderer.Update(_playerTime);
             RuntimeFragmentAssets.Update(_playerTime);
             _renderer.ClearEmitters();
@@ -262,7 +265,7 @@ internal sealed partial class SaberRuntime : IDisposable
         ResetSomersault();
         ClearSaberClashes();
         CancelAssistedSlice(""); ResetOverlaySwing(); _manualSwingSwoosh.Reset(); _commands.Clear(); ResetKittenSabers(); _targeting.Reset();
-        _renderer.ClearEffects(); _contactProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
+        _renderer.ClearEffects(); _contactProbe.Reset(); _manualProbe.Reset(); RuntimeFragmentAssets.ClearHeat();
         _renderer.ClearEmitters(); _renderer.ClearDetachedSabers();
         _owner = null; _system = null; _hasConsumedTime = _hasPreviousTip = _freshPoseThisTick = false;
         _swingSpeed = 0; _consumedPoseGeneration = _pose.MainPoseGeneration;

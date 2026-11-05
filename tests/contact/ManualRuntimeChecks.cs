@@ -17,7 +17,8 @@ internal sealed partial class SaberRuntime
     private bool OverlayVisible = true, SomersaultActive, ForceHolding, ForcePicking, _freshPoseThisTick = true, _selectingSlice;
     private bool _bfl9kUiEnabled = true;
     private bool BFL9KUiVisible => OverlayVisible && _bfl9kUiEnabled;
-    private bool ClutterSliceWorkActive => false;
+    private bool _clutterSliceWorkActive;
+    private bool ClutterSliceWorkActive => _clutterSliceWorkActive;
     private bool SaberHeldForActions => true;
     private readonly FakeBlade _blade = new();
     private readonly FakePose _pose = new();
@@ -246,7 +247,7 @@ internal sealed partial class SaberRuntime
         r.Tick(.3, 1.03, fresh: false); r.Tick(.5, 1.04);
         Check(r._manualSliceActive && r._slicer.Begins == 1, "no-fresh handoff preserves query cursor and frozen endpoints until confirmation");
         r = Scene(); r.Begin(); r.Tick(-.1, 2); r.ReleaseManualSwing(); r.Tick(.1, 2.02);
-        Check(r._slicer.Begins == 0 && !r._manualProbe.Pending, "release before confirmation discards detection and cannot cut during recovery");
+        Check(r._slicer.Begins == 0 && !r._manualProbe.Pending, "release before a held crossing cannot turn recovery movement into a cut");
         r = Scene(); r.Begin(); r.Tick(-.1, 3); r.Tick(.1, 3.02); r.ForceHolding = true; r.Tick(.1, 3.04);
         Check(!r._manualSliceActive && r._slicer.Commits == 0 && !r._manualGesture.Held,
             "Force capture conflict cancels contact and the held gesture without rearming");
@@ -335,6 +336,9 @@ internal sealed partial class SaberRuntime
         QueueReadyValidationPriority();
         QueueProvenanceSurvivesReplacement();
         FinalRenderedReleaseChecks();
+        FrozenReleaseDrainChecks();
+        RenderCadenceContactChecks();
+        VesselContactDiagnosticChecks();
         SwooshRuntimeChecks();
     }
 
@@ -412,11 +416,10 @@ internal sealed partial class SaberRuntime
                     mode + " " + gate.Name + " refuses the final release event");
             }
 
-            foreach (var gap in new[] { "no step", "no fresh pose", "expired pose" })
+            foreach (var gap in new[] { "no fresh pose", "expired pose" })
             {
                 r = ReleasedScene(queued, detector);
-                r.ReleaseContactHandoff(gap == "expired pose" ? 1.2 : 1.03,
-                    advancing: gap != "no step", fresh: gap != "no fresh pose");
+                r.ReleaseContactHandoff(gap == "expired pose" ? 1.2 : 1.03, fresh: gap != "no fresh pose");
                 r.ReleaseContactHandoff(1.21);
                 Check(!Started(r) && !r._manualProbe.Pending && !r._manualReleasedPosePending,
                     mode + " " + gap + " discards the final event without replaying it later");
@@ -430,27 +433,288 @@ internal sealed partial class SaberRuntime
                 && r._sliceActivation.Kind.ToString() == "ManualContact",
                 mode + " passive authorization cannot relabel or overwrite the final manual event");
 
+            r = ReleasedScene(queued, detector); r.ReleaseContactHandoff(advancing: false);
+            Check(!Started(r) && r._acceptedManualContacts.Count == 1 && !r._manualReleasedPosePending
+                && !r._manualGesture.InFlight && r._audio.Slices == 0,
+                mode + " final rendered crossing confirms on a no-step handoff without starting native work");
+            r.ReleaseContactHandoff(1.04, fresh: false);
+            Check(Started(r) && r._audio.Slices == 1 && r._acceptedManualContacts.Count == 0,
+                mode + " an advancing handoff admits the already confirmed final event without another pose");
+
             r = ReleasedScene(queued, detector, ManualContactProbe.TriangleBudget + 4);
             r.ReleaseContactHandoff();
+            Check(!Started(r) && r._manualProbe.Pending && r._manualDrainPending,
+                mode + " final dense query defers under the existing shared work budget");
+            r.ReleaseContactHandoff(1.04, fresh: false);
+            Check(Started(r) && !r._manualProbe.Pending,
+                mode + " deferred final query drains its frozen held interval exactly once");
+
+            r = Scene(ManualContactProbe.TriangleBudget + 4);
+            r._settings.VesselContactDetector = detector;
+            if (queued) { r._settings.SliceExecutionMode = "queued"; r._clutterQueue = new(); }
+            r.Begin(); r.Tick(-.1, 1); r.Tick(.1, 1.02);
+            Check(r._manualProbe.Pending, mode + " earlier held query is deferred before release");
+            r.RenderHeldContactPose(.3, 1.03); r.ReleaseManualSwing(); r.ReleaseContactHandoff(1.04);
+            Check(Started(r) && r._audio.Slices == 1,
+                mode + " final rendered handoff preserves and completes an earlier frozen held interval");
+        }
+    }
+
+    private static SaberRuntime FrozenReleasedScene(bool queued, string detector)
+    {
+        var r = Scene(ManualContactProbe.TriangleBudget * 2 + 4);
+        r._settings.VesselContactDetector = detector;
+        if (queued) { r._settings.SliceExecutionMode = "queued"; r._clutterQueue = new(); }
+        r.Begin(); r.Tick(-.1, 1); r.Tick(.1, 1.02); r.ReleaseManualSwing();
+        return r;
+    }
+
+    private static void FrozenReleaseDrainChecks()
+    {
+        foreach (bool queued in new[] { false, true })
+        foreach (string detector in new[] { "legacy-ribbon", "cached-ribbon" })
+        {
+            string mode = (queued ? "queued " : "serial ") + detector;
+            bool Started(SaberRuntime r) => queued ? r._vesselQueue is { Count: > 0 } : r._slicer.Begins > 0;
+            var r = FrozenReleasedScene(queued, detector);
+            ulong gesture = r._manualGesture.Id, epoch = r._sliceActivation.Epoch;
+            r.Tick(-.5, 1.03, move: false);
+            Check(!Started(r) && r._manualDrainPending && r._manualProbe.Pending
+                && r._manualProbe.TestedTriangles == ManualContactProbe.TriangleBudget
+                && r._manualProbe.DiscoveryUnits == 0 && r._manualProbe.FrameReads == 0,
+                mode + " release resumes its held cursor within one shared budget without sampling return movement");
+            Check(r._sliceActivation.Epoch != epoch && r._manualDrainEpoch == epoch && r._manualDrainGesture == gesture,
+                mode + " drain retains its originating gesture and epoch after release changes activation");
+            r.ReleaseContactHandoff(1.04, advancing: false, fresh: false);
+            Check(!Started(r) && r._acceptedManualContacts.Count == 1 && r._audio.Slices == 0
+                && !r._manualDrainPending && !r._manualProbe.Pending
+                && r._manualProbe.DiscoveryUnits == 0 && r._manualProbe.FrameReads == 0,
+                mode + " a supported no-step handoff confirms only frozen evidence without requiring another render");
+            r.ReleaseContactHandoff(1.05, fresh: false);
+            Check(Started(r) && r._audio.Slices == 1 && r._acceptedManualContacts.Count == 0,
+                mode + " drained evidence starts only on an advancing handoff");
+            if (!queued)
+            {
+                Check(r._manualGesture.InFlight && r._manualGesture.Spent && r._manualGesture.Id == gesture
+                    && !r._manualGesture.Held && r._slicer.Isolations == 0,
+                    mode + " released serial evidence consumes its own gesture once and keeps native mutation gated");
+                r.ReleaseContactHandoff(1.06, advancing: false, fresh: false);
+                Check(r._slicer.Begins == 1 && r._audio.Slices == 1,
+                    mode + " a drained serial stroke cannot start a second cut");
+            }
+
+            foreach (var gate in new (string Name, Action<SaberRuntime> Apply)[] {
+                ("cancel", x => x.InvalidateManualContact()),
+                ("queue cancel", x => x._cancelQueuedClutterRequested = true),
+                ("hidden controls", x => x._bfl9kUiEnabled = false),
+                ("ineligible pose", x => x._pose.Eligible = false),
+                ("stale body pose", x => x._pose.HasFreshBodyFrame = false),
+                ("clash", x => x._pose.ClashHeld = true),
+                ("Force hold", x => x.ForceHolding = true),
+                ("busy slicer", x => x._slicer.Busy = true),
+                ("cooldown", x => x._manualGesture.FinishAttempt(1.02)),
+                ("changed owner", x => x._owner = new()),
+                ("changed controls", x => Program.ControlledVehicle = new KittenEva()),
+                ("new gesture", x => x.Begin()),
+                ("changed scene", x => Universe.CurrentSystem = new()),
+                ("paused", x => Universe.SimulationSpeed = 0),
+                ("unsupported warp", x => Universe.SimulationSpeed = 6),
+                ("modal", x => Program.ModalOpen = true),
+                ("mouse latch", x => Program.HasMouseInputLatch = true),
+                ("execution mode", x => { x._settings.SliceExecutionMode = queued ? "legacy-serial" : "queued"; x._clutterQueue = new(); }),
+                ("changed source", x => ((Vehicle)Universe.CurrentSystem!.All.Items[1]).Parts.Parts[0].PositionParentAsmb = new(.02, 0, 0)),
+                ("changed geometry", x => ((Vehicle)Universe.CurrentSystem!.All.Items[1]).Parts.Parts[0].Modules.Get<MeshViewModule>()[0].MeshView.PositionsCompare = []) })
+            {
+                r = FrozenReleasedScene(queued, detector); gate.Apply(r); r.ReleaseContactHandoff();
+                Universe.SimulationSpeed = 1; Program.ModalOpen = Program.HasMouseInputLatch = false;
+                r.ReleaseContactHandoff(1.04);
+                Check(!Started(r) && !r._manualDrainPending && !r._manualProbe.Pending,
+                    mode + " " + gate.Name + " cancels a released frozen drain without replay");
+            }
+
+            r = FrozenReleasedScene(queued, detector); r.ReleaseContactHandoff(1.4);
+            Check(!Started(r) && !r._manualProbe.Pending && !r._manualDrainPending,
+                mode + " released intervals retain their original age limit");
+            r = FrozenReleasedScene(queued, detector); r.ReleaseContactHandoff();
+            r.Begin(); ulong nextGesture = r._manualGesture.Id; r.ReleaseContactHandoff(1.04);
+            Check(!Started(r) && nextGesture > gesture && !r._manualProbe.Pending && !r._manualGesture.InFlight,
+                mode + " starting a new stroke cancels an already partially drained older stroke");
+
+            if (!queued && detector == "cached-ribbon")
+            {
+                r = Scene(ManualContactProbe.TriangleBudget + 4);
+                r._settings.VesselContactDetector = detector;
+                var vehicle = (Vehicle)Universe.CurrentSystem!.All.Items[1];
+                var second = new Part { Tree = vehicle.Parts };
+                second.Modules.Add(new MeshViewModule(new() { PositionsCompare = [[new(0, -.2, -.2), new(0, .2, -.2), new(0, 0, .2)]] }));
+                vehicle.Parts.Parts.Add(second);
+                r.Begin(); r.Tick(-.1, 1); r.Tick(.1, 1.02); r.ReleaseManualSwing();
+                long before = SliceDetectionDiagnostics.Snapshot(SliceDetectorKind.ManualDrain).Confirmed;
+                r.ReleaseContactHandoff();
+                Check(SliceDetectionDiagnostics.Snapshot(SliceDetectorKind.ManualDrain).Confirmed == before + 2
+                    && r._slicer.Begins == 1 && r._audio.Slices == 1 && !r._manualProbe.Pending && !r._manualDrainPending,
+                    mode + " multiple confirmed frozen contacts authorize only one serial cut");
+            }
+        }
+    }
+
+    private static SaberRuntime NoStepContactScene(bool queued, string detector)
+    {
+        var r = Scene(); r._settings.VesselContactDetector = detector;
+        if (queued) { r._settings.SliceExecutionMode = "queued"; r._clutterQueue = new(); }
+        r.Begin(); r.Tick(-.1, 1); r.Tick(.1, 1.01, advancing: false);
+        return r;
+    }
+
+    private static void RenderCadenceContactChecks()
+    {
+        foreach (bool queued in new[] { false, true })
+        foreach (string detector in new[] { "legacy-ribbon", "cached-ribbon" })
+        {
+            string mode = (queued ? "queued " : "serial ") + detector;
+            bool Started(SaberRuntime r) => queued ? r._vesselQueue is { Count: > 0 } : r._slicer.Begins > 0;
+            var r = NoStepContactScene(queued, detector);
+            Check(!Started(r) && r._acceptedManualContacts.Count == 1 && !r._manualGesture.InFlight
+                && r._renderer.Sparks == 0 && r._audio.Slices == 0,
+                mode + " a fresh rendered no-step crossing retains confirmed evidence without native admission or cues");
+            r.Tick(-.1, 1.02, advancing: false);
+            Check(!Started(r) && r._acceptedManualContacts.Count == 1,
+                mode + " out-and-back rendered movement between solver steps cannot overwrite a confirmed contact");
+            r.Tick(-.1, 1.03, fresh: false, move: false);
+            Check(Started(r) && r._acceptedManualContacts.Count == 0 && r._audio.Slices == 1,
+                mode + " the next solver handoff admits the original crossing exactly once without another pose");
+
+            r = NoStepContactScene(queued, detector); r.ReleaseManualSwing();
+            r.ReleaseContactHandoff(1.02, fresh: false);
+            Check(Started(r) && r._acceptedManualContacts.Count == 0 && r._audio.Slices == 1,
+                mode + " ordinary release preserves already confirmed held evidence until the next solver handoff");
+
+            foreach (var gate in new (string Name, Action<SaberRuntime> Apply)[] {
+                ("cancel", x => x.InvalidateManualContact()),
+                ("gesture cancel", x => x._manualGesture.Cancel()),
+                ("queue cancel", x => x._cancelQueuedClutterRequested = true),
+                ("hidden controls", x => x._bfl9kUiEnabled = false),
+                ("ineligible pose", x => x._pose.Eligible = false),
+                ("stale body pose", x => x._pose.HasFreshBodyFrame = false),
+                ("clash", x => x._pose.ClashHeld = true),
+                ("Force hold", x => x.ForceHolding = true),
+                ("busy slicer", x => x._slicer.Busy = true),
+                ("cooldown", x => x._manualGesture.FinishAttempt(1.02)),
+                ("changed owner", x => x._owner = new()),
+                ("changed controls", x => Program.ControlledVehicle = new KittenEva()),
+                ("new gesture", x => x.Begin()),
+                ("changed scene", x => Universe.CurrentSystem = new()),
+                ("paused", x => Universe.SimulationSpeed = 0),
+                ("unsupported warp", x => Universe.SimulationSpeed = 6),
+                ("modal", x => Program.ModalOpen = true),
+                ("mouse latch", x => Program.HasMouseInputLatch = true),
+                ("execution mode", x => { x._settings.SliceExecutionMode = queued ? "legacy-serial" : "queued"; x._clutterQueue = new(); }),
+                ("changed source", x => ((Vehicle)Universe.CurrentSystem!.All.Items[1]).Parts.Parts[0].PositionParentAsmb = new(.02, 0, 0)),
+                ("changed geometry", x => ((Vehicle)Universe.CurrentSystem!.All.Items[1]).Parts.Parts[0].Modules.Get<MeshViewModule>()[0].MeshView.PositionsCompare = []),
+                ("edited vehicle", x => ((Vehicle)Universe.CurrentSystem!.All.Items[1]).IsEditedVehicle = true),
+                ("internal part", x => ((Vehicle)Universe.CurrentSystem!.All.Items[1]).Parts.Parts[0].IsAttachedInternal = true) })
+            {
+                r = NoStepContactScene(queued, detector); gate.Apply(r); r.ReleaseContactHandoff(1.02, advancing: false, fresh: false);
+                Universe.SimulationSpeed = 1; Program.ModalOpen = Program.HasMouseInputLatch = false;
+                r.ReleaseContactHandoff(1.03, fresh: false);
+                Check(!Started(r) && r._acceptedManualContacts.Count == 0 && !r._manualGesture.InFlight,
+                    mode + " " + gate.Name + " invalidates buffered evidence before native admission");
+            }
+
+            r = NoStepContactScene(queued, detector);
+            r.ReleaseContactHandoff(1.01 + ManualContactProbe.MaximumQueryAge + .01, fresh: false);
+            Check(!Started(r) && r._acceptedManualContacts.Count == 0,
+                mode + " confirmed contacts retain the bounded frozen-evidence age limit");
+
+            if (!queued)
+            {
+                foreach (bool vessel in new[] { false, true })
+                {
+                    r = NoStepContactScene(queued, detector);
+                    if (vessel)
+                    {
+                        r._vesselQueue = new(TaskScheduler.Default, TaskScheduler.Default, 2, 128, 256);
+                        Enqueue(r._vesselQueue, r._owner!, QueueTarget(r._owner!));
+                    }
+                    else r._clutterSliceWorkActive = true;
+                    r.ReleaseContactHandoff(1.02, fresh: false);
+                    Check(!Started(r) && r._acceptedManualContacts.Count == 0,
+                        mode + (vessel ? " active vessel queue" : " active clutter slice")
+                        + " refuses buffered serial admission while the shared cutter lane is occupied");
+                }
+            }
+        }
+    }
+
+    private static void VesselContactDiagnosticChecks()
+    {
+        foreach (bool queued in new[] { false, true })
+        foreach (string detector in new[] { "legacy-ribbon", "cached-ribbon" })
+        {
+            string mode = (queued ? "queued " : "serial ") + detector;
+            var r = NoStepContactScene(queued, detector);
+            Check(r._confirmedVesselContacts == 1 && r._admittedVesselCuts == 0 && r._declinedVesselContacts == 0
+                && r._lastVesselContactOutcome.Contains("awaiting", StringComparison.OrdinalIgnoreCase)
+                && r._sliceStatus.Length == 0 && r._sliceMessageUntil == 0,
+                mode + " diagnostics distinguish a confirmed waiting contact without adding a HUD message");
+            r.ReleaseContactHandoff(1.02, fresh: false);
+            Check(r._confirmedVesselContacts == 1 && r._admittedVesselCuts == 1 && r._declinedVesselContacts == 0
+                && r._lastVesselContactOutcome.Contains("admitted", StringComparison.OrdinalIgnoreCase),
+                mode + " diagnostics count admission separately from the earlier confirmation");
+
+            r = NoStepContactScene(queued, detector);
+            ((Vehicle)Universe.CurrentSystem!.All.Items[1]).HasPhysicsBubble = false;
+            r.ReleaseContactHandoff(1.02, fresh: false);
+            Check(r._confirmedVesselContacts == 1 && r._admittedVesselCuts == 0 && r._declinedVesselContacts == 1
+                && r._lastVesselContactOutcome.Contains("physics bubble", StringComparison.OrdinalIgnoreCase)
+                && r._audio.Slices == 0,
+                mode + " diagnostics retain the concrete target refusal reason without counting an admitted cut");
+
+            r = NoStepContactScene(queued, detector);
+            var accepted = r._acceptedManualContacts[0];
+            r._acceptedManualContacts[0] = accepted with { Contact = accepted.Contact with { MotionLocal = default } };
+            r.ReleaseContactHandoff(1.02, fresh: false);
+            Check(r._admittedVesselCuts == 0 && r._declinedVesselContacts == 1
+                && r._lastVesselContactOutcome.Contains("plane refused", StringComparison.OrdinalIgnoreCase)
+                && r._lastVesselContactOutcome.Contains("direction is invalid", StringComparison.OrdinalIgnoreCase),
+                mode + " diagnostics retain the concrete plane refusal reason");
+
+            r = NoStepContactScene(queued, detector);
+            ((Vehicle)Universe.CurrentSystem!.All.Items[1]).Parts.Parts[0].PositionParentAsmb = new(.02, 0, 0);
+            r.ReleaseContactHandoff(1.02, fresh: false);
+            Check(r._declinedVesselContacts == 1 && r._admittedVesselCuts == 0
+                && r._lastVesselContactOutcome.Contains("transform changed", StringComparison.OrdinalIgnoreCase),
+                mode + " diagnostics count buffered evidence invalidation with its cause");
+
+            r = NoStepContactScene(queued, detector); r.InvalidateManualContact();
+            r.ReleaseContactHandoff(1.02, fresh: false);
+            Check(r._declinedVesselContacts == 1 && r._admittedVesselCuts == 0
+                && r._lastVesselContactOutcome.Contains("cancelled", StringComparison.OrdinalIgnoreCase)
+                && r._sliceStatus.Length == 0 && r._sliceMessageUntil == 0 && r._audio.Slices == 0,
+                mode + " intentional cancellation is diagnostic only and adds no message or sound");
+            r._cosmeticVesselContacts = 7; r.ResetVesselContactDiagnostics();
+            Check(r._cosmeticVesselContacts == 0 && r._confirmedVesselContacts == 0 && r._admittedVesselCuts == 0
+                && r._declinedVesselContacts == 0 && r._lastVesselContactOutcome.Length == 0,
+                mode + " diagnostic reset clears cosmetic, confirmation, admission, decline and outcome state");
+
+            r = NoStepContactScene(queued, detector);
             if (queued)
             {
-                Check(!Started(r) && r._manualProbe.Pending && r._manualDrainPending,
-                    mode + " final dense query defers under the existing shared work budget");
-                r.ReleaseContactHandoff(1.04, fresh: false);
-                Check(Started(r) && !r._manualProbe.Pending,
-                    mode + " deferred final query drains its frozen held interval exactly once");
+                r._clutterQueue!.Count = r._settings.SlicePendingTargetLimit;
+                r.ReleaseContactHandoff(1.02, fresh: false);
+                Check(r._confirmedVesselContacts == 1 && r._admittedVesselCuts == 0 && r._declinedVesselContacts == 1
+                    && r._lastVesselContactOutcome.Contains("queue declined", StringComparison.OrdinalIgnoreCase)
+                    && r._lastVesselContactOutcome.Contains("duplicate, queue limit or source rejection", StringComparison.OrdinalIgnoreCase),
+                    mode + " queue rejection is identified without claiming a geometry failure");
             }
             else
             {
-                Check(!Started(r) && !r._manualProbe.Pending,
-                    mode + " final dense query retains serial release cancellation at its work limit");
-                r = Scene(ManualContactProbe.TriangleBudget + 4);
-                r._settings.VesselContactDetector = detector;
-                r.Begin(); r.Tick(-.1, 1); r.Tick(.1, 1.02);
-                Check(r._manualProbe.Pending, mode + " earlier held query is deferred before release");
-                r.RenderHeldContactPose(.3, 1.03); r.ReleaseManualSwing(); r.ReleaseContactHandoff(1.04);
-                Check(!Started(r) && !r._manualProbe.Pending,
-                    mode + " unconsumed final pose cannot revive earlier serial work cancelled by release");
+                r._slicer.BeginError = "fixture source capture refused";
+                r.ReleaseContactHandoff(1.02, fresh: false);
+                Check(r._confirmedVesselContacts == 1 && r._admittedVesselCuts == 0 && r._declinedVesselContacts == 1
+                    && r._lastVesselContactOutcome.Contains("fixture source capture refused", StringComparison.Ordinal)
+                    && r._audio.Slices == 0,
+                    mode + " diagnostics count a Begin exception and retain its concrete reason");
             }
         }
     }

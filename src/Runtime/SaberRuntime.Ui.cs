@@ -113,6 +113,9 @@ internal sealed partial class SaberRuntime
                         + $"geometry workers configured {_clutterQueue?.WorkerCount ?? 0}; loader slots {(_vesselQueue?.LoadSlots ?? 0) + (_clutterQueue?.LoadSlots ?? 0)}; "
                         + $"tracked memory {((_vesselQueue?.ChargedBytes ?? 0) + (_clutterQueue?.ChargedBytes ?? 0)) / (1024d * 1024d):F1} MiB"
                         + $"\nCached vessel: {_manualProbe.CacheHits} hits, {_manualProbe.CacheFallbacks} cold fallbacks, {_manualProbe.CacheIncomplete} unfinished, {_manualProbe.CacheUnsupported} unsupported."
+                        + $"\nVessel contact: {_cosmeticVesselContacts} cosmetic spark events, {_confirmedVesselContacts} confirmed cutting contacts, "
+                        + $"{_admittedVesselCuts} cuts started, {_declinedVesselContacts} declined or invalidated."
+                        + $"\nLast cutting-contact outcome: {_lastVesselContactOutcome}"
                         + "\nDetector timing is per call, not cut completion; the last 256 timed calls are retained.";
                     foreach (SliceDetectorKind kind in Enum.GetValues<SliceDetectorKind>())
                         diagnostics += "\n" + SliceDetectionDiagnostics.Describe(kind);
@@ -121,7 +124,7 @@ internal sealed partial class SaberRuntime
                     diagnostics += "\n" + SliceJobDiagnostics.Describe();
                     ImGui.TextWrapped(diagnostics);
                     if (ImGui.Button("Copy slice diagnostics")) ImGui.SetClipboardText(diagnostics);
-                    if (ImGui.Button("Reset detector counters")) { SliceDetectionDiagnostics.Reset(); SliceJobDiagnostics.Reset(); }
+                    if (ImGui.Button("Reset detector counters")) { SliceDetectionDiagnostics.Reset(); SliceJobDiagnostics.Reset(); ResetVesselContactDiagnostics(); }
                     ImGui.Separator();
                     if (ImGui.Button("Capture next confirmed vessel hit for SliceReplay")) ArmSliceReplayCapture();
                     ShowSaberControlTip("One-shot developer capture. Copies only the confirmed hit mesh and its target-local blade interval, with a 40,000-triangle cap and a 0.25 ms copy budget per settled update. The background writer is capped at 16 MiB. This does not change cut behavior; the capture is disabled until armed.");

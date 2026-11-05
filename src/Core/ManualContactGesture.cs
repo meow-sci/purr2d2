@@ -20,7 +20,7 @@ internal sealed class ManualContactGesture
         Spent = InFlight = true;
         return true;
     }
-    // The runtime may submit only the last unconsumed pose rendered while held.
+    // The runtime may submit only frozen held intervals or the last unconsumed held pose.
     // Releasing the button changes ownership of that event, not its gesture id.
     internal bool ConsumeReleased(ulong id, double playerTime)
     {

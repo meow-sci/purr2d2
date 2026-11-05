@@ -9,13 +9,98 @@ internal static class ManualContactChecks
 {
     internal static void Run()
     {
-        Geometry(); Gestures(); PassiveStrokeEpochs(); CachedProbe(); MultiTargetProbe(); FrozenDrain(); FirstPassContacts();
+        Geometry(); Gestures(); PassiveStrokeEpochs(); CachedProbe(); MultiTargetProbe(); FrozenDrain(); FirstPassContacts(); ProximityCoverage(); RemovedSubPartEvidence(); ResetRetention(); DenseScanLifetime();
         foreach (bool debug in new[] { false, true })
         {
             DebugTimings.Enabled = debug;
             try { Probe(); }
             finally { DebugTimings.Enabled = false; }
         }
+    }
+    private static void ProximityCoverage()
+    {
+        foreach (bool unknownBounds in new[] { false, true })
+        {
+            var scene = Scene();
+            scene.Vehicle.Parts.Parts.Clear();
+            scene.Mesh.BoundingSphereRadius = .5;
+            var farMesh = new MeshReference { PositionsCompare = [TriangleAt(0)], BoundingSphereRadius = .5 };
+            // Put the hit source after enough far sources to fill the candidate
+            // ring, then continue discovery long enough to churn it repeatedly.
+            for (int i = 0; i < 512; i++)
+            {
+                if (i == 256) scene.Vehicle.Parts.Parts.Add(scene.Part);
+                var part = new Part { Tree = scene.Vehicle.Parts, PositionParentAsmb = new(15, 0, 0) };
+                part.Modules.Add(new MeshViewModule(farMesh)); scene.Vehicle.Parts.Parts.Add(part);
+            }
+            if (unknownBounds)
+            {
+                // Native multi-primitive radii can describe only the last primitive.
+                // Its visible triangle is near the blade despite its distant origin.
+                scene.Part.PositionParentAsmb = new(10, 0, 0);
+                scene.Mesh.PositionsCompare = [TriangleAt(-10), TriangleAt(0)];
+                scene.Mesh.BoundingSphereRadius = .1;
+            }
+            var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity };
+            int hits = 0;
+            for (int frame = 0; frame < 320; frame++)
+            {
+                bool hit = probe.Advance(scene.Owner, Pose(frame % 2 == 0 ? -.1 : .1, frame / 60d, frame * .1f), out var contact);
+                if (frame >= 200 && hit && contact.Part == scene.Part) hits++;
+            }
+            Check(hits == 120, unknownBounds
+                ? "unknown multi-primitive bounds retain a nearby surface among more than 128 sources"
+                : "nearby mesh keeps every crossing while discovery churns more than 128 far sources");
+            if (unknownBounds) continue;
+            // A retained source's rank must follow the blade, so moving elsewhere
+            // can admit a newly relevant part instead of preserving an old near set.
+            hits = 0;
+            for (int frame = 320; frame < 640; frame++)
+            {
+                bool hit = probe.Advance(scene.Owner, Pose(15 + (frame % 2 == 0 ? -.1 : .1), frame / 60d, frame * .1f), out var contact);
+                if (frame >= 520 && hit && contact.Part != null) hits++;
+            }
+            Check(hits == 120, "retained candidate ranks refresh when the blade moves to another group of sources");
+        }
+    }
+    private static void RemovedSubPartEvidence()
+    {
+        (KittenEva Owner, Part Root, Part Child, ManualContactProbe Probe) SubPartScene(int misses = 0)
+        {
+            var scene = Scene(misses);
+            var root = new Part { Tree = scene.Vehicle.Parts };
+            var child = new Part { PartParent = root, Tree = scene.Vehicle.Parts };
+            child.Modules.Add(new MeshViewModule(scene.Mesh)); root.SubParts.Add(child);
+            scene.Vehicle.Parts.Parts.Clear(); scene.Vehicle.Parts.Parts.Add(root);
+            return (scene.Owner, root, child, new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity });
+        }
+        void RemoveLikeNative(Part root, Part child)
+        {
+            // KSA Part.RemoveSubPart clears PartParent, while Tree and the child's
+            // own modules remain set. Tree ownership alone cannot prove membership.
+            root.SubParts.Remove(child); child.PartParent = null;
+        }
+        var scene = SubPartScene();
+        scene.Probe.Advance(scene.Owner, Pose(-.1, 0), out _);
+        Check(scene.Probe.Advance(scene.Owner, Pose(.1, .02, .1f), out var contact)
+            && contact.Part == scene.Child && contact.HitFullPart == scene.Root && scene.Probe.IsEvidenceCurrent(contact),
+            "confirmed subpart evidence records its original live full part");
+        RemoveLikeNative(scene.Root, scene.Child);
+        Check(!scene.Probe.IsEvidenceCurrent(contact),
+            "native subpart removal invalidates old evidence despite retained mesh modules and tree pointer");
+        scene.Probe.ResetMotion();
+        Check(!scene.Probe.Advance(scene.Owner, Pose(-.1, .04, .2f), out _)
+            && !scene.Probe.Advance(scene.Owner, Pose(.1, .06, .3f), out _),
+            "retained discovery cannot scan a child detached by native subpart removal");
+
+        scene = SubPartScene(ManualContactProbe.TriangleBudget + 7);
+        scene.Probe.Advance(scene.Owner, Pose(-.1, 1), out _);
+        Check(!scene.Probe.Advance(scene.Owner, Pose(.1, 1.02, .1f), out _) && scene.Probe.Pending,
+            "subpart removal fixture starts with a frozen pending scan");
+        RemoveLikeNative(scene.Root, scene.Child);
+        Check(!scene.Probe.Advance(scene.Owner, Pose(.5, 1.04, .2f), out _)
+            && !scene.Probe.Pending && scene.Probe.TestedTriangles == 0,
+            "native subpart removal discards its pending scan before more triangle work");
     }
     private static void PassiveStrokeEpochs()
     {
@@ -225,7 +310,7 @@ internal static class ManualContactChecks
                 { probe.Reset(); probe.AdvanceMany(scene.Owner, Pose(-.1, .1, gesture: 43), hits); probe.AdvanceMany(scene.Owner, Pose(.1, .11, .1f, 43), hits); }
                 else
                 { probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, .1, gesture: 43), out _); probe.Advance(scene.Owner, Pose(.1, .11, .1f, 43), out _); }
-                Check(probe.Pending && probe.DrainFrozen(scene.Owner, .27, hits) == 0 && !probe.Pending,
+                Check(probe.Pending && probe.DrainFrozen(scene.Owner, .11 + ManualContactProbe.MaximumQueryAge + .01, hits) == 0 && !probe.Pending,
                     "released manual query expires rather than querying an old interval");
                 probe.Reset();
                 if (cached)
@@ -454,7 +539,7 @@ internal static class ManualContactChecks
             && probe.TestedTriangles == ManualContactProbe.TriangleBudget && Math.Abs(contact.PointLocal.X + .05) < 1e-8,
             "late first hit publishes while still current in the final age window");
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 2), out _); probe.Advance(scene.Owner, Pose(.1, 2.02, .1f), out _);
-        Check(!probe.Advance(scene.Owner, Pose(.5, 2.3, .3f), out _) && !probe.Pending
+        Check(!probe.Advance(scene.Owner, Pose(.5, 2.02 + ManualContactProbe.MaximumQueryAge + .01, .3f), out _) && !probe.Pending
             && (!DebugTimings.Enabled || probe.ExpiredQueries > 0), "old frozen queries explicitly expire with diagnostics on or off");
         probe.Reset(); probe.Advance(scene.Owner, Pose(-.1, 3), out _); probe.Advance(scene.Owner, Pose(.1, 3.02, .1f), out _);
         scene.Part.PositionParentAsmb = new(.2, 0, 0);
@@ -511,6 +596,77 @@ internal static class ManualContactChecks
             Check(probe.LastUpdateMilliseconds == 0 && probe.MaximumUpdateMilliseconds == 0
                 && probe.ExpiredQueries == 0 && probe.Saturations == 0,
                 "disabled probing must skip optional timing and cumulative diagnostic stats");
+    }
+    private static void ResetRetention()
+    {
+        var scene = Scene();
+        Universe.CurrentSystem!.All.Items = Enumerable.Repeat<object>(new object(), ManualContactProbe.DiscoveryBudget * 3)
+            .Concat([scene.Owner, scene.Vehicle]).ToArray();
+        var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity };
+        try
+        {
+            for (int frame = 0; frame < 8; frame++) probe.Advance(scene.Owner, Pose(-.1, frame * .01), out _);
+            Check(probe.Advance(scene.Owner, Pose(.1, .08, .1f), out _), "late-discovered source is available before a regrab");
+            probe.ResetMotion();
+            Check(!probe.Advance(scene.Owner, Pose(-.1, .09, gesture: 2), out _),
+                "gesture reset cannot join its previous stroke to the new first pose");
+            Check(probe.Advance(scene.Owner, Pose(.1, .1, .1f, 2), out _),
+                "regrab retains discovered sources instead of repeating cold fleet traversal");
+            Check(!probe.Advance(scene.Owner, Pose(-.1, .11, gesture: 3), out _)
+                && probe.Advance(scene.Owner, Pose(.1, .12, .1f, 3), out _),
+                "automatic gesture changes retain sources but require fresh motion evidence");
+            scene.Part.Modules.Get<MeshViewModule>()[0].MeshView = new MeshReference { PositionsCompare = [TriangleAt(5)] };
+            probe.ResetMotion();
+            probe.Advance(scene.Owner, Pose(-.1, .13, gesture: 4), out _);
+            Check(!probe.Advance(scene.Owner, Pose(.1, .14, .1f, 4), out _),
+                "retained discovery never detects a mesh removed from its source module");
+        }
+        finally { probe.DisposeCache(); }
+
+        scene = Scene(20000);
+        probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity, CacheableMesh = _ => true };
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            for (int stroke = 1; stroke <= 2000 && probe.CacheHits == 0 && DateTime.UtcNow < deadline; stroke++)
+            {
+                probe.ResetMotion();
+                probe.Advance(scene.Owner, Pose(-.1, stroke * .04, gesture: (ulong)stroke), out _);
+                probe.Advance(scene.Owner, Pose(.1, stroke * .04 + .01, .1f, (ulong)stroke), out _);
+                Thread.Yield();
+            }
+            Check(probe.CacheHits > 0, "short repeated gestures finish one retained immutable cache copy");
+            probe.ResetMotion();
+            Check(!probe.Pending && probe.DrainFrozen(scene.Owner, 100, new()) == 0,
+                "retaining cache progress cannot retain old stroke authorization");
+        }
+        finally { probe.DisposeCache(); }
+    }
+
+    private static void DenseScanLifetime()
+    {
+        foreach (bool cached in new[] { false, true })
+        foreach (double fps in new[] { 30d, 59d })
+        {
+            var scene = Scene(39999);
+            var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity, CacheableMesh = _ => false };
+            var hits = new List<ManualContactProbe.Contact>();
+            try
+            {
+                if (cached) { probe.AdvanceMany(scene.Owner, Pose(-.1, 0), hits); probe.AdvanceMany(scene.Owner, Pose(.1, 1 / fps, .1f), hits); }
+                else { probe.Advance(scene.Owner, Pose(-.1, 0), out _); probe.Advance(scene.Owner, Pose(.1, 1 / fps, .1f), out _); }
+                bool found = false, bounded = true;
+                for (int frame = 2; frame <= 12 && probe.Pending; frame++)
+                {
+                    found |= probe.DrainFrozen(scene.Owner, frame / fps, hits) != 0;
+                    bounded &= probe.TestedTriangles <= ManualContactProbe.TriangleBudget
+                        && probe.PrimitiveReads <= ManualContactProbe.PrimitiveBudget;
+                }
+                Check(found && bounded && !probe.Pending,
+                    $"{(cached ? "cached cold" : "default")} completes 40k late contact at {fps} FPS within unchanged work caps");
+            }
+            finally { probe.DisposeCache(); }
+        }
     }
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); Console.WriteLine("PASS: " + message); }
 }

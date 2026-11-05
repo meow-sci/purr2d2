@@ -13,6 +13,9 @@ internal sealed class ManualContactProbe
 {
     internal const int TriangleBudget = 4096, DiscoveryBudget = 64, FrameBudget = 128, CandidateLimit = 128, PrimitiveBudget = 256;
     internal const double UpdateMilliseconds = .5, MaximumAge = .15, MaximumEndpointTravel = 1;
+    // Frozen evidence can take ten bounded handoffs to scan a 40k-triangle mesh
+    // at 30 Hz. This does not permit joining poses across a longer sample gap.
+    internal const double MaximumQueryAge = .35;
     internal const int RefinementUpdates = 2;
     internal const double RefinementSeconds = .05;
     internal readonly record struct Sample(ulong Gesture, double Time, double3 BaseBody, double3 TipBody, float2 Drag)
@@ -41,6 +44,7 @@ internal sealed class ManualContactProbe
         internal bool FullMeshScan { get; init; }
         internal ulong TriggerEpoch { get; init; }
         internal MeshReference? HitMesh { get; init; }
+        internal Part? HitFullPart { get; init; }
         internal double3[][]? HitPrimitives { get; init; }
         internal ulong HitGeometryRevision { get; init; }
         internal ulong HitGeometryEpoch { get; init; }
@@ -49,10 +53,12 @@ internal sealed class ManualContactProbe
     private sealed class Candidate(Part part, Vehicle vehicle, MeshReference mesh, bool immutableAsset, long ordinal)
     {
         internal readonly Part Part = part;
+        internal readonly Part OriginalFullPart = part.FullPart;
         internal readonly Vehicle Vehicle = vehicle;
         internal readonly MeshReference Mesh = mesh;
         internal readonly bool ImmutableAsset = immutableAsset;
         internal readonly long Ordinal = ordinal;
+        internal double ProximityMeters;
         internal Sample Previous;
         internal CutPoint Base, Tip;
         internal double4x4 SourceTransform;
@@ -127,11 +133,28 @@ internal sealed class ManualContactProbe
 
     internal void Reset()
     {
+        ResetMotion();
         _discovery?.Dispose(); _discovery = null;
-        foreach (var query in _queries) query.CacheLease?.Dispose();
-        _queries.Clear(); _cursor = _deferredCount = 0;
-        _candidates.Clear(); _capture = null; _owner = null; _system = null; _gesture = 0;
+        _candidates.Clear(); _capture = null; _owner = null; _system = null;
         _candidate = _replace = _advanceSerial = 0; _nextOrdinal = 0;
+    }
+
+    // Ending authorization must discard every motion interval, but the next
+    // press need not rediscover the same sources or restart immutable cache copy.
+    // Ownership, transforms and geometry are still checked at each later use.
+    internal void ResetMotion()
+    {
+        if (_gesture == 0 && _queries.Count == 0) return;
+        foreach (var query in _queries) query.CacheLease?.Dispose();
+        _queries.Clear(); _cursor = _deferredCount = 0; _gesture = 0;
+        foreach (var candidate in _candidates)
+        {
+            candidate.HasPrevious = candidate.DragArmed = false;
+            candidate.Active = candidate.BeforeDrag = null;
+            candidate.Previous = default;
+            candidate.Base = candidate.Tip = default;
+            candidate.LastDrag = candidate.DragOrigin = default;
+        }
     }
 
     internal bool Advance(KittenEva owner, Sample sample, out Contact contact)
@@ -164,8 +187,9 @@ internal sealed class ManualContactProbe
         { Reset(); }
         else
         {
-            if (!ReferenceEquals(_owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem) || _gesture != sample.Gesture)
-            { Reset(); _owner = owner; _system = Universe.CurrentSystem; _gesture = sample.Gesture; }
+            if (!ReferenceEquals(_owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem))
+            { Reset(); _owner = owner; _system = Universe.CurrentSystem; }
+            if (_gesture != sample.Gesture) { ResetMotion(); _gesture = sample.Gesture; }
             EnsureRevisionScene();
             _sample = sample;
             long started = Stopwatch.GetTimestamp();
@@ -214,14 +238,18 @@ internal sealed class ManualContactProbe
     private void ObserveCandidate(Candidate entry, KittenEva owner, Sample sample, Camera camera,
         ref Vehicle? lastVehicle, ref double4x4 vehicleFrame)
     {
-        if (entry.Vehicle.IsDisposed || !ReferenceEquals(entry.Vehicle.Parent, owner.Parent)
-            || !ReferenceEquals(entry.Part.StructuralPart.Tree?.OwningVehicle, entry.Vehicle))
-        { entry.HasPrevious = false; return; }
+        if (!SourceAvailable(entry, owner))
+        {
+            entry.HasPrevious = false; entry.ProximityMeters = double.PositiveInfinity;
+            ResolveDragIntervals(entry, authorize: false);
+            return;
+        }
         // All these meshes share one settled sample. Vehicle orientation and COM
         // may change on the next handoff, so reuse the matrix only in this call.
         if (!ReferenceEquals(lastVehicle, entry.Vehicle))
         { lastVehicle = entry.Vehicle; vehicleFrame = entry.Vehicle.GetMatrixAsmb2Ego(camera); }
         var target = entry.Part.MatrixAsmb2Ego(in vehicleFrame);
+        entry.ProximityMeters = Proximity(entry.Mesh, target);
         if (!double4x4.Invert(target, out var inverse)) { entry.HasPrevious = false; return; }
         var a = Point(_baseEgo.Transform(inverse)); var b = Point(_tipEgo.Transform(inverse));
         if (!a.Finite || !b.Finite) { entry.HasPrevious = false; return; }
@@ -499,7 +527,8 @@ internal sealed class ManualContactProbe
             HitTime01 = query.BestTime, AlongBlade01 = query.BestAlong, SweepTolerance = query.Sweep.Tolerance,
             SampleTime = query.Sample.Time,
             TargetOrdinal = query.Source.Ordinal, FullMeshScan = fullMeshScan, TriggerEpoch = query.Sample.Gesture,
-            HitMesh = query.Source.Mesh, HitPrimitives = query.Primitives, HitGeometryRevision = query.Revision,
+            HitMesh = query.Source.Mesh, HitFullPart = query.Source.OriginalFullPart,
+            HitPrimitives = query.Primitives, HitGeometryRevision = query.Revision,
             HitGeometryEpoch = query.RevisionEpoch, HitScene = query.Scene
         };
     }
@@ -527,13 +556,15 @@ internal sealed class ManualContactProbe
                 FinishQuery(i, discardFollowing: true);
     }
 
-    // Validates the exact observed mesh data after admission; callers still
-    // validate that the part owns this mesh when their source signature is captured.
+    // Revalidate the observed mesh and visual-source membership. Do not pin the
+    // owning vehicle here: an admitted queue job may isolate and rebase its source.
     internal bool IsEvidenceCurrent(Contact contact) => contact.HitMesh is { } mesh
         && ReferenceEquals(mesh.PositionsCompare, contact.HitPrimitives)
         && ReferenceEquals(contact.HitScene, Universe.CurrentSystem)
         && _ribbonRevisions.Epoch == contact.HitGeometryEpoch
-        && _ribbonRevisions.Revision(mesh) == contact.HitGeometryRevision;
+        && _ribbonRevisions.Revision(mesh) == contact.HitGeometryRevision
+        && ReferenceEquals(contact.Part.FullPart, contact.HitFullPart)
+        && SourceOwnsMesh(contact.Part, mesh);
 
     private void EnsureRevisionScene()
     {
@@ -577,8 +608,7 @@ internal sealed class ManualContactProbe
     private void AdvanceCapture(KittenEva owner, long started)
     {
         if (_capture is not { } work || _ribbonStore == null) return;
-        bool CurrentSource() => !work.Source.Vehicle.IsDisposed && ReferenceEquals(work.Source.Vehicle.Parent, owner.Parent)
-            && ReferenceEquals(work.Source.Part.StructuralPart.Tree?.OwningVehicle, work.Source.Vehicle)
+        bool CurrentSource() => SourceAvailable(work.Source, owner)
             && ReferenceEquals(work.Source.Mesh.PositionsCompare, work.Primitives)
             && work.Key.Epoch == _ribbonRevisions.Epoch
             && work.Key.Revision == _ribbonRevisions.Revision(work.Source.Mesh);
@@ -593,14 +623,45 @@ internal sealed class ManualContactProbe
     }
 
     private bool WithinBudget(long started, double fraction = 1) => Stopwatch.GetElapsedTime(started).TotalMilliseconds < SoftBudgetMilliseconds * fraction;
-    private bool Current(Query query, KittenEva owner, double now) => now >= query.Sample.Time && now - query.Sample.Time <= MaximumAge
-        && !query.Source.Vehicle.IsDisposed && ReferenceEquals(query.Source.Vehicle.Parent, owner.Parent)
-        && ReferenceEquals(query.Source.Part.StructuralPart.Tree?.OwningVehicle, query.Source.Vehicle)
+    private bool Current(Query query, KittenEva owner, double now) => now >= query.Sample.Time && now - query.Sample.Time <= MaximumQueryAge
+        && SourceAvailable(query.Source, owner)
         && query.Source.Part.StructuralPart.MatrixAsmb2VehicleAsmb.Equals(query.SourceTransform)
         && query.Source.Part.MatrixAsmb2VehicleAsmb.Equals(query.PartTransform)
         && ReferenceEquals(query.Source.Mesh.PositionsCompare, query.Primitives)
         && _ribbonRevisions.Epoch == query.RevisionEpoch
         && _ribbonRevisions.Revision(query.Source.Mesh) == query.Revision;
+
+    private static bool SourceAvailable(Candidate source, KittenEva owner)
+    {
+        if (source.Vehicle.IsDisposed || source.Vehicle.IsEditedVehicle
+            || !ReferenceEquals(source.Part.FullPart, source.OriginalFullPart) || source.OriginalFullPart.IsAttachedInternal
+            || !ReferenceEquals(source.Vehicle.Parent, owner.Parent)
+            || !ReferenceEquals(source.OriginalFullPart.Tree?.OwningVehicle, source.Vehicle)) return false;
+        // Discovery survives a gesture now. A removed/replaced module must not
+        // keep contributing its old mesh while the next discovery pass catches up.
+        return SourceOwnsMesh(source.Part, source.Mesh);
+    }
+
+    private static bool SourceOwnsMesh(Part part, MeshReference mesh)
+    {
+        var modules = part.Modules;
+        bool render = modules.HasAny<PartModelModule>() || modules.HasAny<PartModelDynamicModule>() || modules.HasAny<PartModelGlassModule>();
+        if (!render)
+        {
+            foreach (var module in modules.Get<MeshViewModule>())
+                if (ReferenceEquals(module.MeshView, mesh)) return true;
+        }
+        else
+        {
+            foreach (var module in modules.Get<PartModelModule>())
+                if (ReferenceEquals(module.PartModel.Template.Mesh?.Get(), mesh)) return true;
+            foreach (var module in modules.Get<PartModelDynamicModule>())
+                if (ReferenceEquals(module.PartModelDynamic.Template.Mesh?.Get(), mesh)) return true;
+            foreach (var module in modules.Get<PartModelGlassModule>())
+                if (ReferenceEquals(module.PartModelGlass.Template.Mesh?.Get(), mesh)) return true;
+        }
+        return false;
+    }
     private static double WorldDistanceSquared(CutPoint delta, double4x4 transform) => double3.TransformNormal(Game(delta), transform).LengthSquared();
     private static bool BoundsCouldHit(CutPoint a0, CutPoint b0, CutPoint a1, CutPoint b1, double radius, int primitives)
     {
@@ -660,26 +721,59 @@ internal sealed class ManualContactProbe
     private void Add(Part part, Vehicle vehicle, MeshReference mesh, bool immutableAsset)
     {
         foreach (var candidate in _candidates)
-            if (ReferenceEquals(candidate.Part, part) && ReferenceEquals(candidate.Mesh, mesh) && ReferenceEquals(candidate.Vehicle, vehicle)) return;
-        var entry = new Candidate(part, vehicle, mesh, immutableAsset, ++_nextOrdinal);
-        if (_candidates.Count < CandidateLimit) _candidates.Add(entry);
-        else
+            if (ReferenceEquals(candidate.Part, part) && ReferenceEquals(candidate.Mesh, mesh) && ReferenceEquals(candidate.Vehicle, vehicle)
+                && ReferenceEquals(candidate.OriginalFullPart, part.FullPart)) return;
+        double proximity = 0;
+        if (Program.GetMainCamera() is { } camera)
         {
-            bool placed = false;
+            var vehicleFrame = vehicle.GetMatrixAsmb2Ego(camera);
+            proximity = Proximity(mesh, part.MatrixAsmb2Ego(in vehicleFrame));
+        }
+        int replacement = -1;
+        if (_candidates.Count == CandidateLimit)
+        {
+            double farthest = proximity;
             // Preserve the candidate that owns each frozen cursor: evicting it
             // lets rediscovery create a duplicate concurrent query for that mesh.
+            // Among the others, keep potential blade contacts ahead of separated
+            // sources. Equal distances rotate so unknown bounds retain coverage.
             for (int i = 0; i < CandidateLimit; i++)
             {
-                int slot = _replace; _replace = (_replace + 1) % CandidateLimit;
+                int slot = (_replace + i) % CandidateLimit;
                 var old = _candidates[slot];
-                if (old.Active != null) continue;
-                ResolveDragIntervals(old, authorize: false);
-                _candidates[slot] = entry; placed = true; break;
+                if (old.Active != null || old.ProximityMeters < farthest) continue;
+                if (replacement >= 0 && old.ProximityMeters == farthest) continue;
+                replacement = slot; farthest = old.ProximityMeters;
             }
             if (DebugTimings.Enabled) Saturations++;
-            if (!placed) return;
+            if (replacement < 0) return;
+        }
+        var entry = new Candidate(part, vehicle, mesh, immutableAsset, ++_nextOrdinal) { ProximityMeters = proximity };
+        if (replacement < 0) _candidates.Add(entry);
+        else
+        {
+            ResolveDragIntervals(_candidates[replacement], authorize: false);
+            _candidates[replacement] = entry;
+            _replace = (replacement + 1) % CandidateLimit;
         }
         if (mesh.PositionsCompare is { } primitives) ScheduleCapture(entry, primitives);
+    }
+
+    // Ranking only: native bounds never authorize a hit or exclude an unknown
+    // mesh. Multi-primitive KSA extrema may describe only its last primitive.
+    private double Proximity(MeshReference mesh, double4x4 target)
+    {
+        double radius = mesh.BoundingSphereRadius;
+        if (mesh.PositionsCompare is not { Length: 1 } || !double.IsFinite(radius) || radius <= 0) return 0;
+        var center = target.Translation;
+        var axis = _tipEgo - _baseEgo;
+        double lengthSquared = axis.LengthSquared();
+        double fraction = lengthSquared > 1e-20 ? Math.Clamp(double3.Dot(center - _baseEgo, axis) / lengthSquared, 0, 1) : 0;
+        double stretch = Math.Sqrt(double3.TransformNormal(double3.UnitX, target).LengthSquared()
+            + double3.TransformNormal(double3.UnitY, target).LengthSquared()
+            + double3.TransformNormal(double3.UnitZ, target).LengthSquared());
+        double separation = (center - (_baseEgo + axis * fraction)).Length() - radius * stretch;
+        return double.IsFinite(separation) ? Math.Max(0, separation) : 0;
     }
     private static CutPoint Point(double3 value) => new(value.X, value.Y, value.Z);
     private static double3 Game(CutPoint value) => new(value.X, value.Y, value.Z);

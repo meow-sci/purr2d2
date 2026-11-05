@@ -15,6 +15,7 @@ internal sealed class ArbitrarySlicer
     internal bool HasRetired => Busy || _retiredUpload;
     internal bool Ready;
     internal string? Error = null;
+    internal string? BeginError;
     internal string Phase => "Preparing";
     internal Purr2D2.Slicing.IsolatedSliceSource? Isolation;
     internal ContactSlice? LastContact;
@@ -46,7 +47,10 @@ internal sealed class ArbitrarySlicer
     internal void Begin(Part part, ContactSlice? contact = null,
         Purr2D2.Slicing.Planes.SlicePlaneRequest? planeRequest = null, SliceGeometryBudget? geometry = null,
         string? diagnosticDetector = null, double diagnosticTime = double.NaN)
-    { Begins++; LastPart = part; LastContact = contact; Ready = false; NeedsCapture = true; EstimateDone = false; }
+    {
+        if (BeginError != null) throw new InvalidOperationException(BeginError);
+        Begins++; LastPart = part; LastContact = contact; Ready = false; NeedsCapture = true; EstimateDone = false;
+    }
     internal void FinishSerialDiagnostic(SliceJobOutcome outcome, double now) { }
     internal void Advance() => Advances++;
     internal void AdvanceEstimate() => EstimateDone = true;

@@ -1,5 +1,28 @@
 # Acceptance record
 
+## Manual vessel contact reliability follow-up (2026-11-04)
+
+Follow-up to `af568ea`, compared against `e24b00b`: click-dragging SWING could still lose rendered crossings between physics steps, cancel unfinished serial queries on release, repeatedly restart discovery/cache copying, or evict a nearby source in favor of distant vessel meshes. A 150 ms query deadline also expired before the unchanged 4,096-triangle budget could reach the last triangle of a cold 40,000-triangle mesh at 30 Hz.
+
+Fresh supported rendered poses are now observed at every joined handoff. Exact confirmed contacts wait for an advancing physics handoff before cut admission, with original gesture, scene, owner, source geometry and transforms revalidated. Ordinary release may finish already-frozen held intervals; return movement cannot generate new ones. Gesture changes clear authorization while retaining discovered sources and immutable cache-copy progress. Candidate admission prefers potentially nearby meshes, without using bounds as hit confirmation. Frozen scans may finish within 350 ms; endpoint sample gaps remain limited to 150 ms. The 128-candidate/frame, 64-discovery-unit, 256-primitive and 4,096-triangle limits and 0.5 ms soft clock remain unchanged.
+
+Host reproductions using the production detector/runtime and real Numerics assembly:
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Rendered out-and-back at 144 Hz, solver at 36 Hz, both detectors | 0/30 contacts | 30/30 |
+| One nearby target among 512 sources, after discovery warmup | 192/800 crossings | 800/800 |
+| Repeated strokes against 608 stock-shaped visual sources, both detectors | 0/20 strokes | 20/20 |
+| Cold 40,000-triangle source with its sole contact last, 30 Hz, both detectors | 0/20 strokes | 20/20 |
+
+The grouped fixture reproduces the 76 visual sources and 35,846 triangles of the local HeightD stock module across eight instances, with most instances moved away. Transforms are baked into copied host geometry. A three-frame first-ever stroke can still end before the nearby source is discovered; the second stroke succeeds with retained discovery. These are bounded-work host checks, not native rendering or physics playtests.
+
+At 128 candidates, the default detector's deliberate-miss p95 changed from 0.162 to 0.167 ms, and stationary p95 from 0.044 to 0.035 ms. The recovered 608-source contact case uses more work: default p95 is 0.333 ms and cached p95 is 0.481 ms, whereas the old implementation tested no contact triangles. The cached case reached 1.60 ms in an individual call; the clock is a soft stop and is not a whole-frame guarantee. In repeated cold 40,000-triangle strokes, retaining the partial copy reduced cached allocations from approximately 115,568 to 251 bytes per call after initial setup, without waiting for a completed BVH. Virtual frame time advances immediately in these experiments, so worker-publication timing and native frame throughput are not established.
+
+Contact sparks alone do not prove a cutting contact: the separate current-segment cosmetic probe runs after release, produces no cut audio/status, and its sparks live for 0.7 s. Slicing Diagnostics now distinguishes cosmetic spark events, confirmed cutting contacts, admitted cuts and declined/invalidated contacts, retaining the latest cut-admission outcome without enabling timing or console logging.
+
+Regression checks cover release/drain cancellation, cadence, bounded pending evidence, stale/replaced/removed source meshes, retained discovery and cache progress, source priority, and dense-query expiry. Focused contact/runtime, cached-ribbon, diagnostic and replay-capture suites pass. Local A/B evidence and source hashes are under `artifacts/checks/contact-reliability-round2/`. Native acceptance remains: compare default and cached modes with short release/regrab strokes, record the new contact counters on a miss, inspect cold discovery and delayed dense-mesh response, and measure game frame times. Centerline-versus-glow thickness, curved trajectories between rendered poses and gimbaled visual transforms remain limitations.
+
 ## Selectable slice detection and queued processing
 
 The passive-cut setting defaults off. Manual SWING and the Slice control remain available; opting into ordinary-movement cuts applies to vessels and ground clutter. Settings provide detector, contact-plane and processing choices, including queued geometry workers and experimental long-blade clutter coverage. Coverage hooks, capsule sweeps and cached ribbon detection have focused host checks, but native game performance and behavior have not been established.
