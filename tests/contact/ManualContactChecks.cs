@@ -9,7 +9,7 @@ internal static class ManualContactChecks
 {
     internal static void Run()
     {
-        Geometry(); Gestures(); PassiveStrokeEpochs(); CachedProbe(); MultiTargetProbe(); FrozenDrain();
+        Geometry(); Gestures(); PassiveStrokeEpochs(); CachedProbe(); MultiTargetProbe(); FrozenDrain(); FirstPassContacts();
         foreach (bool debug in new[] { false, true })
         {
             DebugTimings.Enabled = debug;
@@ -130,6 +130,10 @@ internal static class ManualContactChecks
             int count = probe.AdvanceMany(scene.Owner, after, contacts);
             Check(count == 1 && Math.Abs(contacts[0].HitTime01 - .5) < .01,
                 "cold multi-target scan bisects a twisted ribbon and restores original hit time");
+            probe.Reset();
+            probe.Advance(scene.Owner, before, out _);
+            Check(probe.Advance(scene.Owner, after, out var hit) && Math.Abs(hit.HitTime01 - .5) < .01,
+                "default mesh scan confirms the same nonplanar swing in original interval time");
         }
         finally { probe.DisposeCache(); }
 
@@ -244,6 +248,98 @@ internal static class ManualContactChecks
         }
     }
     private static void PlaceTriangle(double3[] vertices, int triangle, double x) => Array.Copy(TriangleAt(x), 0, vertices, triangle * 3, 3);
+    private static void FirstPassContacts()
+    {
+        var probe = new ManualContactProbe { SoftBudgetMilliseconds = double.PositiveInfinity };
+        var scene = Scene();
+        bool found = false;
+        for (int i = 0; i < 21; i++)
+            found |= probe.Advance(scene.Owner, Pose(-.0095 + i * .001, i / 144d, i * .00055f), out _);
+        Check(found, "slow deliberate 1 mm steps confirm a thin surface on the first pass");
+
+        probe.Reset(); found = false;
+        for (int i = 0; i <= 18; i++)
+        {
+            int step = Math.Min(i, 12);
+            found |= probe.Advance(scene.Owner, Pose(-.003 + step * .0005, i / 60d, step * .0001f), out _);
+            if (i < 10 && found) throw new Exception("surface accepted before the drag threshold");
+        }
+        Check(found, "a crossing just before the drag threshold survives until the gesture is authorized");
+
+        probe.Reset();
+        probe.Advance(scene.Owner, new(1, 0, new(-.1, -.1, 0), new(-.1, .1, 0), default), out _);
+        probe.Advance(scene.Owner, new(1, .01, new(-.1, .25, 0), new(-.1, .45, 0), new(.00055f, 0)), out _);
+        Check(!probe.Advance(scene.Owner, new(1, .02, new(.1, .25, 0), new(.1, .45, 0), new(.0011f, 0)), out _),
+            "accumulated pointer movement cannot invent a diagonal cut across a path around a wall");
+
+        scene = Scene(); probe.Reset();
+        probe.Advance(scene.Owner, Pose(-.01, 0), out _);
+        probe.Advance(scene.Owner, Pose(-.009, .01, .0005f), out _);
+        Check(!probe.Advance(scene.Owner, Pose(.01, .02, .0005f), out _)
+            && !probe.Advance(scene.Owner, Pose(.02, .03, .0016f), out _),
+            "a stationary pointer discards a body-only crossing instead of arming it on later drag");
+        Check(!probe.Advance(scene.Owner, Pose(-.02, .04, float.NaN), out _) && !probe.Pending,
+            "nonfinite drag cannot authorize a moving blade");
+
+        scene = Scene(); probe.Reset();
+        // The last primitive's bounds may be much smaller than the first one's in KSA.
+        scene.Mesh.PositionsCompare = [TriangleAt(2), TriangleAt(0)];
+        scene.Mesh.BoundingSphereRadius = .3;
+        probe.Advance(scene.Owner, Pose(1.9, 0), out _);
+        Check(probe.Advance(scene.Owner, Pose(2.1, .02, .1f), out var hit) && hit.PointLocal.X == 2,
+            "an underestimated multi-primitive radius cannot hide a confirmed triangle");
+
+        // An out-and-back completes before the dense miss finishes. Verify both
+        // a second mesh and a later sweep of the very same mesh.
+        foreach (bool sameMesh in new[] { false, true })
+        {
+            scene = Scene(ManualContactProbe.TriangleBudget * 3);
+            var target = scene.Part;
+            if (!sameMesh)
+            {
+                PlaceTriangle(scene.Mesh.PositionsCompare![0], ManualContactProbe.TriangleBudget * 3, 5);
+                target = new Part { Tree = scene.Vehicle.Parts };
+                target.Modules.Add(new MeshViewModule(new MeshReference
+                    { PositionsCompare = [TriangleAt(0)], BoundingSphereRadius = 1 }));
+                scene.Vehicle.Parts.Parts.Add(target);
+            }
+            probe.Reset(); found = false;
+            double[] path = [-.2, -.1, .1, -.1];
+            for (int i = 0; i < 12; i++)
+            {
+                double x = path[Math.Min(i, path.Length - 1)];
+                if (probe.Advance(scene.Owner, Pose(x, i * .01, (float)x), out hit))
+                    found |= hit.Part == target && hit.PointLocal.X == 0
+                        && hit.PreviousBaseLocal.X < 0 && hit.CurrentBaseLocal.X > 0;
+                if (probe.TestedTriangles > ManualContactProbe.TriangleBudget || probe.FrameReads > ManualContactProbe.FrameBudget)
+                    throw new Exception("following a reversal exceeded the shared work budget");
+            }
+            Check(found, sameMesh ? "a busy mesh retains its own later crossing through a reversal"
+                : "a dense miss on one mesh cannot erase an out-and-back crossing on its neighbor");
+        }
+
+        // With the sole hit late in a cold mesh, allocating 256 of every 4096
+        // triangle units to copying would expire the query one update short.
+        scene = Scene(34999);
+        var model = new Part { Tree = scene.Vehicle.Parts };
+        model.Modules.Add(new PartModelModule { PartModel = new PartModel
+            { Template = new PartModelModule.Template { Mesh = scene.Mesh } } });
+        scene.Vehicle.Parts.Parts.Clear(); scene.Vehicle.Parts.Parts.Add(model);
+        probe.Reset(); var contacts = new List<ManualContactProbe.Contact>(); found = false;
+        try
+        {
+            probe.AdvanceMany(scene.Owner, Pose(-.1, 0), contacts);
+            for (int i = 1; i <= 11; i++)
+            {
+                probe.AdvanceMany(scene.Owner, Pose(.1, i / 59d, .1f), contacts);
+                found |= contacts.Exists(c => c.Part == model);
+                if (probe.TestedTriangles > ManualContactProbe.TriangleBudget)
+                    throw new Exception("cache copy and detection exceeded the shared triangle budget");
+            }
+            Check(found, "cold cache copying gives current contact enough of the same budget to finish before expiry");
+        }
+        finally { probe.DisposeCache(); }
+    }
     private static double LayeredContactX(bool reverse, ManualContactProbe probe, double time)
     {
         var scene = Scene(); var vertices = new double3[6];

@@ -49,6 +49,36 @@ try
             "fixture records non-identifying frame and evidence metadata");
     }
 
+    var twisted = new BladeSweep(new(-1, -1, 0), new(-1, 1, 0), new(1, -1, 0), new(1, 1, 1),
+        BladeSweep.ApproximationMeters / Math.Sqrt(3));
+    var twistedPoints = new[] { new CutPoint(0, -2, -1), new CutPoint(0, 2, -1), new CutPoint(0, 0, 3) };
+    var twistedPath = Path.Combine(root, "twisted.json");
+    var twistedCapture = new SliceReplayFixtureCapture<CutPoint>();
+    Check(twisted.Subdivisions > BladeSweep.MaximumSubdivisions && twistedCapture.Arm(twistedPath)
+        && twistedCapture.Offer([twistedPoints], static p => p, twisted, .5, 0, true, "legacy-ribbon", static () => true),
+        "one-shot capture accepts a confirmed twisted interval supported by bounded splitting");
+    twistedCapture.Advance(primitiveBudget: 2, triangleBudget: 2, millisecondBudget: 1000);
+    Check(SpinWait.SpinUntil(() => twistedCapture.State != SliceReplayFixtureCapture<CutPoint>.CaptureState.Writing, TimeSpan.FromSeconds(5))
+        && twistedCapture.State == SliceReplayFixtureCapture<CutPoint>.CaptureState.Complete,
+        "supported twisted contact produces its replay fixture");
+    using (var document = JsonDocument.Parse(File.ReadAllText(twistedPath)))
+    {
+        var fixture = document.RootElement;
+        var interval = fixture.GetProperty("intervals")[0];
+        Check(fixture.GetProperty("intervals").GetArrayLength() == 1
+            && interval.GetProperty("base0")[0].GetDouble() == -1 && interval.GetProperty("base1")[0].GetDouble() == 1
+            && interval.GetProperty("tip1")[2].GetDouble() == 1
+            && interval.GetProperty("tolerance").GetDouble() == twisted.Tolerance
+            && fixture.GetProperty("hitTime01").GetDouble() == .5 && fixture.GetProperty("alongBlade01").GetDouble() == 0,
+            "twisted capture preserves the original endpoints, tolerance and global hit coordinates");
+    }
+    var unsupported = new SliceReplayFixtureCapture<CutPoint>();
+    Check(unsupported.Arm(Path.Combine(root, "unsupported.json"))
+        && !unsupported.Offer([twistedPoints], static p => p,
+            new(twisted.Base0, twisted.Tip0, twisted.Base1, twisted.Tip1, 1e-20), .5, 0, true, "legacy-ribbon", static () => true)
+        && unsupported.State == SliceReplayFixtureCapture<CutPoint>.CaptureState.Failed,
+        "one-shot capture still refuses motion beyond the shared split bound");
+
     var stale = new SliceReplayFixtureCapture<CutPoint>();
     Check(stale.Arm(Path.Combine(root, "stale.json"))
         && stale.Offer([points], static p => p, sweep, .5, .5, false, "cached-ribbon", () => sourceCurrent),

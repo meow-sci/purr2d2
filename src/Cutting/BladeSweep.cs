@@ -48,6 +48,30 @@ internal readonly record struct BladeSweep(CutPoint Base0, CutPoint Tip0, CutPoi
         return MaximumSubdivisions + 1;
     }
 
+    // Keep large twisted intervals bounded without discarding their motion. Every
+    // consumer uses the same at-most-16 pieces and original interval time mapping.
+    internal bool TrySplit(List<(BladeSweep Sweep, double Start, double End)> intervals)
+    {
+        ArgumentNullException.ThrowIfNull(intervals);
+        intervals.Clear();
+        if (Finite && double.IsFinite(Tolerance) && Tolerance > 0 && Split(this, 0, 1, 0, intervals)) return true;
+        intervals.Clear();
+        return false;
+    }
+
+    private static bool Split(BladeSweep sweep, double start, double end, int depth,
+        List<(BladeSweep Sweep, double Start, double End)> intervals)
+    {
+        if (sweep.Subdivisions <= MaximumSubdivisions)
+        { intervals.Add((sweep, start, end)); return true; }
+        if (depth == 4) return false;
+        var baseMid = (sweep.Base0 + sweep.Base1) * .5;
+        var tipMid = (sweep.Tip0 + sweep.Tip1) * .5;
+        double middle = (start + end) * .5;
+        return Split(new(sweep.Base0, sweep.Tip0, baseMid, tipMid, sweep.Tolerance), start, middle, depth + 1, intervals)
+            && Split(new(baseMid, tipMid, sweep.Base1, sweep.Tip1, sweep.Tolerance), middle, end, depth + 1, intervals);
+    }
+
     // Preserve the original API for callers that only need a confirmed point.
     internal bool TryHit(CutTriangle surface, out CutPoint hit, out double along) => TryHit(surface, out hit, out along, out _);
 
@@ -57,8 +81,10 @@ internal readonly record struct BladeSweep(CutPoint Base0, CutPoint Tip0, CutPoi
     {
         hit = default; along = time = 0;
         int count = Subdivisions;
+        // Most vessel faces miss the ribbon bounds. Reject them before normalizing
+        // the surface cross product; bounds remain a rejection, never a hit.
         if (count > MaximumSubdivisions || !Finite || !surface.A.Finite || !surface.B.Finite || !surface.C.Finite
-            || surface.Normal.LengthSquared < .5 || !BoundsOverlap(Min, Max, surface.Min, surface.Max)) return false;
+            || !BoundsOverlap(Min, Max, surface.Min, surface.Max) || surface.Normal.LengthSquared < .5) return false;
 
         Hit best = default;
         for (int i = 0; i < count; i++)
@@ -98,7 +124,7 @@ internal readonly record struct BladeSweep(CutPoint Base0, CutPoint Tip0, CutPoi
         double timeA, double timeB, double timeC, double alongA, double alongB, double alongC, ref Hit best)
     {
         // Bounds and a one-sided plane test reject most misses before edge intersection work.
-        if (ribbon.Normal.LengthSquared < .5 || !BoundsOverlap(ribbon.Min, ribbon.Max, surface.Min, surface.Max)) return;
+        if (!BoundsOverlap(ribbon.Min, ribbon.Max, surface.Min, surface.Max) || ribbon.Normal.LengthSquared < .5) return;
         var n = surface.Normal;
         double da = CutPoint.Dot(ribbon.A - surface.A, n), db = CutPoint.Dot(ribbon.B - surface.A, n), dc = CutPoint.Dot(ribbon.C - surface.A, n);
         const double epsilon = 1e-8;
@@ -118,9 +144,10 @@ internal readonly record struct BladeSweep(CutPoint Base0, CutPoint Tip0, CutPoi
     // triangle vertices, so the caller's time/along ordering is independent of edge order.
     private static void CollectSegmentHits(CutPoint a, CutPoint b, CutTriangle target, ParamTriangle mapping, ref Hit best)
     {
-        var n = target.Normal;
-        if (!a.Finite || !b.Finite || !target.A.Finite || !target.B.Finite || !target.C.Finite || n.LengthSquared < .5
+        if (!a.Finite || !b.Finite || !target.A.Finite || !target.B.Finite || !target.C.Finite
             || !BoundsOverlap(CutPoint.Min(a, b), CutPoint.Max(a, b), target.Min, target.Max)) return;
+        var n = target.Normal;
+        if (n.LengthSquared < .5) return;
         double da = CutPoint.Dot(a - target.A, n), db = CutPoint.Dot(b - target.A, n);
         const double epsilon = 1e-8;
         if (Math.Abs(da) <= epsilon && Math.Abs(db) <= epsilon)

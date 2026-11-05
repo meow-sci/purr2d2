@@ -55,13 +55,28 @@ Check(Finish(geometry.Begin(targetRelative)).Best is { } axial && Math.Abs(axial
     "target-local axial sweep uses existing degenerate ribbon handling");
 Console.WriteLine("Cached ribbon checks passed.");
 
+var pieces = new List<(BladeSweep Sweep, double Start, double End)>(16);
+Check(sweep.TrySplit(pieces) && pieces.Count == 1 && pieces[0] == (sweep, 0d, 1d),
+    "representable sweep keeps its complete original interval");
+Check(!new BladeSweep(default, new(0, 1, 0), new(1, 0, 0), new(1, 1, 1), 1e-20).TrySplit(pieces)
+    && pieces.Count == 0, "unsupported splitting clears a reused output instead of exposing a partial interval");
+Check(!new BladeSweep(new(double.NaN, 0, 0), default, default, default).TrySplit(pieces)
+    && pieces.Count == 0, "nonfinite motion cannot produce split intervals");
 bool checkedBisect = false;
 foreach (double tolerance in new[] { .0005, .001, .002, .004, .008, .016 })
 {
     var twisted = new BladeSweep(new(-1, -1, 0), new(-1, 1, 0), new(1, -1, 0), new(1, 1, 1), tolerance);
     if (twisted.Subdivisions <= BladeSweep.MaximumSubdivisions) continue;
+    bool split = twisted.TrySplit(pieces);
     var bisected = Finish(geometry.Begin(twisted), 2, 1);
-    if (bisected.Status == CachedRibbonGeometry.QueryStatus.UnsupportedMotion) continue;
+    Check(split == (bisected.Status != CachedRibbonGeometry.QueryStatus.UnsupportedMotion),
+        "shared splitting and cached query agree on supported motion");
+    if (!split) continue;
+    Check(pieces.Count is > 1 and <= 16 && pieces[0].Start == 0 && pieces[^1].End == 1
+        && pieces.All(p => p.Sweep.Subdivisions <= BladeSweep.MaximumSubdivisions)
+        && pieces.Zip(pieces.Skip(1)).All(pair => pair.First.End == pair.Second.Start
+            && pair.First.Sweep.Base1 == pair.Second.Sweep.Base0 && pair.First.Sweep.Tip1 == pair.Second.Sweep.Tip0),
+        "shared split remains bounded, chronological and continuous in original time");
     double referenceTime = double.PositiveInfinity, referenceAlong = double.PositiveInfinity;
     for (int i = 0; i < 16; i++)
     {

@@ -334,7 +334,125 @@ internal sealed partial class SaberRuntime
         QueueSplitVehicleLease();
         QueueReadyValidationPriority();
         QueueProvenanceSurvivesReplacement();
+        FinalRenderedReleaseChecks();
         SwooshRuntimeChecks();
+    }
+
+    // Real frames publish after the handoff; a GLFW release is polled before the
+    // next handoff. Keep these phases separate so tests exercise that final pose.
+    private void RenderHeldContactPose(double x = .1, double time = 1.02)
+    {
+        _playerTime = time;
+        MoveManualSwing(new(24, 0), (long)(time * 1000));
+        ApplyOverlaySwing(.02);
+        PublishManualPose(new(x, -1, 0), new(x, 1, 0));
+    }
+
+    private void ReleaseContactHandoff(double time = 1.03, bool advancing = true, bool fresh = true)
+    {
+        _playerTime = time; _freshPoseThisTick = fresh;
+        ApplyManualContactReset(); ApplyOverlaySwing(.02); UpdateManualContact(advancing);
+    }
+
+    private static SaberRuntime ReleasedScene(bool queued, string detector, int misses = 0)
+    {
+        var r = Scene(misses);
+        r._settings.VesselContactDetector = detector;
+        if (queued) { r._settings.SliceExecutionMode = "queued"; r._clutterQueue = new(); }
+        r.Begin(); r.Tick(-.1, 1);
+        r.RenderHeldContactPose(); r.ReleaseManualSwing();
+        return r;
+    }
+
+    private static void FinalRenderedReleaseChecks()
+    {
+        foreach (bool queued in new[] { false, true })
+        foreach (string detector in new[] { "legacy-ribbon", "cached-ribbon" })
+        {
+            string mode = (queued ? "queued " : "serial ") + detector;
+            bool Started(SaberRuntime r) => queued ? r._vesselQueue is { Count: > 0 } : r._slicer.Begins > 0;
+            var r = ReleasedScene(queued, detector);
+            Check(r._manualReleasedPosePending && !r._manualGesture.Held,
+                mode + " release retains only its unconsumed rendered held pose");
+            r.ReleaseContactHandoff();
+            Check(Started(r) && r._audio.Slices == 1 && r._audio.Emitter == new double3(.1, -1, 0)
+                && !r._manualReleasedPosePending && r._sliceActivation.Kind.ToString() == "ManualContact",
+                mode + " final rendered crossing starts one manual cut after ordinary release");
+            r.ReleaseContactHandoff(1.04);
+            Check(r._audio.Slices == 1, mode + " final rendered event cannot be submitted twice");
+
+            r = Scene();
+            r._settings.VesselContactDetector = detector;
+            if (queued) { r._settings.SliceExecutionMode = "queued"; r._clutterQueue = new(); }
+            r.Begin(); r.Tick(-.1, 1); r.ReleaseManualSwing();
+            r.ReleaseContactHandoff(); r.Tick(.1, 1.04);
+            Check(!Started(r) && !r._manualProbe.Pending,
+                mode + " an already consumed pose and later automatic return cannot create a released cut");
+
+            foreach (var gate in new (string Name, Action<SaberRuntime> Apply)[] {
+                ("cancel", x => x.InvalidateManualContact()),
+                ("hidden controls", x => x._bfl9kUiEnabled = false),
+                ("ineligible pose", x => x._pose.Eligible = false),
+                ("stale body pose", x => x._pose.HasFreshBodyFrame = false),
+                ("clash", x => x._pose.ClashHeld = true),
+                ("Force hold", x => x.ForceHolding = true),
+                ("busy slicer", x => x._slicer.Busy = true),
+                ("cooldown", x => x._manualGesture.FinishAttempt(1.02)),
+                ("changed owner", x => x._owner = new()),
+                ("changed controls", x => Program.ControlledVehicle = new KittenEva()),
+                ("new gesture", x => x.Begin()),
+                ("paused", x => Universe.SimulationSpeed = 0),
+                ("unsupported warp", x => Universe.SimulationSpeed = 6),
+                ("modal", x => Program.ModalOpen = true),
+                ("mouse latch", x => Program.HasMouseInputLatch = true),
+                ("changed source", x => ((Vehicle)Universe.CurrentSystem!.All.Items[1]).Parts.Parts[0].PositionParentAsmb = new(.02, 0, 0)) })
+            {
+                r = ReleasedScene(queued, detector); gate.Apply(r); r.ReleaseContactHandoff();
+                Check(!Started(r) && !r._manualReleasedPosePending,
+                    mode + " " + gate.Name + " refuses the final release event");
+            }
+
+            foreach (var gap in new[] { "no step", "no fresh pose", "expired pose" })
+            {
+                r = ReleasedScene(queued, detector);
+                r.ReleaseContactHandoff(gap == "expired pose" ? 1.2 : 1.03,
+                    advancing: gap != "no step", fresh: gap != "no fresh pose");
+                r.ReleaseContactHandoff(1.21);
+                Check(!Started(r) && !r._manualProbe.Pending && !r._manualReleasedPosePending,
+                    mode + " " + gap + " discards the final event without replaying it later");
+            }
+
+            r = ReleasedScene(queued, detector); r._settings.PassiveContactCutsEnabled = true;
+            // A later passive render cannot replace the held event selected at release.
+            r._playerTime = 1.025; r.PublishManualPose(new(-.3, -1, 0), new(-.3, 1, 0));
+            r.ReleaseContactHandoff();
+            Check(Started(r) && r._audio.Emitter == new double3(.1, -1, 0)
+                && r._sliceActivation.Kind.ToString() == "ManualContact",
+                mode + " passive authorization cannot relabel or overwrite the final manual event");
+
+            r = ReleasedScene(queued, detector, ManualContactProbe.TriangleBudget + 4);
+            r.ReleaseContactHandoff();
+            if (queued)
+            {
+                Check(!Started(r) && r._manualProbe.Pending && r._manualDrainPending,
+                    mode + " final dense query defers under the existing shared work budget");
+                r.ReleaseContactHandoff(1.04, fresh: false);
+                Check(Started(r) && !r._manualProbe.Pending,
+                    mode + " deferred final query drains its frozen held interval exactly once");
+            }
+            else
+            {
+                Check(!Started(r) && !r._manualProbe.Pending,
+                    mode + " final dense query retains serial release cancellation at its work limit");
+                r = Scene(ManualContactProbe.TriangleBudget + 4);
+                r._settings.VesselContactDetector = detector;
+                r.Begin(); r.Tick(-.1, 1); r.Tick(.1, 1.02);
+                Check(r._manualProbe.Pending, mode + " earlier held query is deferred before release");
+                r.RenderHeldContactPose(.3, 1.03); r.ReleaseManualSwing(); r.ReleaseContactHandoff(1.04);
+                Check(!Started(r) && !r._manualProbe.Pending,
+                    mode + " unconsumed final pose cannot revive earlier serial work cancelled by release");
+            }
+        }
     }
 
     private static (Part Part, SliceTarget Target, MeshReference Mesh) QueueTarget(KittenEva actor, Vehicle? vehicle = null)

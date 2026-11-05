@@ -60,8 +60,7 @@ internal sealed class SliceReplayFixtureCapture<T>
         ArgumentNullException.ThrowIfNull(point);
         ArgumentNullException.ThrowIfNull(sourceCurrent);
         if (primitives == null || primitives.Length == 0 || primitives.Length > MaximumPrimitives
-            || !sweep.Finite || !double.IsFinite(sweep.Tolerance) || sweep.Tolerance <= 0
-            || sweep.Subdivisions > BladeSweep.MaximumSubdivisions
+            || !sweep.TrySplit(new(16))
             || !double.IsFinite(hitTime) || hitTime is < 0 or > 1
             || !double.IsFinite(along) || along is < 0 or > 1 || !sourceCurrent())
             return Fail("Replay fixture contact or source evidence is invalid.");

@@ -20,6 +20,14 @@ internal sealed class ManualContactGesture
         Spent = InFlight = true;
         return true;
     }
+    // The runtime may submit only the last unconsumed pose rendered while held.
+    // Releasing the button changes ownership of that event, not its gesture id.
+    internal bool ConsumeReleased(ulong id, double playerTime)
+    {
+        if (Held || Spent || InFlight || id == 0 || id != Id || !double.IsFinite(playerTime) || playerTime < CooldownUntil) return false;
+        Spent = InFlight = true;
+        return true;
+    }
     internal void Finish() => InFlight = false;
     internal void FinishAttempt(double playerTime)
     {

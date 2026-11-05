@@ -91,20 +91,10 @@ internal sealed class CachedRibbonGeometry
         internal Query(CachedRibbonGeometry geometry, BladeSweep sweep)
         {
             _geometry = geometry;
-            if (!sweep.Finite || !double.IsFinite(sweep.Tolerance) || sweep.Tolerance <= 0 || !Split(sweep, 0, 1, 0))
+            if (!sweep.TrySplit(_intervals))
             { _intervals.Clear(); _status = QueryStatus.UnsupportedMotion; }
             else if (geometry._nodes.Length == 0) _status = QueryStatus.Complete;
             else { _status = QueryStatus.Pending; _stack[_stackCount++] = 0; }
-        }
-        private bool Split(BladeSweep s, double start, double end, int depth)
-        {
-            if (s.Subdivisions <= BladeSweep.MaximumSubdivisions)
-            { _intervals.Add((s, start, end)); return true; }
-            if (depth == 4) return false;
-            var bm = (s.Base0 + s.Base1) * .5; var tm = (s.Tip0 + s.Tip1) * .5;
-            double mid = (start + end) * .5;
-            return Split(new(s.Base0, s.Tip0, bm, tm, s.Tolerance), start, mid, depth + 1)
-                && Split(new(bm, tm, s.Base1, s.Tip1, s.Tolerance), mid, end, depth + 1);
         }
         internal Progress Advance(Budget budget)
         {

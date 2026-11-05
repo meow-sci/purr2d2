@@ -41,16 +41,26 @@ try
     for (int i = 0; i < sweeps.Length; i++)
     {
         var sweep = sweeps[i];
-        if (sweep.Subdivisions > BladeSweep.MaximumSubdivisions) Console.WriteLine($"{i},legacy-ribbon,unsupported,,,0,0");
+        var intervals = new List<(BladeSweep Sweep, double Start, double End)>(16);
+        if (!sweep.TrySplit(intervals)) Console.WriteLine($"{i},legacy-ribbon,unsupported,,,0,0");
         else
         {
             double time = double.PositiveInfinity, along = double.PositiveInfinity;
-            foreach (var triangle in triangles)
-                if (sweep.TryHit(triangle, out _, out double a, out double t)
-                    && (t < time - 1e-10 || Math.Abs(t - time) <= 1e-10 && a < along)) { time = t; along = a; }
+            int triangleTests = 0;
+            foreach (var interval in intervals)
+            {
+                if (interval.Start > time + 1e-10) break;
+                foreach (var triangle in triangles)
+                {
+                    triangleTests++;
+                    if (!interval.Sweep.TryHit(triangle, out _, out double a, out double localTime)) continue;
+                    double t = interval.Start + (interval.End - interval.Start) * localTime;
+                    if (t < time - 1e-10 || Math.Abs(t - time) <= 1e-10 && a < along) { time = t; along = a; }
+                }
+            }
             Console.WriteLine(double.IsFinite(time)
-                ? FormattableString.Invariant($"{i},legacy-ribbon,hit,{time:R},{along:R},{triangles.Length},0")
-                : $"{i},legacy-ribbon,miss,,,{triangles.Length},0");
+                ? FormattableString.Invariant($"{i},legacy-ribbon,hit,{time:R},{along:R},{triangleTests},0")
+                : $"{i},legacy-ribbon,miss,,,{triangleTests},0");
         }
         var query = geometry.Begin(sweep);
         CachedRibbonGeometry.Progress result; int nodes = 0, tested = 0, updates = 0;

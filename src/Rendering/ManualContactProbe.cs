@@ -57,6 +57,9 @@ internal sealed class ManualContactProbe
         internal CutPoint Base, Tip;
         internal double4x4 SourceTransform;
         internal bool HasPrevious;
+        internal float2 LastDrag, DragOrigin;
+        internal bool DragArmed;
+        internal Query? Active, BeforeDrag;
     }
     private sealed class Query(Candidate source, BladeSweep sweep, Sample sample, double length, double4x4 sourceTransform, double4x4 partTransform, double3[][] primitives)
     {
@@ -68,6 +71,7 @@ internal sealed class ManualContactProbe
         internal readonly double4x4 PartTransform = partTransform;
         internal readonly double3[][] Primitives = primitives;
         internal int Primitive, Triangle;
+        internal bool Prepared;
         internal bool HasBest;
         internal CutPoint BestPoint, BestNormal;
         internal double BestTime, BestAlong, FirstHitTime;
@@ -79,11 +83,12 @@ internal sealed class ManualContactProbe
         internal object? Scene;
         internal List<(BladeSweep Sweep, double Start, double End)>? ScanIntervals;
         internal int ScanInterval;
+        internal Query? Next;
     }
     private sealed record CaptureWork(Candidate Source, double3[][] Primitives, CachedRibbonStore.Key Key,
         CachedRibbonCapture<double3> Capture);
-    // Experimental single-source path; a caller must explicitly certify immutable
-    // loaded meshes. It is not wired to the public multi-target strategy setting.
+    // Tests may explicitly certify a mesh. The runtime cache uses only immutable
+    // render-module assets, and only when the experimental detector is selected.
     internal Func<MeshReference, bool>? CacheableMesh { get; set; }
     private CachedRibbonStore? _ribbonStore;
     private readonly SliceGeometryRevisionRegistry _ribbonRevisions = new();
@@ -100,12 +105,14 @@ internal sealed class ManualContactProbe
     private ulong _gesture;
     private int _candidate, _replace;
     private int _advanceSerial;
-    private Query? _query;
-    private readonly List<Query> _multiQueries = new(CandidateLimit);
-    private int _multiCursor;
+    private readonly List<Query> _queries = new(CandidateLimit);
+    private readonly List<Contact> _singleHit = new(1);
+    private int _cursor, _deferredCount;
+    private int _framesNotSampled, _intervalsDropped;
     private long _nextOrdinal;
-    private bool _automaticCachePolicy;
+    private bool _automaticCachePolicy, _singleResult;
     private Sample _sample;
+    private double3 _baseEgo, _tipEgo;
     internal double LastUpdateMilliseconds { get; private set; }
     internal double MaximumUpdateMilliseconds { get; private set; }
     internal int PrimitiveReads { get; private set; }
@@ -114,124 +121,203 @@ internal sealed class ManualContactProbe
     internal int FrameReads { get; private set; }
     internal int Saturations { get; private set; }
     internal int ExpiredQueries { get; private set; }
-    internal bool Pending => _query != null || _multiQueries.Count != 0;
+    internal bool Pending => _queries.Count != 0;
     // Tests may disable only the soft clock, retaining every hard work limit.
     internal double SoftBudgetMilliseconds { get; set; } = UpdateMilliseconds;
 
     internal void Reset()
     {
         _discovery?.Dispose(); _discovery = null;
-        _candidates.Clear(); DropQuery(); _capture = null; _owner = null; _system = null; _gesture = 0;
-        foreach (var query in _multiQueries) query.CacheLease?.Dispose();
-        _multiQueries.Clear(); _multiCursor = 0;
+        foreach (var query in _queries) query.CacheLease?.Dispose();
+        _queries.Clear(); _cursor = _deferredCount = 0;
+        _candidates.Clear(); _capture = null; _owner = null; _system = null; _gesture = 0;
         _candidate = _replace = _advanceSerial = 0; _nextOrdinal = 0;
     }
 
     internal bool Advance(KittenEva owner, Sample sample, out Contact contact)
     {
-        // Returning to legacy mode must not silently enable its experimental cache.
         if (_automaticCachePolicy) { CacheableMesh = null; _automaticCachePolicy = false; }
-        long started = SliceDetectionDiagnostics.Start();
-        try
-        {
-            bool found = AdvanceCore(owner, sample, out contact);
-            SliceDetectionDiagnostics.Record(SliceDetectorKind.LegacyRibbon, started, found ? 1 : 0, Pending);
-            return found;
-        }
-        finally
-        {
-            if (started != 0 && DebugTimings.Enabled)
-            {
-                LastUpdateMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-                MaximumUpdateMilliseconds = Math.Max(MaximumUpdateMilliseconds, LastUpdateMilliseconds);
-            }
-        }
+        bool found = AdvanceRibbon(owner, sample, _singleHit, single: true) != 0;
+        contact = found ? _singleHit[0] : default;
+        _singleHit.Clear();
+        return found;
     }
 
-    // Multi-target cached mode. Every cursor is tied to one frozen interval and
-    // all cursors share the same discovery, triangle, node and clock budgets.
-    // Output is caller-owned and contains at most one hit per structural part.
     internal int AdvanceMany(KittenEva owner, Sample sample, List<Contact> output)
     {
-        long started = SliceDetectionDiagnostics.Start();
-        int count = AdvanceManyCore(owner, sample, output);
-        SliceDetectionDiagnostics.Record(SliceDetectorKind.CachedRibbon, started, count, Pending);
-        return count;
+        if (CacheableMesh == null) { CacheableMesh = _ => true; _automaticCachePolicy = true; }
+        return AdvanceRibbon(owner, sample, output, single: false);
     }
 
-    private int AdvanceManyCore(KittenEva owner, Sample sample, List<Contact> output)
+    private int AdvanceRibbon(KittenEva owner, Sample sample, List<Contact> output, bool single)
     {
+        long timing = SliceDetectionDiagnostics.Start();
         output.Clear();
+        _singleResult = single;
         _advanceSerial++; TestedTriangles = DiscoveryUnits = FrameReads = PrimitiveReads = 0;
+        _framesNotSampled = _intervalsDropped = 0;
         if (sample.Gesture == 0 || !double.IsFinite(sample.Time) || !Point(sample.BaseBody).Finite || !Point(sample.TipBody).Finite
+            || !float.IsFinite(sample.Drag.X) || !float.IsFinite(sample.Drag.Y)
             || !double.IsFinite(sample.VisualScale) || sample.VisualScale <= 0
             || !double.IsFinite(sample.NominalLength) || sample.NominalLength < 0 || !PositiveAxes(sample.VisualAxes)
-            || owner.IsDisposed || Program.EditorFlag || Program.GetMainCamera() == null || Universe.CurrentSystem == null)
-        { Reset(); return 0; }
-        if (!ReferenceEquals(_owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem) || _gesture != sample.Gesture)
-        { Reset(); _owner = owner; _system = Universe.CurrentSystem; _gesture = sample.Gesture; }
-        EnsureRevisionScene();
-        _sample = sample;
-        long started = Stopwatch.GetTimestamp();
-        // Render-module template meshes are loaded assets. MeshView sources have
-        // no verified immutability contract and always use the uncached scanner.
-        if (CacheableMesh == null) { CacheableMesh = _ => true; _automaticCachePolicy = true; }
-        _ribbonStore ??= new();
-        _ribbonStore.Drain(); AdvanceCapture(owner, started);
-        _discovery ??= Discover(owner).GetEnumerator();
-        try
+            || owner.IsDisposed || Program.EditorFlag || Program.GetMainCamera() is not { } camera || Universe.CurrentSystem == null)
+        { Reset(); }
+        else
         {
-            while (DiscoveryUnits < DiscoveryBudget && (DiscoveryUnits == 0 || WithinBudget(started, .2)))
+            if (!ReferenceEquals(_owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem) || _gesture != sample.Gesture)
+            { Reset(); _owner = owner; _system = Universe.CurrentSystem; _gesture = sample.Gesture; }
+            EnsureRevisionScene();
+            _sample = sample;
+            long started = Stopwatch.GetTimestamp();
+            var position = camera.GetPositionEgo(owner);
+            var rotation = owner.Body2Ego;
+            _baseEgo = sample.BaseBody.Transform(rotation) + position;
+            _tipEgo = sample.TipBody.Transform(rotation) + position;
+            if (CacheableMesh != null) { _ribbonStore ??= new(); _ribbonStore.Drain(); }
+            _discovery ??= Discover(owner).GetEnumerator();
+            try
             {
-                DiscoveryUnits++;
-                if (_discovery.MoveNext()) continue;
-                _discovery.Dispose(); _discovery = null; break;
+                while (DiscoveryUnits < DiscoveryBudget && (DiscoveryUnits == 0 || WithinBudget(started, .2)))
+                {
+                    DiscoveryUnits++;
+                    if (_discovery.MoveNext()) continue;
+                    _discovery.Dispose(); _discovery = null; break;
+                }
             }
+            catch (InvalidOperationException) { _discovery?.Dispose(); _discovery = null; }
+
+            // Sample before spending the triangle budget. Other meshes keep their
+            // consecutive target-local poses even when a dense scan spans updates.
+            int frames = Math.Min(FrameBudget, _candidates.Count);
+            Vehicle? lastVehicle = null;
+            double4x4 vehicleFrame = default;
+            while (FrameReads < frames && WithinBudget(started, .45))
+            {
+                if (_candidate >= _candidates.Count) _candidate = 0;
+                FrameReads++;
+                ObserveCandidate(_candidates[_candidate++], owner, sample, camera, ref lastVehicle, ref vehicleFrame);
+            }
+            _framesNotSampled = _candidates.Count - FrameReads;
+            ProcessQueries(owner, sample.Time, output, started, single);
+            if (!single) SortMultiContacts(output);
+            // Immutable cache warmup is opportunistic. Give live evidence first use
+            // of both the triangle and the clock budgets, including on cold meshes.
+            if (_capture != null && CacheableMesh != null && TestedTriangles < TriangleBudget && PrimitiveReads < PrimitiveBudget
+                && WithinBudget(started)) AdvanceCapture(owner, started);
+            if (DebugTimings.Enabled && (Pending || !WithinBudget(started) || DiscoveryUnits == DiscoveryBudget
+                || FrameReads < frames)) Saturations++;
         }
-        catch (InvalidOperationException) { _discovery?.Dispose(); _discovery = null; }
-        int sampled = 0;
-        while (_candidates.Count > 0 && sampled < _candidates.Count && FrameReads < FrameBudget && WithinBudget(started, .4))
-        {
-            if (_multiQueries.Count >= CandidateLimit) { Saturations++; break; }
-            if (_candidate >= _candidates.Count) _candidate = 0;
-            var entry = _candidates[_candidate++]; sampled++; FrameReads++;
-            if (HasMultiQuery(entry)) continue;
-            if (!SampleFrame(entry, owner, sample, out var a, out var b)) { entry.HasPrevious = false; continue; }
-            var previous = entry.Previous;
-            var sourceTransform = entry.Part.StructuralPart.MatrixAsmb2VehicleAsmb;
-            var partTransform = entry.Part.MatrixAsmb2VehicleAsmb;
-            double scale = Math.Sqrt(double3.TransformNormal(double3.UnitX, partTransform).LengthSquared()
-                + double3.TransformNormal(double3.UnitY, partTransform).LengthSquared()
-                + double3.TransformNormal(double3.UnitZ, partTransform).LengthSquared());
-            var sweep = new BladeSweep(entry.Base, entry.Tip, a, b, BladeSweep.ApproximationMeters / Math.Max(scale, 1e-12));
-            double baseTravel = WorldDistanceSquared(a - entry.Base, partTransform);
-            double travel = Math.Max(baseTravel, WorldDistanceSquared(b - entry.Tip, partTransform));
-            double length = (sample.TipBody - sample.BaseBody).Length();
-            double endpointLimit = Math.Max(MaximumEndpointTravel, length * 1.5);
-            double hiltLimit = MaximumEndpointTravel * Math.Max(1d, sample.VisualScale);
-            double currentLength = sample.NominalLength > 0 ? sample.NominalLength : length;
-            double previousLength = previous.NominalLength > 0 ? previous.NominalLength : (previous.TipBody - previous.BaseBody).Length();
-            bool motion = entry.HasPrevious && previous.Gesture == sample.Gesture
-                && sample.Time > previous.Time && sample.Time - previous.Time <= MaximumAge
-                && (sample.PassiveContact || (sample.Drag - previous.Drag).LengthSquared() >= .000001f)
-                && travel >= .000004 && baseTravel <= hiltLimit * hiltLimit
-                && travel <= Math.Max(endpointLimit, hiltLimit) * Math.Max(endpointLimit, hiltLimit)
-                && Math.Abs(sample.VisualScale - previous.VisualScale) <= Math.Max(sample.VisualScale, previous.VisualScale) * .0002
-                && StableAxes(sample.VisualAxes, previous.VisualAxes) && Math.Abs(currentLength - previousLength) <= .001
-                && entry.SourceTransform.Equals(sourceTransform);
-            entry.Base = a; entry.Tip = b; entry.Previous = sample; entry.HasPrevious = true; entry.SourceTransform = sourceTransform;
-            if (!motion || !BoundsCouldHit(sweep, entry.Mesh.BoundingSphereRadius) || entry.Mesh.PositionsCompare is not { } primitives) continue;
-            var query = new Query(entry, sweep, sample, length, sourceTransform, partTransform, primitives)
-                { Revision = _ribbonRevisions.Revision(entry.Mesh), RevisionEpoch = _ribbonRevisions.Epoch, Scene = _system };
-            PrepareCachedQuery(query);
-            if (query.Cached == null && sweep.Subdivisions > BladeSweep.MaximumSubdivisions
-                && !PrepareScanIntervals(query))
-            { CacheUnsupported++; query.CacheLease?.Dispose(); continue; }
-            _multiQueries.Add(query);
-        }
-        ProcessMultiQueries(owner, sample.Time, output, started);
-        SortMultiContacts(output);
+        FinishTiming(single ? SliceDetectorKind.LegacyRibbon : SliceDetectorKind.CachedRibbon, timing, output.Count);
         return output.Count;
+    }
+
+    private void ObserveCandidate(Candidate entry, KittenEva owner, Sample sample, Camera camera,
+        ref Vehicle? lastVehicle, ref double4x4 vehicleFrame)
+    {
+        if (entry.Vehicle.IsDisposed || !ReferenceEquals(entry.Vehicle.Parent, owner.Parent)
+            || !ReferenceEquals(entry.Part.StructuralPart.Tree?.OwningVehicle, entry.Vehicle))
+        { entry.HasPrevious = false; return; }
+        // All these meshes share one settled sample. Vehicle orientation and COM
+        // may change on the next handoff, so reuse the matrix only in this call.
+        if (!ReferenceEquals(lastVehicle, entry.Vehicle))
+        { lastVehicle = entry.Vehicle; vehicleFrame = entry.Vehicle.GetMatrixAsmb2Ego(camera); }
+        var target = entry.Part.MatrixAsmb2Ego(in vehicleFrame);
+        if (!double4x4.Invert(target, out var inverse)) { entry.HasPrevious = false; return; }
+        var a = Point(_baseEgo.Transform(inverse)); var b = Point(_tipEgo.Transform(inverse));
+        if (!a.Finite || !b.Finite) { entry.HasPrevious = false; return; }
+        var previous = entry.Previous;
+        var sourceTransform = entry.Part.StructuralPart.MatrixAsmb2VehicleAsmb;
+        var partTransform = entry.Part.MatrixAsmb2VehicleAsmb;
+        double baseTravel = WorldDistanceSquared(a - entry.Base, partTransform);
+        double travel = Math.Max(baseTravel, WorldDistanceSquared(b - entry.Tip, partTransform));
+        double length = (sample.TipBody - sample.BaseBody).Length();
+        double hiltLimit = MaximumEndpointTravel * Math.Max(1d, sample.VisualScale);
+        double endpointLimit = Math.Max(hiltLimit, length * 1.5);
+        double currentLength = sample.NominalLength > 0 ? sample.NominalLength : length;
+        double previousLength = previous.NominalLength > 0 ? previous.NominalLength : (previous.TipBody - previous.BaseBody).Length();
+        bool continuous = entry.HasPrevious && previous.Gesture == sample.Gesture
+            && sample.Time > previous.Time && sample.Time - previous.Time <= MaximumAge
+            && (sample.PassiveContact || sample.Drag != entry.LastDrag)
+            && baseTravel <= hiltLimit * hiltLimit && travel <= endpointLimit * endpointLimit
+            && Math.Abs(sample.VisualScale - previous.VisualScale) <= Math.Max(sample.VisualScale, previous.VisualScale) * .0002
+            && StableAxes(sample.VisualAxes, previous.VisualAxes) && Math.Abs(currentLength - previousLength) <= .001
+            && entry.SourceTransform.Equals(sourceTransform);
+        entry.LastDrag = sample.Drag;
+        while (entry.BeforeDrag is { } old && sample.Time - old.Sample.Time > MaximumAge)
+        { entry.BeforeDrag = old.Next; _deferredCount--; }
+        if (!continuous)
+        {
+            entry.DragOrigin = sample.Drag; entry.DragArmed = false;
+            ResolveDragIntervals(entry, authorize: false);
+        }
+        else if (!entry.DragArmed && (sample.PassiveContact || (sample.Drag - entry.DragOrigin).LengthSquared() >= .000001f))
+        {
+            entry.DragArmed = true;
+            ResolveDragIntervals(entry, authorize: true);
+        }
+        // Accumulate sub-2 mm travel. Keep longer movements as individual frozen
+        // ribbons while waiting for deliberate pointer travel. Joining those
+        // endpoints across a turn could cut through space the blade never entered.
+        if (continuous && travel > 0 && travel < .000004) return;
+        var a0 = entry.Base; var b0 = entry.Tip;
+        entry.Base = a; entry.Tip = b; entry.Previous = sample; entry.HasPrevious = true; entry.SourceTransform = sourceTransform;
+        if (!continuous || travel < .000004) return;
+        if (entry.Mesh.PositionsCompare is not { } primitives
+            || !BoundsCouldHit(a0, b0, a, b, entry.Mesh.BoundingSphereRadius, primitives.Length)) return;
+
+        var active = entry.Active;
+        if (active is { HasBest: true }) return;
+        var waiting = entry.DragArmed ? active?.Next : entry.BeforeDrag;
+        if ((!entry.DragArmed || active != null) && (waiting?.Next != null || _deferredCount >= CandidateLimit))
+        { _intervalsDropped++; return; }
+        double scale = Math.Sqrt(double3.TransformNormal(double3.UnitX, partTransform).LengthSquared()
+            + double3.TransformNormal(double3.UnitY, partTransform).LengthSquared()
+            + double3.TransformNormal(double3.UnitZ, partTransform).LengthSquared());
+        var sweep = new BladeSweep(a0, b0, a, b, BladeSweep.ApproximationMeters / Math.Max(scale, 1e-12));
+        var query = new Query(entry, sweep, sample, length, sourceTransform, partTransform, primitives)
+            { Revision = _ribbonRevisions.Revision(entry.Mesh), RevisionEpoch = _ribbonRevisions.Epoch, Scene = _system };
+        if (!entry.DragArmed)
+        {
+            if (entry.BeforeDrag == null) entry.BeforeDrag = query;
+            else entry.BeforeDrag.Next = query;
+            _deferredCount++;
+        }
+        else QueueInterval(query);
+    }
+
+    private void ResolveDragIntervals(Candidate entry, bool authorize)
+    {
+        var interval = entry.BeforeDrag;
+        entry.BeforeDrag = null;
+        while (interval != null)
+        {
+            var next = interval.Next;
+            interval.Next = null;
+            _deferredCount--;
+            if (authorize) QueueInterval(interval);
+            interval = next;
+        }
+    }
+
+    private void QueueInterval(Query interval)
+    {
+        var source = interval.Source;
+        if (source.Active == null) { source.Active = interval; _queries.Add(interval); return; }
+        // An older scan keeps its cursor. Keep up to two following intervals per
+        // mesh (out and back), with one shared cap for all deferred intervals.
+        if (source.Active.HasBest) return;
+        if (source.Active.Next?.Next != null || _deferredCount >= CandidateLimit)
+        { _intervalsDropped++; return; }
+        (source.Active.Next ?? source.Active).Next = interval;
+        _deferredCount++;
+    }
+
+    private void FinishTiming(SliceDetectorKind kind, long started, int count)
+    {
+        SliceDetectionDiagnostics.Record(kind, started, count, Pending, _framesNotSampled, _intervalsDropped);
+        if (started == 0) return;
+        LastUpdateMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        MaximumUpdateMilliseconds = Math.Max(MaximumUpdateMilliseconds, LastUpdateMilliseconds);
     }
 
     // Drain only already-frozen manual intervals after ordinary release. This
@@ -241,7 +327,7 @@ internal sealed class ManualContactProbe
     {
         long started = SliceDetectionDiagnostics.Start();
         int count = DrainFrozenCore(owner, now, output);
-        SliceDetectionDiagnostics.Record(SliceDetectorKind.ManualDrain, started, count, Pending);
+        FinishTiming(SliceDetectorKind.ManualDrain, started, count);
         return count;
     }
 
@@ -249,34 +335,54 @@ internal sealed class ManualContactProbe
     {
         output.Clear();
         _advanceSerial++; TestedTriangles = DiscoveryUnits = FrameReads = PrimitiveReads = 0;
+        _framesNotSampled = _intervalsDropped = 0;
         if (!double.IsFinite(now) || owner.IsDisposed || Program.EditorFlag
             || !ReferenceEquals(_owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem))
         { Reset(); return 0; }
-        if (_query != null)
-        {
-            if (_query.Sample.PassiveContact) DropQuery();
-            else { _multiQueries.Add(_query); _query = null; }
-        }
-        for (int i = _multiQueries.Count - 1; i >= 0; i--)
-            if (_multiQueries[i].Sample.PassiveContact)
-            { _multiQueries[i].CacheLease?.Dispose(); _multiQueries.RemoveAt(i); }
+        for (int i = _queries.Count - 1; i >= 0; i--)
+            if (_queries[i].Sample.PassiveContact) FinishQuery(i, discardFollowing: true);
         long started = Stopwatch.GetTimestamp();
-        ProcessMultiQueries(owner, now, output, started);
+        ProcessQueries(owner, now, output, started, _singleResult);
         SortMultiContacts(output);
         return output.Count;
     }
 
-    private void ProcessMultiQueries(KittenEva owner, double now, List<Contact> output, long started)
+    private void FinishQuery(int index, bool discardFollowing)
     {
-        int nodeBudget = 4096, attempts = _multiQueries.Count;
-        while (attempts-- > 0 && _multiQueries.Count > 0 && WithinBudget(started))
+        var current = _queries[index];
+        current.CacheLease?.Dispose();
+        var next = current.Next;
+        if (discardFollowing)
+            while (next != null) { _deferredCount--; next = next.Next; }
+        current.Source.Active = next;
+        if (next == null) _queries.RemoveAt(index);
+        else { _deferredCount--; _queries[index] = next; }
+    }
+
+    private void ProcessQueries(KittenEva owner, double now, List<Contact> output, long started, bool single)
+    {
+        int nodeBudget = 4096, attempts = _queries.Count;
+        while (attempts-- > 0 && _queries.Count > 0 && WithinBudget(started)
+            && TestedTriangles < TriangleBudget && PrimitiveReads < PrimitiveBudget)
         {
-            if (_multiCursor >= _multiQueries.Count) _multiCursor = 0;
-            var query = _multiQueries[_multiCursor];
+            if (_cursor >= _queries.Count) _cursor = 0;
+            var query = _queries[_cursor];
             if (!Current(query, owner, now))
-            { query.CacheLease?.Dispose(); _multiQueries.RemoveAt(_multiCursor); ExpiredQueries++; continue; }
+            {
+                FinishQuery(_cursor, discardFollowing: false);
+                if (DebugTimings.Enabled || !single) ExpiredQueries++;
+                continue;
+            }
             if (query.HasBest && query.LastCountedAdvance != _advanceSerial)
             { query.RefinementUpdates++; query.LastCountedAdvance = _advanceSerial; }
+            if (!query.Prepared)
+            {
+                PrepareCachedQuery(query);
+                if (query.Cached == null && query.Sweep.Subdivisions > BladeSweep.MaximumSubdivisions
+                    && !PrepareScanIntervals(query))
+                { if (CacheableMesh != null) CacheUnsupported++; _intervalsDropped++; FinishQuery(_cursor, discardFollowing: false); continue; }
+                query.Prepared = true;
+            }
             bool finished = false, unsupported = false;
             if (query.Cached is { } cached)
             {
@@ -322,9 +428,10 @@ internal sealed class ManualContactProbe
             {
                 if (unsupported) CacheUnsupported++;
                 else if (query.HasBest) AddMultiContact(output, MakeContact(query, finished));
-                query.CacheLease?.Dispose(); _multiQueries.RemoveAt(_multiCursor);
+                FinishQuery(_cursor, discardFollowing: query.HasBest && !unsupported);
+                if (single && output.Count != 0) break;
             }
-            else { CacheIncomplete++; _multiCursor++; }
+            else { if (CacheableMesh != null) CacheIncomplete++; _cursor++; }
         }
     }
 
@@ -341,27 +448,10 @@ internal sealed class ManualContactProbe
         if (!query.HasBest) { query.FirstHitTime = now; query.LastCountedAdvance = _advanceSerial; }
         query.HasBest = true; query.BestPoint = point; query.BestNormal = normal; query.BestTime = time; query.BestAlong = along;
     }
-    private bool HasMultiQuery(Candidate candidate)
-    {
-        foreach (var query in _multiQueries) if (ReferenceEquals(query.Source, candidate)) return true;
-        return false;
-    }
     private static bool PrepareScanIntervals(Query query)
     {
         var intervals = new List<(BladeSweep Sweep, double Start, double End)>(16);
-        bool Split(BladeSweep sweep, double start, double end, int depth)
-        {
-            if (sweep.Subdivisions <= BladeSweep.MaximumSubdivisions)
-            { intervals.Add((sweep, start, end)); return true; }
-            if (depth == 4) return false;
-            var baseMid = (sweep.Base0 + sweep.Base1) * .5;
-            var tipMid = (sweep.Tip0 + sweep.Tip1) * .5;
-            double middle = (start + end) * .5;
-            return Split(new(sweep.Base0, sweep.Tip0, baseMid, tipMid, sweep.Tolerance), start, middle, depth + 1)
-                && Split(new(baseMid, tipMid, sweep.Base1, sweep.Tip1, sweep.Tolerance), middle, end, depth + 1);
-        }
-        if (!query.Sweep.Finite || !double.IsFinite(query.Sweep.Tolerance) || query.Sweep.Tolerance <= 0
-            || !Split(query.Sweep, 0, 1, 0)) return false;
+        if (!query.Sweep.TrySplit(intervals)) return false;
         query.ScanIntervals = intervals; return true;
     }
     private static void AddMultiContact(List<Contact> output, Contact candidate)
@@ -377,161 +467,6 @@ internal sealed class ManualContactProbe
         }
         if (output.Count < CandidateLimit) output.Add(candidate);
     }
-    private bool AdvanceCore(KittenEva owner, Sample sample, out Contact contact)
-    {
-        _advanceSerial++;
-        contact = default; TestedTriangles = DiscoveryUnits = FrameReads = PrimitiveReads = 0;
-        if (sample.Gesture == 0 || !double.IsFinite(sample.Time) || !Point(sample.BaseBody).Finite || !Point(sample.TipBody).Finite
-            || !double.IsFinite(sample.VisualScale) || sample.VisualScale <= 0
-            || !double.IsFinite(sample.NominalLength) || sample.NominalLength < 0
-            || !PositiveAxes(sample.VisualAxes)
-            || owner.IsDisposed || Program.EditorFlag || Program.GetMainCamera() == null || Universe.CurrentSystem == null)
-        { Reset(); return false; }
-        if (!ReferenceEquals(_owner, owner) || !ReferenceEquals(_system, Universe.CurrentSystem) || _gesture != sample.Gesture)
-        { Reset(); _owner = owner; _system = Universe.CurrentSystem; _gesture = sample.Gesture; }
-        EnsureRevisionScene();
-        _sample = sample;
-        long started = Stopwatch.GetTimestamp();
-        if (CacheableMesh != null)
-        {
-            _ribbonStore ??= new();
-            _ribbonStore.Drain();
-            AdvanceCapture(owner, started);
-        }
-        int nodeBudget = 4096;
-        // Discovery yields after every scene item, part and module; it never copies a
-        // fleet, builds a BVH or enumerates all meshes before checking the budget.
-        if (_query == null)
-        {
-            _discovery ??= Discover(owner).GetEnumerator();
-            try
-            {
-                while (DiscoveryUnits < DiscoveryBudget && (DiscoveryUnits == 0 || WithinBudget(started, .25)))
-                {
-                    DiscoveryUnits++;
-                    if (_discovery.MoveNext()) continue;
-                    _discovery.Dispose(); _discovery = null; break;
-                }
-            }
-            catch (InvalidOperationException) { _discovery?.Dispose(); _discovery = null; } // Native collection changed: restart bounded discovery.
-        }
-        if (_query != null && _query.HasBest && _query.LastCountedAdvance != _advanceSerial)
-        {
-            _query.RefinementUpdates++;
-            _query.LastCountedAdvance = _advanceSerial;
-        }
-        if (_query != null && !Current(_query, owner, sample.Time)) { DropQuery(); if (DebugTimings.Enabled) ExpiredQueries++; }
-        while (WithinBudget(started))
-        {
-            if (_query != null)
-            {
-                var query = _query;
-                if (query.Cached is { } cached)
-                {
-                    var progress = cached.Advance(new(nodeBudget, TriangleBudget - TestedTriangles, () => WithinBudget(started)));
-                    nodeBudget -= progress.NodesVisited; TestedTriangles += progress.TrianglesTested;
-                    if (progress.Best is { } best && Better(query, best.Point, best.Normal, best.Time, best.Along))
-                    {
-                        if (!query.HasBest) { query.FirstHitTime = sample.Time; query.LastCountedAdvance = _advanceSerial; }
-                        query.HasBest = true; query.BestPoint = best.Point; query.BestNormal = best.Normal;
-                        query.BestTime = best.Time; query.BestAlong = best.Along;
-                    }
-                    if (progress.Status == CachedRibbonGeometry.QueryStatus.UnsupportedMotion)
-                    { CacheUnsupported++; DropQuery(); continue; }
-                    if (progress.Status == CachedRibbonGeometry.QueryStatus.Pending)
-                    { CacheIncomplete++; return TryFallback(query, sample.Time, out contact); }
-                    if (query.HasBest) { contact = MakeContact(query, true); DropQuery(); return true; }
-                    DropQuery(); continue;
-                }
-                while (query.Primitive < query.Primitives.Length)
-                {
-                    if (query.Triangle == 0)
-                    {
-                        if (PrimitiveReads >= PrimitiveBudget)
-                        { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
-                        PrimitiveReads++;
-                    }
-                    var vertices = query.Primitives[query.Primitive];
-                    if (vertices == null || query.Triangle + 2 >= vertices.Length)
-                    {
-                        query.Primitive++; query.Triangle = 0;
-                        if (!WithinBudget(started))
-                        { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
-                        continue;
-                    }
-                    if (TestedTriangles >= TriangleBudget)
-                    { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
-                    int index = query.Triangle; query.Triangle += 3; TestedTriangles++;
-                    var triangle = new CutTriangle(Point(vertices[index]), Point(vertices[index + 1]), Point(vertices[index + 2]));
-                    if (query.Sweep.TryHit(triangle, out var hit, out double along, out double time) && Better(query, hit, triangle.Normal, time, along))
-                    {
-                        if (!query.HasBest)
-                        {
-                            query.FirstHitTime = sample.Time;
-                            query.LastCountedAdvance = _advanceSerial;
-                        }
-                        query.HasBest = true; query.BestPoint = hit; query.BestNormal = triangle.Normal;
-                        query.BestTime = time; query.BestAlong = along;
-                    }
-                    // Advance past a primitive after its final complete triangle. This
-                    // lets an exactly-full triangle budget finish without another read.
-                    if (query.Triangle + 2 >= vertices.Length) { query.Primitive++; query.Triangle = 0; }
-                    if (query.Primitive >= query.Primitives.Length) break;
-                    if (!WithinBudget(started))
-                    { if (DebugTimings.Enabled) Saturations++; return TryFallback(query, sample.Time, out contact); }
-                }
-                if (query.HasBest)
-                {
-                    contact = MakeContact(query, true);
-                    DropQuery(); return true;
-                }
-                DropQuery();
-            }
-            if (_candidates.Count == 0 || FrameReads >= Math.Min(FrameBudget, _candidates.Count)) break;
-            if (_candidate >= _candidates.Count) _candidate = 0;
-            var entry = _candidates[_candidate++]; FrameReads++;
-            if (!SampleFrame(entry, owner, sample, out var a, out var b)) { entry.HasPrevious = false; continue; }
-            var previous = entry.Previous;
-            var sourceTransform = entry.Part.StructuralPart.MatrixAsmb2VehicleAsmb;
-            var partTransform = entry.Part.MatrixAsmb2VehicleAsmb;
-            // Frobenius norm bounds the full linear transform, including shear from
-            // rotated children of nonuniformly scaled parents.
-            double scale = Math.Sqrt(double3.TransformNormal(double3.UnitX, partTransform).LengthSquared()
-                + double3.TransformNormal(double3.UnitY, partTransform).LengthSquared()
-                + double3.TransformNormal(double3.UnitZ, partTransform).LengthSquared());
-            var sweep = new BladeSweep(entry.Base, entry.Tip, a, b, BladeSweep.ApproximationMeters / Math.Max(scale, 1e-12));
-            double baseTravel = WorldDistanceSquared(a - entry.Base, partTransform);
-            double travel = Math.Max(baseTravel, WorldDistanceSquared(b - entry.Tip, partTransform));
-            double length = (sample.TipBody - sample.BaseBody).Length();
-            double endpointLimit = Math.Max(MaximumEndpointTravel, length * 1.5);
-            double hiltLimit = MaximumEndpointTravel * Math.Max(1d, sample.VisualScale);
-            double currentLength = sample.NominalLength > 0 ? sample.NominalLength : length;
-            double previousLength = previous.NominalLength > 0 ? previous.NominalLength
-                : (previous.TipBody - previous.BaseBody).Length();
-            bool motion = entry.HasPrevious && previous.Gesture == sample.Gesture
-                && sample.Time > previous.Time && sample.Time - previous.Time <= MaximumAge
-                && (sample.PassiveContact || (sample.Drag - previous.Drag).LengthSquared() >= .000001f)
-                && travel >= .000004
-                && baseTravel <= hiltLimit * hiltLimit && travel <= Math.Max(endpointLimit, hiltLimit) * Math.Max(endpointLimit, hiltLimit)
-                && Math.Abs(sample.VisualScale - previous.VisualScale) <= Math.Max(sample.VisualScale, previous.VisualScale) * .0002
-                && StableAxes(sample.VisualAxes, previous.VisualAxes)
-                && Math.Abs(currentLength - previousLength) <= .001
-                && entry.SourceTransform.Equals(sourceTransform) && sweep.Subdivisions <= BladeSweep.MaximumSubdivisions;
-            entry.Base = a; entry.Tip = b; entry.Previous = sample; entry.HasPrevious = true; entry.SourceTransform = sourceTransform;
-            if (motion && BoundsCouldHit(sweep, entry.Mesh.BoundingSphereRadius) && entry.Mesh.PositionsCompare is { } primitives)
-            {
-                _query = new(entry, sweep, sample, length, sourceTransform, partTransform, primitives)
-                    { Revision = _ribbonRevisions.Revision(entry.Mesh), RevisionEpoch = _ribbonRevisions.Epoch, Scene = _system };
-                PrepareCachedQuery(_query);
-            }
-        }
-        if (_query != null && TryFallback(_query, sample.Time, out contact))
-        { if (DebugTimings.Enabled) Saturations++; return true; }
-        if (DebugTimings.Enabled && (!WithinBudget(started) || _query != null
-            || DiscoveryUnits == DiscoveryBudget || FrameReads == FrameBudget)) Saturations++;
-        return false;
-    }
-
     private static bool Better(Query query, CutPoint point, CutPoint normal, double time, double along)
     {
         const double epsilon = 1e-10;
@@ -541,21 +476,6 @@ internal sealed class ManualContactProbe
         if (Math.Abs(along - query.BestAlong) > epsilon) return false;
         int pointOrder = Compare(point, query.BestPoint);
         return pointOrder < 0 || pointOrder == 0 && Compare(normal, query.BestNormal) < 0;
-    }
-
-    // Full scans publish the exact mesh minimum. Dense meshes may exceed the existing
-    // per-update work limit; after two refinement updates, 50 ms, or entry into the
-    // final 50 ms of the age window, publish the best confirmed triangle while current.
-    private bool TryFallback(Query query, double now, out Contact contact)
-    {
-        contact = default;
-        double age = now - query.Sample.Time;
-        bool refinementLimit = query.RefinementUpdates >= RefinementUpdates || now - query.FirstHitTime >= RefinementSeconds;
-        bool finalAgeWindow = age >= MaximumAge - RefinementSeconds;
-        if (!query.HasBest || age < 0 || age > MaximumAge || !refinementLimit && !finalAgeWindow) return false;
-        contact = MakeContact(query);
-        DropQuery();
-        return true;
     }
 
     private static Contact MakeContact(Query query, bool fullMeshScan = false)
@@ -591,7 +511,6 @@ internal sealed class ManualContactProbe
     }
 
     private static CutPoint Lerp(CutPoint a, CutPoint b, double t) => a + (b - a) * t;
-    private void DropQuery() { _query?.CacheLease?.Dispose(); _query = null; }
 
     // Settled handoff only. An in-place geometry producer must call this hook;
     // array replacement is also detected by the per-query identity check.
@@ -600,10 +519,12 @@ internal sealed class ManualContactProbe
         _ribbonRevisions.Invalidate(mesh);
         _ribbonStore?.Invalidate(key => ReferenceEquals(key.Mesh, mesh));
         if (_capture != null && ReferenceEquals(_capture.Source.Mesh, mesh)) _capture = null;
-        if (_query != null && ReferenceEquals(_query.Source.Mesh, mesh)) DropQuery();
-        for (int i = _multiQueries.Count - 1; i >= 0; i--)
-            if (ReferenceEquals(_multiQueries[i].Source.Mesh, mesh))
-            { _multiQueries[i].CacheLease?.Dispose(); _multiQueries.RemoveAt(i); }
+        foreach (var entry in _candidates)
+            if (entry.BeforeDrag != null && ReferenceEquals(entry.Mesh, mesh))
+                ResolveDragIntervals(entry, authorize: false);
+        for (int i = _queries.Count - 1; i >= 0; i--)
+            if (ReferenceEquals(_queries[i].Source.Mesh, mesh))
+                FinishQuery(i, discardFollowing: true);
     }
 
     // Validates the exact observed mesh data after admission; callers still
@@ -681,33 +602,20 @@ internal sealed class ManualContactProbe
         && _ribbonRevisions.Epoch == query.RevisionEpoch
         && _ribbonRevisions.Revision(query.Source.Mesh) == query.Revision;
     private static double WorldDistanceSquared(CutPoint delta, double4x4 transform) => double3.TransformNormal(Game(delta), transform).LengthSquared();
-    private static bool BoundsCouldHit(BladeSweep sweep, double radius)
+    private static bool BoundsCouldHit(CutPoint a0, CutPoint b0, CutPoint a1, CutPoint b1, double radius, int primitives)
     {
-        if (!double.IsFinite(radius) || radius <= 0) return false;
+        if (primitives == 0) return false;
+        // KSA's AddPositionExtremes overwrites each primitive's extrema with the
+        // last primitive's. Its mesh radius is conservative only for a single primitive.
+        if (primitives > 1 || !double.IsFinite(radius) || radius <= 0) return true;
+        radius += 1e-8; // Match the inclusiveness of BladeSweep's triangle bounds.
         // A bilinear ribbon lies inside its endpoint AABB. This is a reject only.
-        return Math.Min(Math.Min(sweep.Base0.X, sweep.Tip0.X), Math.Min(sweep.Base1.X, sweep.Tip1.X)) <= radius
-            && Math.Max(Math.Max(sweep.Base0.X, sweep.Tip0.X), Math.Max(sweep.Base1.X, sweep.Tip1.X)) >= -radius
-            && Math.Min(Math.Min(sweep.Base0.Y, sweep.Tip0.Y), Math.Min(sweep.Base1.Y, sweep.Tip1.Y)) <= radius
-            && Math.Max(Math.Max(sweep.Base0.Y, sweep.Tip0.Y), Math.Max(sweep.Base1.Y, sweep.Tip1.Y)) >= -radius
-            && Math.Min(Math.Min(sweep.Base0.Z, sweep.Tip0.Z), Math.Min(sweep.Base1.Z, sweep.Tip1.Z)) <= radius
-            && Math.Max(Math.Max(sweep.Base0.Z, sweep.Tip0.Z), Math.Max(sweep.Base1.Z, sweep.Tip1.Z)) >= -radius;
-    }
-    private static bool SampleFrame(Candidate entry, KittenEva owner, Sample sample, out CutPoint a, out CutPoint b)
-    {
-        a = b = default;
-        if (entry.Vehicle.IsDisposed || !ReferenceEquals(entry.Vehicle.Parent, owner.Parent)
-            || !ReferenceEquals(entry.Part.StructuralPart.Tree?.OwningVehicle, entry.Vehicle)
-            || Program.GetMainCamera() is not { } camera) return false;
-        var vehicle = entry.Vehicle.GetMatrixAsmb2Ego(camera);
-        var target = entry.Part.MatrixAsmb2Ego(in vehicle);
-        if (!double4x4.Invert(target, out var inverse)) return false;
-        // Both transformations use this exact settled sample. Previous endpoints were
-        // transformed using the previous target/owner transforms, including scale.
-        var position = camera.GetPositionEgo(owner);
-        var rotation = double4x4.CreateFromQuaternion(owner.Body2Ego);
-        a = Point((sample.BaseBody.Transform(rotation) + position).Transform(inverse));
-        b = Point((sample.TipBody.Transform(rotation) + position).Transform(inverse));
-        return a.Finite && b.Finite;
+        return Math.Min(Math.Min(a0.X, b0.X), Math.Min(a1.X, b1.X)) <= radius
+            && Math.Max(Math.Max(a0.X, b0.X), Math.Max(a1.X, b1.X)) >= -radius
+            && Math.Min(Math.Min(a0.Y, b0.Y), Math.Min(a1.Y, b1.Y)) <= radius
+            && Math.Max(Math.Max(a0.Y, b0.Y), Math.Max(a1.Y, b1.Y)) >= -radius
+            && Math.Min(Math.Min(a0.Z, b0.Z), Math.Min(a1.Z, b1.Z)) <= radius
+            && Math.Max(Math.Max(a0.Z, b0.Z), Math.Max(a1.Z, b1.Z)) >= -radius;
     }
     private IEnumerable<int> Discover(KittenEva owner)
     {
@@ -718,8 +626,7 @@ internal sealed class ManualContactProbe
             if (item is not Vehicle vehicle || vehicle is KittenEva || vehicle.IsDisposed || vehicle.IsEditedVehicle
                 || !ReferenceEquals(vehicle.Parent, owner.Parent) || Program.GetMainCamera() is not { } camera) continue;
             double reach = (_sample.TipBody - _sample.BaseBody).Length();
-            var baseEgo = _sample.BaseBody.Transform(owner.Body2Ego) + camera.GetPositionEgo(owner);
-            if ((camera.GetPositionEgo(vehicle) - baseEgo).Length() > vehicle.BoundingSphereRadiusBody + reach
+            if ((camera.GetPositionEgo(vehicle) - _baseEgo).Length() > vehicle.BoundingSphereRadiusBody + reach
                 + MaximumEndpointTravel * Math.Max(1d, _sample.VisualScale)) continue;
             for (int p = 0; !vehicle.IsDisposed && p < vehicle.Parts.Parts.Length; p++)
             {
@@ -765,7 +672,8 @@ internal sealed class ManualContactProbe
             {
                 int slot = _replace; _replace = (_replace + 1) % CandidateLimit;
                 var old = _candidates[slot];
-                if (ReferenceEquals(_query?.Source, old) || HasMultiQuery(old)) continue;
+                if (old.Active != null) continue;
+                ResolveDragIntervals(old, authorize: false);
                 _candidates[slot] = entry; placed = true; break;
             }
             if (DebugTimings.Enabled) Saturations++;

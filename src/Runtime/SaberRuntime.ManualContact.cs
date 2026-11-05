@@ -28,6 +28,10 @@ internal sealed partial class SaberRuntime
     private double _passiveStrokePoseTime;
     private double3 _passiveStrokeBase, _passiveStrokeTip;
     private ManualContactProbe.Sample _manualPose;
+    private ManualContactProbe.Sample _manualReleasedPose;
+    private KittenEva? _manualReleaseOwner;
+    private object? _manualReleasePoseOwner;
+    private bool _manualPoseConsumed, _manualReleasedPosePending;
     private bool _manualPoseAvailable, _manualResetPending, _manualCancelPending, _manualSliceActive, _manualIsolated;
     private bool SliceWorkActive => _sliceSequence.Active || _manualSliceActive || ClutterSliceWorkActive || _vesselQueue is { Active: true };
 
@@ -36,10 +40,24 @@ internal sealed partial class SaberRuntime
         BeginManualSwingSwoosh(pointer, swooshThresholdPixels);
         _manualGesture.Begin();
         _manualReleasePending = _manualDrainPending = false;
+        ClearReleasedManualPose();
         ClearManualPose(); _manualResetPending = true;
     }
     private void ReleaseManualSwing()
     {
+        bool queued = _clutterQueue != null && _settings.SliceExecutionMode == "queued";
+        // GLFW release arrives before the settled handoff can consume the last
+        // rendered held pose. Keep that one event, never an automatic return pose.
+        if (_overlayDrag.Held && _manualGesture.Held && _manualPoseAvailable && !_manualPoseConsumed
+            && _manualPose.Gesture == _manualGesture.Id && !_manualSliceActive && !_slicer.Busy
+            && _manualGesture.CanDetectAt(_playerTime) && (queued || !_manualProbe.Pending)
+            && _sliceActivation.Kind == SliceContactAuthorization.ManualContact
+            && ReferenceEquals(_overlayDragOwner, _owner) && ReferenceEquals(_overlayDragPose, _pose))
+        {
+            _manualReleasedPose = _manualPose;
+            _manualReleasedPosePending = true;
+            _manualReleaseOwner = _owner; _manualReleasePoseOwner = _pose;
+        }
         _manualSwingSwoosh.Release();
         _overlayDrag.Release(); _manualGesture.Release();
         _manualDrainEmitter = _manualPose.BaseBody;
@@ -52,6 +70,12 @@ internal sealed partial class SaberRuntime
         _manualPoseAvailable = false;
     }
 
+    private void ClearReleasedManualPose()
+    {
+        _manualReleasedPosePending = false; _manualReleasedPose = default;
+        _manualReleaseOwner = null; _manualReleasePoseOwner = null;
+    }
+
     // Shared with the assisted-slice coordinator so terminal manual outcomes use
     // the same timestamp gate in production and the focused runtime harness.
     private void FinishManualContactAttempt(bool attempted)
@@ -60,6 +84,7 @@ internal sealed partial class SaberRuntime
         else _manualGesture.Finish();
         _manualProbe.Reset();
         ClearManualPose();
+        ClearReleasedManualPose();
         _manualReleasePending = _manualDrainPending = false;
     }
 
@@ -72,9 +97,12 @@ internal sealed partial class SaberRuntime
         _manualPoseAvailable = (_overlayDrag.Held && (queued ? _manualGesture.Held : _manualGesture.CanDetectAt(_playerTime)))
             || (!_overlayDrag.Held && _settings.PassiveContactCutsEnabled && _playerTime >= _manualGesture.CooldownUntil);
         if (_manualPoseAvailable)
+        {
             _manualPose = new(_manualGesture.Id, _playerTime, emitter, tip, _overlayDrag.Offset)
                 { VisualScale = visualScale, NominalLength = nominalLength,
                     VisualAxes = visualAxes == default ? float3.One : visualAxes };
+            _manualPoseConsumed = false;
+        }
         else ClearManualPose();
     }
 
@@ -82,6 +110,7 @@ internal sealed partial class SaberRuntime
     private void InvalidateManualContact()
     {
         ClearManualPose();
+        ClearReleasedManualPose();
         _manualReleasePending = _manualDrainPending = false;
         _manualResetPending = true;
         _manualCancelPending |= _manualSliceActive;
@@ -94,7 +123,7 @@ internal sealed partial class SaberRuntime
             _manualReleasePending = false;
             _manualDrainPending = _clutterQueue != null && _settings.SliceExecutionMode == "queued"
                 && _sliceActivation.Kind == SliceContactAuthorization.ManualContact && _manualProbe.Pending;
-            if (!_manualDrainPending) _manualResetPending = true;
+            if (!_manualDrainPending && !_manualReleasedPosePending) _manualResetPending = true;
         }
         if (_manualResetPending) { _manualProbe.Reset(); _manualResetPending = false; }
         if (!_manualCancelPending) return;
@@ -106,7 +135,7 @@ internal sealed partial class SaberRuntime
     {
         // The UI request is consumed by the clutter coordinator later in this
         // handoff, but vessel jobs must stop before their own transaction step.
-        if (_cancelQueuedClutterRequested) { _vesselQueue?.Cancel(); _manualDrainPending = false; _manualProbe.Reset(); }
+        if (_cancelQueuedClutterRequested) { _vesselQueue?.Cancel(); _manualDrainPending = false; ClearReleasedManualPose(); _manualProbe.Reset(); }
         bool queueConfigured = _clutterQueue != null && _settings.SliceExecutionMode == "queued"
             && _clutterQueueWorkers == _settings.SliceWorkerCount && _clutterQueueLimit == _settings.SlicePendingTargetLimit
             && _clutterQueueMemory == _settings.SliceWorkingMemoryMiB;
@@ -137,9 +166,22 @@ internal sealed partial class SaberRuntime
             && ReferenceEquals(_overlayDragOwner, _owner) && ReferenceEquals(_overlayDragPose, _pose);
         bool detectionEligible = eligible && !_pose.ClashHeld && !_selectingSlice && !_sliceSequence.Active
             && (!_overlayDrag.Held || manualHeld);
+        var releasedPose = _manualReleasedPose;
+        bool finalManualPose = _manualReleasedPosePending && simulationAdvancing && _freshPoseThisTick
+            && SaberLimits.SupportsSpeed(Universe.GetSimulationSpeed()) && _pose.HasFreshBodyFrame
+            && detectionEligible && BFL9KUiVisible && !Program.IsModalOpen() && !Program.HasMouseInputLatch
+            && ReferenceEquals(_owner, Program.ControlledVehicle) && !_manualSliceActive && !_slicer.Busy
+            && !_manualGesture.Held && !_manualGesture.Spent && !_manualGesture.InFlight
+            && releasedPose.Gesture == _manualGesture.Id && releasedPose.Time >= _manualGesture.CooldownUntil
+            && _playerTime >= releasedPose.Time && _playerTime - releasedPose.Time <= ManualContactProbe.MaximumAge
+            && ReferenceEquals(_manualReleaseOwner, _owner) && ReferenceEquals(_manualReleasePoseOwner, _pose)
+            && _sliceActivation.Kind == SliceContactAuthorization.ManualContact;
+        // Only this first settled handoff may transform a released render pose.
+        // Waiting for a later advancing frame would use retrospective target poses.
+        ClearReleasedManualPose();
         // A held SWING takes precedence even when it has not moved; passive movement
         // must never turn a stationary press into a cut.
-        if (_sliceActivation.Update(manualHeld, _manualGesture.Id, _settings.PassiveContactCutsEnabled, detectionEligible))
+        if (_sliceActivation.Update(manualHeld || finalManualPose, _manualGesture.Id, _settings.PassiveContactCutsEnabled, detectionEligible))
         { if (!_manualDrainPending) _manualProbe.Reset(); _passiveStrokeHasPose = false; _vesselProvenance.Observe(_sliceActivation.Epoch); }
         if (_sliceActivation.Kind == SliceContactAuthorization.PassiveContact && simulationAdvancing && _freshPoseThisTick
             && _owner != null && _pose.TryGetBladeSegment(Length, out var passiveBase, out var passiveTip)
@@ -179,7 +221,7 @@ internal sealed partial class SaberRuntime
         bool draining = _manualDrainPending && !manual;
         if (draining)
         {
-            if (!queueConfigured || !detectionEligible || _owner == null)
+            if (!queueConfigured || !detectionEligible || !BFL9KUiVisible || _owner == null)
             { _manualDrainPending = false; _manualProbe.Reset(); return; }
             _manualProbe.DrainFrozen(_owner, _playerTime, _vesselHits);
             if (!_manualProbe.Pending) { _manualDrainPending = false; _manualProbe.Reset(); }
@@ -187,28 +229,38 @@ internal sealed partial class SaberRuntime
         }
         else
         {
+        var contactPose = finalManualPose ? releasedPose : _manualPose;
         if (!detectionEligible || (!queueConfigured && (ClutterSliceWorkActive || _vesselQueue is { Active: true })) || (!manual && !passive)
-            || (manual && !(queueConfigured ? _manualGesture.Held : _manualGesture.CanDetectAt(_playerTime))) || !_manualPoseAvailable
-            || _playerTime < _manualPose.Time
-            || _manualPose.Time < _manualGesture.CooldownUntil
-            || _playerTime - _manualPose.Time > ManualContactProbe.MaximumAge
+            || (!finalManualPose && manual && !(queueConfigured ? _manualGesture.Held : _manualGesture.CanDetectAt(_playerTime)))
+            || (!finalManualPose && !_manualPoseAvailable)
+            || _playerTime < contactPose.Time
+            || contactPose.Time < _manualGesture.CooldownUntil
+            || _playerTime - contactPose.Time > ManualContactProbe.MaximumAge
             || _selectingSlice || _sliceSequence.Active || _slicer.Busy)
         { _manualProbe.Reset(); return; }
         // Render and solver cadence need not agree. Ordinary intervening handoffs
         // preserve the frozen query/cursor; age and lifecycle checks above bound it.
         if (!simulationAdvancing || !_freshPoseThisTick) return;
-        var sample = _manualPose with { Gesture = _sliceActivation.Epoch, PassiveContact = passive };
+        var sample = contactPose with { Gesture = _sliceActivation.Epoch, PassiveContact = passive };
+        if (!finalManualPose) _manualPoseConsumed = true;
         _vesselHits.Clear();
         if (vesselDetector == "cached-ribbon") _manualProbe.AdvanceMany(_owner!, sample, _vesselHits);
         else if (_manualProbe.Advance(_owner!, sample, out var single)) _vesselHits.Add(single);
+        if (finalManualPose)
+        {
+            _manualDrainPending = queueConfigured && _manualProbe.Pending;
+            if (!queueConfigured) _manualProbe.Reset();
+        }
         if (_vesselHits.Count == 0) return;
         }
         foreach (var contact in _vesselHits)
         {
         // Consume before checking cut policy too: a refused surface gets one attempt
         // until the .25-second cooldown expires and fresh motion arrives, never a per-frame flood.
-        if (!queueConfigured && manual && !_manualGesture.Consume(_manualGesture.Id, _playerTime)) return;
-        var emitter = draining ? _manualDrainEmitter : _manualPose.BaseBody;
+        if (!queueConfigured && manual && !(finalManualPose
+            ? _manualGesture.ConsumeReleased(releasedPose.Gesture, _playerTime)
+            : _manualGesture.Consume(_manualGesture.Id, _playerTime))) return;
+        var emitter = finalManualPose ? releasedPose.BaseBody : draining ? _manualDrainEmitter : _manualPose.BaseBody;
         if (!queueConfigured) { _manualProbe.Reset(); ClearManualPose(); }
         if (!queueConfigured) _renderer.AddCutSparks(contact.Part, contact.PointLocal, contact.NormalLocal, _playerTime);
         if (!_targeting.TryContactTarget(_owner!, contact.Part, contact.PointLocal, contact.DistanceMeters,
