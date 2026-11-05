@@ -173,7 +173,7 @@ internal static class ForceOverlayChecks
             {
                 (force.AngryCenter, saber.SliceCenter),
                 (force.ForceCenter, saber.IgniteCenter),
-                (force.CaptureLimitCenter, saber.AutoSwingCenter)
+                (force.CaptureLimitCenter, saber.DropCenter)
             })
             {
                 var left = (forceButton - force.MoveCenter) / force.Scale;

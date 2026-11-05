@@ -22,8 +22,8 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     public float IgniteRadius => SliceRadius;
     public float SwingSliceEdgeGap => (SliceCenter - SwingCenter).Length() - SwingRadius - SliceRadius;
     public float2 IgniteCenter => SwingCenter + ActionButtonOffset(1, Scale);
-    public float2 DropCenter => SwingCenter + ActionButtonOffset(3, Scale);
-    public float2 AutoSwingCenter => SwingCenter + ActionButtonOffset(2, Scale);
+    public float2 DropCenter => SwingCenter + ActionButtonOffset(2, Scale);
+    public float2 AutoSwingCenter => SwingCenter + ActionButtonOffset(3, Scale);
 
     /// <summary>Equal radial and neighbor edge gaps, mirrored for the left-side Furce controls.</summary>
     internal static float2 ActionButtonOffset(int index, float scale, bool mirrored = false)

@@ -366,13 +366,15 @@ internal static class OverlayDragChecks
                     - layout.SwingRadius - layout.IgniteRadius - layout.SwingSliceEdgeGap) < 1e-3f
                 && MathF.Abs((layout.IgniteCenter - layout.SliceCenter).Length()
                     - 2 * layout.SliceRadius - layout.SwingSliceEdgeGap) < 1e-3f
-                && MathF.Abs((layout.AutoSwingCenter - layout.IgniteCenter).Length()
+                && MathF.Abs((layout.DropCenter - layout.IgniteCenter).Length()
+                    - 2 * layout.SliceRadius - layout.SwingSliceEdgeGap) < 1e-3f
+                && MathF.Abs((layout.AutoSwingCenter - layout.DropCenter).Length()
                     - 2 * layout.SliceRadius - layout.SwingSliceEdgeGap) < 1e-3f
                 && layout.AutoSwingPillMin.X >= origin.X - 1e-3f
                 && layout.AutoSwingPillMax.X <= origin.X + size.X + 1e-3f
                 && layout.AutoSwingPillMax.Y <= origin.Y + size.Y + 1e-3f
                 && layout.AutoSwingPillMax.Y > layout.AutoSwingPillMin.Y + 2 * layout.IgniteRadius,
-                "Slice, Ignite and Auto Swing have equal radial and neighbor gaps, and the duration capsule fits the viewport");
+                "Slice, Ignite, Drop and Auto Swing have equal radial and neighbor gaps, and the duration capsule fits the viewport");
             Check(layout.ForwardCenter.Y - layout.SomersaultRadius
                     >= layout.AutoSwingCenter.Y + layout.IgniteRadius + 12 * layout.Scale - 1e-3f,
                 "optional somersault buttons move below the Auto Swing row without overlapping idle hit targets");
