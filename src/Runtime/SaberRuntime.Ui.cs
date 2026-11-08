@@ -85,6 +85,7 @@ internal sealed partial class SaberRuntime
                 if (_renderer.LastError != null) ImGui.TextWrapped(_renderer.LastError);
                 if (_audio.LastError != null) ImGui.TextWrapped(_audio.LastError);
                 if (_preferencesSaveError != null) ImGui.TextWrapped(_preferencesSaveError);
+                ImGui.TextDisabled("Drag values to adjust; Ctrl+click to type.");
                 if (ImGui.CollapsingHeader("Global Big Fuckig Laser 9000 Settings")) DrawSaberAppearanceSettings();
                 if (ImGui.CollapsingHeader("The Furce Settings")) DrawForceSettings();
                 if (ImGui.CollapsingHeader("HUD Overlay Positions")) DrawControlPositionSettings();
@@ -170,10 +171,10 @@ internal sealed partial class SaberRuntime
         try
         {
             SaberSettingsRow("Default blade length");
-            changed |= ImGui.SliderFloat("##BladeLength", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m");
+            changed |= ImGui.DragFloat("##BladeLength", ref length, .01f, .25f, SaberLimits.MaximumBladeLength, "%.2f m", ImGuiSliderFlags.AlwaysClamp);
             SaberSettingsRow("Slice grace / reach");
-            changed |= ImGui.SliderFloat("##SliceReachMultiplier", ref sliceReach,
-                SaberLimits.MinimumSliceReachMultiplier, SaberLimits.MaximumSliceReachMultiplier, "%.2fx");
+            changed |= ImGui.DragFloat("##SliceReachMultiplier", ref sliceReach, .01f,
+                SaberLimits.MinimumSliceReachMultiplier, SaberLimits.MaximumSliceReachMultiplier, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("The blade length multiplier fudge factor for how far away a part slice is detected");
             float effectiveLength = _activeSaber?.BladeLengthOverride ?? length;
             double visibleLength = _pose.ClashHeld ? _pose.ClashHeldBladeLength : _blade.Deployment * effectiveLength;
@@ -181,7 +182,7 @@ internal sealed partial class SaberRuntime
             if (!double.IsFinite(bladeScale) || bladeScale <= 0) bladeScale = 1;
             ImGui.TextWrapped($"Maximum selection: {SaberLimits.SliceSelectionReach(visibleLength * bladeScale, sliceReach):F2} m now; {SaberLimits.SliceSelectionReach(effectiveLength * bladeScale, sliceReach):F2} m fully extended.");
             SaberSettingsRow("Sound volume");
-            changed |= ImGui.SliderFloat("##SoundVolume", ref volume, 0, 1, "%.2f");
+            changed |= ImGui.DragFloat("##SoundVolume", ref volume, .01f, 0, 1, "%.2f", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Overall volume for BFL9K sound effects and hum.");
             SaberSettingsRow("Extended environment lighting");
             ImGui.BeginDisabled(EnvironmentLightingPatch.UnavailableReason != null);
@@ -207,7 +208,7 @@ internal sealed partial class SaberRuntime
         try
         {
             SaberSettingsRow("Tree cut fire duration");
-            changed = ImGui.SliderFloat("##TreeCutFireSeconds", ref fireSeconds, 0, 60, "%.1f s");
+            changed = ImGui.DragFloat("##TreeCutFireSeconds", ref fireSeconds, .1f, 0, 60, "%.1f s", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("How long flames linger on freshly cut tree ends. Set to 0 to disable cut fire. Default: 10 seconds.");
         }
         finally { ImGui.EndTable(); }
@@ -224,8 +225,8 @@ internal sealed partial class SaberRuntime
         try
         {
             SaberSettingsRow("Maximum simulated capes");
-            changed |= ImGui.SliderInt("##CapeSimulationLimit", ref simulationLimit,
-                SaberSettings.MinimumCapeSimulationLimit, SaberSettings.MaximumCapeSimulationLimit);
+            changed |= ImGui.DragInt("##CapeSimulationLimit", ref simulationLimit, 1,
+                SaberSettings.MinimumCapeSimulationLimit, SaberSettings.MaximumCapeSimulationLimit, "%d", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Among enabled capes visible within 25 m, the nearest up to this many receive cloth simulation. A value of 0 keeps the cape visible with cloth motion off. Default: 4.\n\nAt most two capes update per frame, so higher limits share the same update budget and refresh motion less often.");
         }
         finally { ImGui.EndTable(); }
@@ -252,43 +253,43 @@ internal sealed partial class SaberRuntime
         try
         {
             SaberSettingsRow("Shimmer amount");
-            changed |= ImGui.SliderFloat("##ShimmerAmount", ref shimmerAmount, 0, 4, "%.2fx");
+            changed |= ImGui.DragFloat("##ShimmerAmount", ref shimmerAmount, .01f, 0, 4, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Shimmer strength; 0 keeps the halo steady.");
             SaberSettingsRow("Shimmer speed");
-            changed |= ImGui.SliderFloat("##ShimmerSpeed", ref shimmerSpeed, 0, 4, "%.2fx");
+            changed |= ImGui.DragFloat("##ShimmerSpeed", ref shimmerSpeed, .01f, 0, 4, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Shimmer speed; 0 freezes the motion.");
             SaberSettingsRow("Arc count");
-            changed |= ImGui.SliderInt("##ArcCount", ref arcCount, 0, SaberSettings.MaximumArcCount);
+            changed |= ImGui.DragInt("##ArcCount", ref arcCount, 1, 0, SaberSettings.MaximumArcCount, "%d", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Maximum arcs per saber; 0 disables them.\n\nDistance may reduce the visible count.");
             SaberSettingsRow("Arc frequency");
-            changed |= ImGui.SliderFloat("##ArcFrequency", ref arcFrequency, .1f, SaberSettings.MaximumArcFrequency, "%.2fx");
+            changed |= ImGui.DragFloat("##ArcFrequency", ref arcFrequency, .01f, .1f, SaberSettings.MaximumArcFrequency, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Burst rate per arc; 1× gives one burst every two seconds.\n\nHigher rates create shorter, more frequent bursts.");
             SaberSettingsRow("Arc amplitude");
-            changed |= ImGui.SliderFloat("##ArcAmplitude", ref arcAmplitude, 0, 3, "%.2fx");
+            changed |= ImGui.DragFloat("##ArcAmplitude", ref arcAmplitude, .01f, 0, 3, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Arc spread from the blade; 0 removes outward spread.");
             SaberSettingsRow("Arc brightness");
-            changed |= ImGui.SliderFloat("##ArcBrightness", ref arcBrightness, 0, SaberSettings.MaximumArcBrightness, "%.2fx");
+            changed |= ImGui.DragFloat("##ArcBrightness", ref arcBrightness, .01f, 0, SaberSettings.MaximumArcBrightness, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Arc brightness; 0 hides them.");
             SaberSettingsRow("Arc width");
-            changed |= ImGui.SliderFloat("##ArcWidth", ref arcWidth, .25f, SaberSettings.MaximumArcWidth, "%.2fx");
+            changed |= ImGui.DragFloat("##ArcWidth", ref arcWidth, .01f, .25f, SaberSettings.MaximumArcWidth, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Arc width; 1× is the baseline.");
             if (type == SaberType.Dark)
             {
                 SaberSettingsRow("Spark amount");
-                changed |= ImGui.SliderInt("##SparkCount", ref sparkCount, 0, SaberSettings.MaximumSparkCount);
+                changed |= ImGui.DragInt("##SparkCount", ref sparkCount, 1, 0, SaberSettings.MaximumSparkCount, "%d", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Colored welding sparks per burst; 0 disables them. Sparks fade as they fall away.");
                 SaberSettingsRow("Spark frequency");
-                changed |= ImGui.SliderFloat("##SparkFrequency", ref sparkFrequency, 0, SaberSettings.MaximumSparkFrequency, "%.1f bursts/s");
+                changed |= ImGui.DragFloat("##SparkFrequency", ref sparkFrequency, .1f, 0, SaberSettings.MaximumSparkFrequency, "%.1f bursts/s", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Spark bursts per second; 0 disables emission.");
                 SaberSettingsRow("Spark size");
-                changed |= ImGui.SliderFloat("##SparkSize", ref sparkSize, .25f, 3, "%.2fx");
+                changed |= ImGui.DragFloat("##SparkSize", ref sparkSize, .01f, .25f, 3, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
                 SaberSettingsRow("Spark brightness");
-                changed |= ImGui.SliderFloat("##SparkBrightness", ref sparkBrightness, 0, 4, "%.2fx");
+                changed |= ImGui.DragFloat("##SparkBrightness", ref sparkBrightness, .01f, 0, 4, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Spark intensity in this kitten's saber color; 0 hides new sparks.");
                 SaberSettingsRow("Spark lifetime");
-                changed |= ImGui.SliderFloat("##SparkLifetime", ref sparkLifetime, .1f, .8f, "%.2f s");
+                changed |= ImGui.DragFloat("##SparkLifetime", ref sparkLifetime, .01f, .1f, .8f, "%.2f s", ImGuiSliderFlags.AlwaysClamp);
                 SaberSettingsRow("Spark spray speed");
-                changed |= ImGui.SliderFloat("##SparkSpeed", ref sparkSpeed, .25f, 3, "%.2fx");
+                changed |= ImGui.DragFloat("##SparkSpeed", ref sparkSpeed, .01f, .25f, 3, "%.2fx", ImGuiSliderFlags.AlwaysClamp);
             }
         }
         finally { ImGui.EndTable(); }
@@ -321,28 +322,28 @@ internal sealed partial class SaberRuntime
         try
         {
             SaberSettingsRow("Furce capture limit");
-            changed = ImGui.SliderInt("##ForceCaptureLimit", ref captureLimit, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum);
+            changed = ImGui.DragInt("##ForceCaptureLimit", ref captureLimit, 1, ForceCaptureLimits.Minimum, ForceCaptureLimits.Maximum, "%d", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip($"Maximum vessels, debris, and ground objects per Angry Furce capture (default {ForceCaptureLimits.Default}); applies next capture.\n\nThe selected target is included first, then nearest objects fill remaining slots.");
             SaberSettingsRow("Radius bubble line length");
-            changed |= ImGui.SliderFloat("##ForceBubbleLineLengthPercent", ref bubbleLineLength, 0, 100,
-                bubbleLineLength <= 0 ? "3 px" : bubbleLineLength >= 100 ? "Original" : "%.0f%%");
+            changed |= ImGui.DragFloat("##ForceBubbleLineLengthPercent", ref bubbleLineLength, 1, 0, 100,
+                "%.0f%%", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Length of each Angry Furce radius bubble dash: 0% is 3 pixels, 100% is the original length (the maximum and default).\n\nShorter projected dashes keep their original length. Saves automatically and applies immediately.");
             SaberSettingsRow("Clutter aim tolerance");
-            changed |= ImGui.SliderFloat("##ClutterPickTolerance", ref tolerance, 0, .5f, "%.2f m");
+            changed |= ImGui.DragFloat("##ClutterPickTolerance", ref tolerance, .01f, 0, .5f, "%.2f m", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("After an exact miss, this radius catches nearby physical clutter.\n\nExact hits take priority; 0 allows exact hits only.");
             SaberSettingsRow("Maximum Furce spread");
-            changed |= ImGui.SliderFloat("##ForceMaximumSpread", ref maximumSpread,
-                ForceSpreadLimits.MinimumMaximum, ForceSpreadLimits.Maximum, "%.1fx");
+            changed |= ImGui.DragFloat("##ForceMaximumSpread", ref maximumSpread, .1f,
+                ForceSpreadLimits.MinimumMaximum, ForceSpreadLimits.Maximum, "%.1fx", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip($"Caps shared Shift+wheel Furce group spacing; individual object sizes are unchanged. Default: {ForceSpreadLimits.DefaultMaximum:0.0}x. Larger spreads move objects farther from the group center. Saves automatically; changes apply immediately, and lowering the cap eases a held group back within it.");
             SaberSettingsRow("Furce breakup groan (px)");
-            changed |= ImGui.SliderFloat("##ForceBreakupGroanPixels", ref breakupGroan, 1, 64, "%.1f px");
+            changed |= ImGui.DragFloat("##ForceBreakupGroanPixels", ref breakupGroan, .1f, 1, 64, "%.1f px", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before the Furce creak plays; inward Shift+scroll unwinds.");
             SaberSettingsRow("Furce breakup split (px)");
-            changed |= ImGui.SliderFloat("##ForceBreakupSplitPixels", ref breakupSplit, 2, 128, "%.1f px");
+            changed |= ImGui.DragFloat("##ForceBreakupSplitPixels", ref breakupSplit, .1f, 2, 128, "%.1f px", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Continuous outward Shift+scroll distance normalized to pixels before Furce breakup occurs; inward Shift+scroll unwinds.");
             SaberSettingsRow("Breakup debris limit");
-            changed |= ImGui.SliderInt("##ForceBreakupPieceLimit", ref breakupPieceLimit,
-                ForceBreakupLimits.Minimum, ForceBreakupLimits.Maximum);
+            changed |= ImGui.DragInt("##ForceBreakupPieceLimit", ref breakupPieceLimit, 1,
+                ForceBreakupLimits.Minimum, ForceBreakupLimits.Maximum, "%d", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip($"Maximum new debris pieces across all vehicles in one breakup (default {ForceBreakupLimits.Default}); applies to the next breakup.\n\nLarger limits create more physics objects. Smaller and deeper geometry stays grouped into fewer pieces.");
         }
         finally { ImGui.EndTable(); }
@@ -367,13 +368,13 @@ internal sealed partial class SaberRuntime
         try
         {
             SaberSettingsRow("Furce (left) X");
-            changed |= ImGui.SliderFloat("##ForceControlsOffsetX", ref forceX, -1, 1, "%.2f width");
+            changed |= ImGui.DragFloat("##ForceControlsOffsetX", ref forceX, .01f, -1, 1, "%.2f width", ImGuiSliderFlags.AlwaysClamp);
             SaberSettingsRow("Furce (left) Y");
-            changed |= ImGui.SliderFloat("##ForceControlsOffsetY", ref forceY, -1, 1, "%.2f height");
+            changed |= ImGui.DragFloat("##ForceControlsOffsetY", ref forceY, .01f, -1, 1, "%.2f height", ImGuiSliderFlags.AlwaysClamp);
             SaberSettingsRow("Saber (right) X");
-            changed |= ImGui.SliderFloat("##SaberControlsOffsetX", ref saberX, -1, 1, "%.2f width");
+            changed |= ImGui.DragFloat("##SaberControlsOffsetX", ref saberX, .01f, -1, 1, "%.2f width", ImGuiSliderFlags.AlwaysClamp);
             SaberSettingsRow("Saber (right) Y");
-            changed |= ImGui.SliderFloat("##SaberControlsOffsetY", ref saberY, -1, 1, "%.2f height");
+            changed |= ImGui.DragFloat("##SaberControlsOffsetY", ref saberY, .01f, -1, 1, "%.2f height", ImGuiSliderFlags.AlwaysClamp);
         }
         finally { ImGui.EndTable(); }
         if (changed)
@@ -400,15 +401,15 @@ internal sealed partial class SaberRuntime
         try
         {
             SaberSettingsRow("Grip position");
-            changed |= ImGui.SliderFloat3("##GripOffset", ref grip, -40, 40, "%.1f");
+            changed |= ImGui.DragFloat3("##GripOffset", ref grip, .1f, -40, 40, "%.1f", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Chest-relative X, Y and Z offsets in centimetres.");
             SaberSettingsRow("Blade direction");
-            changed |= ImGui.SliderFloat3("##BladeDirection", ref aim, -1, 1, "%.2f");
+            changed |= ImGui.DragFloat3("##BladeDirection", ref aim, .01f, -1, 1, "%.2f", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("X, Y and Z direction in kitten model space.");
             SaberSettingsRow("Finger curl");
-            changed |= ImGui.SliderFloat("##FingerCurl", ref curl, 0, .5f, "%.2f rad");
+            changed |= ImGui.DragFloat("##FingerCurl", ref curl, .01f, 0, .5f, "%.2f rad", ImGuiSliderFlags.AlwaysClamp);
             SaberSettingsRow("Jump combo interval");
-            changed |= ImGui.SliderFloat("##JumpComboIntervalSeconds", ref jumpComboInterval, .1f, 1.5f, "%.2f s");
+            changed |= ImGui.DragFloat("##JumpComboIntervalSeconds", ref jumpComboInterval, .01f, .1f, 1.5f, "%.2f s", ImGuiSliderFlags.AlwaysClamp);
             ShowSaberControlTip("Maximum time between jump presses for a somersault combo.");
             SaberSettingsRow("Space-bar somersaults");
             changed |= ImGui.Checkbox("##SpaceSomersaultEnabled", ref spaceSomersaultEnabled);

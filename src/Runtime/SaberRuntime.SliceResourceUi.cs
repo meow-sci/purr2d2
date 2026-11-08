@@ -38,43 +38,43 @@ internal sealed partial class SaberRuntime
             try
             {
                 SaberSettingsRow("Closed solid limit");
-                liveChanged |= ImGui.SliderInt("##SliceSolidLimit", ref solids,
-                    SliceResourceLimits.MinimumSolidLimit, SliceResourceLimits.MaximumSolidLimit);
+                liveChanged |= ImGui.DragInt("##SliceSolidLimit", ref solids, 16,
+                    SliceResourceLimits.MinimumSolidLimit, SliceResourceLimits.MaximumSolidLimit, "%d", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Maximum closed solids in a part being sliced and in each resulting fragment. Open panels and sharp folds can create separate solids.\n\nApplies to the next cut; larger limits require more preparation work.");
                 SaberSettingsRow("Source triangle limit");
-                liveChanged |= ImGui.SliderInt("##SliceTriangleLimit", ref triangles,
-                    SliceResourceLimits.MinimumTriangleLimit, SliceResourceLimits.MaximumTriangleLimit);
+                liveChanged |= ImGui.DragInt("##SliceTriangleLimit", ref triangles, 1000,
+                    SliceResourceLimits.MinimumTriangleLimit, SliceResourceLimits.MaximumTriangleLimit, "%d", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Maximum triangles while copying, preparing and subdividing the source hull. Backing open panels adds triangles.\n\nCombined cut output may use twice this count; each fragment may use five thirds. Applies to the next cut and saves automatically.");
                 SaberSettingsRow("Initial vertex memory");
-                memoryChanged |= ImGui.SliderInt("##SliceVertexArenaMiB", ref vertex,
-                    SliceResourceLimits.MinimumVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB, "%d MiB");
+                memoryChanged |= ImGui.DragInt("##SliceVertexArenaMiB", ref vertex, 1,
+                    SliceResourceLimits.MinimumVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB, "%d MiB", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Startup reservation for generated fragment vertices.\n\nApplies after restarting KSA.");
                 SaberSettingsRow("Initial index memory");
-                memoryChanged |= ImGui.SliderInt("##SliceIndexArenaMiB", ref index,
-                    SliceResourceLimits.MinimumIndexArenaMiB, SliceResourceLimits.MaximumIndexArenaMiB, "%d MiB");
+                memoryChanged |= ImGui.DragInt("##SliceIndexArenaMiB", ref index, 1,
+                    SliceResourceLimits.MinimumIndexArenaMiB, SliceResourceLimits.MaximumIndexArenaMiB, "%d MiB", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Startup reservation for generated fragment indices.\n\nApplies after restarting KSA.");
                 SaberSettingsRow("Automatic growth");
                 liveChanged |= ImGui.Checkbox("##SliceAutoGrow", ref autoGrow);
                 ShowSaberControlTip("Grow buffers as needed, up to the limits below; off leaves current allocations unchanged.\n\nGrowth can briefly pause rendering and temporarily needs both old and new buffers.");
                 SaberSettingsRow("Maximum vertex memory");
-                liveChanged |= ImGui.SliderInt("##SliceVertexMaximumMiB", ref vertexMaximum,
-                    vertex, SliceResourceLimits.MaximumVertexArenaMiB, "%d MiB");
+                liveChanged |= ImGui.DragInt("##SliceVertexMaximumMiB", ref vertexMaximum, 1,
+                    vertex, SliceResourceLimits.MaximumVertexArenaMiB, "%d MiB", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Maximum runtime vertex capacity; applies now.\n\nLowering it does not shrink existing allocations; stock and startup-restored meshes use additional memory.");
                 SaberSettingsRow("Maximum index memory");
-                liveChanged |= ImGui.SliderInt("##SliceIndexMaximumMiB", ref indexMaximum,
-                    index, SliceResourceLimits.MaximumIndexArenaMiB, "%d MiB");
+                liveChanged |= ImGui.DragInt("##SliceIndexMaximumMiB", ref indexMaximum, 1,
+                    index, SliceResourceLimits.MaximumIndexArenaMiB, "%d MiB", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Maximum runtime index capacity; applies now.\n\nLowering it does not shrink existing allocations.");
                 SaberSettingsRow("Slice storage");
-                liveChanged |= ImGui.SliderInt("##SliceAssetDiskMiB", ref disk,
-                    SliceResourceLimits.MinimumAssetDiskMiB, SliceResourceLimits.MaximumAssetDiskMiB, "%d MiB");
+                liveChanged |= ImGui.DragInt("##SliceAssetDiskMiB", ref disk, 16,
+                    SliceResourceLimits.MinimumAssetDiskMiB, SliceResourceLimits.MaximumAssetDiskMiB, "%d MiB", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Limits new fragment files to this disk budget and applies now.\n\nExisting files and saves stay intact, even when they exceed the budget.");
                 SaberSettingsRow("Slice entry limit");
-                liveChanged |= ImGui.SliderInt("##SliceAssetEntryLimit", ref entries,
-                    SliceResourceLimits.MinimumAssetEntryLimit, SliceResourceLimits.MaximumAssetEntryLimit);
+                liveChanged |= ImGui.DragInt("##SliceAssetEntryLimit", ref entries, 16,
+                    SliceResourceLimits.MinimumAssetEntryLimit, SliceResourceLimits.MaximumAssetEntryLimit, "%d", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Limits new cache entries and applies now.\n\nExisting asset files stay intact.");
                 SaberSettingsRow("Physics vehicle limit");
-                liveChanged |= ImGui.SliderInt("##SlicePhysicsVehicleLimit", ref vehicles,
-                    SliceResourceLimits.MinimumPhysicsVehicleLimit, SliceResourceLimits.MaximumPhysicsVehicleLimit);
+                liveChanged |= ImGui.DragInt("##SlicePhysicsVehicleLimit", ref vehicles, 1,
+                    SliceResourceLimits.MinimumPhysicsVehicleLimit, SliceResourceLimits.MaximumPhysicsVehicleLimit, "%d", ImGuiSliderFlags.AlwaysClamp);
                 ShowSaberControlTip("Limits new cuts to this vehicle count in the local physics bubble; applies now.\n\nExisting vehicles stay intact.");
             }
             finally { ImGui.EndTable(); }

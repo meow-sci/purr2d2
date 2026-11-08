@@ -871,12 +871,13 @@ internal sealed partial class SaberRuntime
             if (ImGui.Checkbox("Cape", ref capeEnabled))
                 SetKittenCapeEnabled(owner, capeEnabled);
             ImGui.TextWrapped("This kitten's appearance and blade length are saved with the current game.");
+            ImGui.TextDisabled("Drag values to adjust; Ctrl+click to type.");
             if (CapeStatusFor(owner) is { } capeStatus)
                 ImGui.TextWrapped(capeStatus);
             ImGui.Text("Blade length");
             float length = SaberLengthFor(owner);
             ImGui.SetNextItemWidth(Math.Min(220 * scale, Math.Max(100 * scale, ImGui.GetContentRegionAvail().X - 96 * scale)));
-            if (ImGui.SliderFloat("##KittenBladeLength", ref length, .25f, SaberLimits.MaximumBladeLength, "%.2f m"))
+            if (ImGui.DragFloat("##KittenBladeLength", ref length, .01f, .25f, SaberLimits.MaximumBladeLength, "%.2f m", ImGuiSliderFlags.AlwaysClamp))
                 SetKittenSaberLength(owner, length);
             ImGui.SameLine();
             if (ImGui.Button("Use default")) UseDefaultKittenSaberLength(owner);

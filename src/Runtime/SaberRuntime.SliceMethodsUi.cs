@@ -35,14 +35,14 @@ internal sealed partial class SaberRuntime
             {
                 int workers = _settings.SliceWorkerCount, pending = _settings.SlicePendingTargetLimit;
                 SaberSettingsRow("Geometry workers");
-                if (ImGui.SliderInt("##SliceWorkerCount", ref workers, 1, 4)) _settings.SliceWorkerCount = workers;
+                if (ImGui.DragInt("##SliceWorkerCount", ref workers, 1, 1, 4, "%d", ImGuiSliderFlags.AlwaysClamp)) _settings.SliceWorkerCount = workers;
                 ShowSaberControlTip($"Up to four geometry workers use a separate serialized loader. The effective worker count is also limited to {Math.Max(1, Environment.ProcessorCount - 2)} on this computer. Changes apply after current work finishes.");
                 SaberSettingsRow("Pending targets");
-                if (ImGui.SliderInt("##SlicePendingTargetLimit", ref pending, 16, 512)) _settings.SlicePendingTargetLimit = pending;
+                if (ImGui.DragInt("##SlicePendingTargetLimit", ref pending, 1, 16, 512, "%d", ImGuiSliderFlags.AlwaysClamp)) _settings.SlicePendingTargetLimit = pending;
                 ShowSaberControlTip("Bounds pending vessel, tree and rock slice targets together. Changes apply after current work finishes.");
                 int memory = _settings.SliceWorkingMemoryMiB;
                 SaberSettingsRow("Working memory (MiB)");
-                if (ImGui.SliderInt("##SliceWorkingMemoryMiB", ref memory, 64, 1024)) _settings.SliceWorkingMemoryMiB = memory;
+                if (ImGui.DragInt("##SliceWorkingMemoryMiB", ref memory, 1, 64, 1024, "%d", ImGuiSliderFlags.AlwaysClamp)) _settings.SliceWorkingMemoryMiB = memory;
                 ShowSaberControlTip("Limits estimated and tracked queued cut buffers. Temporary geometry, detached meshes and native allocations are estimates rather than a hard total memory limit. Changes apply after current work finishes.");
             }
 

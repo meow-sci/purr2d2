@@ -3,6 +3,8 @@ using Purr2D2.Rendering;
 
 namespace Brutal.ImGuiApi
 {
+    public enum ImGuiSliderFlags { None = 0, AlwaysClamp = 0x600 }
+
     public static class ImGui
     {
         internal static readonly HashSet<string> Clicks = [];
@@ -10,7 +12,8 @@ namespace Brutal.ImGuiApi
         internal static readonly Dictionary<string, bool> CheckboxChanges = [];
         internal static readonly List<string> Text = [];
         private static readonly Stack<bool> Disabled = new();
-        public static bool SliderInt(string label, ref int value, int min, int max, string format = "%d")
+        public static bool DragInt(string label, ref int value, float speed, int min, int max,
+            string format = "%d", ImGuiSliderFlags flags = ImGuiSliderFlags.None)
         {
             if (!SliderChanges.Remove(label, out var changed)) return false;
             value = Math.Clamp(changed, min, max); return true;
