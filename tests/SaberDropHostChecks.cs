@@ -29,21 +29,26 @@ internal static class SaberDropHostChecks
             "native dropped-body ownership participates in bubble-origin collider updates");
 
         var overrides = new XmlAttributeOverrides(); var components = new XmlAttributes();
-        components.XmlElements.Add(new XmlElementAttribute("Collider", typeof(ColliderModule.Template)));
+        components.XmlArrayItems.Add(new XmlArrayItemAttribute("Collider", typeof(ColliderModule.Template)));
         overrides.Add(typeof(PartTemplate), nameof(PartTemplate.Components), components);
         var serializer = new XmlSerializer(typeof(AssetBundle), overrides);
         using var stream = File.OpenRead("Assets/purr2d2.xml");
         var assets = (AssetBundle)serializer.Deserialize(stream)!;
         var hilt = assets.Assets.OfType<PartTemplate>().Single(p => p.Id == "Purr2D2_DroppedHilt");
-        // The serializer retains raw tag references; native OnDataLoad resolves these
-        // through VehicleEditor before IsHidden becomes meaningful.
-        foreach (var tag in hilt.EditorTagsStrings) hilt.EditorTags.Add(VehicleEditor.RegisterTag(tag));
+        // Resolve the authored tag through the native tag definition, without
+        // starting the process-wide content library in this managed host check.
+        foreach (var tag in hilt.EditorTagRefs)
+        {
+            tag.Value = new EditorTagDefinition { Id = tag.Ref };
+            hilt.EditorTags.Add(tag.Value.ToTag());
+        }
         Check(hilt.IsHidden && !hilt.IsSubPart && hilt.InertMasses.Count == 1
             && hilt.Components.Single() is ColliderModule.Template collider
             && collider.Colliders.Single() is BoxColliderTemplate,
             "the shipped hilt proxy loads hidden native mass and collision without duplicate render geometry");
-        Check(hilt.Control == null && hilt.RocketCores.Count == 0 && hilt.RocketEngineControllers.Count == 0
-            && hilt.RocketThrusterControllers.Count == 0 && hilt.Batteries.Count == 0,
+        Check(!hilt.Components.Any(c => c is Control.Template or Battery.Template)
+            && hilt.RocketCores.Count == 0 && hilt.RocketEngineControllers.Count == 0
+            && hilt.RocketThrusterControllers.Count == 0,
             "the dropped hilt has no control, engine, power or thrust modules");
     }
     private static void ReleaseSpinFrames()

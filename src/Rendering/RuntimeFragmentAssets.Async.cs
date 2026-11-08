@@ -140,7 +140,7 @@ internal static partial class RuntimeFragmentAssets
                 if (FailedPreparations.TryGetValue(data.Id, out var failed)) throw new InvalidOperationException(failed);
                 Prepared.TryGetValue(data.Id, out var cached);
                 PartTemplate? template = cached?.Template;
-                if (ModLibrary.TryGet<PartTemplate>(data.Id, out var restored)) template = restored;
+                if (FragmentAssetRegistration.TryGetAsset<PartTemplate>(data.Id, out var restored)) template = restored;
                 if (template == null)
                 {
                     uint vertexBytes = checked((uint)data.Uploads.Sum(u => (long)u.VertexBytes));
@@ -195,18 +195,16 @@ internal static partial class RuntimeFragmentAssets
                     foreach (var mesh in loaded.Meshes)
                     {
                         _step = "mesh registration";
-                        if (!ModLibrary.Register(mesh)) throw new InvalidOperationException("Generated mesh ID was unexpectedly registered.");
+                        FragmentAssetRegistration.Register(mesh);
                         yield return 0;
                     }
-                    foreach (var asset in loaded.Bundle.Assets)
+                    var registration = new FragmentAssetRegistration(loaded.Bundle, _mod!);
+                    while (!registration.Done)
                     {
-                        _step = "template initialization";
-                        // Runtime meshes are already loaded. Keep atlas only in the durable XML.
-                        if (asset is not MeshAtlasFileReference) asset.OnDataLoad(_mod!);
+                        _step = registration.Step;
+                        registration.AdvanceOne();
                         yield return 1;
                     }
-                    _step = "bundle registration";
-                    _mod!.Register(loaded.Bundle);
                     template = ModLibrary.Get<PartTemplate>(data.Id);
                     _registeredTemplates++;
                     _registering = null; // A preflight failure can retry a completely registered template.

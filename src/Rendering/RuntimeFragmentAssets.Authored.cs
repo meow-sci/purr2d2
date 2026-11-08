@@ -7,9 +7,8 @@ namespace Purr2D2.Rendering;
 internal sealed class AuthoredDebrisRegistration : IAuthoredDebrisRegistration
 {
     private readonly PreparedAuthoredDebrisAsset _prepared;
-    private readonly KSA.Mod _mod;
-    private int _assetIndex;
-    private bool _registered;
+    private readonly FragmentAssetRegistration? _registration;
+    private bool _recorded;
 
     public PartTemplate? Template { get; private set; }
     public bool Done => Template != null;
@@ -18,33 +17,32 @@ internal sealed class AuthoredDebrisRegistration : IAuthoredDebrisRegistration
     {
         Template = existing;
         _prepared = null!;
-        _mod = null!;
+        _registration = null;
     }
 
     internal AuthoredDebrisRegistration(PreparedAuthoredDebrisAsset prepared, KSA.Mod mod)
     {
         _prepared = prepared;
-        _mod = mod;
+        _registration = new(prepared.Bundle, mod);
     }
 
-    /// <summary>Advance one OnDataLoad, bundle registration, or template lookup operation.</summary>
+    /// <summary>Advance one registration, complete reference pass, or native initialization.</summary>
     public void AdvanceOne()
     {
         if (Done) return;
-        if (_assetIndex < _prepared.Bundle.Assets.Count)
+        if (!_registration!.Done)
         {
-            _prepared.Bundle.Assets[_assetIndex++].OnDataLoad(_mod);
+            _registration.AdvanceOne();
             return;
         }
-        if (!_registered)
+        if (!_recorded)
         {
-            _mod.Register(_prepared.Bundle);
             RuntimeFragmentAssets.RecordAuthoredDebrisRegistration(_prepared.Bundle);
-            _registered = true;
-            return;
+            _recorded = true;
         }
         Template = ModLibrary.Get<PartTemplate>(_prepared.Id);
     }
+
 }
 
 internal static partial class RuntimeFragmentAssets
@@ -105,7 +103,7 @@ internal static partial class RuntimeFragmentAssets
     internal static IAuthoredDebrisRegistration BeginAuthoredDebrisRegistration(PreparedAuthoredDebrisAsset prepared)
     {
         if (!_initialized || _mod == null) throw new InvalidOperationException("Runtime slice assets are unavailable.");
-        if (ModLibrary.TryGet<PartTemplate>(prepared.Id, out var existing) && existing != null)
+        if (FragmentAssetRegistration.TryGetAsset<PartTemplate>(prepared.Id, out var existing) && existing != null)
             return new AuthoredDebrisRegistration(existing);
         return new AuthoredDebrisRegistration(prepared, _mod);
     }

@@ -51,6 +51,7 @@ internal static partial class ClutterForceNative
     private static readonly Func<object, uint> InstanceObject = ReadField<uint>(InstanceType, "ObjectId");
     private static readonly Func<object, uint> InstanceScale = ReadField<uint>(InstanceType, "ScaleId");
     private static readonly Func<object, uint> InstanceColor = ReadField<uint>(InstanceType, "PackedColor");
+    private static readonly Func<object, uint> InstanceModifierColor = ReadField<uint>(InstanceType, "PackedModifierColor");
     private static readonly Func<object, uint> InstanceSubCell = ReadField<uint>(InstanceType, "SubCellId");
     private static readonly DisplaceDelegate Displace = CreateDisplace();
 
@@ -158,6 +159,7 @@ internal static partial class ClutterForceNative
             placement = new GroundClutterPlacementData.DisplacedObject
             {
                 ObjectId = objectId, ScaleId = scaleId, PackedColor = InstanceColor(instance!),
+                PackedModifierColor = InstanceModifierColor(instance!),
                 PositionCcf = position, RotationCcf = rotation
             };
             return true;
@@ -183,7 +185,7 @@ internal static partial class ClutterForceNative
     {
         var data = Ecotypes(native);
         return data != null && (uint)key.EcotypeIndex < (uint)data.Length
-            ? data[key.EcotypeIndex].EcotypeReference.Name + " ground object" : "Ground object";
+            ? data[key.EcotypeIndex].EcotypeReference.Key + " ground object" : "Ground object";
     }
 
     private static DisplaceDelegate CreateDisplace()

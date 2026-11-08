@@ -69,14 +69,15 @@ internal static class GameHooks
     private static MethodInfo Require(Type type, string name, params Type[] parameters) =>
         AccessTools.Method(type, name, parameters) ?? throw new MissingMethodException(type.FullName, name);
 
-    // Since KSA 2026.10.25.5707 the save-load and editor-clone constructors call a private
-    // initializer directly instead of the string/template constructor. Each public
-    // constructor must reach exactly one of these postfixes; validation checks host IL.
+    // Save-load and editor-clone constructors call a private initializer directly.
+    // 5801 also sends the single-argument save constructor straight to that initializer.
+    // Each public constructor must reach exactly one postfix; validation checks host IL.
     internal static ConstructorInfo[] PartConstructionHooks() =>
     [
-        RequirePartConstructor(typeof(string), typeof(PartTemplate), typeof(PartInstance), typeof(Part)),
+        RequirePartConstructor(typeof(string), typeof(PartTemplate), typeof(TransformDataReference<SubPartTemplate>), typeof(Part)),
         RequirePartConstructor(typeof(PartInstance), typeof(Part)),
         RequirePartConstructor(typeof(Part), typeof(Part)),
+        RequirePartConstructor(typeof(PartInstance)),
     ];
 
     private static ConstructorInfo RequirePartConstructor(params Type[] parameters) =>

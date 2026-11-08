@@ -237,6 +237,9 @@ public sealed unsafe partial class SaberRenderer : IDisposable
         {
             Name = Presets.Entrypoint.Main, Stage = VkShaderStageFlags.FragmentBit, Module = frag,
         };
+        // Procedural ribbons have no vertex attributes. Keep this synchronous
+        // create-info local rather than borrowing a host-owned NativeList preset.
+        var vertexInput = new VkPipelineVertexInputStateCreateInfo();
         fixed (VkPipelineShaderStageCreateInfo* stagePtr = stages)
         {
             var info = new VkGraphicsPipelineCreateInfo
@@ -246,7 +249,7 @@ public sealed unsafe partial class SaberRenderer : IDisposable
                 Stages = stagePtr,
                 DynamicState = renderer.DynamicStateInfo,
                 ViewportState = renderer.ViewportState,
-                VertexInputState = Presets.VertexInput.None.Ptr,
+                VertexInputState = &vertexInput,
                 InputAssemblyState = Presets.InputAssembly.TriangleStrip,
                 RasterizationState = Presets.Rasterization.Fill.CullNone,
                 DepthStencilState = RenderingPresets.ReverseZDepthStencil.DepthTestNoWrite,

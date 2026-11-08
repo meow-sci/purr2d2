@@ -654,11 +654,11 @@ internal sealed class ManualContactProbe
         else
         {
             foreach (var module in modules.Get<PartModelModule>())
-                if (ReferenceEquals(module.PartModel.Template.Mesh?.Get(), mesh)) return true;
+                if (ReferenceEquals(module.PartModel.Template.Mesh?.Value, mesh)) return true;
             foreach (var module in modules.Get<PartModelDynamicModule>())
-                if (ReferenceEquals(module.PartModelDynamic.Template.Mesh?.Get(), mesh)) return true;
+                if (ReferenceEquals(module.PartModelDynamic.Template.Mesh?.Value, mesh)) return true;
             foreach (var module in modules.Get<PartModelGlassModule>())
-                if (ReferenceEquals(module.PartModelGlass.Template.Mesh?.Get(), mesh)) return true;
+                if (ReferenceEquals(module.PartModelGlass.Template.Mesh?.Value, mesh)) return true;
         }
         return false;
     }
@@ -706,9 +706,9 @@ internal sealed class ManualContactProbe
                         {
                             // Lists may be rebuilt between yields: recheck the indexed view.
                             MeshReference? mesh = kind switch {
-                                0 when m < part.Modules.Get<PartModelModule>().Length => part.Modules.Get<PartModelModule>()[m].PartModel.Template.Mesh?.Get(),
-                                1 when m < part.Modules.Get<PartModelDynamicModule>().Length => part.Modules.Get<PartModelDynamicModule>()[m].PartModelDynamic.Template.Mesh?.Get(),
-                                2 when m < part.Modules.Get<PartModelGlassModule>().Length => part.Modules.Get<PartModelGlassModule>()[m].PartModelGlass.Template.Mesh?.Get(),
+                                0 when m < part.Modules.Get<PartModelModule>().Length => part.Modules.Get<PartModelModule>()[m].PartModel.Template.Mesh?.Value,
+                                1 when m < part.Modules.Get<PartModelDynamicModule>().Length => part.Modules.Get<PartModelDynamicModule>()[m].PartModelDynamic.Template.Mesh?.Value,
+                                2 when m < part.Modules.Get<PartModelGlassModule>().Length => part.Modules.Get<PartModelGlassModule>()[m].PartModelGlass.Template.Mesh?.Value,
                                 3 when m < part.Modules.Get<MeshViewModule>().Length => part.Modules.Get<MeshViewModule>()[m].MeshView, _ => null };
                             if (mesh != null && mesh.PositionsCompare != null) Add(part, vehicle, mesh, kind != 3);
                             yield return 0;

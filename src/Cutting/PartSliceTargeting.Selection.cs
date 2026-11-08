@@ -137,9 +137,9 @@ internal sealed partial class PartSliceTargeting
     private static void CollectMeshes(Part part, List<MeshReference> meshes)
     {
         meshes.Clear(); bool render = false;
-        foreach (var model in part.Modules.Get<PartModelModule>()) { render = true; Add(model.PartModel.Template.Mesh?.Get()); }
-        foreach (var model in part.Modules.Get<PartModelDynamicModule>()) { render = true; Add(model.PartModelDynamic.Template.Mesh?.Get()); }
-        foreach (var model in part.Modules.Get<PartModelGlassModule>()) { render = true; Add(model.PartModelGlass.Template.Mesh?.Get()); }
+        foreach (var model in part.Modules.Get<PartModelModule>()) { render = true; Add(model.PartModel.Template.Mesh?.Value); }
+        foreach (var model in part.Modules.Get<PartModelDynamicModule>()) { render = true; Add(model.PartModelDynamic.Template.Mesh?.Value); }
+        foreach (var model in part.Modules.Get<PartModelGlassModule>()) { render = true; Add(model.PartModelGlass.Template.Mesh?.Value); }
         if (!render) foreach (var model in part.Modules.Get<MeshViewModule>()) Add(model.MeshView);
         void Add(MeshReference? mesh) { if (mesh != null && !meshes.Contains(mesh)) meshes.Add(mesh); }
     }

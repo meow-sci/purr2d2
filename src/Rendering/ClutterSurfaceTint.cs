@@ -6,7 +6,10 @@ namespace Purr2D2.Rendering;
 /// <summary>Durable native RGB10 tint, with the top 20 bits of its positive luminosity float.</summary>
 internal static class ClutterSurfaceTint
 {
-    internal const uint Marker = 1u << 11, LuminosityMask = 0xfffff000u;
+    // Keep the durable twenty-bit luminosity unchanged. Native highlight colors
+    // now occupy bits 11/12, so its lowest two bits travel in RGB10's unused alpha.
+    internal const uint NativeStateMask = 0x1fffu, Marker = 1u << 13,
+        LuminosityMask = 0xfffff000u, RuntimeLuminosityMask = 0xffffc000u;
     private const string MeshMarker = "_ct";
     internal static uint Luminosity(float value)
     {
@@ -30,7 +33,9 @@ internal static class ClutterSurfaceTint
         if ((parsedLuminosity & ~LuminosityMask) != 0 || !float.IsFinite(value) || value <= 0) return false;
         color = parsedColor; luminosity = parsedLuminosity; return true;
     }
-    internal static int Flags(int original, uint luminosity) => unchecked((int)(((uint)original & 0x7ffu) | Marker | luminosity));
+    internal static int Flags(int original, uint luminosity) => unchecked((int)(((uint)original & NativeStateMask)
+        | Marker | (luminosity & RuntimeLuminosityMask)));
+    internal static uint Color(uint original, uint luminosity) => (original & ~3u) | ((luminosity >> 12) & 3u);
 
     // Only this single declaration is changed; all unmarked models execute their
     // original material path. Raster has a conditional emission varying, while
@@ -42,14 +47,14 @@ internal static class ClutterSurfaceTint
             || !source.Contains("inEmissiveColor", StringComparison.Ordinal) || source.Contains("PURR_CLUTTER_TINT", StringComparison.Ordinal))
             throw new InvalidDataException("Native PartModel diffuse shader contract changed.");
         var flags = Regex.Matches(source, @"inStateFlags\s*&\s*\(1u\s*<<\s*(\d+)u?\)");
-        if (flags.Count == 0 || flags.Any(m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) > 10))
+        if (flags.Count == 0 || flags.Any(m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) > 12))
             throw new InvalidDataException("Native PartModel state flag allocation changed.");
         string tint = """
             // PURR_CLUTTER_TINT: generated exterior meshes only; native low flags stay intact.
-            if ((inStateFlags & 0x800u) != 0u) {
+            if ((inStateFlags & 0x2000u) != 0u) {
                 vec4 purrDiffuse = texture(sampler2D(globalTextures[drawData.diffuseTextureIndex], textureSampler), inUv);
                 vec3 purrColor = vec3(float((inEmissiveColor >> 22u) & 1023u), float((inEmissiveColor >> 12u) & 1023u), float((inEmissiveColor >> 2u) & 1023u)) / 1023.0;
-                float purrLuminosity = uintBitsToFloat(inStateFlags & 0xfffff000u);
+                float purrLuminosity = uintBitsToFloat((inStateFlags & 0xffffc000u) | ((inEmissiveColor & 3u) << 12u));
                 sampledColor = mix(pow(purrDiffuse.rgb, vec3(2.2)), purrDiffuse.rgb, purrDiffuse.a) * 2.0;
                 // Ground clutter normalizes its texture by L, then restores L
                 // before ordinary PBR/environment/punctual lighting. PartModel

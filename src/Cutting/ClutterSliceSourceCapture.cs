@@ -55,7 +55,7 @@ internal sealed class ClutterSliceSourceCapture : IDisposable
                 var primitive = mesh.HostPrimitives[p];
                 if (primitive.IndexBuffer == null || primitive.IndexBuffer.Stride != 4 || primitive.IndexBuffer.Count % 3 != 0)
                     throw new InvalidDataException("The ground object does not expose indexed triangles.");
-                var material = lod.ResolveMaterial(mesh.PrimitiveMaterialIds[p]).Get();
+                var material = lod.ResolveMaterial(mesh.PrimitiveMaterialIds[p]);
                 checked { _triangles += primitive.IndexBuffer.Count / 3; _metadataBytes += 256L + 2L * (material.Id?.Length ?? 0); }
                 yield return 0;
             }
@@ -92,7 +92,7 @@ internal sealed class ClutterSliceSourceCapture : IDisposable
             var faces = new List<SliceFace>();
             for (int p = 0; p < mesh.HostPrimitives.Length; p++)
             {
-                var material = lod.ResolveMaterial(mesh.PrimitiveMaterialIds[p]).Get();
+                var material = lod.ResolveMaterial(mesh.PrimitiveMaterialIds[p]);
                 bool leaf = ClutterSliceGeometry.IsFoliage(material.OpacityMap != null, material.ThicknessMap != null, material.DoubleSided.Value);
                 if (leaf && !ClutterTintShader.FoliageReady)
                     throw new InvalidDataException("The native foliage renderer is unavailable; preserving the ground object's appearance.");

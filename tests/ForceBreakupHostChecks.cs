@@ -40,9 +40,9 @@ internal static class ForceBreakupHostChecks
         var different = AuthoredDebrisAssets.Build(shape with { MassKg = 101 });
         var otherVisual = FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), different.Xml, different.Id, 2)
             .Assets.OfType<PartTemplate>().Single(p => p.Id == different.Id + "_surface");
-        Check(!visual.Components.Select(c => c.Id).Intersect(otherVisual.Components.Select(c => c.Id)).Any(),
+        Check(!visual.Components.Select(c => c.Key).Intersect(otherVisual.Components.Select(c => c.Key)).Any(),
             "unrelated debris has unique model IDs for KSA's global rendering cache");
-        Check(root.SubPartInstances.Count == 1 && root.SubPartInstances[0].InstanceOf == visual.Id,
+        Check(root.SubPartInstances.Count == 1 && root.SubPartInstances[0].Ref == visual.Id,
             "the native template reloads one independently pickable visual child");
         var transform = root.SubPartInstances[0].Transform!;
         Check(transform._positionRaw!.X == -2 && transform._positionRaw.Y == 4 && transform._positionRaw.Z == -6
@@ -51,12 +51,13 @@ internal static class ForceBreakupHostChecks
         Check(root.InertMasses.Single() is CustomMassTemplate && root.Components.Single() is ColliderModule.Template collider
             && collider.Colliders.Single() is BoxColliderTemplate,
             "each debris root reloads native dry mass, inertia and a finite collider");
-        Check(visual.Components.OfType<PartModelModule.Template>().Single().Mesh!.Id == "native_hull"
-            && visual.Components.OfType<PartModelGlassModule.Template>().Single().Mesh!.Id == "native_window"
+        Check(visual.Components.OfType<PartModelModule.Template>().Single().Mesh!.Ref == "native_hull"
+            && visual.Components.OfType<PartModelGlassModule.Template>().Single().Mesh!.Ref == "native_window"
             && visual.Components.OfType<MeshViewModule.Template>().Count() == 2,
             "native serializer retains opaque and glass rendering and picking for both meshes");
         Check(bundle.Assets.OfType<PartTemplate>().All(p => p.RocketCores.Count == 0 && p.RocketEngineControllers.Count == 0
-            && p.RocketThrusterControllers.Count == 0 && p.Control == null && p.Batteries.Count == 0
+            && p.RocketThrusterControllers.Count == 0
+            && !p.Components.Any(c => c is Control.Template or Battery.Template)
             && p.Components.All(c => c is PartModelModule.Template or PartModelGlassModule.Template or MeshViewModule.Template or ColliderModule.Template)),
             "replacement templates contain no tanks, controls, crew, engines or other functional modules");
         var commit = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(ForceVehicleBreakup), "Commit"));

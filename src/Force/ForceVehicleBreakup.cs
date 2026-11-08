@@ -367,8 +367,8 @@ internal sealed class ForceVehicleBreakup : IDisposable
         for (int i = 0; i < models.Length; i++)
         {
             var (meshReference, materialReference, glass, isInternal) = models[i];
-            var mesh = meshReference?.Get();
-            var material = materialReference?.Get();
+            var mesh = meshReference;
+            var material = materialReference;
             if (mesh?.HostPrimitives is not { Length: > 0 } primitives || !mesh.IsReferenceable || string.IsNullOrEmpty(mesh.Id)
                 || material == null || !material.IsReferenceable || string.IsNullOrEmpty(material.Id))
                 throw new InvalidDataException("An authored surface has no durable mesh/material or accessible geometry.");
@@ -698,10 +698,10 @@ internal sealed class ForceVehicleBreakup : IDisposable
     {
         // Span-backed native module collections cannot cross iterator suspension.
         foreach (var model in node.Modules.Get<PartModelModule>().ToArray())
-            yield return (model.PartModel.Template.Mesh, model.PartModel.Template.Material, false, model.PartModel.Template.Internal);
+            yield return (model.PartModel.Template.Mesh?.Value, model.PartModel.Template.Material?.Value, false, model.PartModel.Template.Internal);
         foreach (var model in node.Modules.Get<PartModelDynamicModule>().ToArray())
-            yield return (model.PartModelDynamic.Template.Mesh, model.PartModelDynamic.Template.Material, false, false);
+            yield return (model.PartModelDynamic.Template.Mesh?.Value, model.PartModelDynamic.Template.Material?.Value, false, false);
         foreach (var model in node.Modules.Get<PartModelGlassModule>().ToArray())
-            yield return (model.PartModelGlass.Template.Mesh, model.PartModelGlass.Template.Material, true, false);
+            yield return (model.PartModelGlass.Template.Mesh?.Value, model.PartModelGlass.Template.Material?.Value, true, false);
     }
 }

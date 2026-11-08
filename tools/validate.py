@@ -932,10 +932,11 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
 def _run_managed_project(source: Path, name: str, required: list[Path], program: str | None,
                          *, harmony: bool = False, host_references: tuple[str, ...] = ()) -> tuple[int, str]:
     """Generate isolated projects so game stubs cannot leak into the core checks or mod."""
-    numerics = (source.parent / "ksa-game-assemblies/current/dll/Brutal.Numerics.dll").resolve()
+    host = Path(os.environ.get("KSA_DLL_DIR", source.parent / "ksa-game-assemblies/current/dll")).resolve()
+    numerics = host / "Brutal.Numerics.dll"
     missing = [path.relative_to(source).as_posix() for path in required if not path.is_file()]
     if not numerics.is_file():
-        missing.append("../ksa-game-assemblies/current/dll/Brutal.Numerics.dll")
+        missing.append(str(numerics))
     if missing:
         return 1, "managed checks cannot be generated; missing: " + ", ".join(missing)
     check_dir = source / "artifacts/checks" / name

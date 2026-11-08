@@ -193,13 +193,14 @@ public sealed unsafe partial class SaberRenderer
             StencilAttachmentFormat=!water&&key.Stencil?key.Depth:VkFormat.Undefined
         };
         var noDepth=new VkPipelineDepthStencilStateCreateInfo{DepthTestEnable=false,DepthWriteEnable=false,StencilTestEnable=false};
+        var vertexInput=new VkPipelineVertexInputStateCreateInfo();
         fixed(VkPipelineShaderStageCreateInfo* stagePtr=stages)
         {
             var info=new VkGraphicsPipelineCreateInfo
             {
                 Next=&rendering,Layout=water?_waterLayout:_layout,StageCount=2,Stages=stagePtr,
                 DynamicState=renderer.DynamicStateInfo,ViewportState=renderer.ViewportState,
-                VertexInputState=Presets.VertexInput.None.Ptr,InputAssemblyState=Presets.InputAssembly.TriangleStrip,
+                VertexInputState=&vertexInput,InputAssemblyState=Presets.InputAssembly.TriangleStrip,
                 RasterizationState=Presets.Rasterization.Fill.CullNone,MultisampleState=&samples,
                 DepthStencilState=water?&noDepth:RenderingPresets.ReverseZDepthStencil.DepthTestNoWrite,
                 ColorBlendState=&blend

@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using BepuPhysics;
 using BepuPhysics.Collidables;
 using BepuPhysics.CollisionDetection;
@@ -39,6 +41,7 @@ internal static class ForceHostChecks
         Field(physical, "Handle", typeof(StaticHandle)); Field(physical, "Shape", typeof(TypedIndex));
         Field(physical, "UnitInertia", typeof(BodyInertia)); Field(physical, "SubCellId", typeof(uint));
         Field(physical, "PositionCcf", typeof(double3)); Field(physical, "RotationCcf", typeof(doubleQuat));
+        Field(physical, "PackedColor", typeof(uint)); Field(physical, "PackedModifierColor", typeof(uint));
         Field(dynamic, "Shape", typeof(TypedIndex)); Field(dynamic, "Key", key);
         Field(staticInfo, "Key", key); Field(staticInfo, "Mass", typeof(float));
         foreach (string name in new[] { "ObjectId", "ScaleId" })
@@ -132,12 +135,12 @@ internal static class ForceHostChecks
         Type physical = nativeType.GetNestedType("ClutterPhysicalInstance", BindingFlags.NonPublic)!;
         object row = Activator.CreateInstance(physical, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
             binder: null, args: [staticHandle, shape, new double3(1, 2, 3), doubleQuat.Identity,
-                7u, 2u, 4u, 0xABCDEFu, default(BodyInertia)], culture: null)!;
-        foreach (string reader in new[] { "InstanceHandle", "InstanceShape", "InstanceObject", "InstanceScale", "InstanceColor", "InstanceSubCell" })
+                7u, 2u, 4u, 0xABCDEFu, 0x123456u, default(BodyInertia)], culture: null)!;
+        foreach (string reader in new[] { "InstanceHandle", "InstanceShape", "InstanceObject", "InstanceScale", "InstanceColor", "InstanceModifierColor", "InstanceSubCell" })
         {
             var accessor = (Delegate)AccessTools.Field(bridge, reader).GetValue(null)!;
             string field = reader switch { "InstanceHandle" => "Handle", "InstanceShape" => "Shape", "InstanceObject" => "ObjectId",
-                "InstanceScale" => "ScaleId", "InstanceColor" => "PackedColor", _ => "SubCellId" };
+                "InstanceScale" => "ScaleId", "InstanceColor" => "PackedColor", "InstanceModifierColor" => "PackedModifierColor", _ => "SubCellId" };
             Check(Equals(accessor.DynamicInvoke(row), AccessTools.Field(physical, field).GetValue(row)),
                 "production private physical-row accessor executes correctly: " + reader);
         }
@@ -147,6 +150,28 @@ internal static class ForceHostChecks
         var displace = (ClutterForceNative.DisplaceDelegate)AccessTools.Field(bridge, "Displace").GetValue(null)!;
         Check(!displace(native, null!, in key, 5, out _),
             "production displacement delegate invokes the actual private game method with a valid by-ref stack contract");
+        // Preflight builds the fallback used after a completed ownership transfer
+        // if native placement reconstruction fails. Exercise its actual private-row
+        // path so the new terrain modifier colour cannot silently become zero.
+        var ecotype = (ClutterEcotypePhysicalData)RuntimeHelpers.GetUninitializedObject(typeof(ClutterEcotypePhysicalData));
+        ecotype.PrimitiveData = new ClutterEcotypePhysicalData.ObjectColliderPrimitiveInfo[37];
+        ecotype.PrimitiveData[36] = new() { FirstCollider = 0, ColliderCount = 1 };
+        AccessTools.Field(typeof(ClutterEcotypePhysicalData), "_colliderPrimitives").SetValue(ecotype,
+            new[] { new ClutterEcotypePhysicalData.ColliderPrimitiveData { Handle = shape, LocalRotation = doubleQuat.Identity } });
+        AccessTools.Field(nativeType, "_describedEcotypes").SetValue(native, new[] { null!, null!, null!, ecotype });
+        var instances = (IDictionary)AccessTools.Field(nativeType, "_instanceData").GetValue(native)!;
+        var rows = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(physical))!;
+        rows.Add(row); instances.Add(cell, rows);
+        var target = (ClutterForceTarget)RuntimeHelpers.GetUninitializedObject(typeof(ClutterForceTarget));
+        foreach (var (name, value) in new (string, object)[] { ("Native", native), ("Key", key), ("Shape", shape), ("_static", staticHandle) })
+            AccessTools.Field(typeof(ClutterForceTarget), name).SetValue(target, value);
+        object?[] placementArguments = [target, new RigidPose(new System.Numerics.Vector3(1, 2, 3)), null];
+        Check(AccessTools.Method(bridge, "ValidatePromotionShape").Invoke(null, placementArguments) is true
+            && placementArguments[2] is GroundClutterPlacementData.DisplacedObject placement
+            && placement.PackedColor == 0xABCDEFu && placement.PackedModifierColor == 0x123456u
+            && placement.PositionCcf == new double3(1, 2, 3) && placement.RotationCcf == doubleQuat.Identity,
+            "production promotion fallback preserves both native colour fields and reconstructed placement");
+        instances.Remove(cell);
         ClutterForceNative.Invalidate(native);
         Check(ClutterForceNative.Generation(native) == 1,
             "native clear generation invalidates old identities without reading or recycling a Bepu handle");

@@ -38,8 +38,10 @@ class Vec3(tuple):
 
 def shader_expression(expression, values):
     # Only local shader arithmetic is evaluated; these environments contain numeric
-    # vectors/samples and the three GLSL functions used by the native diffuse rule.
+    # vectors/samples and the GLSL functions used by the native diffuse rule/payload.
+    expression = re.sub(r'\b(0x[0-9a-fA-F]+|\d+)u\b', r'\1', expression)
     return eval(expression, {'__builtins__': {}, 'vec3': Vec3,
+                            'uintBitsToFloat': lambda bits: struct.unpack('<f', struct.pack('<I', bits))[0],
                             'pow': lambda a, b: a ** b, 'mix': lambda a, b, t: a * (1 - t) + b * t}, values)
 
 
@@ -74,7 +76,12 @@ def check_albedo_contract(content, native, output):
         if not re.search(endpoint, ground, re.S):
             raise RuntimeError('Native environment/punctual absolute-albedo contract changed')
     native_transmission = re.search(r'outColor\.rgb\s*\+=\s*global\.lighting\.sunColor\.rgb\s*\*\s*(.*?)\s*\*\s*leafAttenuationWavelengthMult', ground, re.S).group(1)
-    earth = ET.parse(content / 'Astronomicals.xml').find(".//Scattering[@Id='Earth_Scattering']/MeanDiffuseLuminosity")
+    astronomicals = ET.parse(content / 'Astronomicals.xml')
+    earth = astronomicals.find(".//Scattering[@Ref='Earth_Scattering']/MeanDiffuseLuminosity")
+    if earth is None:
+        earth = astronomicals.find(".//Scattering[@Id='Earth_Scattering']/MeanDiffuseLuminosity")
+    if earth is None:
+        raise RuntimeError('Native Earth scattering mean luminosity was not found')
     earth_luminosity = float(earth.get('Value')) ** 2.2
     capture = (DEFAULT_SOURCE / 'src/Cutting/ClutterSliceSourceCapture.cs').read_text()
     default = re.search(r'MeanDiffuseLuminosity\s*\?\?\s*([.\d]+)f,\s*([.\d]+)', capture)
@@ -100,11 +107,18 @@ def check_albedo_contract(content, native, output):
     for filename in ('MeshIndirect.frag', 'MeshIndirectRaytraced.frag'):
         production = (output / filename).read_text()
         assignments = re.search(r'sampledColor = mix\(pow\(purrDiffuse.*?sampledColor\s*\*=.*?;', production, re.S).group()
+        decode_luminosity = re.search(r'float purrLuminosity = (.*?);', production).group(1)
         transmission = re.search(r'lightColor\s*\+=\s*global\.lighting\.sunColor\.rgb\s*\*\s*(.*?)\n\s*\*\s*vec3\(1\.0, 0\.8, 0\.7\)', production, re.S).group(1)
         for exact_luminosity, alpha, diffuse, rgb10 in cases:
             bits = struct.unpack('<I', struct.pack('<f', exact_luminosity))[0] & 0xfffff000
             luminosity = struct.unpack('<f', struct.pack('<I', bits))[0]
             packed_color = rgb10[0] << 22 | rgb10[1] << 12 | rgb10[2] << 2
+            # Evaluate the actual emitted GLSL unpacking with every native flag set.
+            flags = 0x1fff | 0x2000 | (bits & 0xffffc000)
+            emission = packed_color | ((bits >> 12) & 3)
+            decoded = shader_expression(decode_luminosity, {'inStateFlags': flags, 'inEmissiveColor': emission})
+            if decoded != luminosity:
+                raise RuntimeError('Runtime tint payload lost durable luminosity bits or consumed native highlight flags')
             color = Vec3(*(((packed_color >> shift) & 1023) / 1023 for shift in (22, 12, 2)))
             relative = native_color(diffuse, alpha, color, luminosity)
             absolute = relative * luminosity

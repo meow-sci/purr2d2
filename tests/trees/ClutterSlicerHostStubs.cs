@@ -19,6 +19,7 @@ internal static class ClutterScenario
     internal static int WorkersRunning, MaximumWorkers, UploadsLive, MaximumUploads;
     internal static int LoadersRunning, MaximumLoaders;
     internal static Action? WorkerEntered;
+    internal static Action? TimedBoundary;
     internal static ManualResetEventSlim? WorkerRelease;
     internal static ManualResetEventSlim? LoaderRelease;
     internal static void Reset()
@@ -31,7 +32,7 @@ internal static class ClutterScenario
         MainThread = Environment.CurrentManagedThreadId; CaptureThread = CommitThread = WorkerThread = 0;
         WorkersRunning = MaximumWorkers = UploadsLive = MaximumUploads = 0;
         LoadersRunning = MaximumLoaders = 0; LoaderRelease = null;
-        WorkerEntered = null; WorkerRelease = null;
+        WorkerEntered = null; WorkerRelease = null; TimedBoundary = null;
         NativeSlicePhysics.VehicleLimit = 256;
     }
 }
@@ -101,6 +102,7 @@ namespace Purr2D2.Cutting
         internal ClutterSliceSourceCapture(ClutterSliceDescription source, ContactSlice contact, SlicePlaneRequest? request = null) { _source = source; }
         internal void Advance()
         {
+            ClutterScenario.TimedBoundary?.Invoke();
             ClutterScenario.CaptureThread = Environment.CurrentManagedThreadId;
             if (ClutterScenario.CaptureError is { } error) throw new InvalidDataException(error);
             Done = true; Input = new();
@@ -111,6 +113,7 @@ namespace Purr2D2.Cutting
     {
         internal static CpuSlice Calculate(SliceInput input, bool tree, CancellationToken cancel, Action<SlicePlan> publish)
         {
+            ClutterScenario.TimedBoundary?.Invoke();
             ClutterScenario.WorkerThread = Environment.CurrentManagedThreadId;
             int running = Interlocked.Increment(ref ClutterScenario.WorkersRunning);
             int old;
@@ -164,6 +167,7 @@ namespace Purr2D2.Slicing
             IReadOnlyList<PreparedPhysicsFragment> pieces, SlicePlane plane,
             out IReadOnlyList<KSA.Vehicle> created, out string reason)
         {
+            ClutterScenario.TimedBoundary?.Invoke();
             ClutterScenario.Replacements++; ClutterScenario.CommitThread = Environment.CurrentManagedThreadId;
             created = ClutterScenario.ReplaceSucceeds ? [new(), new()] : [];
             owner.BubbleVehicleCount += created.Count;
@@ -181,6 +185,7 @@ namespace Purr2D2.Rendering
         internal static (string Directory, object Mod) CaptureWorkerContext() => ("", new());
         internal static LoadedSlice LoadDetached(CpuSlice calculated, string directory, object mod, CancellationToken cancel)
         {
+            ClutterScenario.TimedBoundary?.Invoke();
             int running = Interlocked.Increment(ref ClutterScenario.LoadersRunning);
             int old;
             do { old = ClutterScenario.MaximumLoaders; if (old >= running) break; }
@@ -204,7 +209,7 @@ namespace Purr2D2.Rendering
             internal string? Error { get; private set; }
             internal UploadJob(LoadedSlice source)
             { ClutterScenario.UploadsLive++; ClutterScenario.MaximumUploads = Math.Max(ClutterScenario.MaximumUploads, ClutterScenario.UploadsLive); }
-            internal void Advance() { ClutterScenario.UploadAdvances++; Done = !ClutterScenario.HoldUploads; Error = ClutterScenario.UploadError; }
+            internal void Advance() { ClutterScenario.TimedBoundary?.Invoke(); ClutterScenario.UploadAdvances++; Done = !ClutterScenario.HoldUploads; Error = ClutterScenario.UploadError; }
             internal void Cancel() { }
             public void Dispose() { ClutterScenario.UploadDisposals++; ClutterScenario.UploadsLive--; }
         }

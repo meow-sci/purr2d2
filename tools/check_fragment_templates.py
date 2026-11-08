@@ -2,6 +2,7 @@
 """Exercise generated XML decoding against the actual host's managed game types."""
 from pathlib import Path
 import os
+import sys
 import subprocess
 import platform
 import struct
@@ -51,16 +52,21 @@ def managed_reference(dll):
 project = ET.Element('Project', Sdk='Microsoft.NET.Sdk')
 props = ET.SubElement(project, 'PropertyGroup')
 for key, value in {'OutputType': 'Exe', 'TargetFramework': 'net10.0', 'ImplicitUsings': 'enable',
-                   'Nullable': 'enable', 'EnableDefaultCompileItems': 'false'}.items():
+                   'Nullable': 'enable', 'EnableDefaultCompileItems': 'false',
+                   'StartupObject': 'FragmentContentHostChecks' if '--content-only' in sys.argv else 'FragmentTemplateChecks'}.items():
     ET.SubElement(props, key).text = value
 items = ET.SubElement(project, 'ItemGroup')
 ET.SubElement(items, 'PackageReference', Include='Samboy063.Tomlet', Version='6.2.0')
 ET.SubElement(items, 'PackageReference', Include='Lib.Harmony', Version='2.4.2')
+# Native content-tag discovery scans KSA's exported types, including saved graph codecs.
+ET.SubElement(items, 'PackageReference', Include='MemoryPack.Core', Version='1.21.4')
 # Native module callers mention KSA's logging constructor in their unchanged IL.
-ET.SubElement(items, 'PackageReference', Include='Microsoft.Extensions.Logging.Abstractions', Version='10.0.0')
+ET.SubElement(items, 'PackageReference', Include='Microsoft.Extensions.Logging.Console', Version='10.0.0')
 # The reference snapshot omits the native EditorTag/KeyHash hashing dependency.
 ET.SubElement(items, 'PackageReference', Include='System.IO.Hashing', Version='10.0.2')
-for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetWriter.cs',
+for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/FragmentAssetRegistration.cs',
+               'src/Rendering/FragmentContentSource.cs', 'src/Rendering/AuthoredDebrisAssets.cs',
+               'tests/FragmentContentHostChecks.cs', 'src/Rendering/FragmentAssetWriter.cs',
                'src/Rendering/ClutterSurfaceTint.cs',
                'src/Rendering/ClutterFoliageSurface.cs', 'src/Rendering/ClutterFoliageMaterial.cs', 'tests/ClutterFoliageHostChecks.cs',
                'src/Rendering/EnvironmentLightingPatch.cs', 'tests/EnvironmentLightingChecks.cs',
@@ -80,6 +86,8 @@ for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/Fragmen
                'tests/SliceWorkerDiagnosticsChecks.cs', 'tests/SliceWorkerHooksChecks.cs',
                'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs', 'tests/CapEmissionHostChecks.cs']:
     ET.SubElement(items, 'Compile', Include=str(root / source))
+for source in (root / 'src/Slicing/Planes').glob('*.cs'):
+    ET.SubElement(items, 'Compile', Include=str(source))
 for dll in host.glob('*.dll'):
     if dll.stem.startswith(('System.', 'Microsoft.')) or dll.stem in ('mscorlib', 'netstandard'):
         continue

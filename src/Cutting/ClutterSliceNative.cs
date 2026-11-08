@@ -43,12 +43,12 @@ internal static partial class ClutterForceNative
         }
         else return false;
         if (objectId >= ecotype.EcotypeReference.ClutterObjects.Count) return false;
-        var obj = ecotype.EcotypeReference.ClutterObjects[(int)objectId].Get();
+        var obj = ecotype.EcotypeReference.ClutterObjects[(int)objectId];
         double scale = ecotype.GetScale(scaleId);
         float mass = (float)ecotype.GetMass(objectId, scaleId);
         if (!double.IsFinite(scale) || scale <= 0 || !float.IsFinite(mass) || mass <= .001f || obj.Lods.Count == 0) return false;
         // Substances identify authored/modded trees too; names cover older content with generic substances.
-        string name = obj.Id + " " + ecotype.EcotypeReference.Name + " " + string.Join(" ", obj.Substances.Select(s => s.Id));
+        string name = obj.Id + " " + ecotype.EcotypeReference.Key + " " + string.Join(" ", obj.Substances.Select(s => s.Ref));
         bool tree = new[] { "tree", "wood", "trunk", "pine", "palm", "oak", "birch", "conifer" }
             .Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
         source = new(target, ecotype, obj, objectId, scaleId, packedColor, scale, mass, tree);

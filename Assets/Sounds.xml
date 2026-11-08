@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <Assets>
   <!-- Hum: supplied recording prepared as mono; swing, ignite/static/retract/clash/Force creak and break/somersault swoosh/fire crackling: supplied mono Ogg recordings;
        contact: original synthesis.
@@ -9,72 +9,124 @@
   <SpatialSoundData Id="Purr2D2TreeFireSpatial" DistanceFilter="false">
     <VolumeRange Min="1" Max="35" />
   </SpatialSoundData>
-  <Sound Id="Purr2D2TreeFireLoop" ChannelId="Sfx" SimSpeed="Ignore" Priority="118">
-    <SoundFile Path="Assets/Audio/fire-crackling.ogg">
-      <Loop RandomStartTime="true" />
-    </SoundFile>
-    <SpatialSoundData Id="Purr2D2TreeFireSpatial" />
+  <SoundFile Path="Assets/Audio/fire-crackling.ogg" Id="Purr2D2TreeFireLoop_File">
+    <Loop RandomStartTime="true" />
+  </SoundFile>
+  <Sound Id="Purr2D2TreeFireLoop" SimSpeed="Ignore" Priority="118">
+    <SpatialSoundData Ref="Purr2D2TreeFireSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2TreeFireLoop_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberLightIgnite" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/bfl9k_on.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/bfl9k_on.ogg" Id="Purr2D2SaberLightIgnite_File" />
+  <Sound Id="Purr2D2SaberLightIgnite" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberLightIgnite_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberDarkIgnite" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/dark_saber_on.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/dark_saber_on.ogg" Id="Purr2D2SaberDarkIgnite_File" />
+  <Sound Id="Purr2D2SaberDarkIgnite" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberDarkIgnite_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SomersaultSwoosh" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/sommersault_swoosh.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/sommersault_swoosh.ogg" Id="Purr2D2SomersaultSwoosh_File" />
+  <Sound Id="Purr2D2SomersaultSwoosh" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SomersaultSwoosh_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberSwing" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/saber_swoosh.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/saber_swoosh.ogg" Id="Purr2D2SaberSwing_File" />
+  <Sound Id="Purr2D2SaberSwing" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberSwing_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberRetract" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/saber_close.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/saber_close.ogg" Id="Purr2D2SaberRetract_File" />
+  <Sound Id="Purr2D2SaberRetract" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberRetract_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberClash" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/saber_clash.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/saber_clash.ogg" Id="Purr2D2SaberClash_File" />
+  <Sound Id="Purr2D2SaberClash" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberClash_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2ForceCreak" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/metal_creak.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/metal_creak.ogg" Id="Purr2D2ForceCreak_File" />
+  <Sound Id="Purr2D2ForceCreak" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2ForceCreak_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2ForceBreak" ChannelId="Sfx" SimSpeed="Ignore" Priority="110">
-    <SoundFile Path="Assets/Audio/metal_bang.ogg" />
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/metal_bang.ogg" Id="Purr2D2ForceBreak_File" />
+  <Sound Id="Purr2D2ForceBreak" SimSpeed="Ignore" Priority="110">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2ForceBreak_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberHum" ChannelId="Sfx" SimSpeed="Ignore" Priority="112">
-    <SoundFile Path="Assets/Audio/saber-hum.wav">
-      <Loop>
-        <Start Value="0" Unit="Pcm" />
-        <End Value="93546" Unit="Pcm" />
-      </Loop>
-    </SoundFile>
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/saber-hum.wav" Id="Purr2D2SaberHum_File">
+    <Loop>
+      <Start Value="0" Unit="Pcm" />
+      <End Value="93546" Unit="Pcm" />
+    </Loop>
+  </SoundFile>
+  <Sound Id="Purr2D2SaberHum" SimSpeed="Ignore" Priority="112">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberHum_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberLightStatic" ChannelId="Sfx" SimSpeed="Ignore" Priority="114">
-    <SoundFile Path="Assets/Audio/light_side_static.ogg">
-      <Loop />
-    </SoundFile>
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/light_side_static.ogg" Id="Purr2D2SaberLightStatic_File">
+    <Loop />
+  </SoundFile>
+  <Sound Id="Purr2D2SaberLightStatic" SimSpeed="Ignore" Priority="114">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberLightStatic_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberDarkStatic" ChannelId="Sfx" SimSpeed="Ignore" Priority="114">
-    <SoundFile Path="Assets/Audio/dark_side_static.ogg">
-      <Loop />
-    </SoundFile>
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/dark_side_static.ogg" Id="Purr2D2SaberDarkStatic_File">
+    <Loop />
+  </SoundFile>
+  <Sound Id="Purr2D2SaberDarkStatic" SimSpeed="Ignore" Priority="114">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberDarkStatic_File" />
+    </SoundFiles>
   </Sound>
-  <Sound Id="Purr2D2SaberContact" ChannelId="Sfx" SimSpeed="Ignore" Priority="120">
-    <SoundFile Path="Assets/Audio/saber-contact.wav">
-      <Loop>
-        <Start Value="0" Unit="Pcm" />
-        <End Value="95999" Unit="Pcm" />
-      </Loop>
-    </SoundFile>
-    <SpatialSoundData Id="Purr2D2SaberSpatial" />
+  <SoundFile Path="Assets/Audio/saber-contact.wav" Id="Purr2D2SaberContact_File">
+    <Loop>
+      <Start Value="0" Unit="Pcm" />
+      <End Value="95999" Unit="Pcm" />
+    </Loop>
+  </SoundFile>
+  <Sound Id="Purr2D2SaberContact" SimSpeed="Ignore" Priority="120">
+    <SpatialSoundData Ref="Purr2D2SaberSpatial" />
+    <Channel Ref="SfxChannel" />
+    <SoundFiles>
+      <SoundFile Ref="Purr2D2SaberContact_File" />
+    </SoundFiles>
   </Sound>
 </Assets>

@@ -60,8 +60,9 @@ namespace KSA
         internal readonly List<object> Items = [];
         internal IEnumerable<T> Get<T>() => Items.OfType<T>();
     }
+    internal sealed class DataReference<T> { internal T? Value = default; }
     internal sealed class MeshReference { internal double3[][]? PositionsCompare; internal MeshReference Get() => this; }
-    internal sealed class ModelTemplate { internal MeshReference? Mesh = null; }
+    internal sealed class ModelTemplate { internal DataReference<MeshReference>? Mesh = null; }
     internal sealed class Model { internal ModelTemplate Template = new(); }
     internal sealed class PartModelModule { internal Model PartModel = new(); }
     internal sealed class PartModelDynamicModule { internal Model PartModelDynamic = new(); }

@@ -101,18 +101,18 @@ internal static class ClutterFoliageMaterial
     private static int Opacity(int original, PartModel model)
     {
         if (!TryMaterial(model, out var material)) return original;
-        int texture = material.OpacityMap?.Get().BindlessHandle ?? TextureReference.EmptyWhite.BindlessHandle;
+        int texture = material.OpacityMap?.Value?.BindlessHandle ?? TextureReference.EmptyWhite.BindlessHandle;
         return ClutterFoliageSurface.Encode(texture, (int)material.ColorPipelineFlags);
     }
 
     private static int Thickness(int original, PartModel model) => TryMaterial(model, out var material)
-        ? material.ThicknessMap?.Get().BindlessHandle ?? -1 : original;
+        ? material.ThicknessMap?.Value?.BindlessHandle ?? -1 : original;
 
     private static bool TryMaterial(PartModel model, out GroundClutterMaterialReference material)
     {
         material = null!;
-        if (!ClutterFoliageSurface.IsMesh(model.Template.Mesh?.Id)) return false;
-        material = model.Template.Material as GroundClutterMaterialReference
+        if (!ClutterFoliageSurface.IsMesh(model.Template.Mesh?.Ref)) return false;
+        material = model.Template.Material?.Value as GroundClutterMaterialReference
             ?? throw new InvalidDataException("Generated foliage lost its native ground material.");
         return true;
     }

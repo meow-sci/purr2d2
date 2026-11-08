@@ -113,10 +113,12 @@ def check_manifest() -> None:
     manifest = ET.parse(ROOT / "Assets" / "Sounds.xml").getroot()
     assert manifest.tag == "Assets"
     sounds = manifest.findall("Sound")
-    assert len(sounds) == 12, "expected twelve sound declarations"
+    assert len(sounds) == 13, "expected thirteen sound declarations including tree fire"
     for sound in sounds:
-        assert sound.get("ChannelId") == "Sfx" and sound.get("SimSpeed") == "Ignore"
-        file = sound.find("SoundFile")
+        assert sound.find("Channel").get("Ref") == "SfxChannel" and sound.get("SimSpeed") == "Ignore"
+        reference = sound.find("SoundFiles/SoundFile")
+        assert reference is not None
+        file = manifest.find(f'SoundFile[@Id="{reference.get("Ref")}"]')
         assert file is not None
         assert file.get("TwoD", "false") == "false"
         path = ROOT / file.attrib["Path"]

@@ -154,6 +154,8 @@ namespace KSA
         }
     }
 
+    public sealed class DataReference<T> { public T? Value; }
+
     public sealed class MeshReference
     {
         public double3[][]? PositionsCompare;
@@ -176,7 +178,7 @@ namespace KSA
 
     public sealed class PartModelModule
     {
-        public sealed class Template { public MeshReference? Mesh; }
+        public sealed class Template { public DataReference<MeshReference>? Mesh; }
         public required PartModel PartModel;
     }
 

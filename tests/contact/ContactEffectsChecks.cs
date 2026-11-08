@@ -22,7 +22,7 @@ internal static class ContactEffectsChecks
         for (int i = 0; i < miss.Length; i += 3)
         { miss[i] = new(4, 0, -1); miss[i + 1] = new(6, 0, -1); miss[i + 2] = new(5, 0, 1); }
         var mesh = new MeshReference { PositionsCompare = [miss, [new(-1, 0, -1), new(1, 0, -1), new(0, 0, 1)]] };
-        part.Modules.Add(new PartModelDynamicModule { PartModelDynamic = new() { Template = new() { Mesh = mesh } } });
+        part.Modules.Add(new PartModelDynamicModule { PartModelDynamic = new() { Template = new() { Mesh = new() { Value = mesh } } } });
         vessel.Parts.Parts.Add(part);
         Universe.CurrentSystem = new(); Universe.CurrentSystem.All.Items = [owner, vessel];
         KSA.Program.EditorFlag = false; KSA.Program.Camera = new();

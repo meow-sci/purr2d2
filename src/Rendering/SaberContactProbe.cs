@@ -127,9 +127,9 @@ internal sealed class SaberContactProbe
     private void Add(Part part, Vehicle vehicle)
     {
         bool render = false;
-        foreach (var model in part.Modules.Get<PartModelModule>()) { render = true; AddMesh(model.PartModel.Template.Mesh?.Get()); }
-        foreach (var model in part.Modules.Get<PartModelDynamicModule>()) { render = true; AddMesh(model.PartModelDynamic.Template.Mesh?.Get()); }
-        foreach (var model in part.Modules.Get<PartModelGlassModule>()) { render = true; AddMesh(model.PartModelGlass.Template.Mesh?.Get()); }
+        foreach (var model in part.Modules.Get<PartModelModule>()) { render = true; AddMesh(model.PartModel.Template.Mesh?.Value); }
+        foreach (var model in part.Modules.Get<PartModelDynamicModule>()) { render = true; AddMesh(model.PartModelDynamic.Template.Mesh?.Value); }
+        foreach (var model in part.Modules.Get<PartModelGlassModule>()) { render = true; AddMesh(model.PartModelGlass.Template.Mesh?.Value); }
         if (!render) foreach (var view in part.Modules.Get<MeshViewModule>()) AddMesh(view.MeshView);
         void AddMesh(MeshReference? mesh)
         { if (mesh != null && _entries.Count < EntryBudget) _entries.Add(new(part, vehicle, mesh)); }

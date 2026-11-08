@@ -20,14 +20,15 @@ internal static class TreeFireAudioChecks
     {
         var assets = XDocument.Load("Assets/Sounds.xml");
         var sound = assets.Root!.Elements("Sound").Single(s => (string?)s.Attribute("Id") == "Purr2D2TreeFireLoop");
-        var file = sound.Element("SoundFile")!;
+        string fileId = (string)sound.Element("SoundFiles")!.Element("SoundFile")!.Attribute("Ref")!;
+        var file = assets.Root.Elements("SoundFile").Single(f => (string?)f.Attribute("Id") == fileId);
         var loop = file.Element("Loop");
         var spatial = assets.Root.Elements("SpatialSoundData").Single(s => (string?)s.Attribute("Id") == "Purr2D2TreeFireSpatial");
-        Check((string?)sound.Attribute("ChannelId") == "Sfx" && (string?)sound.Attribute("SimSpeed") == "Ignore"
+        Check((string?)sound.Element("Channel")?.Attribute("Ref") == "SfxChannel" && (string?)sound.Attribute("SimSpeed") == "Ignore"
             && (string?)file.Attribute("Path") == "Assets/Audio/fire-crackling.ogg"
             && (bool?)file.Attribute("TwoD") != true && (bool?)sound.Attribute("TwoD") != true
             && loop != null && (bool?)loop.Attribute("RandomStartTime") == true && !loop.Elements().Any()
-            && (string?)sound.Element("SpatialSoundData")?.Attribute("Id") == "Purr2D2TreeFireSpatial"
+            && (string?)sound.Element("SpatialSoundData")?.Attribute("Ref") == "Purr2D2TreeFireSpatial"
             && (int?)spatial.Element("VolumeRange")?.Attribute("Min") == 1
             && (int?)spatial.Element("VolumeRange")?.Attribute("Max") == 35,
             "actual sound asset declares Sfx/Ignore, the supplied full-file loop, randomized fragment phases and 1–35m spatial falloff");

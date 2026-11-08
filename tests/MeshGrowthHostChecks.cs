@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Threading;
+using Brutal;
 using Brutal.VulkanApi;
 using Brutal.VulkanApi.Abstractions;
 using HarmonyLib;
@@ -9,6 +10,7 @@ using KSA.Rendering;
 using KSA.Rendering.Raytracing;
 using KSA.Rendering.Thumbnails;
 using Purr2D2.Rendering;
+using RenderCore;
 using VulkanQueue = Brutal.VulkanApi.Queue;
 
 // All assertions inspect real host types and IL. No renderer or Vulkan device is created.
@@ -30,6 +32,18 @@ internal static class MeshGrowthHostChecks
 
     private static void SharedBufferReferences()
     {
+        var meshFields = new (string Name, Type Type)[]
+        {
+            ("HostMesh", typeof(MeshAsset)), ("HasNormal", typeof(bool)), ("HasUV", typeof(bool)),
+            ("VertexStride", typeof(ByteSize)), ("VerticesOffset", typeof(ByteSize)), ("VerticesSize", typeof(ByteSize)),
+            ("IndexCount", typeof(int)), ("IndexType", typeof(VkIndexType)), ("IndicesStride", typeof(ByteSize)),
+            ("IndicesOffset", typeof(ByteSize)), ("IndicesSize", typeof(ByteSize))
+        };
+        Check(typeof(DeviceMeshInterleaved).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Length == meshFields.Length,
+            "Detached device meshes must not skip new native constructor-owned state.");
+        foreach (var (name, type) in meshFields)
+            Check(Field(typeof(DeviceMeshInterleaved), name, type, false).IsPublic,
+                $"Native detached mesh field {name} must remain a plain public field of its audited type.");
         Check(typeof(BufferEx).IsValueType && typeof(BufferEx).IsDefined(typeof(System.Runtime.CompilerServices.IsReadOnlyAttribute)),
             "BufferEx must remain a readonly value wrapper; duplicate wrappers do not own independent allocations.");
         var vertex = Field(typeof(DeviceMeshInterleaved.Shared), "VertexAllocation", typeof(BufferEx), true);
@@ -42,6 +56,18 @@ internal static class MeshGrowthHostChecks
         var bind = Il(Method(typeof(DeviceMeshInterleaved.Shared), "BindBuffers"));
         Check(bind.Any(c => Loads(c, vertex)) && bind.Any(c => Loads(c, index)),
             "Raster draws must bind current shared handles.");
+        foreach (var (type, name) in new (Type, string)[]
+        {
+            (typeof(PartModelRaytracingData), "AddCommandsRaytraced"), (typeof(PartModelRaytracingData), "AddCommandsPrePass"),
+            (typeof(PartModelRaytracingGlassData), "AddCommandsRaytraced"), (typeof(PartModelRaytracingGlassData), "AddCommandsPrePass"),
+            (typeof(PartModelRaytracingGlassData), "WriteCommandsColor"), (typeof(PartModelGlass.Shared), "WriteCommandsColor"),
+            (typeof(ThumbnailRenderer), "RecordPartRender")
+        })
+        {
+            var draw = Il(Method(type, name));
+            Check(draw.Any(c => Loads(c, vertex)) && draw.Any(c => Loads(c, index)),
+                $"Native {type.Name}.{name} must bind both current shared handles.");
+        }
     }
 
     private static void RaytraceReferences()
@@ -93,7 +119,7 @@ internal static class MeshGrowthHostChecks
         Check(get.Any(c => Loads(c, cache)) && get.Count(c => c.opcode == OpCodes.Newobj
             && c.operand is ConstructorInfo info && info.DeclaringType == typeof(VulkanQueue)) == 1,
             "Device.GetQueue must remain the unique cached queue wrapper constructor.");
-        foreach (string name in new[] { "Submit", "Submit2", "WaitIdle", "PresentKHR" })
+        foreach (string name in new[] { "Submit", "Submit2", "WaitIdle", "PresentKHR", "BindSparse" })
         {
             var il = Il(Method(typeof(VulkanQueue), name));
             int enter = il.FindIndex(c => c.operand is MethodInfo m && m.DeclaringType == typeof(Lock) && m.Name == "EnterScope");
@@ -238,7 +264,14 @@ internal static class MeshGrowthHostChecks
             catch (NotSupportedException) { continue; }
             throw new Exception("The production adapter accepted an unsupported module combination.");
         }
-        // The previous audited build (2026.10.19.5638) must not be accepted by this audit.
+        // Neither earlier audited module set is covered by the current audit.
+        try
+        {
+            NativeMeshGrowthHost.ValidateBuild(new("a6318490-1e4f-4d4c-9f1a-b48f97f44be4"), new("088d08a2-d0b4-43bc-93fe-68b321308a47"),
+                new("5b3e5098-d585-4a1c-be2b-33832dc4dbbb"), new("8b56e057-d5e5-45a1-b050-7148531f6907"), new("ff08b769-d391-48e9-91ba-ec4495e7e897"));
+            throw new Exception("The production adapter accepted the previous audited 5707 host build.");
+        }
+        catch (NotSupportedException) { }
         try
         {
             NativeMeshGrowthHost.ValidateBuild(new("80bf516c-4284-4284-9ce1-a0462e9664e1"), new("72531e11-98ac-4f77-afd9-b9130e71655c"),

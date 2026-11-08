@@ -74,12 +74,13 @@ def fixtures(content):
             return [x, y, z] if normal else [x + pos[0], y + pos[1], z + pos[2]]
 
         def visit(node, transforms):
-            definition = definitions[node.get('InstanceOf')] if node.get('InstanceOf') else node
+            reference = node.get('Ref') or node.get('InstanceOf')
+            definition = definitions[reference] if reference else node
             faces = []
-            for model in definition:
+            for model in list(definition) + list(definition.findall("Components/*")):
                 if model.tag in ('PartModel', 'PartModelDynamic', 'PartModelGlass'):
-                    mesh_id = model.find('Mesh').get('Id')
-                    material_key = model.find('Material').get('Id') + ':' + model.tag
+                    mesh_id = model.find('Mesh').get('Ref') or model.find('Mesh').get('Id')
+                    material_key = (model.find('Material').get('Ref') or model.find('Material').get('Id')) + ':' + model.tag
                     material_id = materials.setdefault(material_key, len(materials))
                     if mesh_id not in meshes:
                         meshes.update(load_meshes(mesh_id.split('_')[0]))
@@ -93,7 +94,7 @@ def fixtures(content):
                         faces.append(out)
             if faces:
                 groups.append(faces)
-            for sub in definition.findall('SubPart'):
+            for sub in definition.findall('SubPart') + definition.findall('SubParts/SubPart'):
                 visit(sub, [sub] + transforms)
         visit(definitions[target], [])
         yield {'Name': target, 'Groups': groups}
@@ -122,7 +123,7 @@ if __name__ == '__main__':
         output.write_text(data)
     required = [DEFAULT_SOURCE / p for p in ('src/Cutting/CutGeometry.cs', 'src/Cutting/PlaneSlicer.cs', 'src/Cutting/ClosedMeshPreparation.cs',
                 'src/Cutting/ContactSliceGeometry.cs',
-                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentAssetWriter.cs', 'src/Rendering/FragmentTopology.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs', 'src/Slicing/SliceColliderGeometry.cs', 'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Cutting/TreeSolidPreparation.cs', 'src/Cutting/WoodCapGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'tests/StockSliceChecks.cs')]
+                'src/Rendering/FragmentGlbWriter.cs', 'src/Rendering/FragmentAssetWriter.cs', 'src/Rendering/FragmentTopology.cs', 'src/Slicing/SliceGeometryWork.cs', 'src/Slicing/QuietSubpartBreakup.cs', 'src/Slicing/SliceColliderGeometry.cs', 'src/Cutting/SliceShellBuilder.cs', 'src/Cutting/AssistedSliceGeometry.cs', 'src/Cutting/TreeSolidPreparation.cs', 'src/Cutting/WoodCapGeometry.cs', 'src/Slicing/SlicePrincipalFrame.cs', 'src/Slicing/SliceMeshPrecision.cs', 'src/Slicing/Planes/ISlicePlaneStrategy.cs', 'src/Slicing/Planes/SliceSweepSamples.cs', 'src/Slicing/Planes/LegacyContactPlaneStrategy.cs', 'src/Slicing/Planes/BladePlaneStrategies.cs', 'tests/StockSliceChecks.cs')]
     code, log = _run_managed_project(DEFAULT_SOURCE, 'StockSliceChecks', required,
         'internal static class Program { static void Main() => StockSliceChecks.Run(' + json.dumps(str(output)) + '); }')
     print(log)

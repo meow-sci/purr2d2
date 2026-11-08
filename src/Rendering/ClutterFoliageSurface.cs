@@ -68,7 +68,7 @@ internal static class ClutterFoliageSurface
         string transmission = """
             // Native leaf thickness uses the same inexpensive back-light term.
             // This remains a part draw, using the source planet's saved luminosity.
-            if (purrFoliage(drawData) && drawData.tfiTextureIndex >= 0 && SHOW_SUN != 0u && (inStateFlags & 0x800u) != 0u) {
+            if (purrFoliage(drawData) && drawData.tfiTextureIndex >= 0 && SHOW_SUN != 0u && (inStateFlags & 0x2000u) != 0u) {
                 float purrThickness = texture(sampler2D(globalTextures[drawData.tfiTextureIndex], textureSampler), inUv).r;
                 vec3 purrDirection = normalize(sunPos().xyz - inWorldPosition);
                 vec3 purrView = normalize(-inWorldPosition);

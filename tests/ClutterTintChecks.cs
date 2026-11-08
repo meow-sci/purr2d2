@@ -21,13 +21,23 @@ internal static class ClutterTintChecks
             string id = "Purr2D2_Fragment_abc_s3" + ClutterSurfaceTint.MeshSuffix(source, encoded) + "_m0";
             if (!ClutterSurfaceTint.TryRead(id, out uint color, out uint lum) || color != source || lum != encoded)
                 throw new Exception("Durable ground tint failed mesh-name round trip.");
-            int flags = ClutterSurfaceTint.Flags(0x455, encoded);
-            if (((uint)flags & 0x7ffu) != 0x455 || ((uint)flags & ClutterSurfaceTint.Marker) == 0
-                || ((uint)flags & ClutterSurfaceTint.LuminosityMask) != encoded)
-                throw new Exception("Tint flags changed native selection/shadow/emission state.");
+            for (uint low = 0; low < 4; low++)
+            {
+                uint bits = (encoded & 0xffffc000u) | (low << 12);
+                int flags = ClutterSurfaceTint.Flags(0x1fff, bits);
+                uint packedColor = ClutterSurfaceTint.Color(source | (3u - low), bits);
+                if (((uint)flags & 0x1fffu) != 0x1fffu || ((uint)flags & ClutterSurfaceTint.Marker) == 0
+                    || (((uint)flags & 0xffffc000u) | ((packedColor & 3u) << 12)) != bits
+                    || (packedColor & ~3u) != source)
+                    throw new Exception("Tint payload changed native highlight flags, RGB10 color or durable luminosity precision.");
+            }
             if (ClutterSurfaceTint.TryRead(id + "_cap", out _, out _) || ClutterSurfaceTint.TryRead("Ordinary" + id, out _, out _))
                 throw new Exception("Tint leaked into cap or ordinary model IDs.");
         }
+        for (uint flags = 0; flags <= 0x1fffu; flags++)
+            if ((flags & ClutterSurfaceTint.Marker) != 0
+                || ((uint)ClutterSurfaceTint.Flags((int)flags, restoredLuminosity) & 0x1fffu) != flags)
+                throw new Exception("Tint encoding changed a native highlight state or marked an ordinary state.");
         foreach (float invalid in new[] { 0f, -1, float.NaN, float.PositiveInfinity })
         {
             bool refused = false;
@@ -57,7 +67,7 @@ internal static class ClutterTintChecks
             int added = rewritten.Length - sourceCode.Length;
             if (insertion < declaration.Length || added <= 0 || rewritten[..insertion] != sourceCode[..insertion]
                 || rewritten[(insertion + added)..] != sourceCode[insertion..]
-                || !rewritten.AsSpan(insertion, added).Contains("if ((inStateFlags & 0x800u) != 0u)", StringComparison.Ordinal))
+                || !rewritten.AsSpan(insertion, added).Contains("if ((inStateFlags & 0x2000u) != 0u)", StringComparison.Ordinal))
                 throw new Exception("The clutter correction changed ordinary material, AORM, direct/ambient/punctual, frost or cap paths.");
             if (filename == "MeshIndirect.frag" && rewritten.IndexOf("// PURR_CLUTTER_TINT", StringComparison.Ordinal)
                 > rewritten.IndexOf("sampledColor = mix(sampledColor, frostDiffuse, frostStrength)", StringComparison.Ordinal))
@@ -71,7 +81,7 @@ internal static class ClutterTintChecks
                 throw new Exception("Foliage opacity, thickness or native thin-film isolation was lost.");
             File.WriteAllText(Path.Combine(output, filename), EnableIncludes(rewritten));
             bool refused = false;
-            try { ClutterSurfaceTint.RewriteShader(sourceCode.Replace("inStateFlags & (1u << 4)", "inStateFlags & (1u << 11)"), false); }
+            try { ClutterSurfaceTint.RewriteShader(sourceCode.Replace("inStateFlags & (1u << 4)", "inStateFlags & (1u << 13)"), false); }
             catch (InvalidDataException) { refused = true; }
             if (!refused) throw new Exception("Changed native state allocation did not fail closed.");
         }
@@ -96,7 +106,7 @@ internal static class ClutterTintChecks
             if (!refused) throw new Exception("Changed shadow instance flags did not fail closed.");
         }
         File.WriteAllText(Path.Combine(output, "MeshIndirect.vert"), EnableIncludes(File.ReadAllText(Path.Combine(nativeShaders, "Mesh", "MeshIndirect.vert"))));
-        Console.WriteLine("PASS: exact native RGB10 tint, preserved native flags/caps, 1000 luminosities within 0.05%, foliage opacity/thickness descriptor round trips, fail-closed native color/pre-pass rewrites.");
+        Console.WriteLine("PASS: exact native RGB10 tint, all thirteen native flags/caps preserved, 1000 durable luminosities within 0.05% and all split payload bits exact, foliage opacity/thickness descriptor round trips, fail-closed native color/pre-pass rewrites.");
     }
     private static string EnableIncludes(string source) => System.Text.RegularExpressions.Regex.Replace(source,
         @"#version (\d+)", "#version $1\n#extension GL_GOOGLE_include_directive : require");

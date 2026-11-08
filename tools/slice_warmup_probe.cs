@@ -119,6 +119,11 @@ internal static class SliceWarmupProbe
             return;
         }
 
+        // The production summary is opt-in telemetry. Enable it in this isolated
+        // probe so the runner can verify every selected body was actually prepared.
+        // No user settings or gameplay state are changed by the probe process.
+        assembly.GetType("Purr2D2.Core.DebugTimings", true)!
+            .GetField("Enabled", HiddenStatic)!.SetValue(null, true);
         start.Invoke(null, null);
         for (int i = 0; i < 64; i++) start.Invoke(null, null);
         Wait();

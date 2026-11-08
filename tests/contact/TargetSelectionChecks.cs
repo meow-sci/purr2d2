@@ -19,7 +19,7 @@ internal static class TargetSelectionChecks
         var second = new Part { PartParent = root };
         foreach (var child in new[] { first, second })
         {
-            child.Modules.Add(new PartModelModule { PartModel = new() { Template = new() { Mesh = NewMesh() } } });
+            child.Modules.Add(new PartModelModule { PartModel = new() { Template = new() { Mesh = new() { Value = NewMesh() } } } });
             root.SubParts.Add(child);
         }
         Check(PartSliceTargeting.RepairLegacyFragmentPicker(root), "legacy fragment gains native subpart picking before tree creation");
@@ -37,7 +37,7 @@ internal static class TargetSelectionChecks
         var transformed = new Part(); transformed.Template.Id = "Purr2D2_Fragment_transformed";
         transformed.Modules.Add(new MeshViewModule(pickMesh));
         var moved = new Part { PartParent = transformed, PositionParentAsmb = new(1, 0, 0) };
-        moved.Modules.Add(new PartModelModule { PartModel = new() { Template = new() { Mesh = pickMesh } } });
+        moved.Modules.Add(new PartModelModule { PartModel = new() { Template = new() { Mesh = new() { Value = pickMesh } } } });
         transformed.SubParts.Add(moved);
         Check(!PartSliceTargeting.RepairLegacyFragmentPicker(transformed), "a transformed child cannot misplace a legacy hull picker");
         transformed.Tree = new Vehicle().Parts; moved.PositionParentAsmb = default;
@@ -241,7 +241,7 @@ internal static class TargetSelectionChecks
         transformed.Target.CenterOfMassAsmb = new(.2, .4, -.7);
         transformed.Target.Asmb2Ego = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .6);
         var sub = new Part { PartParent = transformed.Hull, Tree = transformed.Target.Parts, PositionParentAsmb = new(.1, .2, .3) };
-        sub.Modules.Add(new PartModelDynamicModule { PartModelDynamic = new() { Template = new() { Mesh = NewMesh() } } });
+        sub.Modules.Add(new PartModelDynamicModule { PartModelDynamic = new() { Template = new() { Mesh = new() { Value = NewMesh() } } } });
         transformed.Hull.SubParts.Add(sub);
         var matrix = sub.MatrixAsmb2Ego(transformed.Target.GetMatrixAsmb2Ego(KSA.Program.Camera!));
         var point = double3.Zero.Transform(matrix);

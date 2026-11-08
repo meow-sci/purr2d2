@@ -1,20 +1,26 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Original Purr2D2 cape asset in meters, +Y up and +Z forward.
-     CapeRoot is the identity skin root; its 117 children are row-major local translations.
-     CapeMesh is a separate identity scene node. -->
+<?xml version='1.0' encoding='utf-8'?>
 <Assets>
+  <File Id="Purr2D2_Cape_Glb_Source" Path="Assets/Models/Purr2D2_Cape.glb" />
   <GltfFile Id="Purr2D2_Cape_Glb">
-    <Source Path="Assets/Models/Purr2D2_Cape.glb" />
-    <Material Name="Purr2D2_Cloth_Light" AssetId="Purr2D2_Cloth_Light" />
+    <Source Ref="Purr2D2_Cape_Glb_Source" />
+    <Materials>
+      <Material Name="Purr2D2_Cloth_Light" AssetId="Purr2D2_Cloth_Light" />
+    </Materials>
   </GltfFile>
+  <Texture Id="Purr2D2_Cloth_Light_Diffuse" Path="Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png" Category="Default" />
+  <Texture Id="Purr2D2_Cloth_Light_Normal" Path="Assets/Textures/Purr2D2_Cloth_Light_Normal.png" Category="Default" />
+  <Texture Id="Purr2D2_Cloth_Light_AoRoughMetal" Path="Assets/Textures/Purr2D2_Cloth_Light_ORM.png" Category="Default" />
   <PbrMaterial Id="Purr2D2_Cloth_Light">
-    <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Light_Diffuse.png" Category="Default" />
-    <Normal Path="Assets/Textures/Purr2D2_Cloth_Light_Normal.png" Category="Default" />
-    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_Light_ORM.png" Category="Default" />
+    <Diffuse Ref="Purr2D2_Cloth_Light_Diffuse" />
+    <Normal Ref="Purr2D2_Cloth_Light_Normal" />
+    <AoRoughMetal Ref="Purr2D2_Cloth_Light_AoRoughMetal" />
   </PbrMaterial>
+  <Texture Id="Purr2D2_Cloth_Dark_Diffuse" Path="Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png" Category="Default" />
+  <Texture Id="Purr2D2_Cloth_Dark_Normal" Path="Assets/Textures/Purr2D2_Cloth_Normal.png" Category="Default" />
+  <Texture Id="Purr2D2_Cloth_Dark_AoRoughMetal" Path="Assets/Textures/Purr2D2_Cloth_ORM.png" Category="Default" />
   <PbrMaterial Id="Purr2D2_Cloth_Dark">
-    <Diffuse Path="Assets/Textures/Purr2D2_Cloth_Dark_Diffuse.png" Category="Default" />
-    <Normal Path="Assets/Textures/Purr2D2_Cloth_Normal.png" Category="Default" />
-    <AoRoughMetal Path="Assets/Textures/Purr2D2_Cloth_ORM.png" Category="Default" />
+    <Diffuse Ref="Purr2D2_Cloth_Dark_Diffuse" />
+    <Normal Ref="Purr2D2_Cloth_Dark_Normal" />
+    <AoRoughMetal Ref="Purr2D2_Cloth_Dark_AoRoughMetal" />
   </PbrMaterial>
 </Assets>

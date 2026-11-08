@@ -112,13 +112,10 @@ dotnet build Purr2D2.slnx -c Debug -p:KSAFolder="$KSA_DLL_DIR"
 dotnet build Purr2D2.slnx -c Release -p:KSAFolder="$KSA_DLL_DIR"
 ```
 
-**Test-path trap:** `tools/validate.py::_run_managed_project` currently hard-codes the sibling
-`../ksa-game-assemblies/current/dll` for Numerics/Bepu and extra host references; it does **not**
-honor `KSA_DLL_DIR`. `tools/check_stock_slices.py` uses that helper too. Confirm that path resolves
-to `NEW`. If it does not, adapt the helper to accept the target directory consistently (retaining
-the default), or run from an isolated writable layout with matching sibling references. Never
-repoint or mutate a read-only reference checkout. Inspect generated harness HintPaths before
-crediting their results to `NEW`; environment variables alone do not prove which DLLs were used.
+**Test-path check:** `tools/validate.py::_run_managed_project` now honors `KSA_DLL_DIR`,
+retaining the sibling `../ksa-game-assemblies/current/dll` default. `tools/check_stock_slices.py`
+uses that helper too. Inspect generated harness HintPaths before crediting their results to NEW;
+environment variables alone do not prove which DLLs were used. Never repoint a read-only checkout.
 
 Rebuild generated harnesses from current source lists. Cached `--no-build` executables, previously
 generated projects and old PE-adapted host copies are not new-version evidence. If references or
@@ -260,3 +257,11 @@ managed/host/shader/package results; durable-data implications; and remaining na
 pre-existing failures separately from update regressions. The upgrade is fully validated only
 when the required native pass also succeeds. Do not install, publish, commit or modify sibling
 reference repos unless that work was separately requested.
+
+## Current 5801 migration notes
+
+The active baseline is KSA 2026.11.10.5801 (snapshot commit 4de698e8cf248c29fc95f188fb258775d6e574a3); native acceptance remains pending. Historical baseline paragraphs above identify prior records only. The entry now uses StarMapBeforeMain to install ContentLoader.ReadSource and ModLibrary.LoadAll(IContentLoadProgress) hooks, not ImmediateLoad or StarMapAllModsLoaded. Persisted generated XML joins ContentSource before native reset/register/resolve; runtime assets use FragmentAssetRegistration and TagTable collection lookups. ModLibrary.TryGet does not cover PartTemplate/MeshReference in this host even though Get does.
+
+Audit new collection wrappers, Key/Ref and resolved DataReference.Value semantics, including all shipped asset manifests with the real ContentLoader and ReadPayloads=false. Preserve legacy generated XML bytes/IDs using the in-memory adapter; do not rehash/rewrite installed assets. Source shims must reject unknown/conflicting XML instead of silently dropping fields. Clutter native highlighting uses bits0–12; runtime tint marker13 shares the two low luminosity bits with unused RGB10 alpha bits. Include check_clutter_tint.py and check_clutter_coverage_hooks.py in the final matrix, besides the original checks.
+
+Stock harness generation includes all four src/Slicing/Planes files. Native ContentTagTable scans need snapshot-omitted MemoryPack.Core 1.21.4 and Microsoft.Extensions.Logging.Console 10 in test-only package references. Do not ship them with the mod. Keep repo AGENTS.md’s instruction to leave README manually maintained.

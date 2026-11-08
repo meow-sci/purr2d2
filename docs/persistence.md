@@ -47,3 +47,7 @@ Standalone Purr2D2 retains KSA's current load timing. Passive observation and de
 - `KittenPersistenceRuntimeChecks` links production kitten, cape, pose, identity and persistence code with native/render/audio boundary fakes. It covers pending intent, boarding/seated/disabled capture, replacement EVA binding, repeated cleanup, first-system observation, identity conflicts and a 129-enabled-saber restore. Warm stable refreshes assert zero managed allocations and one fleet scan each.
 
 Build and managed fixtures do not certify native graphics, audio or cloth lifetime. The current run and outstanding native acceptance are recorded in [ACCEPTANCE.md](ACCEPTANCE.md). Source research and the original design are in [research-persistence.md](research-persistence.md).
+
+## KSA 5801 upgrade
+
+The sidecar schema, universe.xml hash pairing and roster/EVA/seat identity rules are unchanged. New native condition, life-support and Rules data is included in the native XML hash without entering the mod’s durable choices. Generated assets now join the native two-phase content source at startup; legacy XML is converted only in memory, retaining prior local placement identities as Key values. Keep settings.json, each per-save purr2d2.json, and every Generated/Slices XML/GLB when updating. A clean distribution is not a replacement for that installed user data. Native old-save/restart/co-load acceptance remains pending.

@@ -20,13 +20,13 @@ def check(root):
     require(wood.find('Emissive') is None and wood.find('Alpha') is None and wood.find('ThinFilm') is None,
             'Wood end grain must remain opaque, nonemissive ordinary PBR')
     metal = assets.find("PbrMaterial[@Id='Purr2D2_CutSurface']")
-    require(metal is not None and metal.find("Emissive[@Id='EmptyWhite']") is not None,
+    require(metal is not None and metal.find("Emissive[@Ref='EmptyWhite']") is not None,
             'Generic vessel/rock cut-surface behavior must remain separate')
     textures = {}
     for element, suffix in (('Diffuse', 'Diffuse'), ('Normal', 'Normal'), ('AoRoughMetal', 'ORM')):
         expected = f'Assets/Textures/{MATERIAL}_{suffix}.png'
         node = wood.find(element)
-        require(node is not None and node.get('Path') == expected, f'Wood {element} must use its owned end-grain map')
+        require(node is not None and assets.find(f"Texture[@Id='{node.get('Ref')}']") is not None and assets.find(f"Texture[@Id='{node.get('Ref')}']").get('Path') == expected, f'Wood {element} must use its owned end-grain map')
         _, _, rows = read_rgba_png(root / expected, SIZE)
         pixels = [tuple(row[x:x + 4]) for row in rows for x in range(0, len(row), 4)]
         require(all(pixel[3] == 255 for pixel in pixels), f'Wood {suffix} map must be fully opaque')

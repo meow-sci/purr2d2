@@ -253,8 +253,8 @@ internal sealed class VesselSliceQueue : IDisposable
             foreach (var model in SliceSourceCapture.EnumerateModels(part))
             {
                 if (!BasicCurrent(e) || !e.EvidenceCurrent()) throw new InvalidDataException("Source changed during validation.");
-                var mesh = model.Mesh?.Get();
-                yield return new(part, local, false, mesh, mesh?.PositionsCompare, model.Material?.Get(), model.Glass);
+                var mesh = model.Mesh;
+                yield return new(part, local, false, mesh, mesh?.PositionsCompare, model.Material, model.Glass);
             }
         }
     }

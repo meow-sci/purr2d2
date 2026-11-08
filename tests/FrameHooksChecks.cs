@@ -217,11 +217,16 @@ internal static class FrameHooksChecks
         var hooks = GameHooks.PartConstructionHooks();
         Require(hooks.Select(h => h.MethodHandle).Distinct().Count() == hooks.Length, "Part construction hooks must be distinct.");
         var constructors = typeof(Part).GetConstructors(BindingFlags.Instance | BindingFlags.Public);
-        Require(constructors.Length > 0 && constructors.All(c => Reached(c, hooks) == 1),
-            "Every public Part constructor must reach exactly one fragment-picker postfix.");
+        Require(constructors.Length > 0, "Part must expose public construction entry points.");
+        foreach (var constructor in constructors)
+            Require(Reached(constructor, hooks) == 1,
+                $"Public Part constructor {constructor} must reach exactly one fragment-picker postfix.");
         var saveLoad = AccessTools.Constructor(typeof(Part), [typeof(PartInstance), typeof(Part)])!;
         Require(Reached(saveLoad, [hooks[0]]) == 0,
             "Constructor-chain analysis must detect that the string/template hook alone misses save-load construction.");
+        var rootSaveLoad = AccessTools.Constructor(typeof(Part), [typeof(PartInstance)])!;
+        Require(Reached(rootSaveLoad, hooks.Where(h => h.MethodHandle != rootSaveLoad.MethodHandle).ToArray()) == 0,
+            "Constructor-chain analysis must detect that 5801's one-argument save constructor bypasses the other public hooks.");
         var subtree = PatchProcessor.GetOriginalInstructions(AccessTools.PropertyGetter(typeof(Part), nameof(Part.SubtreeModules))!);
         Require(subtree.Any(c => c.LoadsField(AccessTools.Field(typeof(Part), "_subtreeModules")))
             && subtree.Any(c => c.operand is MemberInfo m && m.Name is "Modules" or "get_Modules"),

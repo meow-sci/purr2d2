@@ -1,30 +1,58 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <Assets>
   <!-- Transient physics owner only. The saber renderer supplies the visible hilt/blade. -->
   <Part Id="Purr2D2_DroppedHilt" DisplayName="BFL9K hilt">
-    <EditorTag Value="Hidden" />
-    <SolidCuboidMass><Mass Kg="0.8" /><LengthX M="0.06" /><LengthY M="0.06" /><LengthZ M="0.30" /></SolidCuboidMass>
-    <Collider Id="Purr2D2_DroppedHilt_Collider"><Box Id="Purr2D2_DroppedHilt_Box"><LengthX M="0.06" /><LengthY M="0.06" /><LengthZ M="0.30" /></Box></Collider>
+    <EditorTags>
+      <EditorTag Ref="Hidden" />
+    </EditorTags>
+    <InertMasses>
+      <SolidCuboidMass>
+        <Mass Kg="0.8" />
+        <LengthX M="0.06" />
+        <LengthY M="0.06" />
+        <LengthZ M="0.30" />
+      </SolidCuboidMass>
+    </InertMasses>
+    <Components>
+      <Collider Key="Purr2D2_DroppedHilt_Collider">
+        <Colliders>
+          <Box Key="Purr2D2_DroppedHilt_Box">
+            <LengthX M="0.06" />
+            <LengthY M="0.06" />
+            <LengthZ M="0.30" />
+          </Box>
+        </Colliders>
+      </Collider>
+    </Components>
   </Part>
+  <File Id="Purr2D2_Hilt_Glb_Source" Path="Assets/Models/Purr2D2_Hilt.glb" />
   <GltfFile Id="Purr2D2_Hilt_Glb">
-    <Source Path="Assets/Models/Purr2D2_Hilt.glb" />
+    <Source Ref="Purr2D2_Hilt_Glb_Source" />
   </GltfFile>
+  <Texture Id="Purr2D2_Hilt_Material_Diffuse" Path="Assets/Textures/Purr2D2_Hilt_Diffuse.png" Category="Default" />
+  <Texture Id="Purr2D2_Hilt_Material_Normal" Path="Assets/Textures/Purr2D2_Hilt_Normal.png" Category="Default" />
+  <Texture Id="Purr2D2_Hilt_Material_AoRoughMetal" Path="Assets/Textures/Purr2D2_Hilt_ORM.png" Category="Default" />
   <PbrMaterial Id="Purr2D2_Hilt_Material">
-    <Diffuse Path="Assets/Textures/Purr2D2_Hilt_Diffuse.png" Category="Default" />
-    <Normal Path="Assets/Textures/Purr2D2_Hilt_Normal.png" Category="Default" />
-    <AoRoughMetal Path="Assets/Textures/Purr2D2_Hilt_ORM.png" Category="Default" />
+    <Diffuse Ref="Purr2D2_Hilt_Material_Diffuse" />
+    <Normal Ref="Purr2D2_Hilt_Material_Normal" />
+    <AoRoughMetal Ref="Purr2D2_Hilt_Material_AoRoughMetal" />
   </PbrMaterial>
+  <Texture Id="Purr2D2_CutSurface_Diffuse" Path="Assets/Textures/Purr2D2_CutSurface_Diffuse.png" Category="Default" />
+  <Texture Id="Purr2D2_CutSurface_AoRoughMetal" Path="Assets/Textures/Purr2D2_CutSurface_ORM.png" Category="Default" />
   <PbrMaterial Id="Purr2D2_CutSurface">
-    <Diffuse Path="Assets/Textures/Purr2D2_CutSurface_Diffuse.png" Category="Default" />
-    <Normal Id="EmptyNormal" />
-    <AoRoughMetal Path="Assets/Textures/Purr2D2_CutSurface_ORM.png" Category="Default" />
-    <Emissive Id="EmptyWhite" />
+    <Diffuse Ref="Purr2D2_CutSurface_Diffuse" />
+    <Normal Ref="EmptyNormal" />
+    <AoRoughMetal Ref="Purr2D2_CutSurface_AoRoughMetal" />
+    <Emissive Ref="EmptyWhite" />
   </PbrMaterial>
   <!-- Fresh wood ends use absolute-albedo PBR maps, without metallic cut heat. -->
+  <Texture Id="Purr2D2_WoodCutSurface_Diffuse" Path="Assets/Textures/Purr2D2_WoodCutSurface_Diffuse.png" Category="Default" />
+  <Texture Id="Purr2D2_WoodCutSurface_Normal" Path="Assets/Textures/Purr2D2_WoodCutSurface_Normal.png" Category="Default" />
+  <Texture Id="Purr2D2_WoodCutSurface_AoRoughMetal" Path="Assets/Textures/Purr2D2_WoodCutSurface_ORM.png" Category="Default" />
   <PbrMaterial Id="Purr2D2_WoodCutSurface">
-    <Diffuse Path="Assets/Textures/Purr2D2_WoodCutSurface_Diffuse.png" Category="Default" />
-    <Normal Path="Assets/Textures/Purr2D2_WoodCutSurface_Normal.png" Category="Default" />
-    <AoRoughMetal Path="Assets/Textures/Purr2D2_WoodCutSurface_ORM.png" Category="Default" />
+    <Diffuse Ref="Purr2D2_WoodCutSurface_Diffuse" />
+    <Normal Ref="Purr2D2_WoodCutSurface_Normal" />
+    <AoRoughMetal Ref="Purr2D2_WoodCutSurface_AoRoughMetal" />
   </PbrMaterial>
   <Shader Id="Purr2D2_Glow_Vert" Path="Assets/Shaders/SaberGlow.vert" />
   <Shader Id="Purr2D2_Glow_Frag" Path="Assets/Shaders/SaberGlow.frag" />

@@ -57,7 +57,7 @@ internal sealed class SliceSourceCapture : IDisposable
                 throw new InvalidDataException("Source changed during estimation.");
             foreach (var model in Models(part))
             {
-                var mesh = model.Mesh?.Get();
+                var mesh = model.Mesh;
                 if (mesh?.HostPrimitives == null) throw new InvalidDataException("Source mesh is unavailable.");
                 foreach (var primitive in mesh.HostPrimitives)
                 {
@@ -97,8 +97,8 @@ internal sealed class SliceSourceCapture : IDisposable
             var models = Models(node.Part);
             if (models.Count != node.Meshes.Length) return false;
             for (int i = 0; i < models.Count; i++)
-                if (!ReferenceEquals(models[i].Mesh?.Get(), node.Meshes[i])
-                    || models[i].Material?.Get()?.Id != node.Materials[i].Id || models[i].Glass != node.Materials[i].Glass) return false;
+                if (!ReferenceEquals(models[i].Mesh, node.Meshes[i])
+                    || models[i].Material?.Id != node.Materials[i].Id || models[i].Glass != node.Materials[i].Glass) return false;
         }
         return Math.Abs(NativeSlicePhysics.SourceMass(_full) - _mass) <= Math.Max(.001, _mass * 2e-5);
     }
@@ -121,12 +121,12 @@ internal sealed class SliceSourceCapture : IDisposable
                 - transform.M12 * (transform.M21 * transform.M33 - transform.M23 * transform.M31)
                 + transform.M13 * (transform.M21 * transform.M32 - transform.M22 * transform.M31);
             var models = Models(part);
-            _nodes.Add(new(part, transform, models.Select(m => m.Mesh?.Get()).ToArray(),
-                models.Select(m => new SliceMaterialData(m.Material?.Get()?.Id ?? "", m.Glass)).ToArray()));
+            _nodes.Add(new(part, transform, models.Select(m => m.Mesh).ToArray(),
+                models.Select(m => new SliceMaterialData(m.Material?.Id ?? "", m.Glass)).ToArray()));
             var faces = new List<SliceFace>();
             foreach (var model in models)
             {
-                var mesh = model.Mesh?.Get(); var material = model.Material?.Get();
+                var mesh = model.Mesh; var material = model.Material;
                 if (mesh?.HostPrimitives == null || material == null || !material.IsReferenceable || string.IsNullOrEmpty(material.Id))
                     throw new InvalidDataException("Part has no accessible native mesh or durable material reference.");
                 topology?.BeginSurface(mesh.Id);
@@ -193,11 +193,11 @@ internal sealed class SliceSourceCapture : IDisposable
     internal static IEnumerable<(MeshReference? Mesh, PbrMaterialReference? Material, bool Glass)> EnumerateModels(Part part)
     {
         for (int i = 0; i < part.Modules.Get<PartModelModule>().Length; i++)
-        { var model = part.Modules.Get<PartModelModule>()[i]; yield return (model.PartModel.Template.Mesh, model.PartModel.Template.Material, false); }
+        { var model = part.Modules.Get<PartModelModule>()[i]; yield return (model.PartModel.Template.Mesh?.Value, model.PartModel.Template.Material?.Value, false); }
         for (int i = 0; i < part.Modules.Get<PartModelDynamicModule>().Length; i++)
-        { var model = part.Modules.Get<PartModelDynamicModule>()[i]; yield return (model.PartModelDynamic.Template.Mesh, model.PartModelDynamic.Template.Material, false); }
+        { var model = part.Modules.Get<PartModelDynamicModule>()[i]; yield return (model.PartModelDynamic.Template.Mesh?.Value, model.PartModelDynamic.Template.Material?.Value, false); }
         for (int i = 0; i < part.Modules.Get<PartModelGlassModule>().Length; i++)
-        { var model = part.Modules.Get<PartModelGlassModule>()[i]; yield return (model.PartModelGlass.Template.Mesh, model.PartModelGlass.Template.Material, true); }
+        { var model = part.Modules.Get<PartModelGlassModule>()[i]; yield return (model.PartModelGlass.Template.Mesh?.Value, model.PartModelGlass.Template.Material?.Value, true); }
     }
     private static void CopyChunk(MeshAsset primitive, int start, List<SliceFace> faces, double4x4 transform, double4x4 inverse, bool reflected, int material)
     {

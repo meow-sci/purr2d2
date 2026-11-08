@@ -404,12 +404,13 @@ def check_xml(root):
                 raise CheckError(f"Assets/Capes.xml: path escapes root: {value}") from exc
             require(target.is_file(), f"Assets/Capes.xml: referenced file missing: {value}")
     expected = {"Purr2D2_Cape_Glb", "Purr2D2_Cloth_Light", "Purr2D2_Cloth_Dark"}
+    expected |= {"Purr2D2_Cape_Glb_Source", *(f"{material}_{channel}" for material in ("Purr2D2_Cloth_Light", "Purr2D2_Cloth_Dark") for channel in ("Diffuse", "Normal", "AoRoughMetal"))}
     require(set(ids) == expected,
-            "Assets/Capes.xml: expected only the cape GLB and the two cloth materials")
+            "Assets/Capes.xml: expected the cape GLB, its source file, two cloth materials and their textures")
     require("Purr2D2_Hood_Glb" not in ids,
             "Assets/Capes.xml: obsolete hood asset declaration must be absent")
     for glb_id, material_name in (("Purr2D2_Cape_Glb", "Purr2D2_Cloth_Light"),):
-        ref = ids[glb_id].find("Material")
+        ref = ids[glb_id].find("Materials/Material")
         require(ref is not None and ref.get("Name") == material_name and ref.get("AssetId") == material_name,
                 f"Assets/Capes.xml: {glb_id} must map its default glTF slot to {material_name}")
     expected_material_maps = {
@@ -426,7 +427,7 @@ def check_xml(root):
     }
     for material_id, expected_maps in expected_material_maps.items():
         material = ids[material_id]
-        actual_maps = {channel.tag: channel.get("Path") for channel in material}
+        actual_maps = {channel.tag: ids[channel.attrib["Ref"]].get("Path") for channel in material}
         require(actual_maps == expected_maps,
                 f"Assets/Capes.xml: {material_id} texture mapping does not match the cloth map contract")
     return ids

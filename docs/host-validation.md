@@ -5,7 +5,7 @@
 From the repository root, after building the mod with .NET 10:
 
 ```sh
-dotnet build Purr2D2.csproj --no-restore
+dotnet build Purr2D2.csproj -p:KSAFolder="$KSA_DLL_DIR"
 dotnet run --file tools/inspect_host.cs -- ../ksa-game-assemblies/current/dll/KSA.dll bin/Debug/net10.0/Purr2D2.dll
 ```
 
@@ -21,14 +21,14 @@ Use `--file` explicitly: without it, `dotnet run tools/inspect_host.cs` selects 
 - The public native `Vehicle.Split(Connection, IConnector, double, out PoseChange, string)` overload and `PartTree.BeginBulkChange` / `EndBulkChange` methods used by staged source isolation.
 - The exact private PartModel submission overload used for generated cap cooling, and the complete plain-public-field layout of `DeviceMeshInterleaved` used to initialize objects inside the startup-reserved fragment arena without growing native counters at runtime.
 - The actual decoded `Program.PrepareFrame` IL contains exactly one call to each apply/input/dispatch method in the production hook's required order. Vehicle membership refresh and dirty derived/resource flushes must run after the hook and before vehicle dispatch, so early isolation receives that engine follow-up before the next swap update. The inspector reads operands correctly, including two-byte opcodes and variable-size switch tables, and resolves call tokens through metadata. Negative controls ensure the same validator rejects missing, duplicate and reordered calls.
-- Exactly one public concrete `[StarMapMod]` class, `Purr2D2.Mod`, a public parameterless constructor, and the four expected public instance lifecycle callbacks with their actual full attribute names/signatures: `ImmediateLoad(KSA.Mod)`, `AllModsLoaded()`, `AfterGui(double)` and `Unload()`, all returning void.
+- Exactly one public concrete `[StarMapMod]` class, `Purr2D2.Mod`, a public parameterless constructor, and the three attributed public instance lifecycle callbacks: `BeforeMain()`, `AfterGui(double)` and `Unload()`, all void. `BeforeMain` calls the checked source/load hook installer exactly once. The public no-argument `AllModsLoaded()` initializer is invoked by a direct native postfix. The obsolete ImmediateLoad/AllModsLoaded attributes must be absent: KSA removed `Mod.PrepareSystems` and added an optional progress argument to `ModLibrary.LoadAll`, which the inspected StarMap wrapper forwards unchanged. The native `ReadSource`, `LoadAll`, `PrepareAll` and surviving UI loader seams are signature-checked.
 - The built mod references KSA, StarMap.API and Harmony; its KSA assembly-reference version matches the inspected host. All assembly references are listed from metadata without resolving or loading them.
 
 The tool exits `0` when the checks pass, `1` when inputs cannot be read or compatibility checks fail, and `2` for an invalid invocation. Failures name the changed method/field and the expected shape. Re-check the hook or rebuild against the intended snapshot instead of treating a changed host as supported.
 
 ## Verified result
 
-The local host reports `KSA 2026.10.25.5707` (assembly-repo commit `4b3e9e2`, module MVID `a6318490-1e4f-4d4c-9f1a-b48f97f44be4`), PE machine `Amd64`. The built mod reports `Purr2D2 0.2.0.0`; references include `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0`, and the matching KSA version. All checks passed after the `RenderViewport` stage was updated to `RenderAtmosphereAndClouds`; the unmodified inspector failed only that stage (`artifacts/checks/ksa5707-initial-inspect-host.log`), and the updated inspector rejects the 2026.10.19.5638 host. The decoded frame call positions are unchanged from 2026.10.19.5638:
+The host is `KSA 2026.11.10.5801` (snapshot commit `4de698e8cf248c29fc95f188fb258775d6e574a3`, module MVID `a064c78d-2b9f-4ac3-ae4e-1cb22ed69344`), PE machine `Amd64`. The mod is `Purr2D2 0.2.0.0`, referencing `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0` and the matching KSA version. The final inspector passes 163 checks (`artifacts/checks/upgrade-5801/inspect-host-complete.log`). The old template Part constructor reflection failed before repair; it now binds `TransformDataReference<SubPartTemplate>` instead of `PartInstance`. The one-argument `Part(PartInstance)` save constructor also reaches the private initializer directly in 5801; its fourth explicit postfix preserves the exactly-once public-constructor coverage invariant. The early source hook and direct load completion callback replace the removed/changed startup seams. Decoded frame offsets remain identical to 5707:
 
 | IL offset | Method |
 | --- | --- |

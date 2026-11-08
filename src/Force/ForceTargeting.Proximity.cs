@@ -171,9 +171,9 @@ internal static partial class ForceTargeting
     private static void Collect(Part part, List<MeshReference> meshes)
     {
         meshes.Clear();
-        foreach (var model in part.Modules.Get<PartModelModule>()) AddMesh(meshes, model.PartModel.Template.Mesh?.Get());
-        foreach (var model in part.Modules.Get<PartModelDynamicModule>()) AddMesh(meshes, model.PartModelDynamic.Template.Mesh?.Get());
-        foreach (var model in part.Modules.Get<PartModelGlassModule>()) AddMesh(meshes, model.PartModelGlass.Template.Mesh?.Get());
+        foreach (var model in part.Modules.Get<PartModelModule>()) AddMesh(meshes, model.PartModel.Template.Mesh?.Value);
+        foreach (var model in part.Modules.Get<PartModelDynamicModule>()) AddMesh(meshes, model.PartModelDynamic.Template.Mesh?.Value);
+        foreach (var model in part.Modules.Get<PartModelGlassModule>()) AddMesh(meshes, model.PartModelGlass.Template.Mesh?.Value);
         if (meshes.Count == 0) foreach (var model in part.Modules.Get<MeshViewModule>()) AddMesh(meshes, model.MeshView);
     }
 

@@ -61,9 +61,9 @@ internal static class ClutterFoliageHostChecks
         var asset = FragmentAssetWriter.Build(fragment with { Foliage = [fragment.Solids[0][0] with { Material = 42 }] }, leafMaterials, default);
         var decoded = FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), asset.Xml, asset.Id, asset.Uploads.Length);
         var leafTemplate = decoded.Assets.OfType<PartTemplate>().SelectMany(p => p.Components).OfType<PartModelModule.Template>()
-            .Single(p => ClutterFoliageSurface.IsMesh(p.Mesh?.Id));
+            .Single(p => ClutterFoliageSurface.IsMesh(p.Mesh?.Ref));
         Check(!leafTemplate.ShadowCaster && leafTemplate.RayTracing == PartModelModule.RaytracingMode.Disabled
-            && leafTemplate.Material?.Id == "FixtureNativeLeaves",
+            && leafTemplate.Material?.Ref == "FixtureNativeLeaves",
             "actual native XML loader excludes leaf point-shadow/RT geometry and retains the original native material ID");
         foreach (var (method, argument) in new[] { (main, 0), (raytraced, 1) })
         {
@@ -100,7 +100,8 @@ internal static class ClutterFoliageHostChecks
             AccessTools.Property(typeof(TextureReference), nameof(TextureReference.BindlessHandle)).SetValue(thickness, 919);
             var material = new GroundClutterMaterialReference
             {
-                Id = "FixtureNativeLeaves", OpacityMap = opacity, ThicknessMap = thickness,
+                Id = "FixtureNativeLeaves", OpacityMap = new() { Ref = "FixtureOpacity", Value = opacity },
+                ThicknessMap = new() { Ref = "FixtureThickness", Value = thickness },
                 ColorPipelineFlags = GroundClutterMaterialReference.PipelineFlags.UseOpacityTexture
                     | GroundClutterMaterialReference.PipelineFlags.DoubleSided
                     | GroundClutterMaterialReference.PipelineFlags.Transmissive
@@ -110,17 +111,18 @@ internal static class ClutterFoliageHostChecks
             var model = (PartModel)RuntimeHelpers.GetUninitializedObject(typeof(PartModel));
             model.Template = new PartModelModule.Template
             {
-                Mesh = new MeshReference { Id = "Purr2D2_Fragment_fixture_s0_fol_m0" }, Material = material
+                Mesh = new() { Ref = "Purr2D2_Fragment_fixture_s0_fol_m0", Value = new MeshReference { Id = "Purr2D2_Fragment_fixture_s0_fol_m0" } },
+                Material = new() { Ref = material.Id, Value = material }
             };
             int encoded = (int)opacityCall.Invoke(null, [33, model])!;
             Check(ClutterFoliageSurface.Texture(encoded) == 713
                 && ClutterFoliageSurface.Flags(encoded) == (int)material.ColorPipelineFlags
                 && (int)thicknessCall.Invoke(null, [44, model])! == 919,
                 "native source opacity/thickness descriptors and foliage flags reach the existing draw buffer");
-            model.Template.Mesh.Id = "Purr2D2_Fragment_fixture_s0_m0";
+            model.Template.Mesh.Ref = "Purr2D2_Fragment_fixture_s0_m0";
             Check((int)opacityCall.Invoke(null, [33, model])! == 33 && (int)thicknessCall.Invoke(null, [44, model])! == 44,
                 "opaque generated wood/caps and ordinary part materials retain their descriptors");
-            Check(ReferenceEquals(model.Template.Material, material) && material.OpacityMap == opacity && material.ThicknessMap == thickness,
+            Check(ReferenceEquals(model.Template.Material.Value, material) && material.OpacityMap.Value == opacity && material.ThicknessMap.Value == thickness,
                 "the adapter never changes source materials or texture ownership");
             // Avoid the native finalizer on a deliberately unconstructed test object.
             GC.SuppressFinalize(model);

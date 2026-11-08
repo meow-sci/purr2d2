@@ -40,6 +40,8 @@ static class HostInspection
                 new("KSA.Program", "PrepareFrame", "KSA.Program+OnFrameResult", false, MethodAttributes.Private, "System.Double", "System.Double"),
                 new("KSA.Program", "OnFrameEditor", "System.Void", false, MethodAttributes.Private, "System.Double"),
                 new("KSA.Program", "OnDrawUiThreadSafe", "System.Void", false, MethodAttributes.Private, "System.Double"),
+                new("KSA.Program", "OnDrawUiViewports", "System.Void", false, MethodAttributes.Private, "System.Double"),
+                new("KSA.Program", "DrawProgramMenusHook", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Program", "OnMouseButton", "System.Void", false, MethodAttributes.Public,
                     "Brutal.GlfwApi.GlfwWindow", "Brutal.GlfwApi.GlfwMouseButton", "Brutal.GlfwApi.GlfwButtonAction", "Brutal.GlfwApi.GlfwModifier"),
                 new("KSA.Program", "OnCursorPos", "System.Void", false, MethodAttributes.Public, "Brutal.GlfwApi.GlfwWindow", "Brutal.Numerics.double2"),
@@ -52,6 +54,10 @@ static class HostInspection
                 new("KSA.ImGuiBackendGlfwImpl", "OnScroll", "System.Void", false, MethodAttributes.Private,
                     "Brutal.GlfwApi.GlfwWindow", "Brutal.Numerics.double2"),
                 new("KSA.Program", "OnGameLoaded", "System.Void", true, MethodAttributes.Public),
+                new("KSA.ContentLoader", "ReadSource", "KSA.ContentSource", true, MethodAttributes.Public,
+                    "System.String", "System.String", "KSA.ModManifest", "KSA.ContentErrors", "KSA.IContentLoadProgress"),
+                new("KSA.ModLibrary", "LoadAll", "System.Void", true, MethodAttributes.Public, "KSA.IContentLoadProgress"),
+                new("KSA.ModLibrary", "PrepareAll", "System.Void", true, MethodAttributes.Public, "KSA.IContentLoadProgress"),
                 new("KSA.Universe", "DeserializeSave", "System.Void", true, MethodAttributes.Public, "KSA.UniverseData"),
                 new("KSA.Program", "Dispose", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Program", "UpdateRenderingResources", "System.Void", false, MethodAttributes.Public, "System.Int32"),
@@ -75,7 +81,10 @@ static class HostInspection
                 new("KSA.PartTree", "BeginBulkChange", "System.Void", false, MethodAttributes.Public),
                 new("KSA.PartTree", "EndBulkChange", "System.Void", false, MethodAttributes.Public),
                 new("KSA.Part", ".ctor", "System.Void", false, MethodAttributes.Public,
-                    "System.String", "KSA.PartTemplate", "KSA.PartInstance", "KSA.Part"),
+                    "System.String", "KSA.PartTemplate", "KSA.TransformDataReference`1<KSA.SubPartTemplate>", "KSA.Part"),
+                new("KSA.Part", ".ctor", "System.Void", false, MethodAttributes.Public, "KSA.PartInstance"),
+                new("KSA.Part", ".ctor", "System.Void", false, MethodAttributes.Public, "KSA.PartInstance", "KSA.Part"),
+                new("KSA.Part", ".ctor", "System.Void", false, MethodAttributes.Public, "KSA.Part", "KSA.Part"),
                 new("KSA.LookupCollection`1", "Deregister", "System.Void", false, MethodAttributes.Public, "!0"),
                 new("KSA.Part", "get_StructuralPart", "KSA.Part", false, MethodAttributes.Public),
             ];
@@ -355,8 +364,7 @@ static class HostInspection
         CheckMethod(image, new Expected(name, ".ctor", "System.Void", false, MethodAttributes.Public));
         (string Name, string Method, string[] Parameters)[] lifecycle =
         [
-            ("StarMapImmediateLoadAttribute", "ImmediateLoad", ["KSA.Mod"]),
-            ("StarMapAllModsLoadedAttribute", "AllModsLoaded", []),
+            ("StarMapBeforeMainAttribute", "BeforeMain", []),
             ("StarMapAfterGuiAttribute", "AfterGui", ["System.Double"]),
             ("StarMapUnloadAttribute", "Unload", []),
         ];
@@ -374,6 +382,17 @@ static class HostInspection
                     $"{hook.Method} carries its expected lifecycle attribute",
                     "The attribute moved to another method; check StarMap callback discovery.");
         }
+        foreach (var removed in new[] { "StarMapImmediateLoadAttribute", "StarMapAllModsLoadedAttribute" })
+            Check(!type.GetMethods().Any(h => image.Attributes(image.Reader.GetMethodDefinition(h).GetCustomAttributes())
+                    .Contains("StarMap.API." + removed)),
+                $"Entry avoids the obsolete [{removed}] loader forwarding contract",
+                "5801 removed Mod.PrepareSystems and added LoadAll's progress argument; install direct native hooks from BeforeMain.");
+        var beforeMain = image.Methods(name, "BeforeMain").SingleOrDefault();
+        if (!beforeMain.IsNil)
+            Check(image.Calls(beforeMain).Count(c => c.Key.StartsWith("Purr2D2.Rendering.FragmentContentSource.InstallSourceHook(", StringComparison.Ordinal)) == 1,
+                "BeforeMain calls the production source/load initializer hook once",
+                "Startup restoration and mesh reservation require the checked direct native hooks.");
+        CheckMethod(image, new Expected(name, "AllModsLoaded", "System.Void", false, MethodAttributes.Public));
     }
 
     private static void CheckReferences(Image host, Image mod)

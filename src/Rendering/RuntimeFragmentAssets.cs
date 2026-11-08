@@ -34,7 +34,7 @@ internal static partial class RuntimeFragmentAssets
     private static readonly Dictionary<string, PreparedFragment> Prepared = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> FailedPreparations = new(StringComparer.Ordinal);
 
-    /// <summary>Must run from ImmediateLoad, before DeviceMeshInterleaved.Shared.Build.</summary>
+    /// <summary>Must run from the startup content-source hook, before native payload loading and mesh binding.</summary>
     internal static void Initialize(KSA.Mod mod,
         int vertexMiB = SliceResourceLimits.DefaultVertexArenaMiB,
         int indexMiB = SliceResourceLimits.DefaultIndexArenaMiB,
@@ -61,28 +61,18 @@ internal static partial class RuntimeFragmentAssets
         _initialVertexCapacity = vertexBytes; _initialIndexCapacity = indexBytes;
         ConfigureStorageLimits(diskMiB, entryLimit);
         _mod = mod;
-        // Native loading resolves all source materials later, before any save can instantiate parts.
+        // Persisted rows join the native source before its register/load/resolve phases.
+        // Registering a separate bundle here would be erased by LoadFrom.ResetContent.
         var directory = Path.Combine(mod.DirectoryPath, "Generated", "Slices");
-        if (Directory.Exists(directory))
-            foreach (var path in Directory.EnumerateFiles(directory, "*.xml").Order(StringComparer.Ordinal))
-            {
-                var document = XDocument.Load(path);
-                FragmentTopology.Remember(document);
-                foreach (var atlas in document.Descendants("MeshAtlas"))
-                {
-                    string source = (string?)atlas.Attribute("Path") ?? "";
-                    if (source.Length == 0 || !File.Exists(mod.GetPath(source)))
-                        throw new InvalidDataException($"Generated slice '{path}' is missing its GLB '{source}'. Restore the complete Generated/Slices directory before loading its saves.");
-                }
-                var bundle = XmlLoader.Load<AssetBundle>(path, mod)
-                    ?? throw new InvalidDataException($"Could not restore generated slice assets from '{path}'. Keep this file and its GLB with the save.");
-                FragmentTemplateLoader.HideFromEditor(bundle);
-                mod.Register(bundle);
-                _registeredTemplates += bundle.Assets.OfType<PartTemplate>().Count();
-            }
         RefreshDiskUsage(directory);
         _initialized = true;
         InstallAuthoredDebrisCallbacks();
+    }
+
+    internal static void CompleteStartupRestore(int count)
+    {
+        if (!_initialized) throw new InvalidOperationException("Runtime fragment mesh reservation did not run before content loading.");
+        _registeredTemplates += count;
     }
 
     private static uint Reserve(ref uint counter, uint capacity, uint alignment)
@@ -144,16 +134,16 @@ internal static partial class RuntimeFragmentAssets
     {
         if (!ClutterTints.TryGetValue(model, out var tint))
         {
-            if (!ClutterSurfaceTint.TryRead(model.Template.Mesh?.Id, out uint color, out uint luminosity)) return;
+            if (!ClutterSurfaceTint.TryRead(model.Template.Mesh?.Ref, out uint color, out uint luminosity)) return;
             tint = new(color, luminosity); ClutterTints.Add(model, tint);
         }
         foreach (ref var instance in instances)
         {
             instance.StateBitFlag = ClutterSurfaceTint.Flags(instance.StateBitFlag, tint.Luminosity);
-            if (ClutterFoliageSurface.IsMesh(model.Template.Mesh?.Id)) ClutterFoliageMaterial.MarkShadow(ref instance);
+            if (ClutterFoliageSurface.IsMesh(model.Template.Mesh?.Ref)) ClutterFoliageMaterial.MarkShadow(ref instance);
             // Native RGB10 data rides the existing emission varying, but the
             // native add-emissive flag is not set. Caps have separate mesh IDs.
-            instance.EmissiveColor = tint.Color;
+            instance.EmissiveColor = ClutterSurfaceTint.Color(tint.Color, tint.Luminosity);
         }
     }
 
@@ -161,7 +151,7 @@ internal static partial class RuntimeFragmentAssets
     // frame, so ordinary models exit on the mesh id and cap ids are parsed once per model.
     private static bool TryGetCapFragment(PartModel model, out string fragmentId)
     {
-        string? id = model.Template.Mesh?.Id;
+        string? id = model.Template.Mesh?.Ref;
         fragmentId = "";
         if (!SliceCapEmission.IsCapMesh(id)) return false;
         if (CapFragments.TryGetValue(model, out fragmentId!)) return true;

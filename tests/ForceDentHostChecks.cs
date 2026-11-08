@@ -20,6 +20,8 @@ internal static class ForceDentHostChecks
             GameSettings.Current.Graphics.VesselDeformationQuality = GameSettings.DeformationQuality.Ultra;
             GameSettings.Current.Graphics.VesselDeformation = true;
             ForceDebrisDeformation.Install(harmony);
+            if (!FragmentAssetRegistration.TryGetAsset<EditorTagDefinition>("Hidden", out _))
+                FragmentAssetRegistration.Register(new EditorTagDefinition { Id = "Hidden" });
             Check(!ForceDebrisDeformation.IsCarrier("stock_dents0")
                 && !ForceDebrisDeformation.IsCarrier(AuthoredDebrisAssets.Prefix + "fixture_node0"),
                 "the deformation hook is limited to generated dent carriers");
@@ -54,10 +56,9 @@ internal static class ForceDentHostChecks
                 // without a GPU/physics world. Only strip visual/collider components; keep
                 // the actual generated hierarchy, transforms, mass and carrier templates.
                 foreach (var template in templates)
-                {
                     template.Components.Clear();
-                    template.OnDataLoad(null!);
-                }
+                var registration = new FragmentAssetRegistration(bundle, KSA.Mod.Empty);
+                while (!registration.Done) registration.AdvanceOne();
                 var root = new Part(id, templates.Single(template => template.Id == id));
                 var tree = PartTree.CreateFromNewPartTree(root);
                 trees.Add(tree);

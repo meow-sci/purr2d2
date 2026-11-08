@@ -5,7 +5,7 @@ using KSA;
 using Purr2D2.Rendering;
 using Purr2D2.Cutting;
 
-// Runs against the real KSA types, without creating a renderer, registry or physics world.
+// Runs against real KSA types and managed content collections, without a renderer or physics world.
 internal static class FragmentTemplateChecks
 {
     private static void Main()
@@ -20,6 +20,7 @@ internal static class FragmentTemplateChecks
         SwimmingAnimationHostChecks.Run();
         SaberWaterHostChecks.Run();
         CapEmissionHostChecks.Run();
+        FragmentContentHostChecks.Run();
         CheckWoodMaterial();
         var xml = Encoding.UTF8.GetBytes("""
             <Assets>
@@ -47,10 +48,10 @@ internal static class FragmentTemplateChecks
         if (!root.IsHidden || !visual.IsHidden || root.IsSubPart || !visual.IsSubPart)
             throw new Exception("Generated debris must stay instantiable as parts/subparts but be absent from both editor catalogs.");
         if (root.Components.OfType<MeshViewModule.Template>().Any()
-            || visual.Components.OfType<MeshViewModule.Template>().Single().MeshView.Id != "pick_mesh")
+            || visual.Components.OfType<MeshViewModule.Template>().Single().MeshView.Ref != "pick_mesh")
             throw new Exception("Picking must stay on the visual subpart for native hover raycasts.");
         var hull = root.Components.OfType<ColliderModule.Template>().Single().Colliders.OfType<ConvexHullColliderTemplate>().Single();
-        if (hull.Mesh.Id != "collision_mesh" || root.SubPartInstances.Count != 1
+        if (hull.Mesh?.Ref != "collision_mesh" || root.SubPartInstances.Count != 1
             || root.InertMasses.Single() is not CustomMassTemplate mass || mass.Mass.Kg != 42)
             throw new Exception("Fragment references, subparts or mass were not preserved.");
         if (!double.IsNaN(mass.Mass)) throw new Exception("Worker must not initialize native template data.");
@@ -73,10 +74,10 @@ internal static class FragmentTemplateChecks
         var mergedVisual = merged.Assets.OfType<SubPartTemplate>().Single();
         if (!mergedRoot.IsHidden || !mergedVisual.IsHidden)
             throw new Exception("Newly sliced roots and visual subparts must be hidden from the vehicle editor.");
-        if (mergedRoot.SubPartInstances.Count != 1 || mergedRoot.SubPartInstances.Single().InstanceOf != mergedVisual.Id
+        if (mergedRoot.SubPartInstances.Count != 1 || mergedRoot.SubPartInstances.Single().Ref != mergedVisual.Id
             || mergedVisual.Components.OfType<PartModelModule.Template>().Count() != 3
             || mergedVisual.Components.OfType<PartModelGlassModule.Template>().Count() != 1
-            || mergedVisual.Components.OfType<MeshViewModule.Template>().Single().MeshView.Id != generated.Id + "_hull")
+            || mergedVisual.Components.OfType<MeshViewModule.Template>().Single().MeshView.Ref != generated.Id + "_hull")
             throw new Exception("Actual KSA XML loader lost merged fragment material/glass/picking modules.");
         FragmentTopology.Remember(XDocument.Parse(Encoding.UTF8.GetString(generated.Xml)));
         if (FragmentTopology.Find(generated.Id) == null) throw new Exception("Generated XML did not restore its durable closed-solid metadata.");
@@ -88,10 +89,10 @@ internal static class FragmentTemplateChecks
             throw new Exception("Canonical export must preserve older saved assets under their original IDs.");
         if (savedBundle.Assets.OfType<PartTemplate>().Any(p => !p.IsHidden))
             throw new Exception("Older saved fragments without editor tags must also be hidden when loaded.");
-        // Startup uses KSA's loader, bypassing Read. Exercise the shared visibility
-        // fix on a raw saved bundle, including tags already resolved by OnDataLoad.
+        // Exercise the shared visibility fix on normalized historical data, including
+        // native tags that were already resolved by OnDataLoad.
         using var savedStream = new MemoryStream(savedXml, writable: false);
-        var restored = (AssetBundle)serializer.Deserialize(savedStream)!;
+        var restored = (AssetBundle)serializer.Deserialize(FragmentTemplateLoader.NormalizeDocument(XDocument.Load(savedStream)).CreateReader())!;
         var restoredParts = restored.Assets.OfType<PartTemplate>().ToArray();
         if (restoredParts.Any(p => p.IsHidden)) throw new Exception("The frozen legacy fixture must reproduce unhidden debris.");
         var identities = restoredParts.Select(p => (p.Id, p.IsSubPart)).ToArray();
@@ -124,17 +125,17 @@ internal static class FragmentTemplateChecks
         var assets = (AssetBundle)new XmlSerializer(typeof(AssetBundle)).Deserialize(stream)!;
         var wood = assets.Assets.OfType<PbrMaterialReference>().Single(m => m.Id == FragmentAssetWriter.WoodCapMaterial);
         var metal = assets.Assets.OfType<PbrMaterialReference>().Single(m => m.Id == FragmentAssetWriter.CapMaterial);
-        if (wood.DiffuseReference?.LocalPath != "Assets/Textures/Purr2D2_WoodCutSurface_Diffuse.png"
-            || wood.NormalReference?.LocalPath != "Assets/Textures/Purr2D2_WoodCutSurface_Normal.png"
-            || wood.PBRMap?.LocalPath != "Assets/Textures/Purr2D2_WoodCutSurface_ORM.png"
-            || wood.EmissiveMap != null || wood.AlphaMap != null || metal.EmissiveMap?.Id != "EmptyWhite")
+        if (wood.DiffuseReference?.Ref != "Purr2D2_WoodCutSurface_Diffuse"
+            || wood.NormalReference?.Ref != "Purr2D2_WoodCutSurface_Normal"
+            || wood.PBRMap?.Ref != "Purr2D2_WoodCutSurface_AoRoughMetal"
+            || wood.EmissiveMap != null || wood.AlphaMap != null || metal.EmissiveMap?.Ref != "EmptyWhite")
             throw new Exception("Native asset XML lost opaque nonemissive wood maps or changed the generic metal material.");
         var (fixture, materials) = FragmentAssetChecks.Fixture();
         var generated = FragmentAssetWriter.Build(fixture with { CutKind = SliceCutKind.Wood }, materials, default);
         var decoded = FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), generated.Xml, generated.Id, generated.Uploads.Length);
         var woodModel = decoded.Assets.OfType<PartTemplate>().SelectMany(p => p.Components).OfType<PartModelModule.Template>()
-            .Single(p => p.Material?.Id == FragmentAssetWriter.WoodCapMaterial);
-        if (woodModel.Mesh?.Id.EndsWith("_cap", StringComparison.Ordinal) != true || !woodModel.ShadowCaster)
+            .Single(p => p.Material?.Ref == FragmentAssetWriter.WoodCapMaterial);
+        if (woodModel.Mesh?.Ref.EndsWith("_cap", StringComparison.Ordinal) != true || !woodModel.ShadowCaster)
             throw new Exception("Native generated wood cap XML lost its real opaque shadow-casting model.");
         Console.WriteLine("PASS: actual native XML loader retains separate opaque nonemissive wood texture maps, original generic metal emission and generated solid wood cap model");
     }

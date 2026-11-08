@@ -408,7 +408,7 @@ internal static class ManualContactChecks
         scene = Scene(34999);
         var model = new Part { Tree = scene.Vehicle.Parts };
         model.Modules.Add(new PartModelModule { PartModel = new PartModel
-            { Template = new PartModelModule.Template { Mesh = scene.Mesh } } });
+            { Template = new PartModelModule.Template { Mesh = new() { Value = scene.Mesh } } } });
         scene.Vehicle.Parts.Parts.Clear(); scene.Vehicle.Parts.Parts.Add(model);
         probe.Reset(); var contacts = new List<ManualContactProbe.Contact>(); found = false;
         try

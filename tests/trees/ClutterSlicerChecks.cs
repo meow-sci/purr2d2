@@ -57,6 +57,14 @@ internal static class ClutterSlicerChecks
         try
         {
             ClutterScenario.Reset(); var owner = new KittenEva();
+            // These external boundaries are tiny no-ops. Ensure each consumes a
+            // stopwatch tick so the production >0 timing assertions do not depend
+            // on clock granularity or whether the fixture methods were tiered.
+            ClutterScenario.TimedBoundary = () =>
+            {
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                while (System.Diagnostics.Stopwatch.GetTimestamp() == started) Thread.SpinWait(1);
+            };
             using (var slicer = new ClutterSlicer())
             {
                 Check(slicer.Begin(owner, new(), default, double3.UnitY, double3.UnitX,
@@ -73,7 +81,8 @@ internal static class ClutterSlicerChecks
                     && Math.Abs(sample.Value.PlayerLatencyMs - 250) < .001
                     && sample.Value.CaptureMs > 0 && sample.Value.GeometryMs > 0 && sample.Value.LoaderMs > 0
                     && sample.Value.UploadMs > 0 && sample.Value.CommitMs > 0,
-                    "serial mesh cut is timed and counted once without a queued admission");
+                    "serial mesh cut is timed and counted once without a queued admission: " + sample
+                    + "; " + SliceJobDiagnostics.Describe());
             }
             Check(SliceJobDiagnostics.CountFor(SliceJobOutcome.Cancelled) == 0,
                 "cleanup after a successful serial cut does not add a cancellation");
