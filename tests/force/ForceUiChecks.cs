@@ -70,6 +70,7 @@ internal sealed partial class SaberRuntime
     {
         ForceRotationDragChecks.Run();
         ForceRotationHandle();
+        ForceRotationShiftAxes();
         ForceCaptureRadiusDragChecks.Run();
         ForceCaptureBubbleChecks.Run();
         ForceOverlayChecks.Run();
@@ -1759,6 +1760,50 @@ internal sealed partial class SaberRuntime
         Check(!runtime._forceRotationDrag.Held && runtime._force.ItemRotation == 0,
             "focus loss rejects pending input at the settled handoff even without another cursor event");
         ImGui.Io.AppFocusLost = false;
+        runtime.ResetForce();
+    }
+
+    private static void ForceRotationShiftAxes()
+    {
+        var runtime = new SaberRuntime
+        {
+            _forceLayout = ForceOverlayLayout.Create(
+                SaberOverlayLayout.Create(float2.Zero, new(1920, 1080), 16, 2), float2.Zero, new(1920, 1080)),
+            _forceLayoutAvailable = true
+        };
+        var layout = runtime._forceLayout;
+        runtime._force.Capture(runtime._owner!, ForceTargeting.Next!, false);
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, layout.RotationHandleCenter(0));
+        runtime.MoveForcePointer(layout.RotationHandleCenter(Math.PI));
+        Program.Window.LeftShift = GlfwKeyAction.Press;
+        runtime.MoveForcePointer(layout.RotationHandleCenter(Math.PI));
+        Check(runtime._forceRotationSegments.Count == 1,
+            "changing Shift without pointer movement does not rotate or reset the item");
+        runtime.MoveForcePointer(layout.RotationHandleCenter(Math.PI / 2));
+        Program.Window.LeftShift = GlfwKeyAction.Release;
+        Program.Window.RightShift = GlfwKeyAction.Press;
+        runtime.MoveForcePointer(layout.RotationHandleCenter(0));
+        Program.Window.RightShift = GlfwKeyAction.Release;
+        runtime.CompleteForceRotationDrag(layout.RotationHandleCenter(-Math.PI / 2));
+        Check(runtime._force.RotationSegments.Count == 0 && runtime._forceRotationSegments.Count == 4,
+            "multiple axis changes before one physics handoff preserve ordered intent without touching physics");
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        var segments = runtime._force.RotationSegments;
+        Check(segments.Count == 4 && !segments[0].AlternateAxis && segments[1].AlternateAxis
+            && segments[2].AlternateAxis && !segments[3].AlternateAxis
+            && Math.Abs(segments[3].Rotation + Math.PI / 2) < 1e-5,
+            "both Shift keys select the alternate axis live, including the final release sample");
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        Check(segments.Count == 4 && runtime._forceRotationSegments.Count == 0,
+            "each rotation segment is applied exactly once");
+        runtime.HandleForceOverlayPress(ForceOverlayHit.Rotate, layout.RotationHandleCenter(runtime._force.ItemRotation));
+        Program.Window.LeftShift = GlfwKeyAction.Press;
+        runtime.MoveForcePointer(layout.RotationHandleCenter(0));
+        runtime.CancelForceRotationDrag();
+        runtime.UpdateForceBeforePhysics(1d / 60);
+        Check(segments.Count == 4 && runtime._forceRotationSegments.Count == 0,
+            "cancelling a modified drag discards all unpublished segments");
+        Program.Window.LeftShift = GlfwKeyAction.Release;
         runtime.ResetForce();
     }
 

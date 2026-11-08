@@ -33,8 +33,8 @@ internal sealed partial class ForceController : IDisposable
     internal KittenEva? Owner { get; private set; }
     internal double3 GroupOffsetBody { get; private set; }
     internal double GroupSpread { get; private set; } = ForceMath.DefaultGroupSpread;
-    // KSA KittenEva uses body +X as its facing direction. Spin each rigid item
-    // about a parallel axis through its own origin; never orbit the group centroid.
+    // KSA KittenEva uses body +X as its facing direction. Shift selects the
+    // perpendicular body +Y axis. Both spin each item through its own origin.
     internal double ItemRotation { get; private set; }
     private doubleQuat _itemRotationBody = doubleQuat.Identity;
     internal string Status { get; private set; } = "";
@@ -210,13 +210,17 @@ internal sealed partial class ForceController : IDisposable
         _spreadDirty = true;
     }
 
-    internal void SetRotation(double radians)
+    internal void SetRotation(double radians, bool alternateAxis = false)
     {
         if (!HasCapture || !double.IsFinite(radians)) return;
         radians = Math.Clamp(radians, -Math.PI * 2, Math.PI * 2);
         if (ItemRotation == radians) return;
+        double delta = radians - ItemRotation;
         ItemRotation = radians;
-        _itemRotationBody = doubleQuat.CreateFromAxisAngle(double3.UnitX, radians);
+        // Compose each drag segment in order, so switching axes preserves the
+        // current orientation and repeated alternating turns can reach any pose.
+        _itemRotationBody = doubleQuat.Concatenate(_itemRotationBody,
+            doubleQuat.CreateFromAxisAngle(alternateAxis ? double3.UnitY : double3.UnitX, delta)).NormalizedOrZero();
         _rotationDirty = true;
     }
 

@@ -298,7 +298,9 @@ namespace Purr2D2.Force
         internal int CapturedLimit;
         internal double CapturedRadius;
         internal double ItemRotation;
-        internal void SetRotation(double rotation) { Events.Add("Rotation"); ItemRotation = rotation; }
+        internal readonly List<(double Rotation, bool AlternateAxis)> RotationSegments = new();
+        internal void SetRotation(double rotation, bool alternateAxis = false)
+        { Events.Add("Rotation"); RotationSegments.Add((rotation, alternateAxis)); ItemRotation = rotation; }
         internal double GroupSpread = ForceMath.DefaultGroupSpread;
         internal int SimulatedCapturedCount = 1;
         internal int CapturedCount => HasCapture ? SimulatedCapturedCount : 0;

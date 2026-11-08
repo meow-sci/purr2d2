@@ -16,6 +16,7 @@ internal static class ForceControllerChecks
         MixedAngryEitherPrimary();
         GroupSpreadAroundCentroid();
         IndependentItemRotation();
+        AlternatingItemRotation();
         BreakupKeepsMixedHold();
         BreakupPreflightAndPartialFailure();
         BreakupPieceBudgets();
@@ -156,6 +157,56 @@ internal static class ForceControllerChecks
                 && controller.ItemRotation == 0 && !controller.HasCapture,
                 "release commits the last item orientation and clears the angle for the next capture");
             Equal(vessels[1].BodyRates, double3.Zero, "release does not introduce artificial residual spin");
+        }
+    }
+
+    private static void AlternatingItemRotation()
+    {
+        var (controller, owner, target) = Setup("alternating-rotation");
+        using (controller)
+        {
+            owner.Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitZ, .7);
+            owner.BodyRates = double3.Zero;
+            target.Body2Cce = doubleQuat.CreateFromAxisAngle(double3.UnitY, .3);
+            var clutter = new ClutterForceTarget(owner, "shift-rock", new(3, 1, 0), double3.Zero);
+            ClutterForceTargets.Candidates = [clutter];
+            var initial = target.GetBody2Cci();
+            var rockInitial = clutter.State.Body2Cci;
+            var position = target.GetPositionCci();
+            var rockPosition = clutter.State.Position;
+            var pick = new ForcePick(target, target.Parts.Items[0], target.Parent, target.System,
+                new double3(0, .5, 0));
+            Check(controller.Capture(owner, pick, true, 10), "mixed group captures for alternate-axis rotation");
+            var expected = doubleQuat.Identity;
+            double previous = 0;
+            foreach (var (angle, alternate) in new[] { (1.2, false), (-.4, true), (.9, false), (0d, true) })
+            {
+                var axis = (alternate ? double3.UnitY : double3.UnitX).Transform(owner.GetBody2Cci());
+                expected = doubleQuat.Concatenate(expected, doubleQuat.CreateFromAxisAngle(axis, angle - previous));
+                controller.SetRotation(angle, alternate);
+                controller.Update(owner);
+                Check(Math.Abs(doubleQuat.Dot(target.GetBody2Cci(), doubleQuat.Concatenate(initial, expected))) > 1 - 1e-12,
+                    "alternating axes compose in order without resetting the previous orientation");
+                Check(Math.Abs(doubleQuat.Dot(clutter.State.Body2Cci, doubleQuat.Concatenate(rockInitial, expected))) > 1 - 1e-12,
+                    "native clutter receives the same composed orientation as vessels");
+                Equal(target.GetPositionCci(), position, "alternate-axis rotation keeps the vessel center fixed");
+                Equal(clutter.State.Position, rockPosition, "alternate-axis rotation keeps the clutter center fixed");
+                Check(controller.TryGetPoseTargetBody(owner, out var aim), "alternate-axis pose target remains available");
+                Equal(aim.Transform(owner.GetBody2Cci()), position + new double3(0, .5, 0).Transform(expected),
+                    "the hand target follows the surface across both rotation axes");
+                previous = angle;
+            }
+            Check(Math.Abs(doubleQuat.Dot(expected, doubleQuat.Identity)) < .999,
+                "returning the handle to zero after mixed-axis turns retains the composed pose");
+            controller.Release(false);
+            Check(Math.Abs(doubleQuat.Dot(target.GetBody2Cci(), doubleQuat.Concatenate(initial, expected))) > 1 - 1e-12,
+                "release preserves the composed orientation");
+            Check(controller.Capture(owner, Pick(target), false), "a new capture succeeds after mixed-axis release");
+            controller.SetRotation(.2); controller.Update(owner);
+            var next = doubleQuat.Concatenate(doubleQuat.Concatenate(initial, expected),
+                doubleQuat.CreateFromAxisAngle(double3.UnitX.Transform(owner.GetBody2Cci()), .2));
+            Check(Math.Abs(doubleQuat.Dot(target.GetBody2Cci(), next)) > 1 - 1e-12,
+                "new captures start from their current pose without stale mixed-axis rotation");
         }
     }
 

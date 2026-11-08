@@ -21,6 +21,7 @@ internal sealed partial class SaberRuntime
     private long _forceRotationGeneration;
     private double _forceRotationTarget;
     private bool _forceRotationPending;
+    private readonly List<(double Rotation, bool AlternateAxis)> _forceRotationSegments = new();
     private readonly ForceOffsetSmoother _forceOffsetSmoother = new();
     private readonly ForceSpreadSmoother _forceSpreadSmoother = new();
     private readonly ForceCaptureLift _forceCaptureLift = new();
@@ -151,8 +152,11 @@ internal sealed partial class SaberRuntime
             // in the same settled handoff as movement, before dispatching new workers.
             if (_forceRotationPending)
             {
-                if (ForceRotationGestureValid()) _force.SetRotation(_forceRotationTarget);
+                if (ForceRotationGestureValid())
+                    foreach (var segment in _forceRotationSegments)
+                        _force.SetRotation(segment.Rotation, segment.AlternateAxis);
                 else CancelForceRotationDrag();
+                _forceRotationSegments.Clear();
                 _forceRotationPending = false;
             }
             bool wasHolding = _force.HasCapture;
@@ -767,6 +771,8 @@ internal sealed partial class SaberRuntime
             if (!ForceRotationGestureValid()) CancelForceRotationDrag();
             else if (_forceRotationDrag.Move(pointer))
             {
+                if (_forceRotationTarget != _forceRotationDrag.Rotation)
+                    _forceRotationSegments.Add((_forceRotationDrag.Rotation, ForceShiftHeld(Program.GetWindow())));
                 _forceRotationTarget = _forceRotationDrag.Rotation;
                 _forceRotationPending = true;
             }
@@ -866,6 +872,7 @@ internal sealed partial class SaberRuntime
     {
         _forceRotationDrag.Release();
         _forceRotationPending = false;
+        _forceRotationSegments.Clear();
         _forceRotationTarget = _force.ItemRotation;
         _forceRotationOwner = null;
         _forceRotationSystem = null;
@@ -962,7 +969,7 @@ internal sealed partial class SaberRuntime
         return true;
     }
 
-    // Query GLFW directly in the scroll callback so the modifier reflects native input
+    // Query GLFW directly in input callbacks so the modifier reflects native input
     // at event time, even if ImGui's translated KeyShift value has not caught up yet.
     internal static bool ForceShiftHeld(GlfwWindow window) => window.GetKey(GlfwKey.LeftShift) == GlfwKeyAction.Press
         || window.GetKey(GlfwKey.RightShift) == GlfwKeyAction.Press;
@@ -1248,7 +1255,7 @@ internal sealed partial class SaberRuntime
             if (overlayHit == ForceOverlayHit.AngryForce && ForceHolding)
                 ShowSaberTooltip("Hold and drag up to choose a throw speed; release to throw.");
             else if (overlayHit == ForceOverlayHit.Rotate)
-                ShowSaberTooltip("rotate captured items");
+                ShowSaberTooltip("rotate captured items (hold Shift for alternate axis)");
             else if (overlayHit == ForceOverlayHit.CaptureLimit)
                 ShowSaberTooltip("max # objects Furce can capture");
         }
