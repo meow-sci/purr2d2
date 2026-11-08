@@ -47,7 +47,7 @@ Use stable string IDs for strategy choices in JSON; do not persist ImGui indices
 | `PassiveContactCutsEnabled` | `false` | Boolean; allows contact cuts during ordinary movement without manual SWING; applies to vessel parts/subparts, trees and rocks |
 | `VesselContactDetector` | `legacy-ribbon` | `legacy-ribbon`, `cached-ribbon` |
 | `ClutterContactDetector` | `legacy-rays` | `legacy-rays`, `all-hit-rays`, `capsule-sweep` |
-| `ContactPlaneStrategy` | `legacy-contact` | `legacy-contact`, `blade-strict`, `blade-limited`, `sweep-fit` |
+| `ContactPlaneStrategy` | `blade-limited` | `legacy-contact`, `blade-strict`, `blade-limited`, `sweep-fit` |
 | `SliceExecutionMode` | `legacy-serial` | `legacy-serial`, `queued` |
 | `SliceWorkerCount` | `2` | Integer 1–4; effective count cannot exceed `max(1, ProcessorCount - 2)` |
 | `SlicePendingTargetLimit` | `128` | Integer 16–512 |

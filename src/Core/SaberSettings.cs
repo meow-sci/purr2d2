@@ -94,15 +94,15 @@ public sealed class SaberSettings
     public bool PassiveContactCutsEnabled { get; set; } = false;
     public string VesselContactDetector { get; set; } = "legacy-ribbon";
     public string ClutterContactDetector { get; set; } = "legacy-rays";
-    public string ContactPlaneStrategy { get; set; } = "legacy-contact";
+    public string ContactPlaneStrategy { get; set; } = "blade-limited";
     public string SliceExecutionMode { get; set; } = "legacy-serial";
     public int SliceWorkerCount { get; set; } = 2;
     public int SlicePendingTargetLimit { get; set; } = 128;
     public int SliceWorkingMemoryMiB { get; set; } = 256;
     public bool SliceClutterReachExtension { get; set; } = false;
     [JsonIgnore]
-    public string EffectiveContactPlaneStrategy => ContactPlaneStrategy is "blade-strict" or "blade-limited" or "sweep-fit"
-        ? ContactPlaneStrategy : "legacy-contact";
+    public string EffectiveContactPlaneStrategy => ContactPlaneStrategy is "legacy-contact" or "blade-strict" or "sweep-fit"
+        ? ContactPlaneStrategy : "blade-limited";
     public float ColorR { get; set; } = .12f;
     public float ColorG { get; set; } = .75f;
     public float ColorB { get; set; } = 1f;
@@ -158,7 +158,7 @@ public sealed class SaberSettings
     {
         VesselContactDetector = ValidId(VesselContactDetector, "legacy-ribbon", "cached-ribbon");
         ClutterContactDetector = ValidId(ClutterContactDetector, "legacy-rays", "all-hit-rays", "capsule-sweep");
-        ContactPlaneStrategy = ValidId(ContactPlaneStrategy, "legacy-contact", "blade-strict", "blade-limited", "sweep-fit");
+        ContactPlaneStrategy = ValidId(ContactPlaneStrategy, "blade-limited", "legacy-contact", "blade-strict", "sweep-fit");
         SliceExecutionMode = ValidId(SliceExecutionMode, "legacy-serial", "queued");
         SliceWorkerCount = Math.Clamp(SliceWorkerCount, 1, 4);
         SlicePendingTargetLimit = Math.Clamp(SlicePendingTargetLimit, 16, 512);

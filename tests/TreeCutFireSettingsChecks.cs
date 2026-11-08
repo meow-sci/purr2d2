@@ -38,7 +38,7 @@ internal static class TreeCutFireSettingsChecks
             File.WriteAllText(path, "{\"VesselContactDetector\":\"unknown\",\"ClutterContactDetector\":null,\"ContactPlaneStrategy\":\"bad\",\"SliceExecutionMode\":\"invalid\",\"SliceWorkerCount\":99}");
             migrated = SaberSettings.Load(path);
             Check(migrated.VesselContactDetector == "legacy-ribbon" && migrated.ClutterContactDetector == "legacy-rays"
-                && migrated.ContactPlaneStrategy == "legacy-contact" && migrated.SliceExecutionMode == "legacy-serial"
+                && migrated.ContactPlaneStrategy == "blade-limited" && migrated.SliceExecutionMode == "legacy-serial"
                 && migrated.SliceWorkerCount == 4, "invalid methods and numeric limits are validated on load");
             foreach (float seconds in new[] { 0f, 7.5f, 60f })
             {
