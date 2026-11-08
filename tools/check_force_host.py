@@ -68,7 +68,7 @@ ET.SubElement(items, "PackageReference", Include="Microsoft.Extensions.Logging.A
 ET.SubElement(items, "PackageReference", Include="Microsoft.Extensions.Logging.Console", Version="10.0.0")
 ET.SubElement(items, "PackageReference", Include="MemoryPack.Core", Version="1.21.4")
 for source in ["src/Core/DebugTimings.cs", "src/Core/SaberLimits.cs", "src/Core/SaberDropMath.cs", "src/Core/SaberDropSequence.cs", "src/Core/ForceCaptureLimits.cs", "src/Core/ForceBreakupLimits.cs", "src/Core/ForceSpreadLimits.cs", "src/Core/ForceBreakupSequence.cs", "src/Core/SomersaultMotion.cs", "src/Core/SomersaultSequence.cs",
-               "src/Runtime/SomersaultMotionController.cs", "src/Cutting/CutGeometry.cs", "src/Cutting/ClutterSliceNative.cs", "src/Slicing/Detection/CapsuleClutterDetector.cs", "src/Slicing/Planes/SliceSweepSamples.cs",
+               "src/Runtime/SomersaultMotionController.cs", "src/Cutting/CutGeometry.cs", "src/Cutting/ClutterSliceNative.cs", "src/Slicing/Detection/CapsuleClutterDetector.cs", "src/Slicing/Planes/SliceSweepSamples.cs", "src/Slicing/SliceDebrisClassification.cs",
                "src/Rendering/AuthoredDebrisAssets.cs", "src/Rendering/FragmentTemplateLoader.cs", "src/Rendering/FragmentAssetRegistration.cs",
                "tests/ForceHostChecks.cs", "tests/ForceClutterBepuChecks.cs", "tests/ForceBreakupHostChecks.cs", "tests/ForceDentHostChecks.cs", "tests/SaberDropHostChecks.cs",
                *(str(path.relative_to(root)) for path in sorted((root / "src/Force").glob("*.cs")))]:

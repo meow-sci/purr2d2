@@ -52,19 +52,21 @@ internal static partial class NativeSlicePhysics
         if (!double4x4.Invert(full.MatrixAsmb2VehicleAsmb, out var oldAssemblyToPart))
         { reason = "Source transformation is singular."; return false; }
         var separatedStates = new HashSet<VehicleUpdateState>();
+        var splitVehicles = new HashSet<Vehicle>();
         if (UpdateState(full.Tree!.OwningVehicle!) is { } initialState) separatedStates.Add(initialState);
+        var bulk = new IsolationBulkChanges();
         try
         {
             timings.Next(SliceCommitPhase.Isolation);
             // Retain the exact trees, since the parent split gives the struck part
             // a new owner. Each scope nests with Split's own staging scopes and is
             // closed before returning to the frame or destroying any vehicle.
-            using (var bulk = new IsolationBulkChanges())
+            using (bulk)
             {
                 foreach (var boundary in boundaries)
                 {
                     bulk.Include(boundary.Source.Tree!);
-                    if (!SplitBoundary(boundary.Source, boundary.Neighbor, separatedStates))
+                    if (!SplitBoundary(boundary.Source, boundary.Neighbor, separatedStates, splitVehicles))
                     { reason = "A connection refused native isolation; the source remains intact with completed native separations."; return false; }
                 }
             }
@@ -93,9 +95,17 @@ internal static partial class NativeSlicePhysics
                 + (isolated?.ContentsReleased == true ? "; source contents were released" : "") + ": " + error.Message;
             return false;
         }
+        finally
+        {
+            // The bulk scopes have closed even on a partial failure. Reclassify
+            // only actual split participants using their final control/seat state.
+            if (bulk.ClosedSuccessfully)
+                foreach (var vehicle in splitVehicles) SliceDebrisClassification.MarkSeparated(vehicle);
+        }
     }
 
-    private static bool SplitBoundary(Part full, Part neighbor, HashSet<VehicleUpdateState> participants)
+    private static bool SplitBoundary(Part full, Part neighbor, HashSet<VehicleUpdateState> participants,
+        HashSet<Vehicle> splitVehicles)
     {
         Part.Connection? crossing = null;
         foreach (var edge in full.Connections)
@@ -103,6 +113,8 @@ internal static partial class NativeSlicePhysics
         if (crossing is null || full.Tree?.OwningVehicle is not { } owner) return false;
         var endpoint = crossing.Connectors[0].ConnectionPart.FullPart == full ? crossing.Connectors[0] : crossing.Connectors[1];
         if (owner.Split(crossing, endpoint, 0, out _) is not { } separated) return false;
+        splitVehicles.Add(owner);
+        splitVehicles.Add(separated);
         // Each successful split is irreversible, even if a later boundary or bulk
         // finalization fails. Protect that native relationship immediately.
         if (UpdateState(owner) is { } originalState && UpdateState(separated) is { } separatedState)
@@ -136,6 +148,7 @@ internal static partial class NativeSlicePhysics
     private sealed class IsolationBulkChanges : IDisposable
     {
         private readonly List<PartTree> _trees = new();
+        internal bool ClosedSuccessfully { get; private set; }
         internal void Include(PartTree tree)
         {
             if (_trees.Contains(tree)) return;
@@ -150,6 +163,7 @@ internal static partial class NativeSlicePhysics
                 catch (Exception error) { (errors ??= new()).Add(error); }
             _trees.Clear();
             if (errors != null) throw new AggregateException("Could not finish native isolation staging updates.", errors);
+            ClosedSuccessfully = true;
         }
     }
 }

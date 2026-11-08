@@ -17,10 +17,12 @@ namespace KSA
         internal static object CurrentSystem = new();
         internal static readonly Roster KittenRoster = new();
     }
+    internal static class Program { internal static Vehicle? ControlledVehicle = null; }
     internal sealed class Part
     {
         internal readonly string Id;
         internal bool IsAttachedInternal;
+        internal bool HasControl;
         internal Part StructuralPart => this;
         internal Part FullPart => this;
         internal PartTree? Tree;
@@ -62,7 +64,7 @@ namespace KSA
         }
     }
     internal sealed class VehicleUpdateState { }
-    internal sealed class Vehicle
+    internal class Vehicle
     {
         internal static readonly List<string> SplitOrder = new();
         internal static readonly List<int> SplitTreeSizes = new();
@@ -72,6 +74,13 @@ namespace KSA
         internal readonly object System = Universe.CurrentSystem;
         internal readonly string Id;
         internal bool IsDisposed;
+        internal bool IsDebris, IsEditedVehicle;
+        internal bool HasControlModule => Parts.Members.Any(part => part.HasControl);
+        internal void MarkAsDebris()
+        {
+            if (PartTree.Created.Any(tree => tree.Depth != 0)) throw new InvalidOperationException("Classified inside bulk change");
+            IsDebris = true;
+        }
         internal bool Drained, EnginesOff;
         internal readonly VehicleUpdateState Worker = new();
         internal Seat[] Crew = [];
@@ -103,6 +112,7 @@ namespace KSA
             return separated;
         }
     }
+    internal sealed class KittenEva : Vehicle { internal KittenEva() : base("kitten", []) { } }
 }
 namespace Purr2D2.Slicing
 {

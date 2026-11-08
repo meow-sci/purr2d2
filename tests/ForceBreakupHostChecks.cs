@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
@@ -9,6 +10,7 @@ using KSA;
 using Purr2D2.Core;
 using Purr2D2.Force;
 using Purr2D2.Rendering;
+using Purr2D2.Slicing;
 
 /// <summary>Use the real KSA serializer/types and native call contracts, without starting the game.</summary>
 internal static class ForceBreakupHostChecks
@@ -19,6 +21,8 @@ internal static class ForceBreakupHostChecks
     {
         CheckPlanner();
         CheckCompoundPlacement();
+        CheckAtlasSurfaceCapture();
+        CheckNativeDebrisCleanup();
 
         var shape = new AuthoredDebrisShape([new("native_hull", "native_paint", false), new("native_window", "native_glass", true)],
             new(1, -2, 3), new(4, 6, 8), 2, 100);
@@ -131,6 +135,127 @@ internal static class ForceBreakupHostChecks
         try { AuthoredDebrisAssets.Build(shape with { Extents = double3.Zero }); }
         catch (InvalidDataException) { Console.WriteLine("PASS: invalid debris dimensions refuse preparation"); return; }
         throw new InvalidOperationException("Invalid debris dimensions were accepted.");
+    }
+
+    private static void CheckAtlasSurfaceCapture()
+    {
+        ModLibrary.TagTable.ClearCollections();
+        var source = new ContentSource();
+        var mod = new KSA.Mod { Id = "furce-atlas-test", DirectoryPath = Directory.GetCurrentDirectory() };
+        source.Mods.Add(mod);
+        var rows = XDocument.Parse("""
+            <Assets>
+              <MeshAtlas Id="FurceAtlasFixture" Path="Assets/Models/Purr2D2_Practice.glb" HostOnly="true" />
+              <PbrMaterial Id="FurceAtlasMaterial" />
+            </Assets>
+            """).Root!.Elements().ToArray();
+        for (int i = 0; i < rows.Length; i++)
+        {
+            ContentStamps.Stamp(rows[i], mod.Id, 0, "atlas-fixture.xml", 0, i);
+            source.Rows.Add(rows[i]);
+        }
+        MeshAtlasFileReference? atlas = null;
+        try
+        {
+            var errors = new ContentErrors();
+            // HostOnly loads the actual vertex/index buffers while avoiding GPU
+            // allocation. Use the real pending-registration and resolution stages.
+            ContentLoader.Load(source, ModLibrary.TagTable,
+                new ContentLoadOptions { Serial = true, ReadPayloads = false }, null, errors);
+            Check(errors.Count == 0, "actual atlas fixture loads without native GPU allocation or content errors");
+            atlas = ModLibrary.Get<MeshAtlasFileReference>("FurceAtlasFixture");
+            var mesh = ModLibrary.Get<MeshReference>("Purr2D2_PracticeBillet_Mesh");
+            var material = ModLibrary.Get<PbrMaterialReference>("FurceAtlasMaterial");
+            Check(mesh.HostPrimitives is { Length: > 0 } && !mesh.IsReferenceable
+                && FragmentAssetRegistration.TryGetAsset<MeshReference>(mesh.Id, out var registered)
+                && ReferenceEquals(registered, mesh),
+                "5801 registers loaded atlas geometry while leaving its legacy IsReferenceable flag false");
+            var captured = ForceVehicleBreakup.CaptureSurface("atlas fixture", mesh, material, false, true);
+            Check(captured.Mesh == mesh.Id && captured.Material == material.Id && captured.Internal,
+                "breakup accepts the actual host-loaded atlas surface and preserves its durable references");
+            var glass = ForceVehicleBreakup.CaptureSurface("glass fixture", mesh, material, true, false);
+            Check(glass.Glass && !glass.Internal, "atlas capture retains glass and internal surface distinctions");
+            Reject(mesh, new PbrMaterialReference { Id = material.Id }, "material is not its registered durable asset");
+            Reject(null, material, "mesh geometry is unavailable");
+            // Give a different object real host geometry under the same name;
+            // merely matching a durable-looking ID must not authorize capture.
+            var impostor = new MeshReference { Id = mesh.Id };
+            GC.SuppressFinalize(impostor); // Borrowed fixture geometry remains owned by the real atlas mesh.
+            typeof(MeshReference).GetProperty(nameof(MeshReference.HostPrimitives))!.SetValue(impostor, mesh.HostPrimitives);
+            Reject(impostor, material, "mesh is not its registered durable asset");
+            typeof(SerializedId).GetProperty(nameof(SerializedId.LoadFailed))!.SetValue(mesh, true);
+            try { Reject(mesh, material, "mesh is not its registered durable asset"); }
+            finally { typeof(SerializedId).GetProperty(nameof(SerializedId.LoadFailed))!.SetValue(mesh, false); }
+            typeof(SerializedId).GetProperty(nameof(SerializedId.LoadFailed))!.SetValue(material, true);
+            try { Reject(mesh, material, "material is not its registered durable asset"); }
+            finally { typeof(SerializedId).GetProperty(nameof(SerializedId.LoadFailed))!.SetValue(material, false); }
+
+            void Reject(MeshReference? candidateMesh, PbrMaterialReference? candidateMaterial, string reason)
+            {
+                try { ForceVehicleBreakup.CaptureSurface("part 'fixture-part', surface 2", candidateMesh, candidateMaterial, false, false); }
+                catch (InvalidDataException error)
+                {
+                    Check(error.Message.Contains(reason) && error.Message.Contains("fixture-part")
+                        && error.Message.Contains("surface 2") && error.Message.Contains("material '"),
+                        "invalid authored surface refuses with actionable part/surface/asset context: " + reason);
+                    return;
+                }
+                throw new Exception("Invalid authored surface was accepted: " + reason);
+            }
+        }
+        finally
+        {
+            if (atlas != null) foreach (var mesh in atlas.Meshes) mesh.Dispose();
+            ModLibrary.TagTable.ClearCollections();
+        }
+    }
+
+    private static void CheckNativeDebrisCleanup()
+    {
+        // Use actual native module lists and the same collector F11 calls, without
+        // creating a physics world, invoking native Split or deleting anything.
+        var trees = new List<PartTree>();
+        var system = (CelestialSystem)RuntimeHelpers.GetUninitializedObject(typeof(CelestialSystem));
+        AccessTools.Field(typeof(CelestialSystem), "_all").SetValue(system, new LookupCollection<Astronomical>("debris fixture"));
+        var oldControlled = AccessTools.Field(typeof(KSA.Program), "_controlledVehicle").GetValue(null);
+        try
+        {
+            var offcut = Fixture("offcut");
+            var control = Fixture("control"); control.Parts.Controls.Add(new Control("fixture-control") { Parent = null! });
+            var occupied = Fixture("occupied");
+            var seat = (IVASeat)AccessTools.Constructor(typeof(IVASeat), [typeof(string)]).Invoke(["fixture-seat"]);
+            seat.AssignedKittenHash = KeyHash.Make("fixture-kitten"); occupied.Parts.Modules.Add(seat);
+            var active = Fixture("active");
+            AccessTools.Field(typeof(KSA.Program), "_controlledVehicle").SetValue(null, active);
+            var debris = new List<Vehicle>();
+            PartFailure.CollectSystemDebris(system, debris);
+            Check(debris.Count == 0, "native F11 cleanup ignores unmarked Vehicle offcuts before classification");
+            foreach (var vehicle in new[] { offcut, control, occupied, active }) SliceDebrisClassification.MarkSeparated(vehicle);
+            PartFailure.CollectSystemDebris(system, debris);
+            Check(offcut.IsDebris && debris.SequenceEqual([offcut]),
+                "classified native offcut is selected by the actual F11 debris collector");
+            Check(!control.IsDebris && !occupied.IsDebris && !active.IsDebris,
+                "native control module, occupied seat and active control protect surviving vehicles from debris classification");
+            var serialize = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(Vehicle), nameof(Vehicle.SerializeSave)));
+            Check(serialize.Any(c => c.Calls(AccessTools.PropertyGetter(typeof(Vehicle), nameof(Vehicle.IsDebris))))
+                && serialize.Any(c => c.operand is FieldInfo f && f.Name == nameof(VehicleData.IsDebris)),
+                "native vehicle saving preserves the debris classification used after restart");
+
+            Vehicle Fixture(string id)
+            {
+                var vehicle = (Vehicle)RuntimeHelpers.GetUninitializedObject(typeof(Vehicle));
+                vehicle.Parts = new PartTree(); trees.Add(vehicle.Parts);
+                AccessTools.PropertySetter(typeof(Astronomical), nameof(Astronomical.Id)).Invoke(vehicle, [id]);
+                AccessTools.PropertySetter(typeof(Astronomical), nameof(Astronomical.Hash)).Invoke(vehicle, [KeyHash.Make(id)]);
+                system.All.Register(vehicle);
+                return vehicle;
+            }
+        }
+        finally
+        {
+            AccessTools.Field(typeof(KSA.Program), "_controlledVehicle").SetValue(null, oldControlled);
+            foreach (var tree in trees) tree.Dispose();
+        }
     }
 
     private static void CheckPlanner()

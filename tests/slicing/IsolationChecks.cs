@@ -10,6 +10,7 @@ internal static class IsolationChecks
         RootLeafAndMidStack();
         DockingReroot();
         RefusalsAndBulkCleanup();
+        DebrisClassification();
         Console.WriteLine("PASS: native isolation ordering, changing owners, bulk finalization and stale source guards");
     }
     private static void Reset()
@@ -17,6 +18,7 @@ internal static class IsolationChecks
         Vehicle.SplitOrder.Clear(); Vehicle.SplitTreeSizes.Clear(); PartTree.Created.Clear();
         Vehicle.ThrowOnSplit = 0; Vehicle.RerootAfterFirstSplit = null; Universe.CurrentSystem = new();
         QuietSliceContacts.Protections = 0;
+        KSA.Program.ControlledVehicle = null;
     }
     private static void RootLeafAndMidStack()
     {
@@ -82,6 +84,8 @@ internal static class IsolationChecks
         Part.Attach(root, selected); Part.Attach(selected, child); original = new("fixture", [root, selected, child]);
         original.Parts.ThrowOnEnd = true;
         Check(!NativeSlicePhysics.TryIsolate(selected, Ready, out _, out _, new()), "bulk finalization failure refuses the swap");
+        Check(PartTree.Created.All(tree => tree.OwningVehicle is not { IsDebris: true }),
+            "failed bulk finalization cannot classify from potentially stale control or seat membership");
         CheckClosed();
 
         Reset(); selected = new("selected"); original = new("fixture", [selected]);
@@ -100,6 +104,37 @@ internal static class IsolationChecks
         Check(!isolated.IsCurrent(out _), "subsequent source assembly edits invalidate the isolated handle");
     }
     private static void CheckClosed() => Check(PartTree.Created.All(t => t.Depth == 0), "every retained native tree leaves bulk mode");
+    private static void DebrisClassification()
+    {
+        Reset();
+        var root = new Part("capsule") { HasControl = true };
+        var cut = new Part("cut tank"); var offcut = new Part("offcut");
+        Part.Attach(root, cut); Part.Attach(cut, offcut);
+        var original = new Vehicle("rocket", [root, cut, offcut]);
+        Check(NativeSlicePhysics.TryIsolate(cut, Ready, out var isolated, out _, new()), "classification fixture isolates its tank");
+        Check(!original.IsDebris && isolated!.Owner.IsDebris
+            && isolated.Neighbors.Single(v => v != original).IsDebris,
+            "inert source/offcut become debris after bulk closure while the control-bearing rocket remains a vehicle");
+
+        Reset(); root = new("capsule") { HasControl = true }; cut = new("tank"); offcut = new("panel");
+        Part.Attach(root, cut); Part.Attach(cut, offcut); original = new("partial", [root, cut, offcut]);
+        Vehicle.ThrowOnSplit = 2;
+        Check(!NativeSlicePhysics.TryIsolate(cut, Ready, out _, out _, new())
+            && !original.IsDebris && cut.Tree!.OwningVehicle!.IsDebris,
+            "completed partial separations classify inert detached trees without relabeling the control-bearing source");
+
+        Reset(); root = new("untouched"); original = new("untouched", [root]);
+        Check(NativeSlicePhysics.TryIsolate(root, Ready, out _, out _, new()) && !original.IsDebris,
+            "an isolation with no native split never reclassifies an unrelated existing vehicle");
+        var occupied = new Vehicle("occupied", [new("seat")]) { Crew = [new() { AssignedKittenHash = new(1) }] };
+        var controlled = new Vehicle("controlled", [new("active")]); KSA.Program.ControlledVehicle = controlled;
+        var edited = new Vehicle("edited", [new("editor")]) { IsEditedVehicle = true };
+        foreach (var protectedVehicle in new Vehicle[] { occupied, controlled, edited, new KittenEva() })
+        {
+            SliceDebrisClassification.MarkSeparated(protectedVehicle);
+            Check(!protectedVehicle.IsDebris, "classification preserves occupied/controlled/edited/kitten ownership: " + protectedVehicle.Id);
+        }
+    }
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);

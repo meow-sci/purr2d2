@@ -366,14 +366,10 @@ internal sealed class ForceVehicleBreakup : IDisposable
         var max = new double3(double.NegativeInfinity);
         for (int i = 0; i < models.Length; i++)
         {
-            var (meshReference, materialReference, glass, isInternal) = models[i];
-            var mesh = meshReference;
-            var material = materialReference;
-            if (mesh?.HostPrimitives is not { Length: > 0 } primitives || !mesh.IsReferenceable || string.IsNullOrEmpty(mesh.Id)
-                || material == null || !material.IsReferenceable || string.IsNullOrEmpty(material.Id))
-                throw new InvalidDataException("An authored surface has no durable mesh/material or accessible geometry.");
-            surfaces[i] = new(mesh.Id, material.Id, glass, isInternal);
-            foreach (var primitive in primitives)
+            var (mesh, material, glass, isInternal) = models[i];
+            surfaces[i] = CaptureSurface($"part '{node.Id}' (template '{node.Template.Id}'), surface {i}",
+                mesh, material, glass, isInternal);
+            foreach (var primitive in mesh!.HostPrimitives)
             {
                 var primitiveMin = primitive.PositionMinimum;
                 var primitiveMax = primitive.PositionMaximum;
@@ -413,6 +409,24 @@ internal sealed class ForceVehicleBreakup : IDisposable
         if (!double.IsFinite(volume) || volume <= 0) throw new InvalidDataException("Authored debris has invalid dimensions.");
         int sourceIndex = _sourceNodes.Count;
         return new(sourceIndex, surfaces, translation, normalizedRotation, scale, position, boundsExtents, volume, attachedInternal);
+    }
+
+    internal static AuthoredDebrisSurface CaptureSurface(string context, MeshReference? mesh,
+        PbrMaterialReference? material, bool glass, bool isInternal)
+    {
+        // 5801's atlas loader registers pending meshes without OnDataLoad, so
+        // IsReferenceable stays false even for stock geometry. Prove durability
+        // against the exact live registry objects instead of that legacy flag.
+        string? failure = null;
+        if (mesh?.HostPrimitives is not { Length: > 0 }) failure = "mesh geometry is unavailable";
+        else if (!FragmentAssetRegistration.TryGetAsset<MeshReference>(mesh.Id, out var registeredMesh)
+            || !ReferenceEquals(mesh, registeredMesh)) failure = "mesh is not its registered durable asset";
+        else if (material == null
+            || !FragmentAssetRegistration.TryGetAsset<PbrMaterialReference>(material.Id, out var registeredMaterial)
+            || !ReferenceEquals(material, registeredMaterial)) failure = "material is not its registered durable asset";
+        if (failure != null)
+            throw new InvalidDataException($"Cannot preserve {context}: {failure} (mesh '{mesh?.Id ?? "<unresolved>"}', material '{material?.Id ?? "<unresolved>"}').");
+        return new(mesh!.Id, material!.Id, glass, isInternal);
     }
 
     private void CompleteCapture()

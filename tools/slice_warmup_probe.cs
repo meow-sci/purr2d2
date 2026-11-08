@@ -105,6 +105,7 @@ internal static class SliceWarmupProbe
         Add("KSA.VehicleReferenceFrameEx", "CciStatesToCcf");
         Add("Purr2D2.Runtime.SliceWorkerHooks", "EnterStage");
         Add("Purr2D2.Slicing.SliceWorkerDiagnostics", "BeginChild");
+        Add("Purr2D2.Slicing.SliceDebrisClassification", "MarkSeparated");
         var tankList = targets.Single(m => m.DeclaringType!.Name == "List" && m.DeclaringType.GetGenericArguments().Any(t => t.FullName == "KSA.Tank") && m.Name == "Dispose");
         representative.Add(tankList);
         Console.WriteLine($"Resolved {roots.Count} roots -> {targets.Count} distinct managed bodies, {ilBytes} IL bytes; closed generic bodies {targets.Count(m => m.IsGenericMethod || m.DeclaringType!.IsConstructedGenericType)}; boundaries {Value<int>("Boundaries")}; caps {cap} methods/{ilCap} bytes.");

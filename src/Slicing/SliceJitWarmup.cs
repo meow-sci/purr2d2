@@ -197,6 +197,7 @@ internal static class SliceJitWarmup
             if (name == "Purr2D2.Runtime.SliceWorkerHooks") return method.Name is "DispatchPrefix" or "RunPrefix" or "RunFinalizer"
                 or "ChildPrefix" or "ChildFinalizer" or "EnterStage";
             return name is "Purr2D2.Slicing.NativeSlicePhysics" or "Purr2D2.Slicing.IsolatedSliceSource"
+                or "Purr2D2.Slicing.SliceDebrisClassification"
                 or "Purr2D2.Slicing.SliceSourceCapture" or "Purr2D2.Slicing.SliceSourceFrame" or "Purr2D2.Slicing.SlicePrincipalFrame"
                 or "Purr2D2.Slicing.ArbitrarySlicer" or "Purr2D2.Runtime.GameHooks"
                 or "Purr2D2.Slicing.SliceCommitTimings" or "Purr2D2.Slicing.SliceFrameDiagnostics"

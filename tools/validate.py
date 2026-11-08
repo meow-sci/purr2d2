@@ -698,6 +698,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
     ]
     isolation_sources = [
         source / "src/Slicing/NativeSliceIsolation.cs",
+        source / "src/Slicing/SliceDebrisClassification.cs",
         source / "src/Slicing/SliceCommitTimings.cs",
         source / "src/Slicing/SliceDiagnosticCounters.cs",
         source / "src/Slicing/SliceFrameDiagnostics.cs",
