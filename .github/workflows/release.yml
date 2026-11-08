@@ -5,8 +5,45 @@ name: Build mod dist
 on:
   push:
     branches: ['**']
+    # Only inputs to the shipped mod should trigger an automatic release.
+    paths:
+      - 'src/**/*.cs'
+      - 'Shared/RuntimeBootstrap.cs'
+      - 'Assets/**'
+      - '!Assets/**/*.md'
+      - 'Purr2D2.csproj'
+      - 'Purr2D2.slnx'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - 'NuGet.Config'
+      - 'nuget.config'
+      - 'packages.lock.json'
+      - 'mod.toml'
+      - 'LICENSE'
+      - 'release-major.txt'
+      - 'tools/release-metadata.sh'
+      - 'tools/stamp-release-version.py'
   pull_request:
     branches: [main]
+    paths:
+      - 'src/**/*.cs'
+      - 'Shared/RuntimeBootstrap.cs'
+      - 'Assets/**'
+      - '!Assets/**/*.md'
+      - 'Purr2D2.csproj'
+      - 'Purr2D2.slnx'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - 'NuGet.Config'
+      - 'nuget.config'
+      - 'packages.lock.json'
+      - 'mod.toml'
+      - 'LICENSE'
+      - 'release-major.txt'
+      - 'tools/release-metadata.sh'
+      - 'tools/stamp-release-version.py'
   workflow_dispatch:
 
 permissions:
