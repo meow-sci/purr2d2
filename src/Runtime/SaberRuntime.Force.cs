@@ -330,7 +330,7 @@ internal sealed partial class SaberRuntime
     private bool ForceCaptureRadiusGestureValid(bool requirePointer = false, float2 pointer = default)
     {
         if (!_forceCaptureRadiusDrag.Held || !ForceUiVisible || Program.IsModalOpen()
-            || Program.HasMouseInputLatch || ImGui.GetIO().AppFocusLost || !ForceCanUse
+            || Program.HasMouseInputLatch || !HudApplicationHasFocus || !ForceCanUse
             || !_forceLayoutAvailable || !_forceCaptureRadiusDrag.Matches(_forceLayout)
             || _owner is not { } owner || !ReferenceEquals(_forceCaptureRadiusOwner, owner)
             || !ReferenceEquals(owner.System, _forceCaptureRadiusSystem)
@@ -398,7 +398,7 @@ internal sealed partial class SaberRuntime
         var query = _forceQuery;
         _forceQuery = null;
         if (query is not { } pending || !ForcePicking || !ForceCanUse || KittenColorPickerContainsPointer(ImGui.GetIO().MousePos)
-            || ImGui.GetIO().AppFocusLost || Program.IsModalOpen() || !ReferenceEquals(pending.Owner, _owner)
+            || !HudApplicationHasFocus || Program.IsModalOpen() || !ReferenceEquals(pending.Owner, _owner)
             || !ReferenceEquals(_forcePickOwner, _owner)) return;
         try
         {
@@ -427,7 +427,7 @@ internal sealed partial class SaberRuntime
         if (!ForcePicking || !ForceCanUse || _owner is not { } owner
             || !ReferenceEquals(_forcePickOwner, owner) || ForceHolding
             || _forceCaptureRadiusDrag.Held || _forceThrowDrag.Held
-            || Program.IsModalOpen() || Program.HasMouseInputLatch || io.AppFocusLost
+            || Program.IsModalOpen() || Program.HasMouseInputLatch || !HudApplicationHasFocus
             || io.WantCaptureMouse || io.WantTextInput || !_forceLayoutAvailable
             || !CursorTarget.IsHitTestViewport(Program.MainViewport))
         {
@@ -437,7 +437,7 @@ internal sealed partial class SaberRuntime
 
         var pointer = io.MousePos;
         if (KittenColorPickerContainsPointer(pointer) || SettingsContainsPointer(pointer)
-            || (_overlayLayoutAvailable && _overlayLayout.Hit(pointer) != SaberOverlayHit.None)
+            || (_overlayLayoutAvailable && HudCombinedHit(pointer) != SaberOverlayHit.None)
             || ForceOverlayHitAt(pointer) != ForceOverlayHit.None)
         {
             ClearForceHoverPreview();
@@ -590,7 +590,7 @@ internal sealed partial class SaberRuntime
     {
         if (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner))
             SetForceStatus("Furce selection cancelled: the controlled kitten changed.", ForceStatusSeverity.None);
-        if (!ForceUiVisible || Program.IsModalOpen() || !ForceCanUse
+        if (_arrangeHud || !ForceUiVisible || Program.IsModalOpen() || !ForceCanUse
             || (_forcePickOwner != null && !ReferenceEquals(_forcePickOwner, _owner)))
             ResetForceGestures();
         if (_forceDrag.Held && !ReferenceEquals(_forceMoveOwner, _owner)) _forceDrag.Release();
@@ -621,12 +621,12 @@ internal sealed partial class SaberRuntime
         RefreshForceHoverPreview();
         if (!ForcePicking || !ForceCanUse) return;
         var io = ImGui.GetIO();
-        if (io.AppFocusLost) { ResetForceGestures(); return; }
+        if (!HudApplicationHasFocus) { ResetForceGestures(); return; }
         if (_forceQuery is { Capture: true }) return;
         var pointer = _forceClickPending ? _forceClickPointer : io.MousePos;
         if ((!_forceClickPending && (io.WantCaptureMouse || !CursorTarget.IsHitTestViewport(Program.MainViewport)))
             || io.WantTextInput || Program.IsModalOpen() || KittenColorPickerContainsPointer(pointer)
-            || (_overlayLayoutAvailable && _overlayLayout.Hit(pointer) != SaberOverlayHit.None)
+            || (_overlayLayoutAvailable && HudCombinedHit(pointer) != SaberOverlayHit.None)
             || (_forceLayoutAvailable && ForceOverlayHitAt(pointer) != ForceOverlayHit.None))
         { _forceHover = null; _forceClickPending = false; _forceQuery = null; return; }
         if (!_forceClickPending && _playerTime < _forceNextHoverTime) return;
@@ -772,7 +772,7 @@ internal sealed partial class SaberRuntime
             else if (_forceRotationDrag.Move(pointer))
             {
                 if (_forceRotationTarget != _forceRotationDrag.Rotation)
-                    _forceRotationSegments.Add((_forceRotationDrag.Rotation, ForceShiftHeld(Program.GetWindow())));
+                    _forceRotationSegments.Add((_forceRotationDrag.Rotation, ForceShiftHeld(HudModifierWindow)));
                 _forceRotationTarget = _forceRotationDrag.Rotation;
                 _forceRotationPending = true;
             }
@@ -858,7 +858,7 @@ internal sealed partial class SaberRuntime
         && _forceRotationGeneration == _forceCaptureGeneration;
 
     private bool ForceRotationGestureValid() => ForceRotationContextValid() && ForceUiVisible
-        && !Program.IsModalOpen() && !Program.HasMouseInputLatch && !ImGui.GetIO().AppFocusLost
+        && !Program.IsModalOpen() && !Program.HasMouseInputLatch && HudApplicationHasFocus
         && _forceLayoutAvailable && _forceRotationDrag.Matches(_forceLayout);
 
     private void CompleteForceRotationDrag(float2 pointer)
@@ -896,7 +896,7 @@ internal sealed partial class SaberRuntime
         }
         if (!_forceThrowDrag.Held) return false;
         bool valid = ForceUiVisible && !Program.IsModalOpen() && !Program.HasMouseInputLatch
-            && !ImGui.GetIO().AppFocusLost && ForceCanUse && ForceHolding
+            && HudApplicationHasFocus && ForceCanUse && ForceHolding
             && _forceLayoutAvailable && _forceThrowDrag.Matches(_forceLayout)
             && ReferenceEquals(_forceThrowOwner, _owner) && ReferenceEquals(_force.Owner, _owner);
         if (valid) _forceThrowDrag.Move(pointer);
@@ -989,7 +989,7 @@ internal sealed partial class SaberRuntime
 
     internal bool FilterForceKey(GlfwWindow window, GlfwKey key, GlfwKeyAction action)
     {
-        if (window != Program.GetWindow() || key != GlfwKey.Escape) return false;
+        if (!HudWindowAcceptsInput(window) || key != GlfwKey.Escape) return false;
         if (Program.IsModalOpen())
         {
             if (_forceThrowDrag.Held || _forceCaptureRadiusDrag.Held) CancelForceThrowDrag();
@@ -1004,7 +1004,7 @@ internal sealed partial class SaberRuntime
         var io = ImGui.GetIO();
         bool forceGestureHeld = _forceThrowDrag.Held || _forceCaptureRadiusDrag.Held || _forceRotationDrag.Held;
         if (!forceGestureHeld && (!ForcePicking && !_forceSettingDrag.Held || KittenColorPickerContainsPointer(io.MousePos)
-            || io.WantTextInput || io.WantCaptureKeyboard)) return false;
+            || io.WantTextInput || (io.WantCaptureKeyboard && !HudKeyboardOwnsInput(window)))) return false;
         if (action != GlfwKeyAction.Release)
         {
             _forceEscapeHeld = true;
@@ -1150,6 +1150,19 @@ internal sealed partial class SaberRuntime
         draw.AddText(ImGui.GetFont(), ImGui.GetFontSize(), labelPosition, markerColor, label, wrap);
     }
 
+    private void DrawForceWorldOverlay(ImDrawListPtr draw)
+    {
+        if (!ForceUiVisible) return;
+        Camera? frameCamera = Program.GetMainCamera();
+        ForceHoverPresentation hoverPresentation = default;
+        bool hasHoverPresentation = frameCamera is { } cameraForPreview
+            && TryGetForceHoverPresentation(cameraForPreview, out hoverPresentation);
+        if (frameCamera is { } camera)
+            DrawForceCaptureBubble(draw, camera, hasHoverPresentation, hoverPresentation);
+        if (hasHoverPresentation && frameCamera is { } markerCamera)
+            DrawForceHoverMarker(draw, markerCamera, hoverPresentation);
+    }
+
     private void DrawForceOverlay(ImDrawListPtr draw)
     {
         try { DrawForceOverlayCore(draw); }
@@ -1174,12 +1187,6 @@ internal sealed partial class SaberRuntime
         if (_forceThrowDrag.Held && !_forceThrowDrag.Matches(layout)) CancelForceThrowDrag();
         if (_forceCaptureRadiusDrag.Held && !_forceCaptureRadiusDrag.Matches(layout)) CancelForceThrowDrag();
         if (_forceRotationDrag.Held && !ForceRotationGestureValid()) CancelForceRotationDrag();
-        Camera? frameCamera = Program.GetMainCamera();
-        ForceHoverPresentation hoverPresentation = default;
-        bool hasHoverPresentation = frameCamera is { } cameraForPreview
-            && TryGetForceHoverPresentation(cameraForPreview, out hoverPresentation);
-        if (frameCamera is { } camera)
-            DrawForceCaptureBubble(draw, camera, hasHoverPresentation, hoverPresentation);
         var white = new ImColor8(255, 255, 255, 255);
         var muted = new ImColor8(195, 200, 210, 255);
         var color = ForceCanUse ? white : muted;
@@ -1259,8 +1266,6 @@ internal sealed partial class SaberRuntime
             else if (overlayHit == ForceOverlayHit.CaptureLimit)
                 ShowSaberTooltip("max # objects Furce can capture");
         }
-        if (hasHoverPresentation && frameCamera is { } markerCamera)
-            DrawForceHoverMarker(draw, markerCamera, hoverPresentation);
         if (_forceThrowDrag.Held)
             DrawForceThrowSlider(draw, layout, settingsFill, faintWhiteRim, white, muted);
         else if (_forceCaptureRadiusDrag.Held)

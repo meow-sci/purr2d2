@@ -62,7 +62,7 @@ internal sealed partial class SaberRuntime
         || _overlayPointerCapture.EventFrame == Program.FrameNumber
         || (_overlayLayoutAvailable && !ImGui.GetIO().WantCaptureMouse
             && ImGui.GetIO().MouseHoveredViewport == ImGui.GetMainViewport().ID
-            && (_overlayLayout.Hit(ImGui.GetIO().MousePos) != OverlayHit.None
+            && (HudCombinedHit(ImGui.GetIO().MousePos) != OverlayHit.None
                 || ForceOverlayHitAt(ImGui.GetIO().MousePos) != ForceOverlayHit.None)));
 
     private void SetSaberOverlayVisible(bool visible)
@@ -76,6 +76,7 @@ internal sealed partial class SaberRuntime
     {
         _settings.KittenListUiEnabled = visible;
         _overlayLayout = _overlayLayout with { ShowKittenList = visible };
+        _kittenHudLayout = _kittenHudLayout with { ShowKittenList = visible };
         if (!visible) { CancelSaberDeploymentDrag(); DismissKittenColorPicker(); }
     }
 
@@ -96,6 +97,7 @@ internal sealed partial class SaberRuntime
     {
         if (!OverlayVisible)
         {
+            InvalidateHudHosts();
             DrawKittenColorPicker();
             _overlayLayoutAvailable = false;
             ResetOverlaySwing();
@@ -109,7 +111,7 @@ internal sealed partial class SaberRuntime
         try
         {
             var io = ImGui.GetIO();
-            if (io.AppFocusLost) OverlayFocusLost();
+            if (!HudApplicationHasFocus) OverlayFocusLost();
             if (_overlayDrag.Held)
             {
                 // Overlay-owned buttons never enter ImGui, so its MouseDown is deliberately false.
@@ -144,24 +146,29 @@ internal sealed partial class SaberRuntime
                 ShowKittenList = KittenListVisible,
                 ShowBFL9KControls = BFL9KUiVisible,
             };
+            bool attachedValid = baseLayout.Valid;
             _overlayLayout = baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
-                new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset);
-            _overlayLayoutAvailable = _overlayLayout.Valid;
-            if (!_overlayLayoutAvailable) { DismissKittenColorPicker(); ResetForceGestures(); CancelSaberDeploymentDrag(); CancelSaberIgniteDrag(); CancelSaberAutoSwingDrag(); CancelSaberDropSpinDrag(); return; }
-            var layout = _overlayLayout;
-            if (_saberDeploymentDrag.Held && !SaberDeploymentDragLayoutStillValid(layout, kittens))
-                CancelSaberDeploymentDrag();
-            if (_igniteDrag.Held && !SaberIgniteDragLayoutStillValid(layout)) CancelSaberIgniteDrag();
-            if (_autoSwingDrag.Held && !SaberAutoSwingDragLayoutStillValid(layout)) CancelSaberAutoSwingDrag();
-            if (_dropSpinDrag.Held && !SaberDropSpinDragLayoutStillValid(layout)) CancelSaberDropSpinDrag();
+                new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset)
+                with { ShowKittenList = false };
+            _kittenHudLayout = WithKittenListOffset(baseLayout, viewport, menuInset)
+                with { ShowBFL9KControls = false };
             _forceLayout = ForceOverlayLayout.Create(baseLayout, viewport.WorkPos, viewport.WorkSize,
                 ImGui.GetFontSize(), ImGui.CalcTextSize("250 m/s").X)
                 .WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
                     new(_settings.ForceControlsOffsetX, _settings.ForceControlsOffsetY), menuInset);
+            if (IsHudDetached(HudPanel.Saber)) PrepareDetachedHudGeometry(HudPanel.Saber, out _, out _);
+            if (IsHudDetached(HudPanel.Kittens)) PrepareDetachedHudGeometry(HudPanel.Kittens, out _, out _);
+            if (IsHudDetached(HudPanel.Force)) PrepareDetachedHudGeometry(HudPanel.Force, out _, out _);
+            _overlayLayoutAvailable = _overlayLayout.Valid || _kittenHudLayout.Valid || _forceLayout.Valid;
             _forceLayoutAvailable = ForceUiVisible && _forceLayout.Valid;
+            if (!_overlayLayoutAvailable)
+            {
+                InvalidateHudHosts(); DismissKittenColorPicker(); ResetOverlaySwing(); ResetForceGestures();
+                CancelSaberDeploymentDrag(); CancelSaberIgniteDrag(); CancelSaberAutoSwingDrag(); CancelSaberDropSpinDrag();
+                return;
+            }
+            var layout = _overlayLayout;
             bool canSomersault = CanStartSomersault(out var somersaultReason);
-            float fontSize = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
-            _overlayListScroll = Math.Clamp(_overlayListScroll, 0, Math.Max(0, kittens.Count * layout.RowHeight - layout.ListBodyHeight));
             DrawKittenColorPicker();
             // The viewport background stays above the scene and below every ImGui window.
             var draw = ImGui.GetBackgroundDrawList(viewport);
@@ -169,16 +176,34 @@ internal sealed partial class SaberRuntime
             var muted = new ImColor8(195, 200, 210, 255);
             var dragCircleWhite = new ImColor8(255, 255, 255, 204);
             var dragCircleMuted = new ImColor8(195, 200, 210, 204);
-            void DrawControls(float2 clipMin, float2 clipMax)
+            DrawForceWorldOverlay(draw);
+            void DrawControls(ImDrawListPtr draw, HudPanel panel, float2 delta, float2 clipMin, float2 clipMax)
             {
                 if (clipMin.X >= clipMax.X || clipMin.Y >= clipMax.Y) return;
+                switch (panel)
+                {
+                    case HudPanel.Saber: _overlayLayout = _overlayLayout.TranslateControls(delta); break;
+                    case HudPanel.Kittens: _kittenHudLayout = _kittenHudLayout.TranslateList(delta); break;
+                    case HudPanel.Force: _forceLayout = _forceLayout.Translate(delta); break;
+                }
+                layout = panel == HudPanel.Kittens ? _kittenHudLayout : _overlayLayout;
+                float fontSize = Math.Min(ImGui.GetFontSize(), 16 * layout.Scale);
+                if (panel == HudPanel.Kittens)
+                    _overlayListScroll = Math.Clamp(_overlayListScroll, 0, Math.Max(0, kittens.Count * layout.RowHeight - layout.ListBodyHeight));
+                if (panel == HudPanel.Kittens && _saberDeploymentDrag.Held && !SaberDeploymentDragLayoutStillValid(layout, kittens)) CancelSaberDeploymentDrag();
+                if (panel == HudPanel.Saber)
+                {
+                    if (_igniteDrag.Held && !SaberIgniteDragLayoutStillValid(layout)) CancelSaberIgniteDrag();
+                    if (_autoSwingDrag.Held && !SaberAutoSwingDragLayoutStillValid(layout)) CancelSaberAutoSwingDrag();
+                    if (_dropSpinDrag.Held && !SaberDropSpinDragLayoutStillValid(layout)) CancelSaberDropSpinDrag();
+                }
                 KittenSaber? autoSwingValueSaber = null;
                 float autoSwingValueMarkerY = 0;
                 draw.PushClipRect(clipMin, clipMax);
                 try
                 {
-                    DrawForceOverlay(draw);
-                    if (layout.ShowKittenList)
+                    if (panel == HudPanel.Force) DrawForceOverlay(draw);
+                    if (panel == HudPanel.Kittens && layout.ShowKittenList)
                     {
                         // List/swing/slice retain 50% alpha; blue action buttons use 25% below.
                         draw.AddRectFilled(layout.ListMin, layout.ListMax, new ImColor8(0, 0, 0, 128));
@@ -242,7 +267,7 @@ internal sealed partial class SaberRuntime
                             draw.AddText(new(layout.ListMin.X + layout.Padding, layout.ListBodyTop + layout.ListBodyHeight), muted, "Scroll for more kittens");
                     }
 
-                    if (layout.ShowBFL9KControls)
+                    if (panel == HudPanel.Saber && layout.ShowBFL9KControls)
                     {
                         draw.AddCircleFilled(layout.SwingCenter, layout.SwingRadius, new ImColor8(0, 0, 0, 128), 64);
                         draw.AddCircle(layout.SwingCenter, layout.SwingRadius, new ImColor8(255, 255, 255, 64), 64,
@@ -303,11 +328,16 @@ internal sealed partial class SaberRuntime
                     }
                     if (autoSwingValueSaber is { } valueSaber)
                         DrawSaberAutoSwingValueLabel(draw, layout, valueSaber, autoSwingValueMarkerY);
-                    if (_dropSpinDrag.Held) DrawSaberDropSpinValueLabel(draw, layout);
+                    if (panel == HudPanel.Saber && _dropSpinDrag.Held) DrawSaberDropSpinValueLabel(draw, layout);
                 }
                 finally { draw.PopClipRect(); }
             }
-            DrawControls(viewport.WorkPos, viewport.WorkPos + viewport.WorkSize);
+            DrawHudPanel(HudPanel.Force, ForceUiVisible && _forceLayoutAvailable && (attachedValid || IsHudDetached(HudPanel.Force)), _forceLayout.ControlsMin, _forceLayout.ControlsMax,
+                (list, delta, min, max) => DrawControls(list, HudPanel.Force, delta, min, max));
+            DrawHudPanel(HudPanel.Kittens, KittenListVisible && (attachedValid || IsHudDetached(HudPanel.Kittens)), _kittenHudLayout.ListMin, _kittenHudLayout.ListMax,
+                (list, delta, min, max) => DrawControls(list, HudPanel.Kittens, delta, min, max));
+            DrawHudPanel(HudPanel.Saber, BFL9KUiVisible && (attachedValid || IsHudDetached(HudPanel.Saber)), _overlayLayout.ControlsMin, _overlayLayout.ControlsMax,
+                (list, delta, min, max) => DrawControls(list, HudPanel.Saber, delta, min, max));
         }
         catch (Exception error)
         {
@@ -318,6 +348,7 @@ internal sealed partial class SaberRuntime
             CancelSaberAutoSwingDrag();
             CancelSaberDropSpinDrag();
             _overlayLayoutAvailable = false;
+            InvalidateHudHosts();
             Report("Saber overlay failed", error);
         }
     }
@@ -366,6 +397,7 @@ internal sealed partial class SaberRuntime
 
     private OverlayLayout CurrentSaberOverlayLayout()
     {
+        if (_hudHosts.Any(host => host.Active)) return _overlayLayout;
         var viewport = ImGui.GetMainViewport();
         float menuInset = OverlayMenuBarInset(viewport);
         var baseLayout = WithAutoSwingValueMetrics(OverlayLayout.Create(viewport.WorkPos, viewport.WorkSize,
@@ -375,8 +407,8 @@ internal sealed partial class SaberRuntime
             ShowKittenList = KittenListVisible,
             ShowBFL9KControls = BFL9KUiVisible,
         };
-        return baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
-            new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset);
+        return WithKittenListOffset(baseLayout.WithControlsOffset(viewport.WorkPos, viewport.WorkSize,
+            new(_settings.SaberControlsOffsetX, _settings.SaberControlsOffsetY), menuInset), viewport, menuInset);
     }
 
     private static OverlayLayout WithAutoSwingValueMetrics(OverlayLayout layout)
@@ -398,7 +430,7 @@ internal sealed partial class SaberRuntime
             {
                 CompleteSaberIgniteDrag(OverlayPointer(window));
                 CompleteSaberAutoSwingDrag(OverlayPointer(window));
-                if (window == Program.GetWindow()) CompleteSaberDropSpinDrag(OverlayPointer(window));
+                if (HudWindowAcceptsInput(window)) CompleteSaberDropSpinDrag(OverlayPointer(window));
                 else CancelSaberDropSpinDrag();
                 CompleteSaberDeploymentDrag(OverlayPointer(window));
                 ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag();
@@ -427,21 +459,25 @@ internal sealed partial class SaberRuntime
                 return true;
             }
         }
-        if (action != GlfwButtonAction.Press || window != Program.GetWindow() || !OverlayVisible || !_overlayLayoutAvailable
+        if (_arrangeHud || action != GlfwButtonAction.Press || !HudWindowAcceptsInput(window) || !OverlayVisible || !_overlayLayoutAvailable
             || Program.IsModalOpen() || Program.HasMouseInputLatch) return false;
-        // Native windows cover these controls. Keep an existing overlay drag paired through release.
-        if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse) return false;
         var pointer = OverlayPointer(window);
-        var hit = _overlayLayout.Hit(pointer);
+        bool ownHost = HudHostContainsPointer(window, pointer, out var hostPanel);
+        // Native chrome and other windows retain their normal ImGui input.
+        if (!_overlayPointerCapture.AnyHeld && ImGui.GetIO().WantCaptureMouse && !ownHost) return false;
+        var hit = HudSaberHit(window, pointer);
+        if (ownHost && (hostPanel == HudPanel.Force || (hit == OverlayHit.Kittens) != (hostPanel == HudPanel.Kittens))) hit = OverlayHit.None;
         // Saber/list controls are drawn after Force and take priority if custom positions overlap.
-        var forceHit = hit == OverlayHit.None && _forceLayoutAvailable ? ForceOverlayHitAt(pointer) : ForceOverlayHit.None;
+        var forceHit = hit == OverlayHit.None && _forceLayoutAvailable && (!ownHost || hostPanel == HudPanel.Force)
+            ? HudForceHit(window, pointer) : ForceOverlayHit.None;
         var io = ImGui.GetIO();
-        bool forcePick = ForcePicking && hit == OverlayHit.None && forceHit == ForceOverlayHit.None
+        bool forcePick = window == Program.GetWindow() && !ownHost && ForcePicking && hit == OverlayHit.None && forceHit == ForceOverlayHit.None
             && !io.WantCaptureMouse && !io.WantTextInput && CursorTarget.IsHitTestViewport(Program.MainViewport);
         if (!_overlayPointerCapture.Consume((int)button, true,
             hit != OverlayHit.None || forceHit != ForceOverlayHit.None || forcePick, Program.HasMouseInputLatch,
             Program.FrameNumber, out bool firstPress)) return false;
         if (!firstPress) return true;
+        _hudGestureWindow = window;
         if (button == GlfwMouseButton.Right && (_forceThrowDrag.Held || _forceCaptureRadiusDrag.Held))
         { CancelForceThrowDrag(); return true; }
         if (_igniteDrag.Held && button == GlfwMouseButton.Right)
@@ -459,26 +495,26 @@ internal sealed partial class SaberRuntime
         switch (hit)
         {
             case OverlayHit.Kittens:
-                if (_fault != null || pointer.Y < _overlayLayout.ListBodyTop
-                    || pointer.Y >= _overlayLayout.ListBodyTop + _overlayLayout.ListBodyHeight) break;
-                int row = (int)((pointer.Y - _overlayLayout.ListBodyTop + _overlayListScroll) / _overlayLayout.RowHeight);
+                if (_fault != null || pointer.Y < _kittenHudLayout.ListBodyTop
+                    || pointer.Y >= _kittenHudLayout.ListBodyTop + _kittenHudLayout.ListBodyHeight) break;
+                int row = (int)((pointer.Y - _kittenHudLayout.ListBodyTop + _overlayListScroll) / _kittenHudLayout.RowHeight);
                 var kittens = OverlayKittens;
                 if ((uint)row < (uint)kittens.Count && !kittens[row].IsDisposed)
                 {
                     if (button == GlfwMouseButton.Left
-                        && _overlayLayout.IsDeploymentBar(pointer, row, _overlayListScroll))
+                        && _kittenHudLayout.IsDeploymentBar(pointer, row, _overlayListScroll))
                     {
                         BeginSaberDeploymentDrag(kittens[row], row, pointer);
                     }
                     else if (button == GlfwMouseButton.Right)
                     {
-                        float nameMinX = _overlayLayout.ListMin.X + _overlayLayout.Padding * 2 + _overlayLayout.ColorSwatchSize;
-                        float nameMaxX = _overlayLayout.ColorSwatchMin(row, _overlayListScroll).X - _overlayLayout.Padding;
+                        float nameMinX = _kittenHudLayout.ListMin.X + _kittenHudLayout.Padding * 2 + _kittenHudLayout.ColorSwatchSize;
+                        float nameMaxX = _kittenHudLayout.ColorSwatchMin(row, _overlayListScroll).X - _kittenHudLayout.Padding;
                         // Match the name's drawing clip; use the native Universe > Vessels action.
-                        if (_overlayLayout.IsTopRow(pointer, row, _overlayListScroll)
+                        if (_kittenHudLayout.IsTopRow(pointer, row, _overlayListScroll)
                             && pointer.X >= nameMinX && pointer.X < nameMaxX) Universe.MoveCameraTo(kittens[row]);
                     }
-                    else if (_overlayLayout.IsColorSwatch(pointer, row, _overlayListScroll))
+                    else if (_kittenHudLayout.IsColorSwatch(pointer, row, _overlayListScroll))
                     {
                         if (KittenColorPickerVisible && ReferenceEquals(_kittenColorPickerOwner, kittens[row]))
                             DismissKittenColorPicker();
@@ -487,7 +523,7 @@ internal sealed partial class SaberRuntime
                             ResetOverlaySwing();
                             ResetForceGestures();
                             _kittenColorPickerOwner = kittens[row];
-                            _kittenColorPickerAnchor = new(_overlayLayout.ListMin.X - _overlayLayout.Padding, pointer.Y);
+                            _kittenColorPickerAnchor = new(_kittenHudLayout.ListMin.X - _kittenHudLayout.Padding, pointer.Y);
                             _kittenColorPickerRequested = true;
                         }
                     }
@@ -543,7 +579,7 @@ internal sealed partial class SaberRuntime
 
     private void BeginSaberAutoSwingDrag(KittenEva owner, float2 pointer, OverlayLayout layout)
     {
-        if (!BFL9KUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost
+        if (!BFL9KUiVisible || Program.IsModalOpen() || !HudApplicationHasFocus
             || !ReferenceEquals(owner, _owner) || !ReferenceEquals(owner, Program.ControlledVehicle)
             || !_currentKittens.Contains(owner) || !_kittenSabers.TryGetValue(owner, out var saber)) return;
         if (!_autoSwingDrag.Begin(pointer, saber.AutoSwing.DurationSeconds, layout.AutoSwingCenter,
@@ -554,7 +590,7 @@ internal sealed partial class SaberRuntime
     private bool SaberAutoSwingDragLayoutStillValid(OverlayLayout layout)
     {
         if (!_autoSwingDrag.Held || !BFL9KUiVisible || Program.IsModalOpen() || Program.HasMouseInputLatch
-            || ImGui.GetIO().AppFocusLost
+            || !HudApplicationHasFocus
             || _fault != null || _autoSwingDragOwner is not { IsDisposed: false } owner
             || !ReferenceEquals(owner, _owner) || !ReferenceEquals(owner, Program.ControlledVehicle)
             || !_currentKittens.Contains(owner) || !_kittenSabers.ContainsKey(owner)) return false;
@@ -646,8 +682,8 @@ internal sealed partial class SaberRuntime
 
     private void BeginSaberDeploymentDrag(KittenEva owner, int row, float2 pointer)
     {
-        var min = _overlayLayout.DeploymentBarMin(row, _overlayListScroll);
-        var max = _overlayLayout.DeploymentBarMax(row, _overlayListScroll);
+        var min = _kittenHudLayout.DeploymentBarMin(row, _overlayListScroll);
+        var max = _kittenHudLayout.DeploymentBarMax(row, _overlayListScroll);
         if (_fault != null || !_saberDeploymentDrag.Begin(pointer.X, min.X, max.X)) return;
         _saberDeploymentDragOwner = owner;
         _saberDeploymentDragRow = row;
@@ -660,7 +696,7 @@ internal sealed partial class SaberRuntime
     {
         int row = _saberDeploymentDragRow;
         if (!_saberDeploymentDrag.Held || !KittenListVisible || Program.IsModalOpen() || Program.HasMouseInputLatch
-            || ImGui.GetIO().AppFocusLost
+            || !HudApplicationHasFocus
             || _fault != null || _saberDeploymentDragOwner is not { IsDisposed: false } owner
             || !_currentKittens.Contains(owner) || (uint)row >= (uint)kittens.Count
             || !ReferenceEquals(kittens[row], owner)) return false;
@@ -674,7 +710,7 @@ internal sealed partial class SaberRuntime
     private void UpdateSaberDeploymentDrag(float2 pointer)
     {
         if (!_saberDeploymentDrag.Held) return;
-        if (!_overlayLayoutAvailable || !SaberDeploymentDragLayoutStillValid(_overlayLayout, OverlayKittens))
+        if (!_overlayLayoutAvailable || !SaberDeploymentDragLayoutStillValid(_kittenHudLayout, OverlayKittens))
         {
             CancelSaberDeploymentDrag();
             return;
@@ -685,13 +721,13 @@ internal sealed partial class SaberRuntime
     private void CompleteSaberDeploymentDrag(float2 pointer)
     {
         if (!_saberDeploymentDrag.Held) return;
-        var currentLayout = CurrentSaberOverlayLayout();
+        var currentLayout = CurrentKittenOverlayLayout();
         if (!currentLayout.Valid || !float.IsFinite(pointer.X) || !float.IsFinite(pointer.Y))
         {
             CancelSaberDeploymentDrag();
             return;
         }
-        _overlayLayout = currentLayout;
+        _kittenHudLayout = currentLayout;
         _overlayLayoutAvailable = true;
         if (!SaberDeploymentDragLayoutStillValid(currentLayout, OverlayKittens))
         {
@@ -734,13 +770,13 @@ internal sealed partial class SaberRuntime
         }
         if (_dropSpinDrag.Held)
         {
-            if (window == Program.GetWindow()) UpdateSaberDropSpinDrag(OverlayPointer(window));
+            if (HudWindowAcceptsInput(window)) UpdateSaberDropSpinDrag(OverlayPointer(window));
             else CancelSaberDropSpinDrag();
             return true;
         }
         if (_forceThrowDrag.Held)
         {
-            if (!ForceUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || !ForceCanUse || !ForceHolding
+            if (!ForceUiVisible || Program.IsModalOpen() || !HudApplicationHasFocus || !ForceCanUse || !ForceHolding
                 || !ReferenceEquals(_forceThrowOwner, _owner) || !ReferenceEquals(_force.Owner, _owner))
                 CancelForceThrowDrag();
             else MoveForcePointer(OverlayPointer(window));
@@ -774,7 +810,7 @@ internal sealed partial class SaberRuntime
         {
             CompleteSaberIgniteDrag(OverlayPointer(window));
             CompleteSaberAutoSwingDrag(OverlayPointer(window));
-            if (window == Program.GetWindow()) CompleteSaberDropSpinDrag(OverlayPointer(window));
+            if (HudWindowAcceptsInput(window)) CompleteSaberDropSpinDrag(OverlayPointer(window));
             else CancelSaberDropSpinDrag();
             CompleteSaberDeploymentDrag(OverlayPointer(window));
             ReleaseManualSwing(); _forceDrag.Release(); ReleaseForceSettingDrag();
@@ -795,6 +831,7 @@ internal sealed partial class SaberRuntime
         _dropSpinEscapeHeld = false;
         _forceEscapeHeld = false;
         _overlayPointerCapture.Reset();
+        _hudGestureWindow = null;
         _overlayUiButtons = 0;
         _overlayUiEventFrame = ulong.MaxValue;
         DismissKittenColorPicker();
@@ -819,7 +856,7 @@ internal sealed partial class SaberRuntime
         _kittenColorPickerBoundsAvailable = false;
     }
 
-    private void DrawKittenColorPicker()
+    private unsafe void DrawKittenColorPicker()
     {
         _kittenColorPickerBoundsAvailable = false;
         bool valid = KittenListVisible && _kittenColorPickerOwner is { IsDisposed: false } kitten && _currentKittens.Contains(kitten);
@@ -831,17 +868,25 @@ internal sealed partial class SaberRuntime
         }
         if (!_kittenColorPickerOpen) return;
         var viewport = ImGui.GetMainViewport();
+        bool external = IsHudDetached(HudPanel.Kittens);
         float scale = Math.Clamp(ImGui.GetFontSize() / 16, .75f, 2);
         float topInset = OverlayMenuBarInset(viewport);
-        float width = Math.Min(440 * scale, viewport.WorkSize.X - 16);
-        float height = Math.Min(690 * scale, viewport.WorkSize.Y - topInset - 16);
+        float width = external ? 440 * scale : Math.Max(1, Math.Min(440 * scale, viewport.WorkSize.X - 16));
+        float height = external ? 690 * scale : Math.Max(1, Math.Min(690 * scale, viewport.WorkSize.Y - topInset - 16));
         var minimum = viewport.WorkPos + new float2(8, topInset + 8);
         var maximum = minimum + new float2(Math.Max(0, viewport.WorkSize.X - width - 16),
             Math.Max(0, viewport.WorkSize.Y - topInset - height - 16));
         var position = new float2(Math.Clamp(_kittenColorPickerAnchor.X - width, minimum.X, maximum.X),
             Math.Clamp(_kittenColorPickerAnchor.Y, minimum.Y, maximum.Y));
-        ImGui.SetNextWindowViewport(viewport.ID);
-        ImGui.SetNextWindowPos(position, ImGuiCond.FirstUseEver);
+        if (external)
+        {
+            position = RecoverHudWindow(new(_kittenColorPickerAnchor.X - width, _kittenColorPickerAnchor.Y),
+                new(width, height), viewport);
+            var windowClass = new ImGuiWindowClass { ViewportFlagsOverrideSet = ImGuiViewportFlags.NoAutoMerge };
+            ImGui.SetNextWindowClass(&windowClass);
+        }
+        else ImGui.SetNextWindowViewport(viewport.ID);
+        ImGui.SetNextWindowPos(position, external ? ImGuiCond.Appearing : ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new float2(width, height), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(new float2(Math.Min(320 * scale, width), Math.Min(240 * scale, height)),
             new float2(float.MaxValue));

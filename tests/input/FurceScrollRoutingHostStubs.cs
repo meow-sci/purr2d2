@@ -94,10 +94,20 @@ namespace Purr2D2.Runtime
         internal bool _settingsAvailable, _pickerAvailable;
         internal KittenEva? _owner, _forceThrowOwner, _forceMoveOwner;
         internal OverlayLayout _overlayLayout;
+        internal OverlayLayout _kittenHudLayout => _overlayLayout;
         internal ForceOverlayLayout _forceLayout;
         internal readonly List<KittenEva> OverlayKittens = [];
         internal readonly List<(double Ticks, bool Shift)> ScrollCalls = [];
 
+        internal bool _arrangeHud = false;
+        internal GlfwWindow? DetachedHud;
+        internal bool DetachedContent = true;
+        private bool HudApplicationHasFocus => !ImGui.Io.AppFocusLost;
+        private bool HudWindowAcceptsInput(GlfwWindow window) => window == Program.GetWindow() || window == DetachedHud;
+        private bool HudHostContainsPointer(GlfwWindow window, float2 pointer, out int panel)
+        { panel = 0; return window == DetachedHud && DetachedContent; }
+        private OverlayHit HudSaberHit(GlfwWindow window, float2 pointer) => _overlayLayout.Hit(pointer);
+        private ForceOverlayHit HudForceHit(GlfwWindow window, float2 pointer) => ForceOverlayHitAt(pointer);
         internal bool OverlayVisible => _overlayVisible;
         internal bool ForceUiVisible => _overlayVisible && _forceUiVisible;
         internal bool ForceCanUse => _owner is { IsDisposed: false }

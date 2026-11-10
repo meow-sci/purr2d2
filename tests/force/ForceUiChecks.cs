@@ -49,6 +49,18 @@ internal sealed partial class SaberRuntime
         draw.AddText(ImGui.GetFont(), ImGui.GetFontSize() * scale,
             center - measured * (scale * .5f), color, text, 0);
     }
+    private void DrawForceFrameForChecks()
+    {
+        RefreshForceHoverPreview();
+        DrawForceWorldOverlay(default);
+        DrawForceOverlayCore(default);
+    }
+    private bool _arrangeHud = false;
+    private bool HudApplicationHasFocus => !ImGui.Io.AppFocusLost;
+    private GlfwWindow HudModifierWindow => Program.GetWindow();
+    private bool HudWindowAcceptsInput(GlfwWindow window) => window == Program.GetWindow();
+    private bool HudKeyboardOwnsInput(GlfwWindow window) => false;
+    private SaberOverlayHit HudCombinedHit(float2 pointer) => _overlayLayout.Hit(pointer);
     private SaberRuntime()
     {
         _forceBreakupClock = new ManualForceBreakupClock();
@@ -842,7 +854,7 @@ internal sealed partial class SaberRuntime
         {
             DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear();
             ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-            runtime.DrawForceOverlayCore(default);
+            runtime.DrawForceFrameForChecks();
         }
         bool Label(float2 center, string text) => DrawnLabels.Contains((center, text));
         ImDrawListPtr.Circle Fill(float2 center) => ImDrawListPtr.Circles.Single(circle => circle.Center == center && circle.Filled);
@@ -952,7 +964,7 @@ internal sealed partial class SaberRuntime
             "the initial two metre thumb sits at the bottom of the pill, which opens upward");
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear();
         ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(DrawnLabels.Any(label => label.Text == "2m") && DrawnLabels.Any(label => label.Text == "50m")
             && ImDrawListPtr.Rects.Count(rect => rect.Filled) == 1
             && ImDrawListPtr.Lines.Any(line => line.Thickness == 2 && line.Color == new ImColor8(110, 255, 174, 230).Value)
@@ -986,7 +998,7 @@ internal sealed partial class SaberRuntime
             "releasing the pill snapshots fourteen metres and only then enters Angry target selection");
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear();
         ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(DrawnLabels.Contains((center, "CANCEL")) && DrawnLabels.Contains((runtime._forceLayout.ForceCenter, "FURCE")),
             "the released Angry picker puts Cancel on its button while the ordinary Furce button stays available");
 
@@ -1276,7 +1288,7 @@ internal sealed partial class SaberRuntime
         {
             ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear();
             ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-            value.DrawForceOverlayCore(default);
+            value.DrawForceFrameForChecks();
         }
 
         static bool ForceHoverMarkerAt(double3 hit, uint color)
@@ -1453,7 +1465,7 @@ internal sealed partial class SaberRuntime
         runtime.MoveForcePointer(new(runtime._forceLayout.AngryCenter.X,
             runtime._forceLayout.AngryCenter.Y - runtime._forceLayout.ThrowSliderTravel));
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         var pill = ImDrawListPtr.Rects.Single(rect => rect.Filled);
         var rim = ImDrawListPtr.Rects.Single(rect => !rect.Filled);
         var thumb = ImDrawListPtr.Circles.Single(circle => circle.Filled
@@ -1512,7 +1524,7 @@ internal sealed partial class SaberRuntime
             && runtime._forceQuery == null && runtime._force.CaptureCalls == 0 && ForceTargeting.Picks == 0,
             "radius adjustment reaches twenty-six metres without querying or capturing");
         ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(ImDrawListPtr.Lines.Any(line => line.Thickness == 2 && line.Color == new ImColor8(110, 255, 174, 230).Value)
             && Program.MainViewport.Camera.LastSphereCenter == Program.MainViewport.Camera.GetPositionEgo(runtime._owner!)
             && Program.MainViewport.Camera.LastSphereRadius == 26,
@@ -1528,7 +1540,7 @@ internal sealed partial class SaberRuntime
         runtime.UpdateForceFrame();
         runtime.UpdateForceBeforePhysics(.016);
         ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Texts.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         var targetHit = new double3(80, 60, -5);
         Check(ReferenceEquals(runtime._forceHoverPreview?.Vehicle, target)
             && ImDrawListPtr.Lines.Any(line => line.Thickness == 2 && line.Color == new ImColor8(110, 255, 174, 230).Value)
@@ -1543,7 +1555,7 @@ internal sealed partial class SaberRuntime
             "the target click only snapshots work for the settled capture handoff");
         runtime.UpdateForceBeforePhysics(.016);
         ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Texts.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(runtime.ForceHolding && runtime._force.CaptureCalls == 1
             && runtime._force.CapturedRadius == 26 && !HasCaptureBubbleVisuals(),
             "settled capture applies the selected radius once and hides the sphere");
@@ -1585,7 +1597,7 @@ internal sealed partial class SaberRuntime
             "a held settings drag keeps updating outside its bounds without moving or targeting the world");
 
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         var pill = ImDrawListPtr.Rects.Single(rect => rect.Filled);
         var pillRim = ImDrawListPtr.Rects.Single(rect => !rect.Filled);
         uint blackHalf = new ImColor8(0, 0, 0, 128).Value;
@@ -1622,19 +1634,19 @@ internal sealed partial class SaberRuntime
             "Move Force keeps its faint white rim while the obsolete distance setting remains hidden");
         runtime.ReleaseForceSettingDrag();
         ImGui.Io.MousePos = count;
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(ImGui.Tooltip == "max # objects Furce can capture",
             "the capture-count tooltip uses the requested exact lowercase text");
         runtime.HandleForceOverlayPress(ForceOverlayHit.CaptureLimit, count);
         runtime._forceLayout = originalLayout.WithControlsOffset(float2.Zero, new(1920, 1080), new(.02f, 0));
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(!runtime._forceSettingDrag.Held && ImDrawListPtr.Rects.Count == 0,
             "a viewport or offset layout change collapses stale press-time pill geometry");
         runtime._forceLayout = originalLayout;
         runtime._settings.AngryForceRadius = 14.6f;
         DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear(); ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(ImDrawListPtr.Rects.Count == 0
             && ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == count
                 && circle.Radius == runtime._forceLayout.ButtonRadius && circle.Color == blackHalf)
@@ -1646,7 +1658,7 @@ internal sealed partial class SaberRuntime
             "the obsolete distance control is hidden while its serialized compatibility value remains untouched");
         ImGui.Tooltip = "";
         ImGui.Io.MousePos = distance;
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(ImGui.Tooltip == "" && runtime.ForceOverlayHitAt(distance) == ForceOverlayHit.None,
             "the hidden legacy distance slot has no tooltip or overlay hit target");
 
@@ -1694,7 +1706,7 @@ internal sealed partial class SaberRuntime
         Check(runtime.ForceOverlayHitAt(top) == ForceOverlayHit.Rotate,
             "either capture mode exposes the top rotation handle");
         ImDrawListPtr.Circles.Clear();
-        runtime.DrawForceOverlayCore(default);
+        runtime.DrawForceFrameForChecks();
         Check(ImDrawListPtr.Circles.Any(circle => circle.Filled && circle.Center == top
             && circle.Radius == layout.ButtonRadius * .25f
             && circle.Color == new ImColor8(255, 255, 255, 64).Value),
@@ -1819,7 +1831,7 @@ internal sealed partial class SaberRuntime
         {
             DrawnLabels.Clear(); ImDrawListPtr.Circles.Clear(); ImDrawListPtr.Lines.Clear(); ImDrawListPtr.Rects.Clear();
             ImDrawListPtr.Texts.Clear(); ImDrawListPtr.Events.Clear();
-            runtime.DrawForceOverlayCore(default);
+            runtime.DrawForceFrameForChecks();
         }
         string ReadStatusText()
         {

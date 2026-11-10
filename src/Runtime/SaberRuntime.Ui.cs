@@ -31,6 +31,8 @@ internal sealed partial class SaberRuntime
             if (ImGui.MenuItem("Big Fucking Laster 9000 HUD", default(ImString), _settings.BFL9KUiEnabled))
                 SetBFL9KUiVisible(!_settings.BFL9KUiEnabled);
             ImGui.Separator();
+            if (ImGui.MenuItem("Arrange HUD", default(ImString), _arrangeHud, _enabled)) SetArrangeHud(!_arrangeHud);
+            if (ImGui.MenuItem("Reset HUD layout")) ResetHudPlacement();
             if (ImGui.MenuItem("Settings", default(ImString), _windowVisible, _enabled)) ToggleSettingsWindow();
         }
         finally { ImGui.EndMenu(); }
@@ -153,6 +155,8 @@ internal sealed partial class SaberRuntime
 
     private void ResetAllSettings()
     {
+        SetArrangeHud(false);
+        InvalidateHudHosts();
         _settings = new SaberSettings();
         _settings.Validate();
         _settingsAutosaver.DeletePreferencesAndRebase(_settings);
@@ -360,10 +364,16 @@ internal sealed partial class SaberRuntime
 
     private void DrawControlPositionSettings()
     {
+        bool arrange = _arrangeHud;
+        if (ImGui.Checkbox("Arrange HUD", ref arrange)) SetArrangeHud(arrange);
+        ImGui.TextWrapped("Drag panel title bars to place the HUD. Detach opens a standalone window; Reattach or its close button returns it to the HUD. Done locks the layout.");
+        if (!HudDetachmentAvailable) ImGui.TextWrapped("Standalone HUD windows require KSA multiple-window support. Saved detached panels remain attached while it is unavailable.");
+        if (ImGui.Button("Reset HUD layout")) ResetHudPlacement();
         ImGui.TextWrapped("Offsets from the default positions, as fractions of screen width and height. Positive X moves right; positive Y moves down.");
         if (!BeginSaberSettingsTable("##ControlPositions", "Saber (right) X")) return;
         float forceX = _settings.ForceControlsOffsetX, forceY = _settings.ForceControlsOffsetY;
         float saberX = _settings.SaberControlsOffsetX, saberY = _settings.SaberControlsOffsetY;
+        float kittenX = _settings.KittenListOffsetX, kittenY = _settings.KittenListOffsetY;
         bool changed = false;
         try
         {
@@ -375,18 +385,26 @@ internal sealed partial class SaberRuntime
             changed |= ImGui.DragFloat("##SaberControlsOffsetX", ref saberX, .01f, -1, 1, "%.2f width", ImGuiSliderFlags.AlwaysClamp);
             SaberSettingsRow("Saber (right) Y");
             changed |= ImGui.DragFloat("##SaberControlsOffsetY", ref saberY, .01f, -1, 1, "%.2f height", ImGuiSliderFlags.AlwaysClamp);
+            SaberSettingsRow("Kitten list X");
+            changed |= ImGui.DragFloat("##KittenListOffsetX", ref kittenX, .01f, -1, 1, "%.2f width", ImGuiSliderFlags.AlwaysClamp);
+            SaberSettingsRow("Kitten list Y");
+            changed |= ImGui.DragFloat("##KittenListOffsetY", ref kittenY, .01f, -1, 1, "%.2f height", ImGuiSliderFlags.AlwaysClamp);
         }
         finally { ImGui.EndTable(); }
         if (changed)
         {
             _settings.ForceControlsOffsetX = forceX; _settings.ForceControlsOffsetY = forceY;
             _settings.SaberControlsOffsetX = saberX; _settings.SaberControlsOffsetY = saberY;
+            _settings.KittenListOffsetX = kittenX; _settings.KittenListOffsetY = kittenY;
             _settings.Validate();
+            foreach (var host in _hudHosts) host.Restore = true;
         }
         if (ImGui.Button("Reset control positions"))
         {
             _settings.ForceControlsOffsetX = _settings.ForceControlsOffsetY = 0;
             _settings.SaberControlsOffsetX = _settings.SaberControlsOffsetY = 0;
+            _settings.KittenListOffsetX = _settings.KittenListOffsetY = 0;
+            foreach (var host in _hudHosts) host.Restore = true;
         }
     }
 

@@ -193,6 +193,7 @@ internal sealed partial class SaberRuntime : IDisposable
         try
         {
             if (!KittenListVisible) DismissKittenColorPicker();
+            if (!HudApplicationHasFocus) OverlayFocusLost();
             UpdateForceVisibility();
             _renderer.ConfigureVfx(_settings);
             _renderer.Prepare();

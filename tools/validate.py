@@ -585,6 +585,8 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "src/Core/SaberDeploymentDrag.cs",
         source / "src/Core/SaberOverlayLayout.cs",
         source / "tests/OverlayDragChecks.cs",
+        source / "src/Core/HudPlacement.cs",
+        source / "tests/HudPlacementChecks.cs",
         source / "src/Runtime/SaberRuntime.Activation.cs",
         source / "tests/ActivationChecks.cs",
         source / "src/Core/ForceOverlayDrag.cs",
@@ -666,7 +668,7 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
         source / "tests/contact/ManualRuntimeQueueHostStubs.cs"]
     core_program = (
         "using System;\n"
-        "internal static class Program { private static void Main() { CoreChecks.Run(); TreeCutFireSettingsChecks.Run(); SaberDropChecks.Run(); SaberDropSpinDragChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); SliceCapEmissionChecks.Run(); } }\n"
+        "internal static class Program { private static void Main() { CoreChecks.Run(); HudPlacementChecks.Run(); TreeCutFireSettingsChecks.Run(); SaberDropChecks.Run(); SaberDropSpinDragChecks.Run(); Purr2D2.Runtime.SaberRuntime.RunActivationChecks(); OverlayDragChecks.Run(); ForceOverlayChecks.Run(); AssistedSliceChecks.Run(); BackgroundSliceChecks.Run(); BackgroundJitWarmupChecks.Run(); SliceJitCallGraphChecks.Run(); SliceDiagnosticsChecks.Run(); SliceWorkerDiagnosticsChecks.Run(); PlaneSliceChecks.Run(); ShellSliceChecks.Run(); PoseChecks.Run(); SlicingPhysicsChecks.Run(); SomersaultMotionChecks.Run(); SliceCapEmissionChecks.Run(); } }\n"
     )
     kitten_sources = [
         source / "src/Runtime/SaberRuntime.Kittens.cs",
@@ -818,6 +820,10 @@ def run_managed_checks(source: Path, stage: Path | None = None) -> tuple[int, st
                    source / "artifacts/checks/SaberVfxChecks/GlowPush.cs"]
     for name, required, program in (
         ("CoreChecks", core_sources, core_program),
+        ("HudHostChecks", [source / "src/Runtime/SaberRuntime.Hud.cs", source / "src/Core/HudPlacement.cs",
+            source / "src/Core/SaberSettings.cs", source / "src/Core/SaberOverlayLayout.cs",
+            source / "src/Core/ForceOverlayLayout.cs", source / "src/Core/SaberOverlayDrag.cs",
+            source / "tests/hud/HudHostStubs.cs", source / "tests/hud/HudHostChecks.cs"], None),
         ("TargetSelectionChecks", target_sources, None),
         ("ManualContactRuntimeChecks", manual_runtime_sources,
          "internal static class ManualContactRuntimeEntry { static void Main() { Purr2D2.Runtime.SaberRuntime.Run(); } }"),
@@ -968,6 +974,7 @@ def _run_managed_project(source: Path, name: str, required: list[Path], program:
             <TargetFramework>net10.0</TargetFramework>
             <ImplicitUsings>enable</ImplicitUsings>
             <Nullable>enable</Nullable>
+            <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
             <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
           </PropertyGroup>
           <ItemGroup>

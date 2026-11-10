@@ -35,8 +35,22 @@ namespace Purr2D2.Runtime
             if (SpaceSomersaultFilterThrows) throw new InvalidOperationException("stub filter failure");
             return SpaceSomersaultFilterResult;
         }
-        internal bool SuppressOverlayImGuiMouseButton(GlfwWindow w, GlfwMouseButton b, GlfwButtonAction a) => false;
+        internal int HudButtonSuppressions;
+        internal bool SuppressOverlayImGuiMouseButton(GlfwWindow w, GlfwMouseButton b, GlfwButtonAction a)
+        { HudButtonSuppressions++; return false; }
         internal bool SuppressOverlayImGuiScroll(GlfwWindow w) => false;
+        internal bool DeferHudFocusLoss = false;
+        internal bool HudBackendResult = false, HudGameBlock = false;
+        internal int HudButtonRoutes, HudScrollRoutes, HudCursorRoutes, HudKeyRoutes;
+        internal bool BlockHudGameInput(GlfwWindow w) => HudGameBlock;
+        internal bool RouteHudBackendButton(GlfwWindow w, GlfwMouseButton b, GlfwButtonAction a)
+        { HudButtonRoutes++; return HudBackendResult; }
+        internal bool RouteHudBackendScroll(GlfwWindow w, double2 o)
+        { HudScrollRoutes++; return HudBackendResult; }
+        internal void RouteHudBackendCursor(GlfwWindow w) { HudCursorRoutes++; }
+        internal bool RouteHudBackendKey(GlfwWindow w, GlfwKey k, GlfwKeyAction a)
+        { HudKeyRoutes++; return HudBackendResult; }
+
         internal int OverlayFocusLostCalls;
         internal int PendingSpaceSomersaultCancelCalls;
         internal void OverlayFocusLost() => OverlayFocusLostCalls++;

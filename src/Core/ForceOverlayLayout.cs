@@ -79,6 +79,11 @@ public readonly record struct ForceOverlayLayout(float2 CaptureLimitCenter, floa
     {
         if (!Valid || !SaberOverlayLayout.TryControlsTranslation(ControlsMin, ControlsMax, origin, size,
             normalizedOffset, topInset, out var delta)) return default;
+        return Translate(delta);
+    }
+
+    public ForceOverlayLayout Translate(float2 delta)
+    {
         return this with { CaptureLimitCenter = CaptureLimitCenter + delta,
             AngryRadiusCenter = AngryRadiusCenter + delta, ForceCenter = ForceCenter + delta, AngryCenter = AngryCenter + delta,
             MoveCenter = MoveCenter + delta, StatusMin = StatusMin + delta, StatusMax = StatusMax + delta };

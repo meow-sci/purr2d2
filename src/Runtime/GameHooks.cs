@@ -56,6 +56,10 @@ internal static class GameHooks
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiMouseButton)));
         harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnScroll", typeof(GlfwWindow), typeof(double2)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiScroll)));
+        harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnCursorPos", typeof(GlfwWindow), typeof(double2)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiCursor)));
+        harmony.Patch(Require(typeof(ImGuiBackendGlfwImpl), "OnKey", typeof(GlfwWindow), typeof(GlfwKey), typeof(int), typeof(GlfwKeyAction), typeof(GlfwModifier)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(OverlayImGuiKey)));
         foreach (var constructor in PartConstructionHooks())
             harmony.Patch(constructor, postfix: new HarmonyMethod(typeof(GameHooks), nameof(RepairFragmentPicker)));
         harmony.Patch(Require(typeof(Program), nameof(Program.OnGameLoaded)),
@@ -205,11 +209,11 @@ internal static class GameHooks
     // Main-window game callbacks precede the backend's independent subscription.
     // Consume owned input in both routes so neither camera nor covered ImGui widgets react.
     private static bool OverlayMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action) =>
-        !(Runtime?.FilterOverlayMouseButton(window, button, action) ?? false);
-    private static bool OverlayCursor(GlfwWindow window) => !(Runtime?.FilterOverlayCursor(window) ?? false);
-    private static bool OverlayScroll(GlfwWindow window, double2 offset) => !(Runtime?.FilterOverlayScroll(window, offset) ?? false);
+        !((Runtime?.BlockHudGameInput(window) ?? false) || (Runtime?.FilterOverlayMouseButton(window, button, action) ?? false));
+    private static bool OverlayCursor(GlfwWindow window) => !((Runtime?.BlockHudGameInput(window) ?? false) || (Runtime?.FilterOverlayCursor(window) ?? false));
+    private static bool OverlayScroll(GlfwWindow window, double2 offset) => !((Runtime?.BlockHudGameInput(window) ?? false) || (Runtime?.FilterOverlayScroll(window, offset) ?? false));
     private static bool OverlayKey(GlfwWindow window, GlfwKey key, GlfwKeyAction action) =>
-        !((Runtime?.FilterSaberDropSpinKey(window, key, action) ?? false)
+        !((Runtime?.BlockHudGameInput(window) ?? false) || (Runtime?.FilterSaberDropSpinKey(window, key, action) ?? false)
             || (Runtime?.FilterForceKey(window, key, action) ?? false));
     internal static bool SpaceSomersaultKey(KittenEva __instance, GlfwKeyEvent keyEvent, ref bool __result)
     {
@@ -232,13 +236,22 @@ internal static class GameHooks
     {
         if (window == Program.GetWindow() && focusEvent == GlfwFocusEvent.LostFocus)
         {
-            Runtime?.OverlayFocusLost();
+            if (!(Runtime?.DeferHudFocusLoss ?? false)) Runtime?.OverlayFocusLost();
             Runtime?.CancelPendingSpaceSomersault();
         }
     }
-    private static bool OverlayImGuiMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action) =>
-        !(Runtime?.SuppressOverlayImGuiMouseButton(window, button, action) ?? false);
-    private static bool OverlayImGuiScroll(GlfwWindow __0) => !(Runtime?.SuppressOverlayImGuiScroll(__0) ?? false);
+    private static bool OverlayImGuiMouseButton(GlfwWindow window, GlfwMouseButton button, GlfwButtonAction action)
+    {
+        bool routed = Runtime?.RouteHudBackendButton(window, button, action) ?? false;
+        // Always retire the backend's paired-button mask, including routed secondary releases.
+        bool suppressed = Runtime?.SuppressOverlayImGuiMouseButton(window, button, action) ?? false;
+        return !routed && !suppressed;
+    }
+    private static bool OverlayImGuiScroll(GlfwWindow __0, double2 __1) =>
+        !((Runtime?.RouteHudBackendScroll(__0, __1) ?? false) || (Runtime?.SuppressOverlayImGuiScroll(__0) ?? false));
+    private static void OverlayImGuiCursor(GlfwWindow window) => Runtime?.RouteHudBackendCursor(window);
+    private static bool OverlayImGuiKey(GlfwWindow window, GlfwKey key, GlfwKeyAction action) =>
+        !(Runtime?.RouteHudBackendKey(window, key, action) ?? false);
     private static void RepairFragmentPicker(Part __instance)
     {
         try { PartSliceTargeting.RepairLegacyFragmentPicker(__instance); }

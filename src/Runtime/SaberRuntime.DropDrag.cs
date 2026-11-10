@@ -26,7 +26,7 @@ internal sealed partial class SaberRuntime
 
     private void BeginSaberDropSpinDrag(KittenEva owner, float2 pointer, OverlayLayout layout)
     {
-        if (!BFL9KUiVisible || Program.IsModalOpen() || Program.HasMouseInputLatch || ImGui.GetIO().AppFocusLost
+        if (!BFL9KUiVisible || Program.IsModalOpen() || Program.HasMouseInputLatch || !HudApplicationHasFocus
             || !ReferenceEquals(owner, AppearanceKitten) || !_currentKittens.Contains(owner)
             || !_kittenSabers.TryGetValue(owner, out var saber) || !SaberDropButtonAvailable(owner, saber)) return;
         // Canceling a reach remains immediate. A dropped hilt selects its return
@@ -43,26 +43,17 @@ internal sealed partial class SaberRuntime
 
     private bool SaberDropSpinDragLayoutStillValid(OverlayLayout layout) =>
         _dropSpinDrag.Held && _overlayLayoutAvailable && BFL9KUiVisible && !Program.IsModalOpen() && !Program.HasMouseInputLatch
-        && !ImGui.GetIO().AppFocusLost && _dropSpinDragOwner is { IsDisposed: false } owner
+        && HudApplicationHasFocus && _dropSpinDragOwner is { IsDisposed: false } owner
         && ReferenceEquals(owner, AppearanceKitten) && _currentKittens.Contains(owner)
         && _kittenSabers.TryGetValue(owner, out var saber) && ReferenceEquals(saber, _dropSpinDragSaber)
         && (_dropDragReturning ? saber.Drop.Phase == SaberDropSequence.Stage.Dropped : saber.Drop.Held)
         && SaberDropButtonAvailable(owner, saber) && _dropSpinDrag.Matches(layout);
 
-    private static bool DropSpinPointerInMainWindow(float2 pointer)
-    {
-        if (!float.IsFinite(pointer.X) || !float.IsFinite(pointer.Y)) return false;
-        var viewport = ImGui.GetMainViewport();
-        var min = viewport.Pos;
-        var max = min + viewport.Size;
-        return pointer.X >= min.X && pointer.X <= max.X && pointer.Y >= min.Y && pointer.Y <= max.Y;
-    }
-
     private void UpdateSaberDropSpinDrag(float2 pointer)
     {
         if (!_dropSpinDrag.Held) return;
         if (!_overlayLayoutAvailable || !SaberDropSpinDragLayoutStillValid(_overlayLayout)
-            || !DropSpinPointerInMainWindow(pointer) || !_dropSpinDrag.Move(pointer))
+            || !DropSpinPointerInHudWindow(pointer) || !_dropSpinDrag.Move(pointer))
         { CancelSaberDropSpinDrag(); return; }
         float displayed = _dropDragReturning
             ? (float)Math.Round(_dropSpinDrag.ReturnDurationSeconds * 1000)
@@ -78,7 +69,7 @@ internal sealed partial class SaberRuntime
     {
         if (!_dropSpinDrag.Held) return;
         var layout = CurrentSaberOverlayLayout();
-        if (!SaberDropSpinDragLayoutStillValid(layout) || !DropSpinPointerInMainWindow(pointer))
+        if (!SaberDropSpinDragLayoutStillValid(layout) || !DropSpinPointerInHudWindow(pointer))
         { CancelSaberDropSpinDrag(); return; }
         var owner = _dropSpinDragOwner!;
         bool returning = _dropDragReturning;
@@ -100,7 +91,7 @@ internal sealed partial class SaberRuntime
 
     internal bool FilterSaberDropSpinKey(GlfwWindow window, GlfwKey key, GlfwKeyAction action)
     {
-        if (window != Program.GetWindow() || key != GlfwKey.Escape) return false;
+        if (!HudWindowAcceptsInput(window) || key != GlfwKey.Escape) return false;
         if (_dropSpinEscapeHeld)
         {
             if (action == GlfwKeyAction.Release) _dropSpinEscapeHeld = false;

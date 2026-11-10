@@ -4,6 +4,7 @@ using Brutal.Concurrency.Jobs;
 using Brutal.GlfwApi;
 using Brutal.ImGuiApi;
 using Brutal.ImGuiApi.Abstractions;
+using Brutal.Numerics;
 using HarmonyLib;
 using KSA;
 using Purr2D2.Runtime;
@@ -186,6 +187,29 @@ internal static class FrameHooksChecks
         focus.Invoke(null, [null, GlfwFocusEvent.LostFocus]);
         Require(runtime.OverlayFocusLostCalls == 1 && runtime.PendingSpaceSomersaultCancelCalls == 1,
             "Losing focus on the main window must release overlay input and cancel pending keyboard somersault intent.");
+        runtime.DeferHudFocusLoss = true;
+        focus.Invoke(null, [null, GlfwFocusEvent.LostFocus]);
+        Require(runtime.OverlayFocusLostCalls == 1 && runtime.PendingSpaceSomersaultCancelCalls == 2,
+            "Moving focus into a detached HUD preserves its gestures while cancelling main-window keyboard intent.");
+        runtime.HudBackendResult = true;
+        Require(!(bool)AccessTools.Method(typeof(GameHooks), "OverlayImGuiMouseButton")!.Invoke(null,
+            [null, GlfwMouseButton.Left, GlfwButtonAction.Press])! && runtime.HudButtonRoutes == 1 && runtime.HudButtonSuppressions == 1,
+            "Secondary custom presses are routed once before backend ImGui consumption.");
+        AccessTools.Method(typeof(GameHooks), "OverlayImGuiMouseButton")!.Invoke(null,
+            [null, GlfwMouseButton.Left, GlfwButtonAction.Release]);
+        Require(runtime.HudButtonSuppressions == 2,
+            "Routed secondary releases still retire the ImGui paired-button suppression mask.");
+        Require(!(bool)AccessTools.Method(typeof(GameHooks), "OverlayImGuiScroll")!.Invoke(null,
+            [null, new double2(0, 1)])! && runtime.HudScrollRoutes == 1,
+            "Secondary custom wheel input applies through its backend route once.");
+        AccessTools.Method(typeof(GameHooks), "OverlayImGuiCursor")!.Invoke(null, [null]);
+        Require(runtime.HudCursorRoutes == 1, "Secondary cursor input reaches the HUD without skipping the ImGui backend.");
+        Require(!(bool)AccessTools.Method(typeof(GameHooks), "OverlayImGuiKey")!.Invoke(null,
+            [null, GlfwKey.Escape, GlfwKeyAction.Press])! && runtime.HudKeyRoutes == 1,
+            "Detached gesture cancellation reaches the HUD before ImGui consumes Escape.");
+        runtime.HudGameBlock = true;
+        Require(!(bool)AccessTools.Method(typeof(GameHooks), "OverlayScroll")!.Invoke(null, [null, new double2(0, 1)])!,
+            "An owned secondary window cannot fall through into native camera controls.");
         GameHooks.Runtime = null;
 
         Console.WriteLine("PASS: actual KSA keyboard guard/controller ordering and KittenEva.OnKey signature verified; accepted, declined, absent and failing runtime paths preserve native input contract; main-window focus loss cancels pending keyboard intent");
