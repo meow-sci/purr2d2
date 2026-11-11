@@ -18,6 +18,7 @@ internal static class IsolationChecks
         Vehicle.SplitOrder.Clear(); Vehicle.SplitTreeSizes.Clear(); PartTree.Created.Clear();
         Vehicle.ThrowOnSplit = 0; Vehicle.RerootAfterFirstSplit = null; Universe.CurrentSystem = new();
         QuietSliceContacts.Protections = 0;
+        NativeSlicePhysics.FailPreparedAfterDrain = false;
         KSA.Program.ControlledVehicle = null;
     }
     private static void RootLeafAndMidStack()
@@ -67,6 +68,16 @@ internal static class IsolationChecks
     }
     private static void RefusalsAndBulkCleanup()
     {
+        Reset();
+        var massSource = new Part("fallback source");
+        var massOwner = new Vehicle("fallback owner", [massSource]);
+        NativeSlicePhysics.FailPreparedAfterDrain = true;
+        Check(!NativeSlicePhysics.TryIsolate(massSource, Ready, out var retained, out var massReason, new())
+            && retained is { ContentsReleased: true } && retained.Owner == massOwner
+            && !massOwner.IsDisposed && massReason.Contains("isolated source mass"),
+            "native fallback mismatch retains the separated empty source before fragment creation");
+        retained!.Dispose();
+
         Reset();
         var root = new Part("rocket"); var selected = new Part("selected"); var child = new Part("child");
         Part.Attach(root, selected); Part.Attach(selected, child); var original = new Vehicle("fixture", [root, selected, child]);

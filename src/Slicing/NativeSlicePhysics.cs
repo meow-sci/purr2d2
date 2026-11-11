@@ -132,7 +132,8 @@ internal static partial class NativeSlicePhysics
             massSum += p.Asset.MassKg;
         }
         double sourceMass = SourceMass(struck);
-        if (Math.Abs(massSum - sourceMass) > Math.Max(.001, sourceMass * 2e-5))
+        if (!double.IsFinite(sourceMass) || sourceMass <= .001
+            || Math.Abs(massSum - sourceMass) > Math.Max(.001, sourceMass * 2e-5))
         { reason = "Prepared slice masses do not conserve the source inert mass."; return false; }
         reason = "";
         return true;
@@ -292,5 +293,5 @@ internal static partial class NativeSlicePhysics
         }
     }
 
-    internal static float SourceMass(Part struck) => SourceParts(struck).Sum(p => p.ComputeSubtreeInertMass());
+    internal static float SourceMass(Part struck) => SliceSourceMass.Resolve(struck.StructuralPart, SourceParts(struck));
 }

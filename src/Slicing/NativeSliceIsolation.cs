@@ -83,6 +83,11 @@ internal static partial class NativeSlicePhysics
             };
             ProtectIsolation(isolated);
             Quiesce(isolated, timings);
+            if (!ValidatePreparedFragments(full, pieces, out reason))
+            {
+                reason = "The isolated source mass differs from the prepared fragments; the separated empty source is retained. " + reason;
+                return false;
+            }
             reason = "Source isolated and emptied; preparing the fragment swap.";
             return true;
         }

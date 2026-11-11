@@ -100,6 +100,7 @@ internal static class SliceJitWarmup
         string[] physics = ["TryIsolate", "ValidateSource", "ValidatePreparedFragments", "SourceMass", "SourceParts",
             "ValidateTree", "CanBake", "Pair", "SplitBoundary", "RollBackFragment"];
         foreach (string name in physics) yield return Named(typeof(NativeSlicePhysics), name);
+        yield return Named(typeof(SliceSourceMass), nameof(SliceSourceMass.Resolve));
         yield return Named(typeof(IsolatedSliceSource), "IsCurrent");
         yield return Named(typeof(SliceSourceCapture), "IsCurrent");
         yield return Named(typeof(SliceSourceCapture), "Models");
@@ -197,7 +198,7 @@ internal static class SliceJitWarmup
             if (name == "Purr2D2.Runtime.SliceWorkerHooks") return method.Name is "DispatchPrefix" or "RunPrefix" or "RunFinalizer"
                 or "ChildPrefix" or "ChildFinalizer" or "EnterStage";
             return name is "Purr2D2.Slicing.NativeSlicePhysics" or "Purr2D2.Slicing.IsolatedSliceSource"
-                or "Purr2D2.Slicing.SliceDebrisClassification"
+                or "Purr2D2.Slicing.SliceDebrisClassification" or "Purr2D2.Slicing.SliceSourceMass"
                 or "Purr2D2.Slicing.SliceSourceCapture" or "Purr2D2.Slicing.SliceSourceFrame" or "Purr2D2.Slicing.SlicePrincipalFrame"
                 or "Purr2D2.Slicing.ArbitrarySlicer" or "Purr2D2.Runtime.GameHooks"
                 or "Purr2D2.Slicing.SliceCommitTimings" or "Purr2D2.Slicing.SliceFrameDiagnostics"
