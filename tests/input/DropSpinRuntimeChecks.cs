@@ -9,6 +9,15 @@ namespace Purr2D2.Runtime;
 // The real runtime gesture and pure drag run against managed window/appearance boundaries.
 internal sealed partial class SaberRuntime
 {
+    private bool HudApplicationHasFocus => !ImGui.GetIO().AppFocusLost;
+    private bool HudWindowAcceptsInput(GlfwWindow window) => window == Program.GetWindow();
+    private bool DropSpinPointerInHudWindow(float2 pointer)
+    {
+        var viewport = ImGui.GetMainViewport();
+        return float.IsFinite(pointer.X) && float.IsFinite(pointer.Y)
+            && pointer.X >= viewport.Pos.X && pointer.X <= viewport.Pos.X + viewport.Size.X
+            && pointer.Y >= viewport.Pos.Y && pointer.Y <= viewport.Pos.Y + viewport.Size.Y;
+    }
     private bool BFL9KUiVisible = true, _overlayLayoutAvailable = true;
     private string? _fault;
     private KittenEva? AppearanceKitten;

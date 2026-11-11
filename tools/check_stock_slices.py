@@ -2,6 +2,7 @@
 """Exercise the production shell/plane slicer against a user's installed stock GLBs.
 
 Usage: python3 tools/check_stock_slices.py /path/to/Content/Core
+   or: python3 tools/check_stock_slices.py --structural /path/to/Content/Core
    or: python3 tools/check_stock_slices.py --fixture artifacts/checks/stock-slices.json
 Game assets remain local and are never included in the mod or repository.
 """
@@ -16,11 +17,60 @@ import xml.etree.ElementTree as ET
 from validate import DEFAULT_SOURCE, _run_managed_project
 
 
-def fixtures(content):
-    for family, target in [('FuelTankA', 'CoreFuelTankA_Prefab_LF3W3HA'),
-                           ('FuelTankA', 'CoreFuelTankA_Prefab_LF1WHalfHB'),
-                           ('CommandA', 'CoreCommandA_Prefab_MediumCapsuleVariantA'),
-                           *[('ServiceModuleA', f'CoreServiceModuleA_Prefab_SetAHeight{height}') for height in 'ABCD']]:
+LEGACY_TARGETS = [
+    ('FuelTankA', 'CoreFuelTankA_Prefab_LF3W3HA'),
+    ('FuelTankA', 'CoreFuelTankA_Prefab_LF1WHalfHB'),
+    ('CommandA', 'CoreCommandA_Prefab_MediumCapsuleVariantA'),
+    *[('ServiceModuleA', f'CoreServiceModuleA_Prefab_SetAHeight{height}') for height in 'ABCD'],
+]
+STRUCTURAL_TARGETS = [
+    ('StructuralA', 'CoreStructuralA_Prefab_' + suffix)
+    for suffix in ('StrutCubeHalfW1HalfHA', 'StrutHex1HA', 'StrutOcto2HA', 'StrutOcto2HB', 'PanelAA', 'PanelAC')
+]
+INERT_MASS_COMPONENTS = {'Tank', 'SolidGrainSegment', 'Parachute', 'RadiationShield'}
+
+
+def check_massless_template(target, definitions, patches):
+    """Audit the authored data on a 5801 root, its variants' parents and its subparts."""
+    visited = set()
+
+    def visit(part_id):
+        if part_id in visited:
+            return
+        visited.add(part_id)
+        part = definitions[part_id]
+        if parent := part.get('Parent'):
+            visit(parent)
+        for row in (part, *patches.get(part_id, [])):
+            for component in list(row) + row.findall('Components/*'):
+                if ((component.tag == 'InertMasses' and len(component) > 0)
+                        or component.tag.endswith('Mass') or component.tag in INERT_MASS_COMPONENTS):
+                    raise ValueError(f'{target}: revisit the zero-mass case because {part_id} now declares {component.tag}')
+            for subpart in row.findall('SubPart') + row.findall('SubParts/SubPart'):
+                visit(subpart.get('Ref') or subpart.get('InstanceOf'))
+
+    visit(target)
+
+
+def fixtures(content, structural=False):
+    definitions = {}
+    for xml in content.glob("*Assets.xml"):
+        definitions.update({e.get("Id"): e for e in ET.parse(xml).getroot() if e.tag in ("Part", "SubPart") and e.get("Id")})
+    patches = {}
+    if structural:
+        if not (content / 'CoreStructuralAGameData.xml').is_file():
+            raise ValueError('CoreStructuralAGameData.xml is required for the structural mass audit')
+        for xml in content.glob('*GameData.xml'):
+            for row in ET.parse(xml).getroot():
+                if row.tag in ('Part', 'SubPart') and row.get('Id'):
+                    patches.setdefault(row.get('Id'), []).append(row)
+        massless_targets = [part_id for part_id in definitions
+                            if part_id.startswith(('CoreStructuralA_Prefab_Strut', 'CoreStructuralA_Prefab_Panel'))]
+        for target in massless_targets:
+            check_massless_template(target, definitions, patches)
+        print(f'PASS: {len(massless_targets)} stock strut/panel templates have no authored inert mass')
+
+    for family, target in STRUCTURAL_TARGETS if structural else LEGACY_TARGETS:
         def load_meshes(atlas):
             data = (content / 'Meshes' / f'{atlas}_MeshAtlas.glb').read_bytes()
             length = struct.unpack_from('<I', data, 12)[0]
@@ -47,9 +97,6 @@ def fixtures(content):
                 meshes[mesh['name']] = triangles
             return meshes
         meshes = load_meshes("Core" + family)
-        definitions = {}
-        for xml in content.glob("*Assets.xml"):
-            definitions.update({e.get("Id"): e for e in ET.parse(xml).getroot() if e.tag in ("Part", "SubPart") and e.get("Id")})
         groups = []
         materials = {}
 
@@ -97,27 +144,30 @@ def fixtures(content):
             for sub in definition.findall('SubPart') + definition.findall('SubParts/SubPart'):
                 visit(sub, [sub] + transforms)
         visit(definitions[target], [])
-        yield {'Name': target, 'Groups': groups}
+        yield {'Name': target, 'Groups': groups, 'Structural': structural}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('content', nargs='?', type=Path, help='installed Content/Core directory, including Meshes')
     parser.add_argument('--fixture', type=Path, help='reuse an existing local stock fixture without reading game GLBs')
+    parser.add_argument('--structural', action='store_true', help='test stock struts and panels from KSA 2026.11.10.5801')
     args = parser.parse_args()
     if (args.content is None) == (args.fixture is None):
         parser.error('provide either Content/Core or --fixture')
+    if args.structural and args.fixture is not None:
+        parser.error('--structural selects which fixtures to generate from Content/Core')
     if args.fixture is not None:
         output = args.fixture.resolve()
         if not output.is_file():
             parser.error(f'fixture does not exist: {output}')
     else:
-        output = DEFAULT_SOURCE / 'artifacts/checks/stock-slices.json'
+        output = DEFAULT_SOURCE / 'artifacts/checks' / ('structural-slices.json' if args.structural else 'stock-slices.json')
         # Read every required asset before replacing a usable cache. Generated game
         # fixtures stay in ignored artifacts/ and are never bundled with the mod.
         try:
-            data = json.dumps(list(fixtures(args.content.resolve())))
-        except (OSError, KeyError, ET.ParseError) as error:
+            data = json.dumps(list(fixtures(args.content.resolve(), args.structural)))
+        except (OSError, KeyError, ValueError, ET.ParseError) as error:
             parser.error(f'could not read installed stock assets (cached fixture preserved): {error}')
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(data)

@@ -1093,3 +1093,32 @@ A user playtest after the 5801 upgrade reported repeated "An authored surface ha
 **Validation.** Release builds against the explicit 5801 DLL directory with zero warnings/errors. `check_force_host.py` passes **390 checks**, including real host atlas capture, safety refusals and native F11 selection; production isolation regressions cover root/leaf/mid-stack/docking, partial failures, bulk closure, control/crew/editor ownership and no-split behavior. Full managed/source/stage/shader validation passes all **49 suites / 3,708 PASS lines**, with no C# warnings/errors; the final bounded JIT probe also passes. Logs are under `artifacts/checks/furce-atlas-fix/`. Warmup prepares **1,330/1,330 methods**, **99,634 IL bytes**, failures0, with unchanged budgets; the new classification method is reached and needs no later JIT in the probe. Archive integrity passes; generated assets/settings/saves are not modified.
 
 Native retest remains: repeat Angry Furce breakup on Gemini7/stock craft and saved generated fragments, including glass; inspect source refusal context on an unsupported asset. In orbit, slice attached tanks/branches, verify fresh uncontrolled uncrewed offcuts appear as Debris in F11 and are removed by its built-in cleanup, while crew/control-bearing remnants remain Vehicle. Repeat across save/restart, controlled-vehicle changes, cancellation and partial isolation. No native game session was run by the agent for these fixes.
+
+## Stock structural slicing investigation (2026-11-10)
+
+`tools/check_stock_slices.py --structural /path/to/Content/Core` generates
+local fixtures for cube, hexagonal and large octagonal struts, the octagonal foil
+variant, PanelAA and the mixed-atlas PanelAC. The 5801 geometry run passes
+12 assisted/manual-contact cuts with explicit 100 kg fixture mass. The suite also
+passes six zero-mass worker-input refusal cases without publication. Fresh fixture
+generation checks the absence of authored mass on all 19 strut and 32 panel
+templates, including their roots, parent definitions,
+subparts and GameData patches. See `research-slicing-physics.md` for the native
+vehicle fallback-mass analysis, source references and asset provenance.
+
+The user-reported native preflight refusal is explained by the source-part mass
+query returning zero while KSA can supply fallback mass on the isolated vehicle.
+The runtime mass-handling correction and live native acceptance remain pending.
+The following cases cover that correction through the normal gameplay entry
+points. Record template ID, source part inert mass, source owner inert/total mass,
+isolated owner inert/total mass, fragment mass sum and the displayed error.
+
+| Case | Setup and action | Required outcome after the mass correction |
+|---|---|---|
+| Standalone source | Spawn each of the six structural fixtures as a standalone vessel. Use both SLICE selection and a manual blade swing. | Two physical capped fragments with native collision, positive inertia and mass summing to the source's native fallback dry mass. |
+| Attached leaf | Face-snap each strut or panel to a control-bearing, positive-mass vessel and cut it. | Fragment mass matches the isolated source's fallback dry mass. Neighbor mass, control and stored contents remain correct. |
+| Mid-stack | Put a strut between two branches and cut its body. | External branches separate through native connections and remain intact. The strut's fragment mass matches its emptied isolated owner. |
+| Rotation and scale | Repeat the cube and large octagonal struts at 45-degree assembly rotation and at 0.5× and 2× root scale. | Detached-frame fallback mass matches native isolation and scales with volume. All masses and inertia remain finite and positive. |
+| Authored-mass control | Cut an existing mass-bearing tank, empty and fueled, beside a structural source. | Preserve the tank's authored dry mass and existing content-release behavior through replacement. |
+| Follow-up and persistence | Recut generated structural fragments, then save, restart and reload. | Generated CustomMass, collider, cap surfaces, fragment identities and total dry mass survive recuts and restoration. |
+| Refusal and cancellation | On the current runtime, attempt standalone and attached cuts. After a correction, cancel before isolation and between isolation and swap. | Current mass refusals publish no fragments. Cancellation follows the existing intact-source or separated-empty-shell transaction contract for its phase. |

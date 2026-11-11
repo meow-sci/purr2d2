@@ -1,5 +1,95 @@
 # Arbitrary slice physics and persistence
 
+## Stock strut and panel mass investigation, 5801
+
+The reported "The part has no finite positive inert mass." comes from
+`NativeSlicePhysics.ValidateSource`. `SliceSourceCapture` runs this check before
+reading render geometry. `SourceMass` sums `Part.ComputeSubtreeInertMass()` over
+the selected structural shell and internally attached parts. KSA's method sums
+`InertMass` modules built from authored mass templates and `IInertMass`
+components. Visible geometry and colliders alone supply no part-level mass.
+
+All 19 strut and 32 panel templates in CoreStructuralA have no authored inert mass in their
+definitions, parent definitions, referenced subparts or Core GameData patches.
+This accounts for the refusal on both bare trusses and their foil variants.
+
+KSA handles a vehicle whose total authored inert mass is zero in
+`Vehicle.UpdateAfterPartTreeModification`. Its
+`ComputeFallbackVehicleMassPropsAsmb` computes solid-cuboid mass and inertia from
+the assembly-space MeshView bounding box, using a density of 100 kg/m³. Invalid
+or zero box dimensions use a one-metre cube. The result belongs to the vehicle's
+physics properties and is exposed through `Vehicle.InertMass`. The individual
+parts still report zero from `ComputeSubtreeInertMass()`. A massless strut attached
+to a positive-dry-mass vessel starts using fallback vehicle mass when native
+isolation makes it its own massless vessel.
+
+Purr2D2 needs finite positive mass to construct fragment inertia, split source
+mass between fragments and assign balanced separating motion. Removing the
+preflight check alone would reach the worker's invalid-fragment-mass refusal.
+`ValidatePreparedFragments` also checks source dry-mass conservation, and the
+final swap compares the created fragments' native total mass with the emptied
+isolated owner's mass.
+
+A correction needs a consistent source mass throughout capture, preparation,
+isolation and replacement. For an already isolated source,
+`Vehicle.InertMass` includes the native fallback and excludes stores. An attached
+source needs the fallback mass for its eventual isolated MeshView bounds.
+Predicting that value requires the native detached assembly frame, part scale
+and internal attachments. The original vessel's total mass includes neighboring
+parts and consumables. Native splitting can rotate or rebase the source, so the
+post-isolation comparison remains necessary. Preserve authored positive dry mass
+and all existing mass-conservation checks when implementing this correction.
+
+Current source references are `KSA/InertMass.cs` (`ComputeTotalAsmb` and
+`CreateComponents`), `KSA/Part.cs` (`ComputeSubtreeInertMass` and
+`ComputeSubPartBoundingBox`), `KSA/PartTree.cs` (`ComputeBoundingBoxAsmb`), and
+`KSA/Vehicle.cs` (`UpdateAfterPartTreeModification` and
+`ComputeFallbackVehicleMassPropsAsmb`) under
+`../ksa-game-assemblies/current/decomp/`.
+
+### Reproducible structural tests
+
+Run from the repository with the full stock Content/Core directory, including
+mesh atlases and GameData XML.
+
+```sh
+python3 tools/check_stock_slices.py --structural /path/to/Content/Core
+python3 tools/check_stock_slices.py --fixture artifacts/checks/structural-slices.json
+```
+
+The new mode audits all 51 strut/panel templates' missing mass declarations, copies
+rendered meshes with their authored subpart transforms and exercises the
+production worker. Each target gets an assisted cut, a blade-limited manual
+contact cut at a real rendered triangle near 57% of its X extent, and a
+zero-mass worker-input refusal case.
+
+| Fixture suffix after CoreStructuralA_Prefab_ | Coverage |
+|---|---|
+| StrutCubeHalfW1HalfHA | Transformed square truss and mirrored endcaps |
+| StrutHex1HA | Hexagonal truss and diagonal braces |
+| StrutOcto2HA | Large octagonal truss with 36 authored subparts |
+| StrutOcto2HB | Foil variant with replacement subparts and a second mesh atlas |
+| PanelAA | Thin triangular panel |
+| PanelAC | Frame and inset panel from different mesh atlases |
+
+Positive geometry cases use an explicit 100 kg test input to exercise geometry
+beyond the current native preflight refusal. They require two true cut fragments,
+fresh cap meshes, conserved fixture mass, a manual anchor residual of at most
+1 mm, XML/GLB reload with closed topology, and Bepu convex-hull cooking. The
+zero-mass worker cases require rejection without publishing a slice. Cached
+fixtures retain the geometry test mode, and the XML mass audit runs during fresh
+fixture generation. Local fixtures remain in ignored `artifacts/checks/`.
+
+The run passed all 12 positive geometry cases and six zero-mass refusal cases using
+`/Users/asherwin/repos/meow-sci/ksa-linux/Content/Core`. Its sibling KSA.dll
+byte-matches the 5801 reference, and its structural/surfaces XML matches the
+reference XML. CoreStructuralA_MeshAtlas.glb has SHA-256
+`84a2fb0308c67a77c666cd6ecf9887fd6f921e4783052b772e70d727b0119220`.
+Native source capture, isolation, replacement and live physics still need the
+in-game cases recorded in `ACCEPTANCE.md`.
+
+## Existing slice transaction
+
 The slice geometry is authored in the original vehicle's assembly frame in physical metres. Every source subpart transform, including scale, is baked before clipping. `SlicePrincipalFrame` recentres each closed component on its exact volume centroid, diagonalizes its complete unit-density inertia tensor, and rotates the geometry into a proper right-handed principal frame. Its diagonal specific moments are persisted in native `CustomMass` XML. This preserves offdiagonal inertia through ordinary native save/load without a runtime-only mass override.
 
 `NativeSlicePhysics.ValidateSource` accepts finite positive inert mass on a native-physics vessel, including occupied vessels. Tanks, service modules and capsules can become inert wreckage; their functional modules are discarded. Existing dents and deployed parachutes are refused. External connections must join actual full parts on unique parent-child boundaries; reinforced links, subpart endpoints and non-tree graphs are refused. Work and native fragment counts are bounded.

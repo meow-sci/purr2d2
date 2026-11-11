@@ -5,6 +5,23 @@ namespace Purr2D2.Core;
 
 public enum SaberType { Light, Dark }
 
+/// <summary>Desktop coordinates are persisted; native window/viewport handles are never saved.</summary>
+public sealed class HudWindowSettings
+{
+    public bool Detached { get; set; }
+    public bool AlwaysOnTop { get; set; }
+    public bool HasPosition { get; set; }
+    public float X { get; set; }
+    public float Y { get; set; }
+
+    public void Validate()
+    {
+        if (!float.IsFinite(X) || !float.IsFinite(Y)) { HasPosition = false; X = Y = 0; }
+        X = Math.Clamp(X, -100000, 100000);
+        Y = Math.Clamp(Y, -100000, 100000);
+    }
+}
+
 public sealed class SaberEffectSettings
 {
     public float ShimmerAmount { get; set; }
@@ -130,6 +147,11 @@ public sealed class SaberSettings
     public float ForceControlsOffsetY { get; set; }
     public float SaberControlsOffsetX { get; set; }
     public float SaberControlsOffsetY { get; set; }
+    public float KittenListOffsetX { get; set; }
+    public float KittenListOffsetY { get; set; }
+    public HudWindowSettings SaberHudWindow { get; set; } = new();
+    public HudWindowSettings ForceHudWindow { get; set; } = new();
+    public HudWindowSettings KittenHudWindow { get; set; } = new();
     public int SliceVertexArenaMiB { get; set; } = SliceResourceLimits.DefaultVertexArenaMiB;
     public int SliceIndexArenaMiB { get; set; } = SliceResourceLimits.DefaultIndexArenaMiB;
     public bool SliceAutoGrow { get; set; } = true;
@@ -188,6 +210,11 @@ public sealed class SaberSettings
         ForceControlsOffsetY = Clamp(ForceControlsOffsetY, -1, 1, 0);
         SaberControlsOffsetX = Clamp(SaberControlsOffsetX, -1, 1, 0);
         SaberControlsOffsetY = Clamp(SaberControlsOffsetY, -1, 1, 0);
+        KittenListOffsetX = Clamp(KittenListOffsetX, -1, 1, 0);
+        KittenListOffsetY = Clamp(KittenListOffsetY, -1, 1, 0);
+        (SaberHudWindow ??= new()).Validate();
+        (ForceHudWindow ??= new()).Validate();
+        (KittenHudWindow ??= new()).Validate();
         SliceVertexArenaMiB = Math.Clamp(SliceVertexArenaMiB, SliceResourceLimits.MinimumVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB);
         SliceIndexArenaMiB = Math.Clamp(SliceIndexArenaMiB, SliceResourceLimits.MinimumIndexArenaMiB, SliceResourceLimits.MaximumIndexArenaMiB);
         SliceVertexMaximumMiB = Math.Clamp(SliceVertexMaximumMiB, SliceVertexArenaMiB, SliceResourceLimits.MaximumVertexArenaMiB);

@@ -87,6 +87,14 @@ public readonly record struct SaberOverlayLayout(float2 ListMin, float2 ListMax,
     {
         if (!Valid || !TryControlsTranslation(ControlsMin, ControlsMax, origin, size, normalizedOffset, topInset, out var delta))
             return default;
+        return TranslateControls(delta);
+    }
+
+    public SaberOverlayLayout TranslateList(float2 delta) => this with
+    { ListMin = ListMin + delta, ListMax = ListMax + delta, ListBodyTop = ListBodyTop + delta.Y };
+
+    public SaberOverlayLayout TranslateControls(float2 delta)
+    {
         return this with { SwingCenter = SwingCenter + delta, SliceCenter = SliceCenter + delta,
             ForwardCenter = ForwardCenter + delta, BackwardCenter = BackwardCenter + delta,
             LeftCenter = LeftCenter + delta, RightCenter = RightCenter + delta,

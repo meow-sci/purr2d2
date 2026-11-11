@@ -26,7 +26,7 @@ internal sealed partial class SaberRuntime
 
     private void BeginSaberIgniteDrag(KittenEva owner, float2 pointer, OverlayLayout layout)
     {
-        if (!BFL9KUiVisible || Program.IsModalOpen() || ImGui.GetIO().AppFocusLost || _fault != null
+        if (!BFL9KUiVisible || Program.IsModalOpen() || !HudApplicationHasFocus || _fault != null
             || !ReferenceEquals(owner, _owner) || !ReferenceEquals(owner, Program.ControlledVehicle)
             || !_currentKittens.Contains(owner) || !_kittenSabers.TryGetValue(owner, out var saber)) return;
         if (_igniteDrag.Begin(pointer, SaberDeploymentFor(owner, saber), SaberEnabledFor(owner),
@@ -36,7 +36,7 @@ internal sealed partial class SaberRuntime
 
     private bool SaberIgniteDragLayoutStillValid(OverlayLayout layout) =>
         layout.Valid && _igniteDrag.Held && BFL9KUiVisible && !Program.IsModalOpen() && !Program.HasMouseInputLatch
-        && !ImGui.GetIO().AppFocusLost && _fault == null && _igniteDragOwner is { IsDisposed: false } owner
+        && HudApplicationHasFocus && _fault == null && _igniteDragOwner is { IsDisposed: false } owner
         && ReferenceEquals(owner, _owner) && ReferenceEquals(owner, Program.ControlledVehicle)
         && _currentKittens.Contains(owner) && _kittenSabers.ContainsKey(owner)
         && _igniteDrag.MatchesLayout(layout.IgniteCenter, layout.IgniteRadius, layout.IgnitePillTravel);

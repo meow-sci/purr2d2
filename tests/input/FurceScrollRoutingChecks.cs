@@ -159,6 +159,23 @@ internal static class FurceScrollRoutingChecks
         Check(MathF.Abs(runtime._overlayListScroll - expectedScroll) < 1e-3f && runtime.ScrollCalls.Count == 0,
             "list scrolling updates only its own position and leaves Force targets untouched");
 
+        runtime = Active(out window);
+        var detached = new GlfwWindow();
+        runtime.DetachedHud = detached;
+        Program.MainViewport.CursorHit = false;
+        SetPointer(runtime, detached, runtime._forceLayout.MoveCenter);
+        ImGui.Io.WantCaptureMouse = true;
+        detached.LeftShift = GlfwKeyAction.Press;
+        CheckRoute(runtime, detached, new(0, .5), native: true, backend: true, ticks: .5, shift: true,
+            "an owned detached Furce control uses that window's Shift and applies wheel input once despite ImGui capture");
+        runtime.DetachedContent = false;
+        CheckRoute(runtime, detached, new(0, .5), native: false, backend: false, ticks: null, shift: true,
+            "detached native chrome retains ordinary ImGui wheel input");
+        runtime.DetachedContent = true;
+        runtime._arrangeHud = true;
+        CheckRoute(runtime, detached, new(0, .5), native: false, backend: false, ticks: null, shift: true,
+            "arranging a detached panel cannot change gameplay values");
+
         Console.WriteLine("PASS: production Force scroll routing shares ownership between GLFW and ImGui callbacks without duplicate target updates");
     }
 
@@ -210,7 +227,7 @@ internal static class FurceScrollRoutingChecks
         bool filtered = runtime.FilterOverlayScroll(window, offset);
         int callsAfterNative = runtime.ScrollCalls.Count;
         bool suppressed = runtime.SuppressOverlayImGuiScroll(window);
-        int expectedShiftQueries = ReferenceEquals(window, Program.Window) ? 2 : 0;
+        int expectedShiftQueries = (ReferenceEquals(window, Program.Window) || ReferenceEquals(window, runtime.DetachedHud)) ? 2 : 0;
         Check(filtered == native && suppressed == backend,
             $"{message}: game={filtered}, ImGui={suppressed}");
         Check(SaberRuntime.ShiftHelperCalls - shiftQueries == expectedShiftQueries,

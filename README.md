@@ -5,6 +5,8 @@ A Kitten Spacy Agency mod to add:
 - BFL9K (Big Fucking Laser 9000)
 - The Furce
 
+Use **purr2d2 → Arrange HUD** to move the Saber, Furce and kitten panels. Each panel has a **Detach** action for a standalone window and **Reattach** to return it to the HUD. Layouts save automatically; **Reset HUD layout** brings every panel back. See [HUD layout controls](docs/hud-layout.md).
+
 # media
 
 ![bfl9k_01](docs/media/bfl9k_01.webp)
