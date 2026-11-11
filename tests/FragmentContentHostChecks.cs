@@ -87,6 +87,7 @@ internal static class FragmentContentHostChecks
                 <Assets><EditorTagDef Id="Hidden"/><PbrMaterial Id="FixtureMetal"/><PbrMaterial Id="FixtureCopper"/>
                 <PbrMaterial Id="Purr2D2_CutSurface"/><Mesh Id="FixtureAuthoredMesh"/></Assets>
                 """);
+            var coreRows = source.Rows.Select(row => new XElement(row)).ToArray();
             var frozen = File.ReadAllBytes("tests/fixtures/fragment-v3.xml");
             var oldDocument = XDocument.Parse(Encoding.UTF8.GetString(frozen));
             string oldId = (string)oldDocument.Root!.Element("Part")!.Attribute("Id")!;
@@ -118,9 +119,31 @@ internal static class FragmentContentHostChecks
             var missing = XDocument.Parse(Encoding.UTF8.GetString(frozen));
             missing.Root!.Element("MeshAtlas")!.SetAttributeValue("Path", "Generated/Slices/missing.glb");
             File.WriteAllText(oldPath, missing.ToString());
-            Invalid(() => FragmentContentSource.AppendPersistedAssets(Source(mod), mod), "missing persisted GLB must fail explicitly");
-            Check(File.ReadAllText(oldPath) == missing.ToString(), "missing-GLB refusal preserves original durable bytes");
-            Console.WriteLine("PASS: native source loads frozen v3, current export and authored debris together, preserves IDs/placement keys, and refuses missing GLBs without rewriting assets");
+            string slices = Path.GetDirectoryName(oldPath)!;
+            File.WriteAllText(Path.Combine(slices, "000-malformed.xml"), "<Assets><Part");
+            var unknown = XDocument.Parse(Encoding.UTF8.GetString(frozen));
+            unknown.Root!.Element("Part")!.Add(new XElement("UnexpectedGeneratedComponent"));
+            File.WriteAllText(Path.Combine(slices, "001-unknown.xml"), unknown.ToString());
+            var topology = XDocument.Parse(Encoding.UTF8.GetString(current.Xml));
+            topology.Root!.Element("Purr2D2SliceTopology")!.SetAttributeValue("Version", 99);
+            File.WriteAllText(Path.Combine(slices, "002-topology.xml"), topology.ToString());
+            File.WriteAllText(Path.Combine(slices, "zzz-malformed.xml"), "not XML");
+            var originals = Directory.GetFiles(slices).ToDictionary(path => path, File.ReadAllBytes);
+            var partial = Source(mod); partial.Rows.AddRange(coreRows);
+            string[] surviving = [];
+            string warnings = CaptureWarnings(() => surviving = FragmentContentSource.AppendPersistedAssets(partial, mod));
+            Check(surviving.SequenceEqual(ids.Where(id => id != oldId && id != oldId + "_visual")),
+                "bad files before, between and after valid entries cannot discard other fragments or publish partial IDs");
+            foreach (string path in new[] { oldPath, "000-malformed.xml", "001-unknown.xml", "002-topology.xml", "zzz-malformed.xml" })
+                Check(warnings.Contains(path, StringComparison.Ordinal), "each skipped generated file is identified in the log");
+            ModLibrary.TagTable.ClearCollections();
+            Load(partial);
+            foreach (string id in surviving)
+                Check(ModLibrary.Get<PartTemplate>(id) is { LoadFailed: false }, "remaining generated assets still load through KSA");
+            Check(Directory.GetFiles(slices).Length == originals.Count
+                && originals.All(entry => File.ReadAllBytes(entry.Key).SequenceEqual(entry.Value)),
+                "best-effort restore never rewrites, deletes or renames generated files");
+            Console.WriteLine("PASS: native source restores historical/current/authored assets and skips malformed XML, unknown components, invalid topology and missing GLBs without changing files or leaking partial rows");
 
             void Write(string id, byte[] xml, byte[]? glb = null)
             {
@@ -196,7 +219,7 @@ internal static class FragmentContentHostChecks
     {
         ModLibrary.TagTable.ClearCollections();
         var harmony = new Harmony("purr2d2.tests.content-lifecycle");
-        int initialized = 0, completed = 0;
+        int initialized = 0, completed = 0, restored = -1;
         string directory = Path.GetFullPath(Path.Combine("artifacts/checks", "fragment-lifecycle-" + Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(Path.Combine(directory, "purr2d2"));
         var bootSource = typeof(ModLibrary).GetField("_bootSource", BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -205,8 +228,25 @@ internal static class FragmentContentHostChecks
         var load = typeof(ModLibrary).GetMethod(nameof(ModLibrary.LoadAll), [typeof(IContentLoadProgress)])!;
         try
         {
-            File.WriteAllText(Path.Combine(directory, "purr2d2", "mod.toml"), "name = \"Fixture\"\nassets = []\n");
-            FragmentContentSource.InstallSourceHook(harmony, _ => initialized++, () => completed++);
+            string modDirectory = Path.Combine(directory, "purr2d2");
+            File.WriteAllText(Path.Combine(modDirectory, "mod.toml"), "name = \"Fixture\"\nassets = [\"core.xml\"]\n");
+            File.WriteAllText(Path.Combine(modDirectory, "core.xml"), """
+                <Assets><EditorTagDef Id="Hidden"/><PbrMaterial Id="FixtureMetal"/><Mesh Id="FixtureAuthoredMesh"/></Assets>
+                """);
+            string slices = Path.Combine(modDirectory, "Generated", "Slices");
+            Directory.CreateDirectory(slices);
+            var (goodId, goodXml) = AuthoredDebrisAssets.Build(new(
+                [new("FixtureAuthoredMesh", "FixtureMetal", false)], default, new(1, 2, 3), 1, 12));
+            var (failedId, failedXml) = AuthoredDebrisAssets.Build(new(
+                [new("MissingSourceModMesh", "FixtureMetal", false)], default, new(1, 2, 3), 1, 12));
+            File.WriteAllBytes(Path.Combine(slices, goodId + ".xml"), goodXml);
+            File.WriteAllBytes(Path.Combine(slices, failedId + ".xml"), failedXml);
+            File.WriteAllText(Path.Combine(slices, "bad.xml"), "<Assets>");
+            FragmentContentSource.InstallSourceHook(harmony, _ => initialized++, () =>
+            {
+                restored = FragmentContentSource.VerifyStartupRestore();
+                completed++;
+            });
             FragmentContentSource.InstallSourceHook(harmony, _ => initialized += 100, () => completed += 100);
             Check(Harmony.GetPatchInfo(read)!.Postfixes.Count(p => p.owner == harmony.Id) == 1
                 && Harmony.GetPatchInfo(load)!.Postfixes.Count(p => p.owner == harmony.Id) == 1,
@@ -226,14 +266,26 @@ internal static class FragmentContentHostChecks
             Check(completed == 0 && ReferenceEquals(bootSource.GetValue(null), source),
                 "a skipped LoadAll must not initialize runtime or consume native content");
             harmony.Unpatch(load, HarmonyPatchType.Prefix, harmony.Id);
-            // Empty content needs no renderer or physics world; this runs the real
-            // native full loader and its completion postfix, with no native payloads.
-            ModLibrary.LoadAll(null);
-            ModLibrary.LoadAll(null);
-            Check(completed == 1 && bootSource.GetValue(null) == null,
-                "real LoadAll completion initializes once and duplicate empty loads cannot repeat it");
-            FragmentContentSource.VerifyStartupRestore();
-            Console.WriteLine("PASS: real startup ReadSource/LoadAll hooks install once, initialize once, reject duplicate source reads and ignore skipped loads");
+            // The snapshot omits the game's .NET 11 logging dependencies. Isolate
+            // its console sink while retaining real error collection and propagation.
+            harmony.Patch(AccessTools.Method(typeof(ModLibrary), nameof(ModLibrary.PrintContentErrors)),
+                prefix: new HarmonyMethod(typeof(FragmentContentHostChecks), nameof(SkipNativeErrorLogging)));
+            // Authored debris reuses meshes, so the real loader can exercise missing
+            // dependency failures and its completion postfix without GPU payloads.
+            string warnings = CaptureWarnings(() => { ModLibrary.LoadAll(null); ModLibrary.LoadAll(null); });
+            Check(completed == 1 && bootSource.GetValue(null) == null && restored == 2,
+                "native load failures cannot block runtime initialization; only successful templates are counted");
+            var nativeErrors = AccessTools.Property(typeof(ModLibrary), "FullLoadErrors").GetValue(null) as ContentErrors;
+            Check(FragmentAssetRegistration.TryGetAsset<PartTemplate>(goodId, out _)
+                && !FragmentAssetRegistration.TryGetAsset<PartTemplate>(failedId, out _)
+                && nativeErrors is { Count: > 0 }
+                && warnings.Contains(failedId, StringComparison.Ordinal),
+                "native failed templates stay unavailable and are logged without blocking valid templates");
+            ModLibrary.TagTable.ClearCollections();
+            warnings = CaptureWarnings(() => Check(FragmentContentSource.VerifyStartupRestore() == 0,
+                "missing registered templates are tolerated after native loading"));
+            Check(warnings.Contains(goodId, StringComparison.Ordinal), "missing templates are identified in the log");
+            Console.WriteLine("PASS: real startup hooks initialize once despite malformed files and native dependency failures, count successful templates, reject duplicate source reads and ignore skipped loads");
         }
         finally
         {
@@ -247,6 +299,16 @@ internal static class FragmentContentHostChecks
     }
 
     private static bool SkipNativeLoad() => false;
+    private static bool SkipNativeErrorLogging() => false;
+
+    private static string CaptureWarnings(Action action)
+    {
+        var previous = Console.Out;
+        using var output = new StringWriter();
+        try { Console.SetOut(output); action(); }
+        finally { Console.SetOut(previous); }
+        return output.ToString();
+    }
 
     private static void InvalidOperation(Action action, string message)
     {

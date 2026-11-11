@@ -109,6 +109,8 @@ jobs:
         run: python3 tools/validate.py --stage artifacts/stage/purr2d2
       - name: Runtime bootstrap regressions
         run: python3 tools/check_runtime_bootstrap.py --entry-assembly bin/Release/net10.0/Purr2D2.dll
+      - name: Generated slice startup regressions
+        run: python3 tools/check_fragment_templates.py --content-only
       - name: Verify release archive
         if: steps.meta.outputs.publish == 'true'
         env:

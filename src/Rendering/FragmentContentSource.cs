@@ -69,40 +69,59 @@ internal static class FragmentContentSource
         if (!source.Mods.Contains(mod)) throw new InvalidOperationException("Generated rows need their defining mod in the native source.");
         var directory = Path.Combine(mod.DirectoryPath, "Generated", "Slices");
         if (!Directory.Exists(directory)) return [];
+        string[] paths;
+        try
+        {
+            paths = Directory.GetFiles(directory, "*.xml");
+            Array.Sort(paths, StringComparer.Ordinal);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            ReportSkipped(directory, error.GetBaseException().Message);
+            return [];
+        }
         var ids = new List<string>();
         int fileIndex = source.Rows.Where(row => (string?)row.Attribute(ContentStamps.MOD) == mod.Id)
             .Select(row => int.TryParse((string?)row.Attribute(ContentStamps.FILE_INDEX), out int index) ? index : -1)
             .DefaultIfEmpty(-1).Max() + 1;
-        foreach (var path in Directory.EnumerateFiles(directory, "*.xml").Order(StringComparer.Ordinal))
+        foreach (var path in paths)
         {
-            var bytes = File.ReadAllBytes(path);
-            using var input = new MemoryStream(bytes, writable: false);
-            var original = XDocument.Load(input);
-            foreach (var atlas in original.Descendants("MeshAtlas"))
+            try
             {
-                string assetPath = (string?)atlas.Attribute("Path") ?? "";
-                if (assetPath.Length == 0 || !File.Exists(mod.GetPath(assetPath)))
-                    throw new InvalidDataException($"Generated slice '{path}' is missing its GLB '{assetPath}'. Restore the complete Generated/Slices directory before loading its saves.");
+                var bytes = File.ReadAllBytes(path);
+                using var input = new MemoryStream(bytes, writable: false);
+                var original = XDocument.Load(input);
+                foreach (var atlas in original.Descendants("MeshAtlas"))
+                {
+                    string assetPath = (string?)atlas.Attribute("Path") ?? "";
+                    if (assetPath.Length == 0 || !File.Exists(mod.GetPath(assetPath)))
+                        throw new InvalidDataException($"Missing generated slice GLB '{assetPath}'.");
+                }
+                var normalized = FragmentTemplateLoader.NormalizeDocument(original, addHiddenReference: true);
+                var rootPart = normalized.Root!.Elements("Part").SingleOrDefault()
+                    ?? throw new InvalidDataException("Generated slice has no unique root part.");
+                string id = (string?)rootPart.Attribute("Id") ?? "";
+                int surfaces = normalized.Descendants("Components").Elements()
+                    .Count(e => e.Name == "PartModel" || e.Name == "PartModelGlass");
+                // Validate the whole file before publishing any of its rows. A bad
+                // entry must not leave half a fragment in the native content source.
+                FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), bytes, id, surfaces);
+                string relative = Path.GetRelativePath(mod.DirectoryPath, path).Replace(Path.DirectorySeparatorChar, '/');
+                int modIndex = source.Mods.IndexOf(mod), rowIndex = 0;
+                var rows = normalized.Root.Elements().ToArray();
+                foreach (var row in rows)
+                    ContentStamps.Stamp(row, mod.Id, modIndex, relative, fileIndex, rowIndex++);
+                var partIds = rows.Where(row => row.Name == "Part" || row.Name == "SubPart")
+                    .Select(row => (string?)row.Attribute("Id") ?? "").ToArray();
+                FragmentTopology.Remember(original);
+                source.Rows.AddRange(rows);
+                ids.AddRange(partIds);
+                fileIndex++;
             }
-            var normalized = FragmentTemplateLoader.NormalizeDocument(original, addHiddenReference: true);
-            var rootPart = normalized.Root!.Elements("Part").SingleOrDefault()
-                ?? throw new InvalidDataException("Generated slice has no unique root part: " + path);
-            string id = (string?)rootPart.Attribute("Id") ?? "";
-            int surfaces = normalized.Descendants("Components").Elements()
-                .Count(e => e.Name == "PartModel" || e.Name == "PartModelGlass");
-            // Decode with the production private serializer before adding any rows;
-            // unknown/missing components must not silently invalidate durable saves.
-            FragmentTemplateLoader.Read(FragmentTemplateLoader.CreateSerializer(), bytes, id, surfaces);
-            FragmentTopology.Remember(original);
-            string relative = Path.GetRelativePath(mod.DirectoryPath, path).Replace(Path.DirectorySeparatorChar, '/');
-            int modIndex = source.Mods.IndexOf(mod), rowIndex = 0;
-            foreach (var row in normalized.Root.Elements())
+            catch (Exception error) when (error is not OutOfMemoryException)
             {
-                ContentStamps.Stamp(row, mod.Id, modIndex, relative, fileIndex, rowIndex++);
-                source.Rows.Add(row);
-                if (row.Name == "Part" || row.Name == "SubPart") ids.Add((string?)row.Attribute("Id") ?? "");
+                ReportSkipped(path, error.GetBaseException().Message);
             }
-            fileIndex++;
         }
         return ids.ToArray();
     }
@@ -111,11 +130,25 @@ internal static class FragmentContentSource
     {
         if (!_sourceRead)
             throw new InvalidOperationException("Purr2d2's startup source hook did not run. The loader must invoke BeforeMain before content preparation.");
+        int restored = 0;
         foreach (string id in _restoredIds)
-            if (!FragmentAssetRegistration.TryGetAsset<PartTemplate>(id, out var part) || part == null || part.LoadFailed)
-                throw new InvalidDataException($"Generated slice template '{id}' did not finish native content loading. Retain its immutable XML/GLB and restore all required source mods before loading a save.");
-        return _restoredIds.Length;
+        {
+            try
+            {
+                if (FragmentAssetRegistration.TryGetAsset<PartTemplate>(id, out var part) && part != null && !part.LoadFailed)
+                    restored++;
+                else ReportSkipped(id, "Template is unavailable after native content loading.");
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                ReportSkipped(id, error.GetBaseException().Message);
+            }
+        }
+        return restored;
     }
+
+    private static void ReportSkipped(string asset, string reason) =>
+        Console.WriteLine($"[purr2d2] Skipping generated slice '{asset}': {reason} Continuing startup; saves may contain missing parts.");
 
     internal static void RemoveSourceHook()
     {
