@@ -64,7 +64,11 @@ internal static partial class RuntimeFragmentAssets
         // Persisted rows join the native source before its register/load/resolve phases.
         // Registering a separate bundle here would be erased by LoadFrom.ResetContent.
         var directory = Path.Combine(mod.DirectoryPath, "Generated", "Slices");
-        RefreshDiskUsage(directory);
+        try { RefreshDiskUsage(directory); }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            Console.WriteLine($"[purr2d2] Could not inspect generated slice storage '{directory}'; continuing startup: {error.Message}");
+        }
         _initialized = true;
         InstallAuthoredDebrisCallbacks();
     }
