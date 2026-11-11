@@ -1108,8 +1108,11 @@ vehicle fallback-mass analysis, source references and asset provenance.
 
 The user-reported native preflight refusal is explained by the source-part mass
 query returning zero while KSA can supply fallback mass on the isolated vehicle.
-The runtime mass-handling correction and live native acceptance remain pending.
-The following cases cover that correction through the normal gameplay entry
+The runtime now resolves fallback dry mass before preparation and verifies it
+against the isolated native source before replacement. The host tests compare
+predictions with KSA's own mass routine using actual picking geometry, rotation,
+translation, uniform/nonuniform scale and native tree separation. Live native
+acceptance remains pending. The following cases cover the correction through the normal gameplay entry
 points. Record template ID, source part inert mass, source owner inert/total mass,
 isolated owner inert/total mass, fragment mass sum and the displayed error.
 
@@ -1121,4 +1124,4 @@ isolated owner inert/total mass, fragment mass sum and the displayed error.
 | Rotation and scale | Repeat the cube and large octagonal struts at 45-degree assembly rotation and at 0.5× and 2× root scale. | Detached-frame fallback mass matches native isolation and scales with volume. All masses and inertia remain finite and positive. |
 | Authored-mass control | Cut an existing mass-bearing tank, empty and fueled, beside a structural source. | Preserve the tank's authored dry mass and existing content-release behavior through replacement. |
 | Follow-up and persistence | Recut generated structural fragments, then save, restart and reload. | Generated CustomMass, collider, cap surfaces, fragment identities and total dry mass survive recuts and restoration. |
-| Refusal and cancellation | On the current runtime, attempt standalone and attached cuts. After a correction, cancel before isolation and between isolation and swap. | Current mass refusals publish no fragments. Cancellation follows the existing intact-source or separated-empty-shell transaction contract for its phase. |
+| Refusal and cancellation | Attempt standalone and attached cuts, then cancel before isolation and between isolation and swap. Include an unsupported or stale source. | Invalid mass and geometry publish no fragments. A native post-isolation mass mismatch retains the empty source. Cancellation follows the existing intact-source or separated-empty-shell transaction contract for its phase. |

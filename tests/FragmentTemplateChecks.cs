@@ -21,6 +21,7 @@ internal static class FragmentTemplateChecks
         SaberWaterHostChecks.Run();
         CapEmissionHostChecks.Run();
         FragmentContentHostChecks.Run();
+        SliceSourceMassHostChecks.Run();
         CheckWoodMaterial();
         var xml = Encoding.UTF8.GetBytes("""
             <Assets>

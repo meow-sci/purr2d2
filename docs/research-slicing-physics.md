@@ -2,16 +2,16 @@
 
 ## Stock strut and panel mass investigation, 5801
 
-The reported "The part has no finite positive inert mass." comes from
+The reported "The part has no finite positive inert mass." originated in
 `NativeSlicePhysics.ValidateSource`. `SliceSourceCapture` runs this check before
-reading render geometry. `SourceMass` sums `Part.ComputeSubtreeInertMass()` over
+reading render geometry. The previous `SourceMass` summed `Part.ComputeSubtreeInertMass()` over
 the selected structural shell and internally attached parts. KSA's method sums
 `InertMass` modules built from authored mass templates and `IInertMass`
 components. Visible geometry and colliders alone supply no part-level mass.
 
 All 19 strut and 32 panel templates in CoreStructuralA have no authored inert mass in their
 definitions, parent definitions, referenced subparts or Core GameData patches.
-This accounts for the refusal on both bare trusses and their foil variants.
+This accounts for the reported refusal on both bare trusses and their foil variants.
 
 KSA handles a vehicle whose total authored inert mass is zero in
 `Vehicle.UpdateAfterPartTreeModification`. Its
@@ -30,15 +30,25 @@ preflight check alone would reach the worker's invalid-fragment-mass refusal.
 final swap compares the created fragments' native total mass with the emptied
 isolated owner's mass.
 
-A correction needs a consistent source mass throughout capture, preparation,
-isolation and replacement. For an already isolated source,
-`Vehicle.InertMass` includes the native fallback and excludes stores. An attached
-source needs the fallback mass for its eventual isolated MeshView bounds.
-Predicting that value requires the native detached assembly frame, part scale
-and internal attachments. The original vessel's total mass includes neighboring
-parts and consumables. Native splitting can rotate or rebase the source, so the
-post-isolation comparison remains necessary. Preserve authored positive dry mass
-and all existing mass-conservation checks when implementing this correction.
+`SourceMass` now delegates to `SliceSourceMass.Resolve` throughout capture,
+preparation, isolation and replacement. Authored nonzero mass keeps its original
+value, including invalid values that preflight must reject. An already isolated
+source uses `Vehicle.InertMass`, which includes native fallback mass and excludes
+stores.
+
+For an attached massless structural source, the resolver predicts the native
+detached frame. A root retained while its children separate keeps its existing
+assembly-space bounds. A detached child keeps its position and scale, receives
+identity root rotation, and carries internally retained full parts through the
+same native pose transformation. Bounds are recomputed from the same direct
+visual subparts, MeshView primitive and float32-transformed picking vertices as
+KSA. This preserves the native rounding behavior for scaled parts far from the
+assembly origin. Neighboring parts and consumables contribute no source mass.
+
+After isolation and draining, `TryIsolate` rechecks the prepared masses against
+the actual source owner before authorizing replacement. Unexpected native frame
+restoration or mass changes retain the separated empty source. The final swap
+also checks the actual created vehicle masses before removing the source.
 
 Current source references are `KSA/InertMass.cs` (`ComputeTotalAsmb` and
 `CreateComponents`), `KSA/Part.cs` (`ComputeSubtreeInertMass` and
@@ -87,6 +97,14 @@ reference XML. CoreStructuralA_MeshAtlas.glb has SHA-256
 `84a2fb0308c67a77c666cd6ecf9887fd6f921e4783052b772e70d727b0119220`.
 Native source capture, isolation, replacement and live physics still need the
 in-game cases recorded in `ACCEPTANCE.md`.
+
+`python3 tools/check_fragment_templates.py` also runs
+`SliceSourceMassHostChecks` against real KSA meshes, Part/PartTree instances,
+`SetRootPose` and the engine's own fallback mass routine. It covers retained
+roots, detached children at 45-degree rotation and 10 km translation, scales
+0.5×/1×/2× and nonuniform scale, retained internal parts, stored-content exclusion,
+authored/invalid mass and native empty-bounds behavior. Isolation regressions
+verify that a post-separation mass mismatch retains the empty source.
 
 ## Existing slice transaction
 

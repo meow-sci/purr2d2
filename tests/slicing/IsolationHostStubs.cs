@@ -126,6 +126,7 @@ namespace Purr2D2.Slicing
     internal static class QuietSliceQuiescence { internal static void Release(KSA.VehicleUpdateState state) { } }
     internal static partial class NativeSlicePhysics
     {
+        internal static bool FailPreparedAfterDrain;
         internal static KSA.VehicleUpdateState? UpdateState(KSA.Vehicle owner) => owner.Worker;
         private static void ProtectIsolation(IsolatedSliceSource isolated) { }
         private static void Quiesce(IsolatedSliceSource isolated, SliceCommitTimings timings)
@@ -143,7 +144,8 @@ namespace Purr2D2.Slicing
         internal static bool ValidatePreparedFragments(KSA.Part struck, IReadOnlyList<PreparedPhysicsFragment> pieces, out string reason)
         {
             reason = "Unprepared fixture fragment";
-            return pieces.Count >= 2 && pieces.All(p => p.Valid);
+            return pieces.Count >= 2 && pieces.All(p => p.Valid)
+                && !(FailPreparedAfterDrain && struck.Tree?.OwningVehicle?.Drained == true);
         }
     }
 }
