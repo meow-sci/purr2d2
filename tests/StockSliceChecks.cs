@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using Brutal.Numerics;
 using Purr2D2.Cutting;
 using Purr2D2.Slicing;
+using Purr2D2.Slicing.Planes;
 using Purr2D2.Rendering;
 using BepuPhysics.Collidables;
 using BepuUtilities.Memory;
@@ -10,48 +11,27 @@ using Vector3 = System.Numerics.Vector3;
 
 internal static class StockSliceChecks
 {
-    internal sealed record Fixture(string Name, double[][][][] Groups);
+    internal sealed record Fixture(string Name, double[][][][] Groups, bool Structural = false);
     internal static void Run(string path)
     {
+        var failures = new List<string>();
+        int checkedFixtures = 0;
         foreach (var fixture in JsonSerializer.Deserialize<Fixture[]>(File.ReadAllText(path))!)
         {
             if (Environment.GetEnvironmentVariable("PURR_STOCK_FILTER") is { Length: > 0 } filter && !fixture.Name.Contains(filter)) continue;
+            checkedFixtures++;
             var groups = fixture.Groups.Select(group => group.Select(f => new SliceFace(Vertex(f[0]), Vertex(f[1]), Vertex(f[2]), f[0].Length > 8 ? (int)f[0][8] : 0)).ToArray()).ToArray();
             var materials = groups.SelectMany(g => g).Select(f => f.Material).Distinct().ToDictionary(id => id, id => new SliceMaterialData("FixtureMaterial" + id, false));
             var input = new SliceInput(groups, [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], materials, 100);
+            if (fixture.Structural)
+            {
+                CheckStructuralSlices(input, fixture.Name, failures);
+                continue;
+            }
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
             double planMs = 0;
             var cpu = SliceGeometryWork.Calculate(input, CancellationToken.None, _ => planMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
-            foreach (var asset in cpu.Fragments)
-            {
-                var xml = XDocument.Parse(System.Text.Encoding.UTF8.GetString(asset.Xml));
-                if (xml.Root!.Elements("SubPart").Count() != 1 || xml.Root.Element("Part")!.Elements("SubPart").Count() != 1
-                    || asset.Uploads.Length > materials.Count + 1)
-                    throw new Exception("Worker export did not merge fragment material surfaces into one visual SubPart");
-                int legacySurfaces = xml.Descendants("Run").Count();
-                var reload = Reload(asset);
-                if (reload.Groups.Sum(s => s.Length) * 3 != asset.Uploads.Sum(u => u.IndexBytes / 4))
-                    throw new Exception("Merged export/reload changed the visual triangle count");
-                using var document = JsonDocument.Parse(asset.Glb.AsMemory(20, BitConverter.ToInt32(asset.Glb, 12)));
-                if (document.RootElement.GetProperty("meshes").GetArrayLength() != asset.MeshNames.Length || asset.Uploads.Length + 2 != asset.MeshNames.Length)
-                    throw new Exception("Worker export omitted a visual, picking or collision mesh");
-                if (asset.Uploads.Any(u => u.Bytes.Length != u.VertexBytes + u.IndexBytes)) throw new Exception("Worker upload size mismatch");
-                var collision = document.RootElement.GetProperty("meshes")[asset.MeshNames.Length - 1];
-                int position = collision.GetProperty("primitives")[0].GetProperty("attributes").GetProperty("POSITION").GetInt32();
-                var accessor = document.RootElement.GetProperty("accessors")[position];
-                int hullPoints = accessor.GetProperty("count").GetInt32();
-                var view = document.RootElement.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
-                int offset = 28 + BitConverter.ToInt32(asset.Glb, 12) + view.GetProperty("byteOffset").GetInt32();
-                var points = new Vector3[hullPoints];
-                for (int i = 0; i < points.Length; i++)
-                    points[i] = new(BitConverter.ToSingle(asset.Glb, offset + i * 12), BitConverter.ToSingle(asset.Glb, offset + i * 12 + 4), BitConverter.ToSingle(asset.Glb, offset + i * 12 + 8));
-                using var pool = new BufferPool();
-                long cooking = System.Diagnostics.Stopwatch.GetTimestamp();
-                if (!ConvexHullHelper.CreateShape(points, pool, out var center, out var hull) || !float.IsFinite(center.LengthSquared()))
-                    throw new Exception("Exported collider cannot be cooked by the native hull implementation");
-                hull.Dispose(pool);
-                Console.WriteLine($"  Worker fragment: {legacySurfaces} legacy surfaces -> {asset.Uploads.Length} render surfaces; one visual SubPart; {hullPoints} collision vertices; native hull cook {System.Diagnostics.Stopwatch.GetElapsedTime(cooking).TotalMilliseconds:F2} ms");
-            }
+            CheckWorkerFragments(cpu, materials);
             Console.WriteLine($"PASS: {fixture.Name} worker pipeline; faceted={cpu.Faceted}, attempts={cpu.Attempts}, fallback={cpu.FacetFallback}; plan {planMs:F1} ms, complete {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
             if (fixture.Name.Contains("FuelTank") || fixture.Name.EndsWith("HeightC", StringComparison.Ordinal))
                 ContactSlice(input, fixture.Name);
@@ -133,6 +113,106 @@ internal static class StockSliceChecks
                 }
                 Console.WriteLine($"PASS: {fixture.Name} cut {plane}, {result.Pieces.Length} fragments, {result.ContourCount} cut contours");
             }
+        }
+        if (checkedFixtures == 0) throw new Exception("No stock slice fixtures matched the filter.");
+        if (failures.Count != 0)
+            throw new Exception("Structural slice failures:\n" + string.Join("\n", failures));
+    }
+
+    private static void CheckStructuralSlices(SliceInput input, string name, List<string> failures)
+    {
+        if (input.Groups.Length == 0 || input.Groups.Any(group => group.Length == 0))
+            throw new Exception(name + ": structural fixture has no rendered triangles.");
+
+        // The stock XML audit establishes that this part has no authored inert mass.
+        // Use the fixture mass to test geometry beyond the in-game mass preflight.
+        Check("assisted", input);
+
+        // Start at a real rendered triangle near a transverse cut 57% along X.
+        // This avoids the mirrored joint at the exact midpoint of many struts.
+        var faces = input.Groups.SelectMany(group => group).ToArray();
+        var positions = faces.SelectMany(face => new[] { face.A.Position.X, face.B.Position.X, face.C.Position.X }).ToArray();
+        double cutX = positions.Min() + .57 * (positions.Max() - positions.Min());
+        var anchor = faces.Select(face => (face.A.Position + face.B.Position + face.C.Position) / 3)
+            .MinBy(point => Math.Abs(point.X - cutX));
+        var request = new SlicePlaneRequest("blade-limited", "manual", "vessel", anchor, new(0, 1, 0), new(0, 0, 1));
+        Check("transverse contact", input with { PlaneRequest = request });
+        bool published = false;
+        try
+        {
+            SliceGeometryWork.Calculate(input with { MassKg = 0, PlaneRequest = request }, default, _ => published = true);
+            failures.Add(name + ": zero-mass worker input unexpectedly produced fragments.");
+        }
+        catch (InvalidDataException error)
+        {
+            if (published) failures.Add(name + ": zero-mass worker input published a partial slice.");
+            else if (!error.Message.Contains("mass", StringComparison.OrdinalIgnoreCase))
+                failures.Add(name + ": zero-mass worker input failed before the mass check: " + error.Message);
+            else Console.WriteLine($"PASS: {name} zero-mass worker input refused without publication ({error.Message})");
+        }
+
+        void Check(string cutName, SliceInput cutInput)
+        {
+            string label = name + " " + cutName;
+            try
+            {
+                SlicePlan? plan = null;
+                var cut = SliceGeometryWork.Calculate(cutInput, CancellationToken.None, value => plan = value);
+                if (plan is null || plan.Plane != cut.Plane || cut.AuthoredSubpartFallback
+                    || cut.Fragments.Length != 2
+                    || cut.Fragments.Any(fragment => !float.IsFinite(fragment.MassKg) || fragment.MassKg <= 0)
+                    || Math.Abs(cut.Fragments.Sum(fragment => fragment.MassKg) - cutInput.MassKg) > .001)
+                    throw new InvalidDataException("Expected two cut fragments that conserve the fixture mass.");
+                if (cutInput.PlaneRequest is not null && !(cut.AnchorResidualMetres is >= 0 and <= .001))
+                    throw new InvalidDataException("The cut missed the rendered contact by more than 1 mm.");
+                if (cut.Fragments.Any(fragment => !fragment.MeshNames.Any(mesh => mesh.Contains("_cap", StringComparison.Ordinal))))
+                    throw new InvalidDataException("A cut fragment lost its fresh cut surface.");
+                CheckWorkerFragments(cut, cutInput.Materials);
+                Console.WriteLine($"PASS: {label}, {cut.Attempts} attempt(s), {cut.Fragments.Length} fragments");
+            }
+            catch (Exception error)
+            {
+                string message = label + ": " + error.Message;
+                failures.Add(message);
+                Console.WriteLine("FAIL: " + message);
+            }
+        }
+    }
+
+    private static void CheckWorkerFragments(CpuSlice cpu, IReadOnlyDictionary<int, SliceMaterialData> materials)
+    {
+        foreach (var asset in cpu.Fragments)
+        {
+            var xml = XDocument.Parse(System.Text.Encoding.UTF8.GetString(asset.Xml));
+            if (xml.Root!.Elements("SubPart").Count() != 1 || xml.Root.Element("Part")!.Elements("SubPart").Count() != 1
+                || asset.Uploads.Length > materials.Count + 1)
+                throw new Exception("Worker export did not merge fragment material surfaces into one visual SubPart");
+            int legacySurfaces = xml.Descendants("Run").Count();
+            var reload = Reload(asset);
+            if (reload.Groups.Sum(s => s.Length) * 3 != asset.Uploads.Sum(u => u.IndexBytes / 4))
+                throw new Exception("Merged export/reload changed the visual triangle count");
+            if (!SliceShellBuilder.TryPrepare(reload.Groups, out var solids, out var reason, generatedClosedGeometry: true)
+                || !PlaneSlicer.TryAuditCompound(solids, out _, out reason))
+                throw new Exception("Exported fragment lost closed topology after XML/GLB reload: " + reason);
+            using var document = JsonDocument.Parse(asset.Glb.AsMemory(20, BitConverter.ToInt32(asset.Glb, 12)));
+            if (document.RootElement.GetProperty("meshes").GetArrayLength() != asset.MeshNames.Length || asset.Uploads.Length + 2 != asset.MeshNames.Length)
+                throw new Exception("Worker export omitted a visual, picking or collision mesh");
+            if (asset.Uploads.Any(u => u.Bytes.Length != u.VertexBytes + u.IndexBytes)) throw new Exception("Worker upload size mismatch");
+            var collision = document.RootElement.GetProperty("meshes")[asset.MeshNames.Length - 1];
+            int position = collision.GetProperty("primitives")[0].GetProperty("attributes").GetProperty("POSITION").GetInt32();
+            var accessor = document.RootElement.GetProperty("accessors")[position];
+            int hullPoints = accessor.GetProperty("count").GetInt32();
+            var view = document.RootElement.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+            int offset = 28 + BitConverter.ToInt32(asset.Glb, 12) + view.GetProperty("byteOffset").GetInt32();
+            var points = new Vector3[hullPoints];
+            for (int i = 0; i < points.Length; i++)
+                points[i] = new(BitConverter.ToSingle(asset.Glb, offset + i * 12), BitConverter.ToSingle(asset.Glb, offset + i * 12 + 4), BitConverter.ToSingle(asset.Glb, offset + i * 12 + 8));
+            using var pool = new BufferPool();
+            long cooking = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (!ConvexHullHelper.CreateShape(points, pool, out var center, out var hull) || !float.IsFinite(center.LengthSquared()))
+                throw new Exception("Exported collider cannot be cooked by the native hull implementation");
+            hull.Dispose(pool);
+            Console.WriteLine($"  Worker fragment: {legacySurfaces} legacy surfaces -> {asset.Uploads.Length} render surfaces; one visual SubPart; {hullPoints} collision vertices; native hull cook {System.Diagnostics.Stopwatch.GetElapsedTime(cooking).TotalMilliseconds:F2} ms");
         }
     }
 
