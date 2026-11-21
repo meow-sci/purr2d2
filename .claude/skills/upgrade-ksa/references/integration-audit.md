@@ -296,3 +296,13 @@ prepared-worker `ManualControlInputs`, `BubbleOrigin`, `BubbleClutterStatics`, `
 - Native highlight flags occupy bits0–12. Tint marker is bit13, preserving all native flags and durable luminosity precision with split flag/RGB10-alpha encoding. Procedural modifier color is included in PackedColor for cut tint; displaced native rows also preserve PackedModifierColor.
 - CharacterAvatar now disposes its renderables; condition poses and EVA habitat/carry data require native owner cleanup and layer acceptance. Native frame ordering and prepared-worker ownership are still guarded.
 - Current mesh-growth pins are five 5801 modules; old5707 identities must reject. Audit each draw/RT/thumbnail consumer and queue method, including BindSparse, before re-pinning.
+
+## 5901 active contract updates
+
+- Frame: `Program.PrepareFrame` gains `KfsIntegration.BeforeInputEvents()` before input and `Editor?.UpdateAerodynamics()` between cloth dispatch and `FlushDirtyDerived`; the transformation requires order, not adjacency.
+- Shaders: native PartModel and ground clutter use screen-space `GetScreenCloudShadows(gl_FragCoord)`; `GetCloudShadow` became `GetCloudShadowFromShadowVolume`. Foliage back-light copies the native sun cloud factor and fails closed. Highlight tint (`PartHighlight.glsl`) still uses bits 0/10–12.
+- Mesh growth pins the five 5901 modules; 5801 and 5707 identities must reject. Shared-buffer readers (24 references) and device-address consumers are identical to 5801.
+- Module lists are array-backed; sub-part lists start compact and promote on stateful adds. `Get`/`GetUsing`/`Add` semantics used by the mod are unchanged. Split transfer appends without per-ID dedup, so never register a module into a tree list directly.
+- Aerodynamics: `ComputeDerivatives` takes `PartTree` and applies panel-method loads from `ColliderModule` shapes; `AerodynamicsBuilder.Start`/`Dispose` await in-flight builds. Generated hull colliders participate natively.
+- Assets: `MeshAtlas Inverted="true"` yields `<name>_Inverted` meshes; stock HM-2/HM-3 use them as Internal interiors on the exterior hull. Slice capture excludes Internal+Inverted PartModels only.
+- Input: `Program.OnKey`/`OnMouseButton` route through native `PartPicking` after the mod's prefixes; Esc/right-click cancel and Furce picking can coexist. Native menus use `ImGuiHelper.BeginMenu`. Incapacitated EVA kittens report `IsControllable == false`; saber/Furce actions are not gated by it (design decision pending).

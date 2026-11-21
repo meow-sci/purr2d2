@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Purr2D2.Rendering;
 
 /// <summary>Generated leaf-card shader contract. Native part materials and low instance flags stay intact.</summary>
@@ -65,6 +67,7 @@ internal static class ClutterFoliageSurface
         source = source.Replace(film, "drawData.tfiTextureIndex >= 0 && !purrFoliage(drawData)", StringComparison.Ordinal);
         const string result = "return lightColor;";
         RequireOnce(source, result);
+        string cloudShadow = NativeCloudShadow(source);
         string transmission = """
             // Native leaf thickness uses the same inexpensive back-light term.
             // This remains a part draw, using the source planet's saved luminosity.
@@ -76,7 +79,7 @@ internal static class ClutterFoliageSurface
                 float purrShadow = 1.0;
                 if (celestialShadow) {
                     purrShadow *= getCelestialShadow(inWorldPosition, sunPos());
-                    purrShadow *= GetCloudShadow(inWorldPosition);
+                    purrShadow *= PURR_NATIVE_CLOUD_SHADOW;
                 }
                 float purrDepth = -(global.camera.view * vec4(inWorldPosition, 1.0)).z;
                 purrShadow *= GetCascadedShadow(inWorldPosition, worldNormal, max(dot(worldNormal, purrDirection), 0.0), purrDepth);
@@ -84,7 +87,7 @@ internal static class ClutterFoliageSurface
                 lightColor += global.lighting.sunColor.rgb * sampledColor
                     * vec3(1.0, 0.8, 0.7) * purrShadow * (purrDot + 0.01) * (1.0 - purrThickness);
             }
-            """;
+            """.Replace("PURR_NATIVE_CLOUD_SHADOW", cloudShadow, StringComparison.Ordinal);
         // All ordinary generated exterior draws carry the luminosity marker.
         // RT declares it unconditionally; native raster dynamic draws omit it.
         if (!raytraced) transmission = "\n#ifdef ENABLE_EMISSIVE\n" + transmission + "\n#endif\n";
@@ -111,6 +114,18 @@ internal static class ClutterFoliageSurface
         // std430 already rounds the original mat4 + int structure to 80 bytes.
         // Name existing bytes 68 and 72 without changing its layout or stride.
         return source.Replace("int Highlighted;", "int Highlighted;\n    uint PurrUnusedEmission;\n    int PurrFoliageMarker;", StringComparison.Ordinal);
+    }
+
+    // Leaf back-light uses the native sun term's own cloud factor. KSA 5901 moved it
+    // from GetCloudShadow(inWorldPosition) to the screen-space GetScreenCloudShadows(gl_FragCoord),
+    // matching ground clutter; neither name is assumed, and any other shape fails closed.
+    internal static string NativeCloudShadow(string source)
+    {
+        var matches = Regex.Matches(source,
+            @"\bsunColor\s*\*=\s*(Get\w*Cloud\w*\((?:gl_FragCoord|inWorldPosition)\))\s*;");
+        if (matches.Count != 1)
+            throw new InvalidDataException("Native PartModel sun cloud-shadow term changed or is ambiguous.");
+        return matches[0].Groups[1].Value;
     }
 
     private static void RequireOnce(string source, string anchor)

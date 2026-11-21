@@ -1,6 +1,6 @@
 # BFL9K rendering and art contract
 
-Verified against the local `ksa-game-assemblies/current` snapshot, build 2026.11.10.5801 (5707→5801 upgrade, native acceptance pending). The coffer articles are useful starting points but target the older 5554 build; the implementation uses the current members below.
+Verified against the local `ksa-game-assemblies/current` snapshot, build 2026.11.16.5901 (5801→5901 upgrade, native acceptance pending; the 5707→5801 notes below remain accurate unless superseded). The coffer articles are useful starting points but target the older 5554 build; the implementation uses the current members below.
 
 ## Implemented route
 
@@ -112,3 +112,14 @@ Shipped manifests use separate File/Texture/SoundFile rows and explicit Ref fiel
 `NativeList<T>.Ptr` moved to an extension surface. The two bufferless saber/water pipeline builders now supply stack-local empty vertex-input descriptions, equivalent to the old borrowed preset, with no collection allocation or ownership. Shader modules remain shared host assets.
 
 Native PartModel uses highlight bits 11 and 12 in 5801. Clutter tint preserves bits 0–12 and uses marker bit 13. The upper luminosity bits occupy flags 14–31 and the remaining two bits occupy the unused RGB10 alpha bits. GLSL reconstructs the original luminosity exactly; historical `_ct` mesh suffixes retain their bytes and precision. The foliage transmission path uses the same new marker. Native procedural modifier color is already included in captured PackedColor; native displacement separately preserves PackedModifierColor.
+
+## 5901 render, shader and asset changes
+
+Cloud shadows now render off-screen at half resolution in the main view (rev 5879). Native PartModel and ground-clutter shaders multiply sunlight by `GetScreenCloudShadows(gl_FragCoord)`, which returns 1 where no screen pass ran (secondary views); the old world-space `GetCloudShadow` was renamed `GetCloudShadowFromShadowVolume`. The generated-foliage back-light rewrite no longer names a host function: it copies the native sun term's own `sunColor *= Get…Cloud…(gl_FragCoord|inWorldPosition);` factor, and refuses (leaving the native shader untouched) if that term is missing or duplicated. Tint, foliage clip/prepass and both shadow guards keep their single-line anchors; shipped native shader text is CRLF, which these anchors tolerate.
+
+Part highlights now tint and rim-light (`PartHighlight.glsl`, rev 5825) but still use bits 0 and 10–12 only; native C# writers stop at 4097 and the new probe-core status light uses the existing bits 6/7. Clutter tint marker bit 13 and luminosity bits 14–31 remain free, and the cap upload prefix still overrides bits 6/7 on generated caps after `PartTreeRenderData.Compose`.
+
+The renderer finished moving to dynamic rendering (revs 5816/5880): the swapchain/UI pass and loading screen lost their VkRenderPass, and more color targets changed format. Saber, water and fragment pipelines already derive formats and sample counts from the live `RenderTarget` (`SetupGraphicsPipeline`, unchanged) and draw with their own `BeginRendering`; `SuperMeshRenderSystem`, `RenderTarget`, `PartModel` and the ocean depth copy (`R32SFloat`) are unchanged. The ImGui backend now builds per-format pipelines; the mod's menus use the native `ImGuiHelper.BeginMenu` viewport-pinned wrapper like all 5901 menus.
+
+Mesh atlases can load listed meshes inside out (`Inverted="true"`, rev 5883) as `<name>_Inverted`. Stock HM-2/HM-3 habitat modules use these as Internal placeholder interiors lying exactly on their exterior hull. Slice capture excludes only that combination (Internal and an inverted native mesh, `NativeInteriorShell`), because the shell builder would otherwise reorient the closed inside-out island onto the exterior and fragments, which carry no Internal flag, would gain a coincident second hull. Ordinary internal IVA geometry and Furce authored-surface capture are unchanged.
+

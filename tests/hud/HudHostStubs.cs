@@ -133,6 +133,10 @@ namespace Brutal.ImGuiApi
 namespace KSA
 {
     public sealed class KittenEva { }
+    public static class ImGuiHelper
+    {
+        public static bool BeginMenu(string label, bool enabled = true) => Brutal.ImGuiApi.ImGui.BeginMenu(label);
+    }
     public static class Program
     {
         public static readonly Brutal.GlfwApi.GlfwWindow Window = new();

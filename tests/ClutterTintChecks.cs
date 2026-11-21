@@ -79,6 +79,23 @@ internal static class ClutterTintChecks
                 || !rewritten.Contains("purrThickness", StringComparison.Ordinal)
                 || !rewritten.Contains("&& !purrFoliage(drawData)", StringComparison.Ordinal))
                 throw new Exception("Foliage opacity, thickness or native thin-film isolation was lost.");
+            // The leaf back-light must use this shader's own sun cloud factor (screen-space since 5901).
+            string nativeCloud = ClutterFoliageSurface.NativeCloudShadow(sourceCode);
+            int leaf = rewritten.IndexOf("float purrShadow = 1.0;", StringComparison.Ordinal);
+            if (leaf < 0 || rewritten.IndexOf("purrShadow *= " + nativeCloud + ";", leaf, StringComparison.Ordinal) < 0
+                || rewritten.Contains("PURR_NATIVE_CLOUD_SHADOW", StringComparison.Ordinal))
+                throw new Exception("Foliage transmission does not use the native sun cloud-shadow term: " + nativeCloud);
+            foreach (var (changed, name) in new[]
+            {
+                (sourceCode.Replace("sunColor *= " + nativeCloud + ";", "", StringComparison.Ordinal), "missing"),
+                (sourceCode.Replace("sunColor *= " + nativeCloud + ";", "sunColor *= " + nativeCloud + "; sunColor *= " + nativeCloud + ";", StringComparison.Ordinal), "duplicated"),
+            })
+            {
+                bool cloudRefused = false;
+                try { ClutterFoliageSurface.RewriteShader(ClutterSurfaceTint.RewriteShader(changed, filename.Contains("Raytraced")), prepass: false, raytraced: filename.Contains("Raytraced")); }
+                catch (InvalidDataException) { cloudRefused = true; }
+                if (!cloudRefused) throw new Exception("A " + name + " native cloud-shadow term did not fail closed.");
+            }
             File.WriteAllText(Path.Combine(output, filename), EnableIncludes(rewritten));
             bool refused = false;
             try { ClutterSurfaceTint.RewriteShader(sourceCode.Replace("inStateFlags & (1u << 4)", "inStateFlags & (1u << 13)"), false); }

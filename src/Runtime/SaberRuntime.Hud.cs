@@ -222,7 +222,7 @@ internal sealed partial class SaberRuntime
                     if (detached)
                     {
                         if (ImGui.MenuItem("Reattach")) SetHudDetached(panel, false);
-                        if (ImGui.BeginMenu("View"))
+                        if (ImGuiHelper.BeginMenu("View"))
                         {
                             try
                             {

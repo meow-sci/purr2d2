@@ -193,7 +193,11 @@ internal sealed class SliceSourceCapture : IDisposable
     internal static IEnumerable<(MeshReference? Mesh, PbrMaterialReference? Material, bool Glass)> EnumerateModels(Part part)
     {
         for (int i = 0; i < part.Modules.Get<PartModelModule>().Length; i++)
-        { var model = part.Modules.Get<PartModelModule>()[i]; yield return (model.PartModel.Template.Mesh?.Value, model.PartModel.Template.Material?.Value, false); }
+        {
+            var model = part.Modules.Get<PartModelModule>()[i];
+            if (NativeInteriorShell.ExcludedFromCapture(model.PartModel.Template)) continue;
+            yield return (model.PartModel.Template.Mesh?.Value, model.PartModel.Template.Material?.Value, false);
+        }
         for (int i = 0; i < part.Modules.Get<PartModelDynamicModule>().Length; i++)
         { var model = part.Modules.Get<PartModelDynamicModule>()[i]; yield return (model.PartModelDynamic.Template.Mesh?.Value, model.PartModelDynamic.Template.Material?.Value, false); }
         for (int i = 0; i < part.Modules.Get<PartModelGlassModule>().Length; i++)

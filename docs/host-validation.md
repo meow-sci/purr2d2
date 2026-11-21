@@ -6,7 +6,7 @@ From the repository root, after building the mod with .NET 10:
 
 ```sh
 dotnet build Purr2D2.csproj -p:KSAFolder="$KSA_DLL_DIR"
-dotnet run --file tools/inspect_host.cs -- ../ksa-game-assemblies/current/dll/KSA.dll bin/Debug/net10.0/Purr2D2.dll
+dotnet run --file tools/inspect_host.cs -- "$KSA_DLL_DIR/KSA.dll" bin/Debug/net10.0/Purr2D2.dll
 ```
 
 Use `--file` explicitly: without it, `dotnet run tools/inspect_host.cs` selects the existing repository project and treats the C# filename as an application argument.
@@ -28,20 +28,22 @@ The tool exits `0` when the checks pass, `1` when inputs cannot be read or compa
 
 ## Verified result
 
-The host is `KSA 2026.11.10.5801` (snapshot commit `4de698e8cf248c29fc95f188fb258775d6e574a3`, module MVID `a064c78d-2b9f-4ac3-ae4e-1cb22ed69344`), PE machine `Amd64`. The mod is `Purr2D2 0.2.0.0`, referencing `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0` and the matching KSA version. The final inspector passes 163 checks (`artifacts/checks/upgrade-5801/inspect-host-complete.log`). The old template Part constructor reflection failed before repair; it now binds `TransformDataReference<SubPartTemplate>` instead of `PartInstance`. The one-argument `Part(PartInstance)` save constructor also reaches the private initializer directly in 5801; its fourth explicit postfix preserves the exactly-once public-constructor coverage invariant. The early source hook and direct load completion callback replace the removed/changed startup seams. Decoded frame offsets remain identical to 5707:
+The host is `KSA 2026.11.16.5901` (snapshot commit `8d2ad13693adc15005e2f110c42fa6575f70fd40`, module MVID `ded30488-a614-431f-ab2e-8c395b14bb59`), PE machine `Amd64`. The mod is `Purr2D2 0.2.0.0`, referencing `StarMap.API 0.3.6.0`, `0Harmony 2.4.2.0` and the matching KSA version. The inspector passes on the unmodified sources and again on the final Release build (`artifacts/checks/upgrade-5901/inspect-host-initial.log`, `inspect-host-final.log`); no signature, private-field, constructor-chain, lifecycle or render-order check needed a repair for 5901. The four public `Part` constructors and the BeforeMain/ReadSource/LoadAll startup seams are unchanged from 5801.
 
-| IL offset | Method |
+5901 inserts two native calls into `Program.PrepareFrame`, so offsets after them moved while the required order is unchanged. `KfsIntegration.BeforeInputEvents()` (a no-op unless the kFS prototype is enabled) now precedes `InputEvents.ApplyInputEvents()`; Purr2D2's settled update still runs immediately after input. `Editor?.UpdateAerodynamics()` (vehicle editor only) now runs between cloth dispatch and `PartTree.FlushDirtyDerived()`; the transformation requires order, uniqueness and stack shape, not adjacency, and no structural mutation moves across a worker boundary:
+
+| IL offset (5801 → 5901) | Method |
 | --- | --- |
 | `00D4` | `Universe.ApplyOrbitSolvers()` |
 | `00F2` | `Universe.ApplyVehicleSolvers()` |
 | `0110` | `Universe.ApplyClothSolvers()` |
-| `017B` | `InputEvents.ApplyInputEvents()` |
-| `01A8` | `Program.RefreshVehiclesInFrame()` |
-| `0263` | `Universe.ExecuteNextClothSolvers(double, SimStep)` |
-| `0268` | `PartTree.FlushDirtyDerived()` |
-| `026D` | `PartTree.FlushDirtyResourceManagers()` |
-| `0274` | `Universe.ExecuteNextVehicleSolvers(double, SimStep)` |
-| `027B` | `Universe.ExecuteNextOrbitSolvers(double, SimStep)` |
+| `017B` → `0180` | `InputEvents.ApplyInputEvents()` |
+| `01A8` → `01AD` | `Program.RefreshVehiclesInFrame()` |
+| `0263` → `0268` | `Universe.ExecuteNextClothSolvers(double, SimStep)` |
+| `0268` → `027D` | `PartTree.FlushDirtyDerived()` |
+| `026D` → `0282` | `PartTree.FlushDirtyResourceManagers()` |
+| `0274` → `0289` | `Universe.ExecuteNextVehicleSolvers(double, SimStep)` |
+| `027B` → `0290` | `Universe.ExecuteNextOrbitSolvers(double, SimStep)` |
 
 These results establish **metadata and IL layout compatibility**. They do not establish that Harmony accepts the production patches in KSA's actual runtime, that the transpiler's emitted result executes correctly, or that gameplay/rendering is correct. The real game acceptance checks remain necessary.
 

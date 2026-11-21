@@ -264,7 +264,14 @@ internal static class MeshGrowthHostChecks
             catch (NotSupportedException) { continue; }
             throw new Exception("The production adapter accepted an unsupported module combination.");
         }
-        // Neither earlier audited module set is covered by the current audit.
+        // No earlier audited module set is covered by the current audit.
+        try
+        {
+            NativeMeshGrowthHost.ValidateBuild(new("a064c78d-2b9f-4ac3-ae4e-1cb22ed69344"), new("0328ae0f-5125-46f2-b6ce-99c11f6af7b7"),
+                new("6c39566a-6b2a-4a2e-8f74-0f073bb0f19a"), new("a2efb53a-dcf2-4483-aade-69de8bf89536"), new("9bc46477-2c92-4bf4-a914-cd687a630481"));
+            throw new Exception("The production adapter accepted the previous audited 5801 host build.");
+        }
+        catch (NotSupportedException) { }
         try
         {
             NativeMeshGrowthHost.ValidateBuild(new("a6318490-1e4f-4d4c-9f1a-b48f97f44be4"), new("088d08a2-d0b4-43bc-93fe-68b321308a47"),

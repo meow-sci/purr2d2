@@ -53,3 +53,8 @@ Build and managed fixtures do not certify native graphics, audio or cloth lifeti
 ## KSA 5801 upgrade
 
 The sidecar schema, universe.xml hash pairing and roster/EVA/seat identity rules are unchanged. New native condition, life-support and Rules data is included in the native XML hash without entering the mod’s durable choices. Generated assets now join the native two-phase content source at startup; legacy XML is converted only in memory, retaining prior local placement identities as Key values. Keep settings.json, each per-save purr2d2.json, and every Generated/Slices XML/GLB when updating. A clean distribution is not a replacement for that installed user data. Native old-save/restart/co-load acceptance remains pending.
+
+## KSA 5901 upgrade
+
+`GameSave`, `UncompressedSave`, `Universe.DeserializeSave` and `LoadSystem` are unchanged, so capture/snapshot pairing, the universe.xml hash and sidecar publication are unaffected. New native mission plans, UniverseTime-based life-support/dose timing and crew data are part of the native XML and therefore of its hash only. The roster gains a hash index with a verified scan fallback; the identity index still iterates `KittenRoster.Kittens` directly. Incapacitated EVA kittens are now non-controllable; Space somersault scope and the motion controller already require `IsControllable`, so a transient somersault releases instead of resuming. The sidecar schema is unchanged. Native A→B→A, overwrite and old-save acceptance on 5901 remains pending.
+

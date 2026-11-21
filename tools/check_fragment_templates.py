@@ -85,7 +85,8 @@ for source in ['src/Rendering/FragmentTemplateLoader.cs', 'src/Rendering/Fragmen
                'tests/SliceDiagnosticsChecks.cs', 'tests/FrameHooksChecks.cs', 'tests/FrameHooksHostStubs.cs',
                'tests/SliceWorkerDiagnosticsChecks.cs', 'tests/SliceWorkerHooksChecks.cs',
                'src/Slicing/SliceSourceMass.cs', 'tests/SliceSourceMassHostChecks.cs',
-               'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs', 'tests/CapEmissionHostChecks.cs']:
+               'tests/FragmentAssetChecks.cs', 'tests/FragmentTemplateChecks.cs', 'tests/CapEmissionHostChecks.cs',
+               'src/Cutting/NativeInteriorShell.cs', 'tests/NativeInteriorShellChecks.cs']:
     ET.SubElement(items, 'Compile', Include=str(root / source))
 for source in (root / 'src/Slicing/Planes').glob('*.cs'):
     ET.SubElement(items, 'Compile', Include=str(source))
