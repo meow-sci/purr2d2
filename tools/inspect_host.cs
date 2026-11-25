@@ -118,6 +118,7 @@ static class HostInspection
             if (!prepare.IsNil) CheckFrameSeam(host, prepare);
             CheckRenderSeams(host);
             CheckSomersaultSeams(host);
+            CheckSaveLoadSeams(host);
             CheckEntry(mod);
             CheckReferences(host, mod);
             Console.WriteLine(_failures == 0
@@ -277,6 +278,80 @@ static class HostInspection
             previous = indices[0];
         }
         return null;
+    }
+
+    // KSA 5916 defers loads of saves from another star system to SaveSystemSwap.OnFrame, which
+    // tears the world down in Program.SwapSystem and then runs UncompressedSave.ApplyLoaded.
+    // Purr2D2 pairs kitten sidecars inside ApplyLoaded and releases ownership in a SwapSystem prefix.
+    private static void CheckSaveLoadSeams(Image image)
+    {
+        const string deserialize = "KSA.Universe.DeserializeSave(KSA.UniverseData):System.Void";
+        const string gameLoaded = "KSA.Program.OnGameLoaded():System.Void";
+        const string applyKey = "KSA.UncompressedSave.ApplyLoaded():System.Void";
+        Expected populate = new("KSA.GameSave", "Populate", "System.Void", false, MethodAttributes.Public);
+        Expected write = new("KSA.UncompressedSave", "Write", "System.Boolean", false, MethodAttributes.Public);
+        Expected load = new("KSA.UncompressedSave", "Load", "System.Void", false, MethodAttributes.Public);
+        Expected apply = new("KSA.UncompressedSave", "ApplyLoaded", "System.Void", false, MethodAttributes.Private);
+        Expected request = new("KSA.SaveSystemSwap", "RequestLoad", "KSA.SystemSwapRequest", true, MethodAttributes.Public,
+            "System.String", "System.String", "System.Action");
+        Expected frame = new("KSA.SaveSystemSwap", "OnFrame", "System.Void", true, MethodAttributes.Public);
+        Expected swap = new("KSA.Program", "SwapSystem", "KSA.SystemSwapResult", false, MethodAttributes.Public, "KSA.SystemTemplate");
+        Expected loadSystem = new("KSA.Universe", "LoadSystem", "System.Void", true, MethodAttributes.Public, "System.String");
+        Expected restart = new("KSA.SaveSystemRestart", "RestartInto", "System.Void", true, MethodAttributes.Public, "System.String", "System.String");
+        Expected arrival = new("KSA.ArrivalService", "Check", "System.Void", false, MethodAttributes.Private,
+            "KSA.ArrivalService+Tracked", "System.Double", "System.Int64");
+        Expected arrivals = new("KSA.ArrivalService", "Update", "System.Void", false, MethodAttributes.Public, "KSA.CelestialSystem");
+        CheckMethod(image, populate); CheckMethod(image, write); CheckMethod(image, arrival);
+        CheckParameterNames(image, "KSA.Universe", "LoadSystem", "id");
+        CheckParameterNames(image, "KSA.Universe", "DeserializeSave", "universeData");
+
+        var applyHandle = CheckMethod(image, apply);
+        if (!applyHandle.IsNil)
+        {
+            var problem = OrderedUnique(image.Calls(applyHandle), [deserialize, gameLoaded]);
+            Check(problem == null, "UncompressedSave.ApplyLoaded reconstructs once, then reports the loaded game",
+                problem ?? "Re-check KittenSaveHooks' file-load window.");
+        }
+        var loadHandle = CheckMethod(image, load);
+        CheckMethod(image, request);
+        if (!loadHandle.IsNil)
+        {
+            var calls = image.Calls(loadHandle, functionPointers: true);
+            var problem = OrderedUnique(calls, ["&" + applyKey, request.Key]);
+            Check(problem == null && !calls.Any(c => c.Key is deserialize or gameLoaded),
+                "UncompressedSave.Load hands ApplyLoaded to SaveSystemSwap instead of reconstructing directly",
+                problem ?? "Load reconstructs directly again; re-check where the kitten sidecar window belongs.");
+        }
+        var frameHandle = CheckMethod(image, frame);
+        var swapHandle = CheckMethod(image, swap);
+        if (!frameHandle.IsNil)
+        {
+            var calls = image.Calls(frameHandle);
+            var problem = OrderedUnique(calls, [swap.Key, "System.Action.Invoke():System.Void"]);
+            Check(problem == null && calls.Any(c => c.Key == restart.Key),
+                "SaveSystemSwap.OnFrame swaps systems before applying a queued load, or relaunches",
+                problem ?? "The deferred swap no longer calls RestartInto when the system does not fit.");
+        }
+        if (!swapHandle.IsNil)
+        {
+            var calls = image.Calls(swapHandle);
+            var problem = OrderedUnique(calls, ["KSA.JobSystems.WaitAll():System.Void", "KSA.CelestialSystem.DestroyAllVehicles():System.Void",
+                "KSA.Universe.DestroyAllPhysicsBubbles():System.Void", "KSA.Universe.CreateSystem(System.String):System.Void"]);
+            Check(problem == null && !calls.Any(c => c.Key == loadSystem.Key),
+                "Program.SwapSystem joins workers, then destroys vehicles and bubbles before creating the new system, without LoadSystem",
+                problem ?? "SwapSystem now reaches LoadSystem; the swap prefix would release ownership twice.");
+        }
+        CheckMethod(image, loadSystem);
+        var restartHandle = CheckMethod(image, restart);
+        if (!restartHandle.IsNil)
+            Check(image.Calls(restartHandle).Any(c => c.Key == "System.Environment.Exit(System.Int32):System.Void"),
+                "SaveSystemRestart.RestartInto exits the process without Program.Dispose",
+                "Re-check whether the pre-restart preference flush is still needed.");
+        var arrivalsHandle = CheckMethod(image, arrivals);
+        if (!arrivalsHandle.IsNil)
+            Check(image.Calls(arrivalsHandle).Any(c => c.Key == arrival.Key),
+                "ArrivalService.Update evaluates tracked vehicles through the filtered Check",
+                "The dropped-hilt arrival filter no longer sees native arrival evaluation.");
     }
 
     private static void CheckRenderSeams(Image image)
@@ -481,7 +556,8 @@ static class HostInspection
                     yield return TypeName(Reader.GetMethodDefinition((MethodDefinitionHandle)constructor).GetDeclaringType());
             }
         }
-        public List<Call> Calls(MethodDefinitionHandle h)
+        // functionPointers also records ldftn/ldvirtftn targets, keyed with a leading '&'.
+        public List<Call> Calls(MethodDefinitionHandle h, bool functionPointers = false)
         {
             var method = Reader.GetMethodDefinition(h);
             if (method.RelativeVirtualAddress == 0) throw new BadImageFormatException("PrepareFrame has no IL body");
@@ -496,6 +572,8 @@ static class HostInspection
                 if (!Opcodes.TryGetValue(code, out var opcode)) throw new BadImageFormatException($"Unknown IL opcode at IL_{offset:X4}");
                 if (opcode == OpCodes.Call || opcode == OpCodes.Callvirt)
                     result.Add(new Call(offset, MethodKey(MetadataTokens.EntityHandle(BitConverter.ToInt32(il, position)))));
+                else if (functionPointers && (opcode == OpCodes.Ldftn || opcode == OpCodes.Ldvirtftn))
+                    result.Add(new Call(offset, "&" + MethodKey(MetadataTokens.EntityHandle(BitConverter.ToInt32(il, position)))));
                 var size = opcode.OperandType switch
                 {
                     OperandType.InlineNone => 0,

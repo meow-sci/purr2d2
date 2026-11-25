@@ -16,6 +16,7 @@ internal static class FrameHooksChecks
     internal static void Run()
     {
         CheckDropSpinKeyRouting();
+        CheckRestartFlush();
         GameHooks.Runtime = null;
         var method = AccessTools.Method(typeof(KSA.Program), "PrepareFrame", [typeof(double), typeof(double)])!;
         var original = PatchProcessor.GetOriginalInstructions(method);
@@ -213,6 +214,33 @@ internal static class FrameHooksChecks
         GameHooks.Runtime = null;
 
         Console.WriteLine("PASS: actual KSA keyboard guard/controller ordering and KittenEva.OnKey signature verified; accepted, declined, absent and failing runtime paths preserve native input contract; main-window focus loss cancels pending keyboard intent");
+    }
+
+    // KSA 5916 relaunches into another star system through Environment.Exit when a live swap
+    // would exceed VRAM. Program.Dispose never runs, so pending preferences are flushed first.
+    private static void CheckRestartFlush()
+    {
+        var restart = AccessTools.Method(typeof(SaveSystemRestart), nameof(SaveSystemRestart.RestartInto), [typeof(string), typeof(string)]);
+        Require(restart is { IsStatic: true, IsPublic: true } && restart.ReturnType == typeof(void),
+            "SaveSystemRestart.RestartInto(string, string) changed; re-check the pre-exit preference flush.");
+        var il = PatchProcessor.GetOriginalInstructions(restart!);
+        var dispose = AccessTools.Method(typeof(KSA.Program), nameof(KSA.Program.Dispose), Type.EmptyTypes);
+        Require(il.Any(c => c.Calls(AccessTools.Method(typeof(Environment), nameof(Environment.Exit), [typeof(int)])))
+            && !il.Any(c => c.Calls(dispose)),
+            "Native restart no longer exits without Program.Dispose; re-check whether the restart flush is still needed.");
+        var hook = AccessTools.Method(typeof(GameHooks), "BeforeProcessRestart")!;
+        var runtime = new SaberRuntime();
+        GameHooks.Runtime = runtime;
+        hook.Invoke(null, null);
+        Require(runtime.FlushSettingsCalls == 1, "The restart prefix must flush pending preferences exactly once.");
+        runtime.FlushSettingsThrows = true;
+        SaberRuntime.LastReportMessage = null;
+        hook.Invoke(null, null);
+        Require(runtime.FlushSettingsCalls == 2 && SaberRuntime.LastReportMessage == "Saving preferences before the game restart failed",
+            "A failed preference write must be reported without blocking the native restart.");
+        GameHooks.Runtime = null;
+        hook.Invoke(null, null);
+        Console.WriteLine("PASS: actual KSA system-swap restart exits without Program.Dispose; the prefix flushes preferences once, reports failures and tolerates a missing runtime");
     }
 
     private static void CheckDropSpinKeyRouting()

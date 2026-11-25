@@ -68,6 +68,10 @@ internal static class GameHooks
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(BeforeDeserializeSave)) { priority = Priority.Last });
         harmony.Patch(Require(typeof(Program), nameof(Program.Dispose)),
             prefix: new HarmonyMethod(typeof(GameHooks), nameof(Shutdown)));
+        // KSA 5916: a system swap that would exceed VRAM relaunches the game via Environment.Exit,
+        // bypassing Program.Dispose. Preferences are the only durable state still pending then.
+        harmony.Patch(Require(typeof(SaveSystemRestart), nameof(SaveSystemRestart.RestartInto), typeof(string), typeof(string)),
+            prefix: new HarmonyMethod(typeof(GameHooks), nameof(BeforeProcessRestart)));
     }
 
     private static MethodInfo Require(Type type, string name, params Type[] parameters) =>
@@ -276,6 +280,11 @@ internal static class GameHooks
         SliceFrameDiagnostics.Reset();
         try { Runtime?.ResetWorld(); }
         catch (Exception ex) { SaberRuntime.Report("World reset cleanup failed", ex); }
+    }
+    private static void BeforeProcessRestart()
+    {
+        try { Runtime?.FlushSettings(); }
+        catch (Exception ex) { SaberRuntime.Report("Saving preferences before the game restart failed", ex); }
     }
     private static void Shutdown()
     {

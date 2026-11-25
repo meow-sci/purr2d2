@@ -56,6 +56,13 @@ namespace Purr2D2.Runtime
         internal void OverlayFocusLost() => OverlayFocusLostCalls++;
         internal void CancelPendingSpaceSomersault() => PendingSpaceSomersaultCancelCalls++;
         internal void ResetWorld() { }
+        internal int FlushSettingsCalls;
+        internal bool FlushSettingsThrows;
+        internal void FlushSettings()
+        {
+            FlushSettingsCalls++;
+            if (FlushSettingsThrows) throw new IOException("stub preferences write failure");
+        }
         internal void Shutdown() { }
         internal static string? LastReportMessage;
         internal static Exception? LastReportException;

@@ -10,6 +10,7 @@ internal static class SaberDropHostChecks
 {
     internal static void Run()
     {
+        ArrivalFilter();
         ReleaseSpinFrames();
         var worker = typeof(Vehicle).GetField("_threadWorkerUpdateState", BindingFlags.Instance | BindingFlags.NonPublic);
         var adopt = AccessTools.Method(typeof(Vehicle), "AdoptSeparatedVehicle", [typeof(Vehicle), typeof(PhysicsBubble), typeof(double3)]);
@@ -51,6 +52,45 @@ internal static class SaberDropHostChecks
             && hilt.RocketThrusterControllers.Count == 0,
             "the dropped hilt has no control, engine, power or thrust modules");
     }
+    // KSA 5938 tracks every non-debris vehicle and saves first visitors by vehicle ID. The hilt is
+    // deliberately not debris, so the private per-vehicle evaluation must skip it, and only it.
+    private static void ArrivalFilter()
+    {
+        var update = PatchProcessor.GetOriginalInstructions(AccessTools.Method(typeof(ArrivalService), nameof(ArrivalService.Update), [typeof(CelestialSystem)]));
+        var check = Purr2D2.Runtime.DroppedHiltArrivals.Target(out var vehicle);
+        Check(update.Any(c => c.operand is MethodInfo m && m.DeclaringType == typeof(Vehicle) && m.Name == "get_IsDebris")
+            && update.Count(c => c.operand is MethodInfo m && m == check) >= 1,
+            "native arrival tracking excludes only debris and evaluates each tracked vehicle through the filtered method");
+        var harmony = new Harmony("purr2d2.checks.arrivals");
+        try
+        {
+            Check(Purr2D2.Runtime.DroppedHiltArrivals.TryInstall(harmony, out var error) && error is null
+                && Harmony.GetPatchInfo(check)?.Prefixes.Count(p => p.owner == harmony.Id) == 1,
+                "the hilt arrival filter installs and JITs on the real private ArrivalService.Check");
+        }
+        finally { harmony.UnpatchAll(harmony.Id); }
+        var trackedType = check.GetParameters()[0].ParameterType;
+        var idField = AccessTools.Field(typeof(Astronomical), "<Id>k__BackingField")!;
+        object Tracked(string? id)
+        {
+            object? owner = null;
+            if (id is not null)
+            {
+                owner = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(Vehicle));
+                idField.SetValue(owner, id);
+            }
+            var tracked = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(trackedType);
+            AccessTools.DeclaredField(trackedType, "Vehicle")!.SetValue(tracked, owner);
+            Check(ReferenceEquals(vehicle(tracked), owner), "the arrival filter reads the tracked native vehicle");
+            return tracked;
+        }
+        Check(!Purr2D2.Runtime.DroppedHiltArrivals.BeforeCheck(Tracked(Purr2D2.Runtime.DroppedHiltArrivals.IdPrefix + Guid.NewGuid().ToString("N")))
+            && Purr2D2.Runtime.DroppedHiltArrivals.BeforeCheck(Tracked("Gemini 7"))
+            && Purr2D2.Runtime.DroppedHiltArrivals.BeforeCheck(Tracked(Purr2D2.Runtime.DroppedHiltArrivals.IdPrefix))
+            && Purr2D2.Runtime.DroppedHiltArrivals.BeforeCheck(Tracked(null)),
+            "only dropped hilts skip native arrival evaluation; crewed, unnamed and malformed IDs are unchanged");
+    }
+
     private static void ReleaseSpinFrames()
     {
         // Only the parent angular-rate query is substituted; conversion and

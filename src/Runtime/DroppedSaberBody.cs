@@ -70,7 +70,7 @@ internal sealed class DroppedSaberBody : IDisposable
             || !NativeVector(ownerState.Kinematic.AngularVelocityPhys) || !NativeVector(owner.BodyRates)
             || !NativeVector(releaseAngularVelocity) || !NativeVector(releaseBodyRates)
             || !UnitRotation(owner.Body2Cce) || !UnitRotation(ownerState.Kinematic.Body2Phys)) return false;
-        string id = "Purr2D2_DroppedHilt_" + Guid.NewGuid().ToString("N");
+        string id = DroppedHiltArrivals.IdPrefix + Guid.NewGuid().ToString("N");
         Vehicle? created = null;
         Part? root = null;
         try

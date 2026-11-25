@@ -13,9 +13,16 @@ internal static class KittenSaveHooks
     {
         Patch(typeof(GameSave), nameof(GameSave.Populate), [], nameof(InvalidateCapture), nameof(Captured));
         Patch(typeof(UncompressedSave), nameof(UncompressedSave.Write), [], postfix: nameof(Written), finalizer: nameof(WriteFinished));
-        Patch(typeof(UncompressedSave), nameof(UncompressedSave.Load), [], nameof(Loading), finalizer: nameof(LoadFinished));
+        // KSA 5916 reads the file in Load, then hands ApplyLoaded (DeserializeSave + OnGameLoaded) to
+        // SaveSystemSwap. A save from another star system runs it later, after a live system swap,
+        // so the sidecar window must span ApplyLoaded rather than Load. Every load plan runs it.
+        Patch(typeof(UncompressedSave), "ApplyLoaded", [], nameof(Loading), finalizer: nameof(LoadFinished));
         Patch(typeof(Universe), nameof(Universe.DeserializeSave), [typeof(UniverseData)], nameof(Reconstructing), finalizer: nameof(Reconstructed));
+        // Boot still selects its first system through LoadSystem.
         Patch(typeof(Universe), nameof(Universe.LoadSystem), [typeof(string)], nameof(ChangingSystem), finalizer: nameof(SystemChanged));
+        // In-game switches (save loads, multiplayer joins) use SwapSystem instead: it destroys every vehicle,
+        // bubble and system renderer before any DeserializeSave, so release ownership first.
+        Patch(typeof(Program), nameof(Program.SwapSystem), [typeof(SystemTemplate)], nameof(SwappingSystem), finalizer: nameof(SystemSwapped));
 
         void Patch(Type type, string name, Type[] arguments, string? prefix = null, string? postfix = null, string? finalizer = null)
         {
@@ -99,6 +106,23 @@ internal static class KittenSaveHooks
     {
         Observe(() => Runtime?.SceneSaves.FinishReconstruction(__state, Universe.CurrentSystem,
             __runOriginal ? __exception : new InvalidOperationException("Native system change was skipped."), systemChange: true));
+        return __exception;
+    }
+
+    private static void SwappingSystem(bool __runOriginal, out KittenSaveSession.Reconstruction? __state)
+    {
+        __state = null;
+        if (!__runOriginal || Runtime is not { } runtime) return;
+        // Never release bindings while a worker can still own the world; a failed join aborts the swap.
+        JobSystems.WaitAll();
+        Observe(runtime.ResetWorld, "World reset before a system swap failed");
+        __state = runtime.SceneSaves.BeginReconstruction(null, Universe.CurrentSystem, fileAllowed: false);
+    }
+
+    private static Exception? SystemSwapped(KittenSaveSession.Reconstruction? __state, Exception? __exception, bool __runOriginal)
+    {
+        Observe(() => Runtime?.SceneSaves.FinishReconstruction(__state, Universe.CurrentSystem,
+            __runOriginal ? __exception : new InvalidOperationException("Native system swap was skipped."), systemChange: true));
         return __exception;
     }
 

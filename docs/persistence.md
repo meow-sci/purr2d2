@@ -33,7 +33,7 @@ Identity indexing is lazy: one roster/fleet/seat snapshot is shared by a batch o
 - `KittenProfiles.cs` owns detached profiles and preserves unavailable records.
 - `KittenSaveStorage.cs` owns bounded, validated, hash-bound JSON and atomic sidecar replacement.
 - `KittenSaveSession.cs` pairs captures and scopes file loads/reconstruction generations. Nested operations cannot let an older completion overwrite a newer scene.
-- `KittenSaveHooks.cs` passively observes native capture/write/load/deserialization/new-system methods. Last-priority observers honor skipped originals and return original native exceptions.
+- `KittenSaveHooks.cs` passively observes native capture/write, `UncompressedSave.ApplyLoaded` (the file-load window since 5949), deserialization, boot `LoadSystem` and in-game `Program.SwapSystem`. Last-priority observers honor skipped originals and return original native exceptions.
 - `KittenIdentityIndex.cs` checks native roster, EVA and seat identity.
 - `SaberRuntime.Persistence.cs` binds profiles to existing per-kitten saber/cape ownership. System bookkeeping runs before the disabled-mode early return.
 
@@ -58,3 +58,16 @@ The sidecar schema, universe.xml hash pairing and roster/EVA/seat identity rules
 
 `GameSave`, `UncompressedSave`, `Universe.DeserializeSave` and `LoadSystem` are unchanged, so capture/snapshot pairing, the universe.xml hash and sidecar publication are unaffected. New native mission plans, UniverseTime-based life-support/dose timing and crew data are part of the native XML and therefore of its hash only. The roster gains a hash index with a verified scan fallback; the identity index still iterates `KittenRoster.Kittens` directly. Incapacitated EVA kittens are now non-controllable; Space somersault scope and the motion controller already require `IsControllable`, so a transient somersault releases instead of resuming. The sidecar schema is unchanged. Native A→B→A, overwrite and old-save acceptance on 5901 remains pending.
 
+## KSA 5949 upgrade
+
+Rev 5916 adds live star-system switching. `UncompressedSave.Load` now reads `universe.xml` and passes its private `ApplyLoaded` (`DeserializeSave` then `OnGameLoaded`) to `SaveSystemSwap.RequestLoad`:
+
+- A save from the running system, or one whose bodies the running system contains, applies immediately inside `Load`, as before.
+- A save from another installed system is queued. Later in the same frame `SaveSystemSwap.OnFrame` calls `Program.SwapSystem` and then `ApplyLoaded`. `SwapSystem` joins jobs, destroys every vehicle and bubble, disposes the system renderers and creates the new system with `Universe.CreateSystem`; it never calls `LoadSystem`.
+- A save from an uninstalled system is refused without touching the scene. If the new system would not fit in video memory, `SaveSystemRestart.RestartInto` relaunches the game with `-load <save>` and calls `Environment.Exit`, so `Program.Dispose` never runs.
+
+The 5901 observer opened the sidecar window around `Load`. A queued swap therefore deserialized after the window had closed, and the save's kitten choices were silently replaced by defaults (a later overwrite would have made that permanent). The window now spans `ApplyLoaded`, which every plan runs, so the same identity pairing applies to immediate, contained and swapped loads. A passive `SwapSystem` prefix joins workers and releases Purr2D2's world ownership before native teardown, then takes a no-file reconstruction token like `LoadSystem`; the following `ApplyLoaded` supersedes it with the save's sidecar. Multiplayer joins that switch system clear profiles as before. A `RestartInto` prefix flushes debounced preferences; per-save sidecars and generated slice assets are already written when the relaunch happens.
+
+`GameSave`, `UncompressedSave.Write` and the universe.xml location are byte-identical, so capture pairing and the sidecar hash are unchanged. New native XML (destination visits, kitten `FirstVisits`, vehicle `At` lists, body knowledge) affects only the hashed bytes; the sidecar schema is unchanged. Rev 5946 empties seats that name a kitten missing from the roster, seated elsewhere or on EVA inside native `DeserializeSave`, before the identity index first runs. An EVA kitten whose save also listed a stale seat now binds its profile instead of being rejected as a seat conflict. Dropped hilts are excluded from the new arrival service so their transient IDs never enter the saved visit log.
+
+Host IL checks pin the `Load` → `ApplyLoaded` hand-off, the `OnFrame` swap-then-apply order, `SwapSystem` teardown without `LoadSystem`, and `RestartInto`'s exit; they fail on 5901. Managed fixtures model deferred, uninstalled and over-budget swaps in both Harmony orders. Native swap loads, A→B→A switching and the relaunch path remain acceptance items.

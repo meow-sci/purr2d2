@@ -267,6 +267,13 @@ internal static class MeshGrowthHostChecks
         // No earlier audited module set is covered by the current audit.
         try
         {
+            NativeMeshGrowthHost.ValidateBuild(new("ded30488-a614-431f-ab2e-8c395b14bb59"), new("2edf3fc0-2178-449e-ad38-08f06406147d"),
+                new("f02cf35a-670a-499c-8d23-02594ae1edee"), new("e5d0db6b-5ee7-4026-9e2e-2e74971e585e"), new("0b627248-1c28-4c7f-8784-8b4a4ecb2f60"));
+            throw new Exception("The production adapter accepted the previous audited 5901 host build.");
+        }
+        catch (NotSupportedException) { }
+        try
+        {
             NativeMeshGrowthHost.ValidateBuild(new("a064c78d-2b9f-4ac3-ae4e-1cb22ed69344"), new("0328ae0f-5125-46f2-b6ce-99c11f6af7b7"),
                 new("6c39566a-6b2a-4a2e-8f74-0f073bb0f19a"), new("a2efb53a-dcf2-4483-aade-69de8bf89536"), new("9bc46477-2c92-4bf4-a914-cd687a630481"));
             throw new Exception("The production adapter accepted the previous audited 5801 host build.");
