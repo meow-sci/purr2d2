@@ -143,11 +143,16 @@ internal static class SaberWaterHostChecks
             (long)VkDescriptorType.UniformBuffer, (long)VkDescriptorType.UniformBufferDynamic, (long)VkDescriptorType.StorageBuffer]),
             "native binding writer places the three ocean samplers before static binding three and dynamic binding four");
         var global = BindingInitializers(Code(typeof(GlobalShaderBindings), nameof(GlobalShaderBindings.CreateDescriptors)));
-        Check(global.Count == 2 && global.Select(b => b[nameof(VkDescriptorSetLayoutBinding.Binding)]).SequenceEqual([0L, 1L])
+        // The water pipeline layout uses the live native Global layout and binds the live native set, so
+        // the shader only needs bindings zero and one to keep their uniform-buffer shape. Since 5948 the
+        // native set also owns binding two: the sun-transmittance tile that transparencies write and
+        // sunbloom reads (Common/SunTransmittance.glsl). The saber water shaders never include it.
+        Check(global.Count == 3 && global.Select(b => b[nameof(VkDescriptorSetLayoutBinding.Binding)]).SequenceEqual([0L, 1L, 2L])
             && global.All(b => b[nameof(VkDescriptorSetLayoutBinding.DescriptorCount)] == 1
-                && b[nameof(VkDescriptorSetLayoutBinding.DescriptorType)] == (long)VkDescriptorType.UniformBuffer
-                && (b[nameof(VkDescriptorSetLayoutBinding.StageFlags)] & (long)VkShaderStageFlags.FragmentBit) != 0),
-            "native Global set bindings zero and one are fragment-visible uniform buffers");
+                && (b[nameof(VkDescriptorSetLayoutBinding.StageFlags)] & (long)VkShaderStageFlags.FragmentBit) != 0)
+            && global.Take(2).All(b => b[nameof(VkDescriptorSetLayoutBinding.DescriptorType)] == (long)VkDescriptorType.UniformBuffer)
+            && global[2][nameof(VkDescriptorSetLayoutBinding.DescriptorType)] == (long)VkDescriptorType.StorageBuffer,
+            "native Global set bindings zero and one are fragment-visible uniform buffers; binding two is the native sun-transmittance storage buffer");
         Check(ImageBarrierInfo.Presets.StorageReadFc.Layout == VkImageLayout.General
             && (ImageBarrierInfo.Presets.StorageReadFc.StageMask & VkPipelineStageFlags2.FragmentShaderBit) != 0
             && ImageBarrierInfo.Presets.DepthSampledReadF.Layout == VkImageLayout.DepthStencilReadOnlyOptimal

@@ -47,6 +47,7 @@ namespace KSA
         public Func<UniverseData>? ReadData;
         public Action? AfterGameLoaded;
         public int NativeLoads;
+        public string? SystemId; // null: saved in the running system
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         public bool Write()
@@ -72,16 +73,64 @@ namespace KSA
             if (FailRead) return; // KSA catches an unreadable XML file and returns.
             UniverseData = ReadData?.Invoke()
                 ?? new UniverseData(File.ReadAllText(Path.Combine(Directory.FullName, "universe.xml")));
+            // KSA 5916: the reconstruction runs now, or after a live system swap at the frame boundary.
+            if (SaveSystemSwap.RequestLoad(SystemId, ApplyLoaded) == SystemSwapRequest.NotInstalled)
+                HostTrace.Add("system not installed");
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void ApplyLoaded()
+        {
             Universe.DeserializeSave(UniverseData);
             Program.OnGameLoaded();
             AfterGameLoaded?.Invoke();
         }
     }
 
+    public enum SystemSwapRequest { Applied, Queued, NotInstalled }
+    public enum SystemSwapResult { Swapped, WontFit }
+    public sealed class SystemTemplate(string id) { public readonly string Id = id; }
+
+    public static class SaveSystemSwap
+    {
+        private static (SystemTemplate System, Action Apply)? _pending;
+        public static bool IsPending => _pending.HasValue;
+        public static void Reset() => _pending = null;
+
+        public static SystemSwapRequest RequestLoad(string? savedSystemId, Action apply)
+        {
+            if (savedSystemId is null || savedSystemId == Universe.CurrentSystem?.Id) { apply(); return SystemSwapRequest.Applied; }
+            if (SystemLibrary.Find(savedSystemId) is null) return SystemSwapRequest.NotInstalled;
+            _pending = (new SystemTemplate(savedSystemId), apply);
+            return SystemSwapRequest.Queued;
+        }
+
+        public static void OnFrame()
+        {
+            if (_pending is not { } pending) return;
+            _pending = null;
+            if (Program.SwapSystem(pending.System) == SystemSwapResult.WontFit) { HostTrace.Add("restart into system"); return; }
+            pending.Apply();
+        }
+    }
+
     public static class Program
     {
-        public static bool IsEditorOpen, ThrowOnGameLoaded;
+        public static bool IsEditorOpen, ThrowOnGameLoaded, SwapWontFit;
         public static Action? DuringGameLoaded;
+
+        // Instance in KSA; static here. Natively destroys vehicles, bubbles and renderers before any load.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static SystemSwapResult SwapSystem(SystemTemplate system)
+        {
+            JobSystems.WaitAll();
+            HostTrace.Add("native teardown");
+            Universe.CurrentData = null;
+            if (SwapWontFit) return SystemSwapResult.WontFit;
+            Universe.CurrentSystem = new(system.Id);
+            HostTrace.Add("native system " + system.Id);
+            return SystemSwapResult.Swapped;
+        }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static void OnGameLoaded()

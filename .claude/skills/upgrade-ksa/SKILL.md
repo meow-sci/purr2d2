@@ -266,10 +266,20 @@ Audit new collection wrappers, Key/Ref and resolved DataReference.Value semantic
 
 Stock harness generation includes all four src/Slicing/Planes files. Native ContentTagTable scans need snapshot-omitted MemoryPack.Core 1.21.4 and Microsoft.Extensions.Logging.Console 10 in test-only package references. Do not ship them with the mod. Keep repo AGENTS.md’s instruction to leave README manually maintained.
 
-## Current 5901 migration notes
+## 5901 migration notes (previous baseline)
 
-The active baseline is KSA 2026.11.16.5901 (snapshot commit 8d2ad13693adc15005e2f110c42fa6575f70fd40); native acceptance remains pending. The 5801 notes above are the previous record and stay accurate unless contradicted here. `.github/workflows/release.yml` pins the audited assembly-repo commit for CI; move it with every audited upgrade or CI silently keeps building against the old game.
+The previous baseline was KSA 2026.11.16.5901 (snapshot commit 8d2ad13693adc15005e2f110c42fa6575f70fd40); its native acceptance remains pending. The 5801 notes above are older records and stay accurate unless contradicted here. `.github/workflows/release.yml` pins the audited assembly-repo commit for CI; move it with every audited upgrade or CI silently keeps building against the old game.
 
 Compilation succeeded unchanged, so every 5901 break was silent: run every real-host script before trusting a green build. The native clutter shaders renamed world-space `GetCloudShadow` (cloud shadows became screen-space `GetScreenCloudShadows(gl_FragCoord)`); `check_clutter_tint.py` caught it as a GLSL compile failure, which in game would quietly disable tint/foliage. Shader rewrites should copy the native expression they mirror rather than naming host helpers. Mesh growth needed only a re-pin after the full audit; compare shared-buffer and device-address consumer sets between OLD and NEW decomp in addition to the IL suite.
 
 Most decomp diffs are renamed locals (`double5`/`double6` became type names) and log line literals. Normalize those before reading diffs. 5901 also makes sub-part module lists compact until promoted, adds panel-method aerodynamics from collider shapes (fragments, debris and the dropped hilt receive aero loads; builds can block at flush/disposal), inside-out `MeshAtlas Inverted` meshes used as Internal habitat interiors (excluded from slice capture by `NativeInteriorShell`), the native `PartPicking` input route and incapacitated EVA kittens (`IsControllable` false). Snapshot text Content is CRLF in the working tree; keep shader anchors single-line. The snapshot still omits MathNet.Numerics 5.0.0 for the warmup probe.
+
+## Current 5949 migration notes
+
+The active baseline is KSA 2026.11.25.5949 (snapshot commit 618c2a1370df423099e297b20382aa419a4b04d3); native acceptance remains pending. The notes above stay accurate unless contradicted here. Again everything compiled unchanged.
+
+The one functional break came from a new native flow, not a changed signature. Rev 5916's live star-system switching defers `UncompressedSave.ApplyLoaded` until after `Program.SwapSystem`, so a sidecar window tied to `Load` silently imported nothing. Diff the call graphs reachable from every hooked method, not only the hooked signatures. Look for new deferral, queueing or `Action`-passing seams between methods the mod pairs (Load→DeserializeSave, Populate→Write), and for new paths that bypass hooked methods (SwapSystem never calls LoadSystem; RestartInto exits without Dispose). Model any new native flow in the stub host (`tests/persistence/HookHostStubs.cs`), and prove the scenario fails with the HEAD hooks before trusting it.
+
+New native features can also capture mod-owned objects into durable native data. The rev 5938 arrival service saved dropped-hilt IDs as destination first visitors. Review new per-vehicle or per-part services for what they persist and which flags (`IsDebris`) gate them.
+
+Mesh growth: the five modules changed only through debug naming (`SetDebugName` lost `[Conditional("DEBUG")]`). Compare per-method IL with offsets normalized (ilspycmd `-il`, as in the 5949 record); decomp alone showed Brutal.Vulkan unchanged although its MVID moved. Run `check_clutter_tint.py` with NEW `Content/Core`. Attribute warmup graph growth by listing both graphs from the same HEAD built against OLD and NEW in a scratch export. The historical stock-slice fixture lives in the main checkout's ignored `artifacts/checks/stock-slices.json` (SHA-256 `badf3371…`). `artifacts/checks/upgrade-5949/run-final.sh` reproduces the full final matrix.

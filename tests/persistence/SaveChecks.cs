@@ -72,12 +72,15 @@ internal static class SaveChecks
         Run("a later prefix veto cannot commit a skipped reconstruction", LateVeto);
         Run("a skipped transaction cannot resume an already quarantined scene", QuarantineVeto);
         Run("vanilla, corrupt and future sidecars clear old scene on native success", VanillaLoad);
+        Run("a save from another system restores its choices after the deferred live swap", SwappedSystemLoad);
+        Run("uninstalled-system and over-budget swaps never apply the save", RefusedSystemLoad);
     }
 
     private static void Run(string name, Action test)
     {
         OtherSaveHooks.Reset(); HostTrace.Events.Clear();
-        KSA.Program.IsEditorOpen = KSA.Program.ThrowOnGameLoaded = false;
+        KSA.Program.IsEditorOpen = KSA.Program.ThrowOnGameLoaded = KSA.Program.SwapWontFit = false;
+        SaveSystemSwap.Reset();
         KSA.Program.DuringGameLoaded = null;
         SystemLibrary.FailInitialization = JobSystems.FailWait = false;
         Universe.CurrentSystem = new(); Universe.CurrentData = null;
@@ -509,6 +512,42 @@ internal static class SaveChecks
         Seed(); var future = FileSave("future-schema"); var document = Document("future-schema"); document.SchemaVersion = 99;
         File.WriteAllText(Path.Combine(future.Directory.FullName, KittenSaveStorage.FileName), JsonSerializer.Serialize(document, KittenSaveStorage.Options));
         future.Load(); ExpectNames();
+    }
+
+    // KSA 5916 queues a save from another star system; SaveSystemSwap.OnFrame later swaps systems and
+    // runs UncompressedSave.ApplyLoaded. The sidecar must pair with that deferred reconstruction.
+    private static void SwappedSystemLoad()
+    {
+        Seed(); var save = FileSave("swapped"); save.SystemId = "other";
+        save.Load();
+        ExpectNames("old");
+        Check(SaveSystemSwap.IsPending && Runtime.ResetCount == 0 && Runtime.BindingsAlive && Universe.CurrentSystem?.Id == "initial",
+            "a queued swap leaves the running scene and its bindings untouched until the frame boundary");
+        SaveSystemSwap.OnFrame();
+        ExpectNames("swapped");
+        Check(Universe.CurrentSystem?.Id == "other" && Universe.CurrentData?.Label == "loaded-swapped" && !Session.Suspended,
+            "the deferred apply pairs the save's sidecar with the swapped system's reconstruction");
+        var events = HostTrace.Events;
+        int release = events.IndexOf("release bindings"), teardown = events.IndexOf("native teardown");
+        Check(events.IndexOf("join jobs") is >= 0 and var join && join < release && release < teardown,
+            "mod bindings are released after a worker join and before native system teardown");
+        Check(Runtime.ResetCount == 3, "swap, reconstruction and OnGameLoaded each release bindings once");
+        save.SystemId = null; Seed("edited"); save.Load(); ExpectNames("swapped");
+        Check(!SaveSystemSwap.IsPending, "reloading in the now-running system applies immediately");
+    }
+
+    private static void RefusedSystemLoad()
+    {
+        Seed(); var missing = FileSave("missing-system"); missing.SystemId = "uninstalled";
+        missing.Load();
+        ExpectNames("old");
+        Check(!SaveSystemSwap.IsPending && Runtime.ResetCount == 0 && Runtime.BindingsAlive && !Session.Suspended
+            && HostTrace.Events.Contains("system not installed"), "a save from an uninstalled system leaves the scene untouched");
+        var large = FileSave("too-large"); large.SystemId = "other"; KSA.Program.SwapWontFit = true;
+        large.Load(); SaveSystemSwap.OnFrame();
+        Check(HostTrace.Events.Contains("restart into system") && Universe.CurrentData is null && !HostTrace.Events.Contains("game loaded"),
+            "an over-budget swap relaunches instead of applying the save");
+        Check(Names().Length == 0 && !Session.Suspended, "torn-down scene choices are not carried into the relaunch");
     }
 
     private static void Check(bool condition, string message)

@@ -7,14 +7,14 @@ using NativeQueue = Brutal.VulkanApi.Queue;
 
 namespace Purr2D2.Rendering;
 
-/// <summary>Fail-closed private adapter for the audited 2026.11.16.5901 host.</summary>
+/// <summary>Fail-closed private adapter for the audited 2026.11.25.5949 host.</summary>
 internal static class NativeMeshGrowthHost
 {
-    internal static readonly Guid AuditedKsaModule = new("ded30488-a614-431f-ab2e-8c395b14bb59");
-    internal static readonly Guid AuditedVulkanModule = new("2edf3fc0-2178-449e-ad38-08f06406147d");
-    internal static readonly Guid AuditedAbstractionsModule = new("f02cf35a-670a-499c-8d23-02594ae1edee");
-    internal static readonly Guid AuditedRenderCoreModule = new("e5d0db6b-5ee7-4026-9e2e-2e74971e585e");
-    internal static readonly Guid AuditedCoreModule = new("0b627248-1c28-4c7f-8784-8b4a4ecb2f60");
+    internal static readonly Guid AuditedKsaModule = new("1e1e0a8c-ba04-4f83-bfc4-663993881b08");
+    internal static readonly Guid AuditedVulkanModule = new("52acb320-b412-4d37-82d8-0f5036a87c3f");
+    internal static readonly Guid AuditedAbstractionsModule = new("64b0e253-f675-44c8-83ea-94a473555e8f");
+    internal static readonly Guid AuditedRenderCoreModule = new("1cabda1d-6d7c-481a-b592-d12396de3c21");
+    internal static readonly Guid AuditedCoreModule = new("c3840f09-0347-4d95-89c2-c1f30da86c34");
     internal static readonly FieldInfo QueueCacheField = RequireField(typeof(Device), "_queues", typeof(Dictionary<(int, int), NativeQueue>));
     internal static readonly FieldInfo QueueLockField = RequireField(typeof(NativeQueue), "_lock", typeof(System.Threading.Lock));
     internal static readonly FieldInfo RaytraceCreateInfoField = RequireField(typeof(RaytracePipeline), "_createInfo", typeof(RaytracePipeline.CreateInfo));
@@ -34,7 +34,7 @@ internal static class NativeMeshGrowthHost
     {
         if (ksa != AuditedKsaModule || vulkan != AuditedVulkanModule || abstractions != AuditedAbstractionsModule
             || renderCore != AuditedRenderCoreModule || core != AuditedCoreModule)
-            throw new NotSupportedException("Native mesh growth requires the audited KSA 2026.11.16.5901 rendering modules; this host build needs a new compatibility audit.");
+            throw new NotSupportedException("Native mesh growth requires the audited KSA 2026.11.25.5949 rendering modules; this host build needs a new compatibility audit.");
     }
 
     internal static FieldInfo RequireField(Type type, string name, Type fieldType)

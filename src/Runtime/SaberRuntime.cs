@@ -271,6 +271,13 @@ internal sealed partial class SaberRuntime : IDisposable
         _owner = null; _system = null; _hasConsumedTime = _hasPreviousTip = _freshPoseThisTick = false;
         _swingSpeed = 0; _consumedPoseGeneration = _pose.MainPoseGeneration;
     }
+    /// <summary>Writes debounced preferences now; used before native process exits that skip shutdown.</summary>
+    internal void FlushSettings()
+    {
+        if (_disposed) return;
+        if (!_settingsAutosaver.Flush(_settings))
+            Console.WriteLine("[purr2d2] " + _settingsAutosaver.LastError);
+    }
     internal void Shutdown()
     {
         if (_disposed) return;
@@ -279,8 +286,7 @@ internal sealed partial class SaberRuntime : IDisposable
         SliceWorkerHooks.Uninstall();
         _debugTimingHarmony = null;
         EnvironmentLightingPatch.Release();
-        if (!_settingsAutosaver.Flush(_settings))
-            Console.WriteLine("[purr2d2] " + _settingsAutosaver.LastError);
+        FlushSettings();
         _disposed = true; _ready = false;
         JobSystems.WaitAll();
         SliceClutterCoverageHooks.Uninstall(); _coverageHarmony = null;

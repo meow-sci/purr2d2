@@ -1199,3 +1199,98 @@ Use disposable save copies and preserve installed settings.json, every per-save 
 - [ ] Furce picker active while Life Support transfer picking is active: Esc/right-click ordering, then normal native picking afterwards.
 - [ ] The purr2d2 menu and detached HUD View menu in windowed mode (Linux), plus the detached HUD through the dynamic-rendering ImGui backend.
 - [ ] Unscience co-load in both orders, plus kFS enabled from the debug menu (new `BeforeInputEvents` hook) with Purr2D2 slicing/Furce active.
+
+## KSA 2026.11.25.5949 upgrade (2026-11-25)
+
+**Scope and target.** OLD is the recorded managed/host baseline, KSA `2026.11.16.5901`, assembly-repo commit `8d2ad13693adc15005e2f110c42fa6575f70fd40`, read from the sibling `ksa-game-assemblies_prev` checkout (`/Users/asherwin/repos/meow-sci/ksa-game-assemblies_prev/current`). NEW is `2026.11.25.5949`, snapshot commit `618c2a1370df423099e297b20382aa419a4b04d3` (`/Users/asherwin/repos/meow-sci/ksa-game-assemblies/current`). Every final build passes an explicit `KSAFolder`, and every host script runs with `KSA_DLL_DIR` set to NEW `dll/`. DLLs, decomp and text Content come from that one snapshot; it has no stock, character or animation GLBs. `version.json` spans 5901→5949 with entries 5902–5948; revision 5949 was reviewed through sources and IL only. There is no baseline gap. Neither reference checkout was modified.
+
+Both snapshots contain the same 38 DLL filenames. KSA, Planet.Core, Planet.Render.Core, Brutal.Vulkan, Brutal.Vulkan.Abstractions, BepuPhysics and BepuUtilities changed; all other DLLs keep their MVIDs. Bepu moved to 2.5.0-beta.33 with an unchanged `2.5.0.0` assembly version. StarMap.API `0.3.6` and Harmony `2.4.2` remain compile-only, and the mod/manifest version stays `0.2.0`. CI (`.github/workflows/release.yml`) now pins `618c2a13…`.
+
+The mod compiled against NEW without changes and the PE inspector passed on the unmodified sources. Every finding below was silent. They came from the real-host scripts, normalized decomp/IL/Content diffs and three parallel read-only audits (persistence, part trees/render data, rockets/clutter/Bepu). Each subagent claim used here was re-checked against the decomp.
+
+**Confirmed regressions and repairs.**
+
+| Area and mod site | OLD → NEW host evidence | Result and native follow-up |
+|---|---|---|
+| Kitten choices on loads from another star system: `KittenSaveHooks` | Rev 5916: `UncompressedSave.Load` now reads the file and passes private `ApplyLoaded` (`DeserializeSave` + `OnGameLoaded`) to `SaveSystemSwap.RequestLoad`. A save from another installed system is queued and applied later in the frame by `SaveSystemSwap.OnFrame` after `Program.SwapSystem`. The sidecar window opened in a `Load` prefix had already closed, so `BeginReconstruction` found no file frame and imported nothing. All saved choices and preserved records were silently replaced by defaults, and overwriting the save would have made the loss permanent | The window now spans `ApplyLoaded`, which runs in every plan (current system, contained bodies, deferred swap). New stub-host scenarios cover deferred, uninstalled and over-budget swaps in both Harmony orders. Built against the unmodified HEAD hooks, the same harness fails ("expected profiles [swapped], found []"; `persistence-head-hooks-negative.log`). The inspector pins the `Load`→`ApplyLoaded` hand-off and fails on 5901 |
+| World teardown on system swaps: `KittenSaveHooks.SwappingSystem` | `Program.SwapSystem` joins jobs, destroys every vehicle and bubble, disposes the ocean/sunbloom/planet renderers and calls `Universe.CreateSystem`; it never calls the hooked `LoadSystem` (now boot-only). Purr2D2's first reset would otherwise have been the later `DeserializeSave` prefix, after native teardown (kittens, capes, held Furce bodies and dropped hilts already disposed) | A passive last-priority prefix joins workers, releases mod ownership while native objects still exist, and takes the same no-file reconstruction token as `LoadSystem`. The model test asserts join → release → native teardown. Inspector checks SwapSystem's order and absence of `LoadSystem` |
+| Preferences on the over-budget relaunch: `GameHooks.BeforeProcessRestart` | When the new system would not fit in video memory, `SaveSystemRestart.RestartInto` saves native settings, starts a new process and calls `Environment.Exit` without `Program.Dispose`, skipping Purr2D2's shutdown flush (1 s autosave debounce) | A prefix flushes pending preferences; failures are reported without blocking the relaunch. A real-host check verifies `RestartInto` exits without `Dispose` and covers flush, failure and missing-runtime paths. Sidecars and generated slice assets are already on disk at that point |
+| Dropped hilts in the saved visit log: new `DroppedHiltArrivals` | Rev 5938 tracks every non-debris vehicle and saves each destination's first visitor ID, plus visit counts, in universe.xml. The hilt is deliberately non-debris (so native eviction cannot reclaim owned equipment), so its transient `Purr2D2_DroppedHilt_*` ID could become a permanent first visitor | A fail-closed prefix on private `ArrivalService.Check(Tracked, double, long)` skips only hilt IDs. Real-type checks prove native tracking excludes only debris, the filter installs and JITs on the real method, and crewed, unnamed and malformed IDs are unaffected |
+| Mesh growth: `NativeMeshGrowthHost` and tests | All five guarded modules have new MVIDs; growth correctly refused NEW (`mesh-growth-host-initial.log`) | Re-pinned only after the audit below; 5901/5801/5707/older identities still reject. Native Vulkan growth acceptance remains pending |
+| Water contract test: `SaberWaterHostChecks` | Rev 5948 adds native Global-set binding 2, the 4097-float sun-transmittance storage buffer (fragment/compute) that transparencies write and sunbloom reads. The test pinned exactly two UBO bindings (`fragment-templates-initial.log`) | Production unchanged: the water pipeline layout uses the live native set layouts and binds the native sets, and the shader includes neither `SunTransmittance.glsl` nor the new per-body ocean segment SSBO (rev 5907, placed after binding 4 by `Utils.WriteBindings`). The test now asserts the actual three-binding shape |
+| CI target: `.github/workflows/release.yml`, csproj guidance | CI checked out the 5901 assembly commit | Pin 5949. Existing path filters cover `src/**/*.cs` and `Purr2D2.csproj`, so this change set triggers a CI build |
+
+The five guarded module identities changed as follows:
+
+| Module | 5901 MVID | 5949 MVID |
+|---|---|---|
+| KSA | `ded30488-a614-431f-ab2e-8c395b14bb59` | `1e1e0a8c-ba04-4f83-bfc4-663993881b08` |
+| Brutal.Vulkan | `2edf3fc0-2178-449e-ad38-08f06406147d` | `52acb320-b412-4d37-82d8-0f5036a87c3f` |
+| Brutal.Vulkan.Abstractions | `f02cf35a-670a-499c-8d23-02594ae1edee` | `64b0e253-f675-44c8-83ea-94a473555e8f` |
+| Planet.Render.Core | `e5d0db6b-5ee7-4026-9e2e-2e74971e585e` | `1cabda1d-6d7c-481a-b592-d12396de3c21` |
+| Planet.Core | `0b627248-1c28-4c7f-8784-8b4a4ecb2f60` | `c3840f09-0347-4d95-89c2-c1f30da86c34` |
+
+**Mesh-growth audit.** Per-method IL was compared with offsets normalized (ilspycmd 11.2 `-il`):
+
+- Brutal.Vulkan's IL is identical; only static-data RVAs moved.
+- Brutal.Vulkan.Abstractions changes only `DebugNameExtensions` (`SetDebugName` lost `[Conditional("DEBUG")]` and now names objects whenever debug utils are enabled) and the naming calls in `DeviceEx.AllocateBuffer`/`AllocateImage`.
+- Planet.Core changes only `CommandBufferPool` debug names.
+- Planet.Render.Core adds the implicit cube-mesh types (rev 5907) plus debug names.
+- KSA's growth-path changes are debug names, the prepass normal/roughness split (RT bindings 19/20; vertex/index bindings 3/4 and the cached `CreateInfo` arrays unchanged), and a raw-`VkBuffer` BLAS overload whose only new caller is `CubeMesh` with its own buffers.
+- DeviceMeshInterleaved, PartModel and its glass/RT data, StagingPool, BufferEx, RaytraceAllocator and the BLAS utils/refs are unchanged.
+- Shared-buffer reader lines (41) and device-address consumer lines (280) match 5901 apart from that refactor.
+
+**Compatible contracts reviewed.** About 250 decomp files have semantic diffs after normalization. 50 of them are host types the mod references by metadata or string; each was reviewed against its consumers.
+
+- *Frame and workers.* `PrepareFrame` offsets are identical to 5901. `OnFrame` adds `SaveSystemRestart.OnFrame`/`SaveSystemSwap.OnFrame` before rendering. `UpdateRenderingResources` fills each view's sun-transmittance span; the light prefix order is unchanged.
+- *Topology and render data.* Rev 5939 makes membership and transforms incremental: `TransferPart`→`NotePartAppended`, `RemoveTransferredParts`→`NotePartsRemoved`, `Part.ResetCachedPosMatrixValues`→`InvalidateTransforms`, with full-rebuild fallbacks. The mod mutates trees only through native Split/CreateFromNewPartTree/CreateVehicle/adoption/destroy paths. `Compose` is byte-identical, so the cap-emission upload prefix still rewrites fresh per-frame copies. Part constructors, `Vehicle.Split`, bulk-change scopes, `PoseChange`, `UpdateVehicleConfiguration`, `UpdateAfterPartTreeModification`, `FlushDirtyDerived` and `MarkAsDebris` are unchanged. Batched transfer-out compaction is opened only by editor `Part.Disconnect`.
+- *Saves and identity.* `GameSave`, `UncompressedSave.Write`, the universe.xml location and `OnGameLoaded` are byte-identical; new visit/first-visit/body-knowledge XML only affects hashed bytes. Rev 5946 empties stale seats inside native `DeserializeSave`, before the identity index runs, so an EVA kitten that also had a stale seat now binds its profile.
+- *Rendering.* `SuperMeshRenderSystem.ClearBuckets`/`RenderTranslucencyPass`, RenderGame/Viewport/Editor ordering, `WriteForwardLights` and the 16-slot light ABI, `OceanRenderer` hooks and the sunbloom entry layouts are unchanged. Native prepass pipelines now write two attachments; the mod uses native prepass techniques only, and its foliage rewrite of `MeshNormalIndirect.frag` still edits `worldNormal` before the native pack. MeshIndirect, MeshIndirectRaytraced, the shadow passes, Camera, PartHighlight, OceanFunctions and UnderwaterPostProcess shaders are identical apart from CRLF. `SwapSystem` rebuilds the ocean/sunbloom/planet renderers after a device idle, and the water path revalidates their layouts each frame.
+- *Rockets.* Rev 5925/5936 converts engines and RCS to gas-generator/pressure-fed cycles; thrust still flows only through `RocketNozzles` (including `TurbineExhaustNozzle`), all updated inside `UpdateModules`, and the three quiet-hold caller sites remain.
+- *Clutter and Bepu.* `BubbleClutterStatics` and every reflected member are byte-identical; GPU resources moved to lazily allocated `GroundClutterGpuResources`, which the mod does not touch. Bepu beta.33 keeps the packed handle layouts, `ConvexHullHelper` semantics and `NarrowPhaseCallbacks`.
+- *Avatar, pose, capes, audio, input and content loading.* Unchanged apart from the native two-attachment fur prepass blend state.
+
+**Native behavior changes that affect the mod without a code change** (acceptance items, not regressions):
+
+- Bepu 2.5.0-beta.33 no longer divides friction across 2–4 contact points. Sliced halves, thrown or toppled clutter and breakup debris grip harder.
+- Generated clutter physics cells are now rebuilt whenever streamed normal or diffuse textures update, not only height (revs 5921/5922). Furce clutter targets and queued clutter slices refuse ("changed before replacement") more often while textures stream. Re-resolving a stale target by its instance key is a possible follow-up if this is measurable.
+- The first slice in a session JITs the new incremental render-data removal path during rendering. Warmup never covered render-side rebuilds, so this is not a regression, but record frame time.
+- Native debug names are now applied in release builds when debug utils are enabled.
+
+**Verification.** .NET SDK `10.0.404`, runtime 10.0.15, macOS ARM64; host KSA PE AMD64. Pure-IL test copies are adapted only under ignored artifacts; snapshot DLLs are unchanged. Commands, resolved paths, output and exit codes are in `artifacts/checks/upgrade-5949/`. `run-final.sh` reproduces the final matrix; `*-initial.log` keep the pre-repair failures. All 19 final checks exit 0. Tests inspect signatures/IL or use managed fixtures; none starts a native game.
+
+| Check | Final evidence/result |
+|---|---|
+| Debug / Release solution | `build-debug-final.log`, `build-release-final.log`: `--no-incremental`, explicit NEW KSAFolder, zero warnings/errors; fresh Release stage/ZIP/checksum |
+| Source/stage/shader/managed matrix | `validate-final.log`: **3,724 PASS lines**; persistence **54 scenarios / 249 assertions**. Every regenerated harness HintPath resolves to NEW `dll/` or to adapted copies of NEW KSA (MVID `1e1e0a8c…`); none to OLD |
+| PE host/entry | `inspect-host-final.log`: **197 PASS lines** (167 before the new save/load seams). `inspect-host-old-negative.log` shows those seams fail against 5901 |
+| Fragment/source/worker/light/water/restart contracts | `fragment-templates-final.log`: **81 PASS records**, including the new restart-flush check; `--content-only` passes (4). The "Extended environment lighting is unavailable" line is the deliberate changed-IL negative control |
+| Furce / native physics / hilt | `force-host-final.log`: **397 PASS records**, including the arrival filter |
+| Mesh planning / actual host contracts | `mesh-growth-final.log` and `mesh-growth-host-final.log` pass with the 5949 pins |
+| Clutter shaders and coverage | `clutter-tint-final.log`: 14 PASS against NEW `Content/Core` (the initial run omitted the content argument); `clutter-coverage-hooks-final.log` passes |
+| Cape | `cape-cloth-final.log`: 118 bones/117 joints, zero inverse-bind error; CPU cloth checks and benchmark. Not native fit/draw evidence |
+| Saber shaders | `saber-shaders-final.log`: source and staged Light/Dark/water GLSL compile/link with the 128-byte push-constant ABI |
+| Runtime bootstrap | `runtime-bootstrap-final.log`: 19 isolated cases and the built entry initializer, with read-only peer parity against unscience `7f77908` and gatOS `4003c49` |
+| Production JIT warmup | `slice-warmup-final.log`: **1,389/1,389 methods**, **106,760 IL bytes**, 122 roots, 909 boundaries, failed 0, within the unchanged 1,800/786,432 caps; cancellation passes. MathNet.Numerics 5.0.0 is still omitted from the snapshot; NuGet `lib/net6.0` (SHA-256 `83b41a60…`) is used as before. The same unmodified HEAD built against 5901 selects 1,383. The +6 delta is entirely native bodies now reached through `Vehicle.Split`: the rev 5939 transfer-out compaction and incremental render-data notifications (+7), `BubbleOrigin.GetBub2Cce` (+1), and the rev 5934 explicit-origin `PhysicsStates` overloads replacing implicit ones (−2). Purr2D2 bodies are unchanged at 174 (`slice-warmup-graph-5901.txt`, `-5949.txt`, `-diff.log`) |
+| Historical stock geometry | `stock-slices-historical-final.log`: **36 PASS records / seven historical fixtures** (the 2026-10-29 fixture, SHA-256 `badf3371…`, copied read-only from the main checkout). Historical slicer regression coverage only; the 5949 snapshot has no GLBs |
+| Release policy / archive integrity | `release-policy-final.log`: 13 tests pass. `release-archive-final.log`, `package-integrity-final.log`/`package-details.json`: **48 files** under one `purr2d2/` root, byte-identical to stage; staged DLL identical to the final Release build; `Purr2D2.dll` is the only binary; mod.toml version 0.2.0; sidecar SHA-256 `852E4FE80DE2B4EB33C1627CD351B080E0BEB45A02BACC187BC98C3D55C506B4` |
+
+**Native acceptance remains pending.** Managed/host checks passed; native acceptance pending. No 5949 game session was run, and nothing was installed, published or committed. No feature was removed and no guard relaxed; mesh growth still refuses unaudited modules. Peer follow-up: Unscience also hooks `UncompressedSave.Load`/`DeserializeSave` and should review the rev 5916 deferral for its own coordinator; its existing `Load` deferral composes with Purr2D2's `ApplyLoaded` window.
+
+Use disposable save copies and preserve installed settings.json, every per-save purr2d2.json and **all** Generated/Slices XML/GLBs. In addition to the outstanding 5801/5901 checklists above:
+
+- [ ] Load a save made in another star system (forced swap) with custom colors/types, capes, an enabled saber and preserved records: choices restore; save again and diff `purr2d2.json`.
+- [ ] The same swap with an ignited saber, an active Furce hold (vessel and clutter), a dropped hilt and a clutter slice in flight: no "World reset" errors, no crash. Then switch A→B→A three times: stable VRAM, correct water/cape rendering, no stale owners.
+- [ ] Contained-bodies load (Solar System save into Solar System + Interstellar), `-load <save>` launch, an uninstalled-system save (scene unchanged) and a multiplayer join that switches systems.
+- [ ] Force the over-budget relaunch (inflate `Documents/system-vram.toml`) right after changing a preference: `settings.json` persists and the relaunched load restores kitten choices.
+- [ ] Keys, clicks and focus loss during the swap loading screen: no exceptions from Purr2D2 input prefixes.
+- [ ] Drop a hilt at a landed destination, wait over a second, save: universe.xml `Visits` contains no `Purr2D2_DroppedHilt_*`.
+- [ ] A 5901 save with an EVA/seat conflict loads with the seat emptied and the EVA kitten's profile bound.
+- [ ] Slice gas-generator engines (LR91 Sea, LR91 Vac + verniers), pulsing pressure-fed RCS and a burning SRB: no thrust, turbine or vernier plume during the hold; no re-ignition after release.
+- [ ] Slice mid-stack parts (parent, several children, IVA, gimbaled engines, windows), the root part and a docked vessel (Reroot): neighbors and the emptied shell render with no ghost, missing or misplaced static/dynamic/glass parts in raster and raytraced IVA, on the isolation frame and after the swap. Record first-slice frame time in a fresh session.
+- [ ] Hot caps cool over 0–60 s in raster and raytraced IVA with several cap fragments on screen, with no stuck or compounding emission; reloaded caps are cold.
+- [ ] Pick, capture and slice rocks and trees while textures stream near the surface: log refusal rate and coverage-state flapping; held/promoted bodies survive. Slice a tree, leave until the planet's clutter resources free, return: the original stays hidden.
+- [ ] Friction: slice a tree on a ~30° slope, throw a rock, topple a tree; compare with 5901 behaviour.
+- [ ] Sabers in water, under clouds, rings and exhaust plumes near the sun: the sun disc/flare still dims for native transparencies, and the additive blade does not dim it.
+- [ ] Repeated forced mesh-arena growth on 5949 with RT off/on, IVA, resize/rebuild, thumbnails and secondary views, with Vulkan synchronization validation and debug utils enabled.
+- [ ] Unscience co-load in both orders with same-system and swap loads.
